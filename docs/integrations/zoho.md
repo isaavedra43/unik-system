@@ -37,10 +37,19 @@ Todas las peticiones agregan automáticamente `organization_id` y el header `Aut
 
 La validación es lazy: solo ocurre cuando una operación Zoho la necesita, para no romper builds donde la integración no se usa.
 
+## Endpoints internos temporales de verificación
+
+Para comprobar la integración desde Railway sin exponerla como API pública, existen dos endpoints internos protegidos con el header `X-UNIK-API-Key` (debe coincidir con `process.env.UNIK_INTERNAL_API_KEY`):
+
+- `GET /api/internal/zoho/sales-orders` → devuelve el listado RAW de Sales Orders.
+- `GET /api/internal/zoho/sales-orders/{id}` → devuelve una Sales Order individual RAW.
+
+Ambos son **solo READ**, no guardan información y requieren autenticación interna.
+
 ## Lo que todavía NO existe
 
 - Webhooks de Zoho.
 - Persistencia de datos Zoho en PostgreSQL.
-- Endpoints HTTP de UNIK para esta integración.
+- Endpoints HTTP públicos de UNIK para esta integración.
 - Escritura hacia Zoho (POST/PUT/PATCH/DELETE).
 - Normalización o modelos de dominio de los datos de Zoho.

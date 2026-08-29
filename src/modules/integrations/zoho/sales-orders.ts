@@ -16,11 +16,7 @@ export async function listSalesOrders(): Promise<unknown> {
  * Returns the RAW JSON response exactly as Zoho provides it.
  */
 export async function getSalesOrder(salesOrderId: string): Promise<unknown> {
-  const parsed = salesOrderIdSchema.safeParse(salesOrderId);
+  salesOrderIdSchema.parse(salesOrderId);
 
-  if (!parsed.success) {
-    throw new Error('Invalid salesOrderId: expected a numeric string of reasonable length');
-  }
-
-  return zohoGet(`/salesorders/${parsed.data}`);
+  return zohoGet(`/salesorders/${salesOrderId}`);
 }
