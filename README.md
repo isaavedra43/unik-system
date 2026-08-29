@@ -1,6 +1,6 @@
 # UNIK System
 
-UNIK System es una aplicación empresarial full-stack diseñada como un **Modular Monolith**. El frontend y el backend coexisten dentro del mismo proyecto y repositorio.
+UNIK System es una aplicación empresarial full-stack diseñada como un **Modular Monolith**. El frontend y el backend coexisten dentro del mismo proyecto y repositorio, y se despliegan juntos.
 
 ## Arquitectura
 
@@ -14,35 +14,52 @@ UNIK System es una aplicación empresarial full-stack diseñada como un **Modula
 - React
 - TypeScript (strict mode)
 - Node.js
-- PostgreSQL (futura base de datos principal)
+- PostgreSQL
 - Prisma ORM
 - Zod
-- Tailwind CSS (pendiente de configuración visual)
-- shadcn/ui (pendiente)
-- Railway (futuro entorno de deployment)
-- GitHub (control de versiones)
-- Docker (preparado para futuro deployment)
+- Docker
+- GitHub
+- Railway
 
-## Notas importantes
+## Infraestructura actual
 
-- **Frontend y backend** viven en el mismo proyecto y se desplegarán juntos.
-- **Zoho Inventory** será inicialmente una fuente externa de información.
-- La **integración con Zoho** se realizará posteriormente mediante API y Webhooks.
-- **PostgreSQL** será la base de datos principal, pero aún no está conectada.
-- **Railway** será el entorno de deployment, pero aún no está configurado.
-- Esta etapa solo contiene la **estructura inicial** del proyecto.
+- **GitHub** es el origen del repositorio y fuente del deployment.
+- **Railway** es el entorno de deployment actual.
+- **PostgreSQL** está conectado y operativo.
+- **Next.js** se ejecuta en Railway con dominio público.
 
 ## Estado actual
 
-Este repositorio contiene únicamente:
+La infraestructura base ya está funcionando:
 
-- Estructura de carpetas preparada para crecer de forma modular.
-- Dependencias base instaladas.
-- Configuración de TypeScript, ESLint, Prettier y Prisma.
-- Dockerfile básico para futuro deployment.
-- Archivo `.env.example` con placeholders.
+```
+Next.js → Prisma → PostgreSQL
+```
 
-No se ha desarrollado frontend, backend funcional, modelos de datos, migraciones, conexiones externas ni autenticación.
+Esto se comprueba con el endpoint:
+
+```bash
+GET /api/health
+```
+
+que devuelve `database: connected` cuando la conexión es exitosa.
+
+## Zoho Inventory
+
+- Zoho Inventory será una fuente externa de información.
+- Fuera del código se han probado manualmente: Zoho Self Client, OAuth authorization, refresh token, access token, permiso `ZohoInventory.salesorders.READ`, GET de Sales Orders y GET de Sales Order por ID.
+- **La integración Zoho dentro del código aún no está implementada.**
+- Los webhooks aún no están implementados.
+
+## Lo que aún no existe
+
+- Modelos de datos y migraciones de Prisma.
+- Tablas de negocio.
+- Módulos de ventas, compras, inventario, logística, finanzas, reportes, usuarios e IA.
+- Frontend funcional.
+- Autenticación.
+- Integración Zoho automatizada.
+- Webhooks.
 
 ## Requisitos
 
@@ -55,7 +72,14 @@ No se ha desarrollado frontend, backend funcional, modelos de datos, migraciones
 npm install
 npm run dev
 npm run build
+npm run start
 npm run typecheck
 npm run lint
 npm run format:check
+npm run prisma:generate
+npm run prisma:validate
 ```
+
+## Nota
+
+Este repositorio contiene la **estructura inicial y foundation** del proyecto. Ver `docs/architecture/current-state.md` para el checkpoint completo.

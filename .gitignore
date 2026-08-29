@@ -43,9 +43,6 @@ Thumbs.db
 # TypeScript
 *.tsbuildinfo
 
-# Prisma
-/prisma/migrations/
-
 # Testing
 /coverage
 
