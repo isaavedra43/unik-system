@@ -4,8 +4,8 @@ import { prisma } from '@/lib/prisma';
 import { ZohoApiError } from './client';
 import { getSalesOrder, listSalesOrders } from './sales-orders';
 
-const SOURCE = 'zoho';
-const ENTITY_TYPE = 'sales_order';
+export const SOURCE = 'zoho';
+export const ENTITY_TYPE = 'sales_order';
 const PER_PAGE = 200;
 
 /** Defensive upper bound so a broken pagination contract can never loop forever. */
@@ -68,13 +68,34 @@ export interface SyncSalesOrdersResult {
   apiCalls: number;
 }
 
+const SYNC_LOCK_KEY = '__unikZohoSalesOrdersSyncLock' as const;
+
+interface SyncLockState {
+  inProgress: boolean;
+}
+
+type GlobalWithSyncLock = typeof globalThis & {
+  [SYNC_LOCK_KEY]?: SyncLockState;
+};
+
 /**
- * In-memory guard preventing two concurrent syncs inside the SAME instance.
- * This is intentionally NOT a distributed lock: multiple Railway instances or
- * replicas could still run concurrently. A durable strategy will be decided
- * together with the scheduler.
+ * In-memory guard preventing two concurrent syncs inside the SAME process.
+ *
+ * It is stored on globalThis on purpose: Next.js compiles the instrumentation
+ * hook and the route handlers into separate bundles, so a plain module-level
+ * variable could end up duplicated and the internal scheduler would not see the
+ * lock held by a manual request (and vice versa). A single globalThis slot keeps
+ * one lock per process.
+ *
+ * This is still NOT a distributed lock: multiple replicas of the web service
+ * would each hold their own lock. A DB-backed strategy is required before
+ * scaling beyond one replica.
  */
-let syncInProgress = false;
+function getSyncLock(): SyncLockState {
+  const scope = globalThis as GlobalWithSyncLock;
+  scope[SYNC_LOCK_KEY] ??= { inProgress: false };
+  return scope[SYNC_LOCK_KEY];
+}
 
 const remoteTimestampSchema = z.string().min(1).transform(toDateOrIssue);
 
@@ -303,12 +324,13 @@ export async function syncSalesOrders(
   options: SyncSalesOrdersOptions = {}
 ): Promise<SyncSalesOrdersResult> {
   const { mode, maxDetailFetches } = syncSalesOrdersOptionsSchema.parse(options);
+  const lock = getSyncLock();
 
-  if (syncInProgress) {
+  if (lock.inProgress) {
     throw new SyncAlreadyRunningError();
   }
 
-  syncInProgress = true;
+  lock.inProgress = true;
   const startedAt = new Date();
   let run: { id: string } | null = null;
 
@@ -400,7 +422,7 @@ export async function syncSalesOrders(
 
     throw new SyncFailedError(errorCode, run?.id ?? 'sync-run-creation-failed');
   } finally {
-    syncInProgress = false;
+    lock.inProgress = false;
   }
 }
 
@@ -426,11 +448,13 @@ export interface BaselineResult {
  * changes, or when the order is new.
  */
 export async function baselineSalesOrders(): Promise<BaselineResult> {
-  if (syncInProgress) {
+  const lock = getSyncLock();
+
+  if (lock.inProgress) {
     throw new SyncAlreadyRunningError();
   }
 
-  syncInProgress = true;
+  lock.inProgress = true;
   const startedAt = new Date();
   let run: { id: string } | null = null;
 
@@ -521,6 +545,6 @@ export async function baselineSalesOrders(): Promise<BaselineResult> {
 
     throw new SyncFailedError(errorCode, run?.id ?? 'unknown');
   } finally {
-    syncInProgress = false;
+    lock.inProgress = false;
   }
 }

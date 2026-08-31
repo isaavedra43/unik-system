@@ -125,33 +125,43 @@ Después del baseline los futuros `scan` actúan así:
 
 ### Automated Sales Orders Sync
 
-Existe un runner para Railway Cron en `scripts/cron/zoho-sales-orders-sync.mjs`:
+La automatización vive **dentro del mismo servicio persistente `unik-system`**. No existe un Railway Cron Service ni un segundo servicio.
 
-- Pertenece al **mismo repositorio**, pero se ejecuta como un servicio de cron separado en Railway.
-- Dispara `POST {APP_URL}/api/internal/zoho/sync/sales-orders` con el endpoint existente.
-- Envía `mode: "sync"` y `max_detail_fetches: 50` por defecto.
-- El override `ZOHO_SALES_ORDERS_CRON_MAX_DETAIL_FETCHES` acepta valores `1`–`200`; si no existe, usa `50`.
-- Timeout de `15` minutos.
-- Solo imprime metadata técnica; nunca secretos, payloads ni datos de Sales Orders.
-- Un `HTTP 409 Sync already running` se considera un salto seguro (`exit 0`).
-- Otros errores HTTP o de red terminan con `exit 1`.
-- NO conecta directamente a Zoho ni a PostgreSQL.
-- Requiere `APP_URL` y `UNIK_INTERNAL_API_KEY`.
-- Railway Cron Start Command: `npm run cron:zoho-sales-orders`
-- Railway Cron Schedule: `0 * * * *`
+Arranque: el hook oficial de Next.js `src/instrumentation.ts` llama a `startSalesOrdersScheduler()` una vez por instancia, solo cuando `process.env.NEXT_RUNTIME === 'nodejs'`. Toda la lógica vive en `sales-orders-scheduler.ts`.
 
-La protección `syncInProgress` vive **únicamente dentro del proceso del Web Service** (`unik-system`). El Railway Cron Service es un contenedor/proceso separado que solo hace HTTP hacia el endpoint; el lock no se comparte entre ellos.
+Flujo:
 
-Con una sola réplica del Web Service, la protección process-local es suficiente. Si en el futuro `unik-system` se escala a múltiples réplicas, dos requests podrían atenderse en procesos distintos y el lock en memoria ya no bastará; será necesario un lock distribuido o DB-backed antes de escalar.
+1. Arranca `unik-system` y el scheduler espera un **startup delay de 30 s**.
+2. Cada **5 minutos** hace un tick que consulta **solo PostgreSQL** (cero llamadas a Zoho).
+3. El tick busca el último `IntegrationSyncRun` con `mode = 'sync'` y `status = 'COMPLETED'`, ordenado por `completedAt desc`.
+4. Si ese run tiene **≥ 60 minutos**, o si no existe ninguno, la sincronización está _due_.
+5. Si está due, llama directamente a `syncSalesOrders({ mode: 'sync', maxDetailFetches: 50 })`, el mismo motor que usa el endpoint manual.
+
+Detalles:
+
+- `baseline` y `scan` completados **no** cuentan: no descargan detalles y no deben posponer un sync real.
+- `IntegrationSyncRun` es la fuente durable, así que un reinicio de Railway **no** reinicia el reloj: el nuevo proceso reconstruye la decisión desde PostgreSQL.
+- Feature flag `ZOHO_SALES_ORDERS_SCHEDULER_ENABLED`. Solo el valor exacto `true` lo activa; el default es desactivado. No se activa por `NODE_ENV`, así que `npm run dev` no consume API de Zoho.
+- El scheduler nunca tumba Next.js: un fallo se loguea y el siguiente tick vuelve a evaluar. No hay retry inmediato.
+- `SyncAlreadyRunningError` (por ejemplo, un sync manual en curso) se trata como _skip_ seguro.
+- Los intervalos son constantes internas documentadas (`SYNC_INTERVAL_MS`, `CHECK_INTERVAL_MS`, `STARTUP_DELAY_MS`, `SCHEDULER_MAX_DETAIL_FETCHES`), no variables de entorno.
+
+Presupuesto de API con el volumen actual (~115 páginas por scan): `115 × 24 ≈ 2.760` llamadas/día más un máximo de `50 × 24 = 1.200` por detalles, es decir `≈ 3.960` de una cuota de `5.000`/día. **Si `pagesScanned` crece de forma significativa hay que recalcular el intervalo de sincronización.**
+
+Requiere que `unik-system` sea un **Persistent Service** que no se duerma; los timers viven en el proceso.
+
+Para verificar una ejecución: revisar los logs del servicio (`zoho.sales_orders.scheduler.*`) o consultar `IntegrationSyncRun` filtrando `mode = 'sync'` y `status = 'COMPLETED'`.
 
 ### Concurrencia
 
-La protección **en memoria** evita dos sincronizaciones simultáneas dentro de la misma instancia del Web Service. **No es un distributed lock**: si existen múltiples réplicas del Web Service en Railway, todavía podrían solaparse. La estrategia definitiva se decidirá junto con el escalado.
+El lock que evita dos sincronizaciones simultáneas se guarda en `globalThis`, no en una variable de módulo. Next.js compila el hook de instrumentation y los route handlers en bundles distintos, así que una variable de módulo podría duplicarse y el scheduler no vería el lock tomado por una petición manual. Con `globalThis` existe **un solo lock por proceso**, y el contrato externo no cambia: si hay un sync en curso, el endpoint sigue devolviendo `HTTP 409 Sync already running`.
+
+**Limitación de una sola réplica.** Scheduler interno + lock process-wide es correcto mientras `unik-system` tenga **una réplica**. Con 2+ réplicas cada una arrancaría su propio scheduler y tendría su propio lock. Antes de escalar hay que implementar _scheduler ownership_ y lock DB-backed/distribuido.
 
 ## Lo que todavía NO existe
 
 - Webhooks de Zoho.
-- Scheduler automático en el proceso de Next.js: el runner de cron está listo, pero el servicio cron en Railway todavía debe configurarse manualmente en producción.
+- Activación en producción del scheduler interno: el código está listo, pero `ZOHO_SALES_ORDERS_SCHEDULER_ENABLED` todavía no se ha puesto en `true` en Railway.
 - Normalización o modelos de dominio de los datos de Zoho (solo se guardan snapshots RAW).
 - Detección de eliminaciones: no se marca nada como borrado por no aparecer en el listado. `lastSeenAt` queda preparado para analizarlo después.
 - Modelos de negocio (Sales Order, Customer, Item, Invoice, Payment, Vendor).

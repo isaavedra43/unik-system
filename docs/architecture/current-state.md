@@ -38,19 +38,27 @@ Endpoints internos protegidos con `X-UNIK-API-Key`, verificados en Railway contr
 - `GET /api/internal/zoho/sales-orders`
 - `GET /api/internal/zoho/sales-orders/{id}`
 
-## Phase 3 - Sales Orders Polling Sync (implementada, no desplegada)
+## Phase 3 - Sales Orders Polling Sync (verificada en producción)
 
 - Motor de polling en `sales-orders-sync.ts` con modos `scan`, `sync` y `baseline`.
 - Detección de cambios mediante `last_modified_time` del listado.
 - Snapshots RAW, límite `maxDetailFetches` (default 50, máx 200).
 - Modo `baseline` para convertir un `scan` histórico en punto de partida sin descargar detalles ni crear snapshots.
 - Endpoint `POST /api/internal/zoho/sync/sales-orders`.
-- `scripts/cron/zoho-sales-orders-sync.mjs` y `npm run cron:zoho-sales-orders` listos para Railway Cron.
-- Motor de sincronización soporta `scan`, `sync`, `baseline` manual y runner de cron como cliente del mismo endpoint vía HTTP.
-- El Railway Cron Service es un proceso separado; el lock en memoria (`syncInProgress`) vive únicamente en el Web Service y es suficiente mientras haya una sola réplica.
-- Migración Prisma versionada, generada con tooling oficial.
+- Migración Prisma versionada y aplicada.
+- Baseline histórico ejecutado (22.954 Sales Orders) y protegido contra reejecución.
+- Sync real verificado: una Sales Order modificada en Zoho quedó almacenada en `IntegrationSnapshot`.
 
-**Todavía no desplegado ni probado en producción.** La migración no ha sido aplicada a la base de Railway. El servicio de cron en Railway todavía debe configurarse manualmente.
+## Phase 4 - Internal Scheduler (implementada, pendiente de activación)
+
+- `src/instrumentation.ts` arranca `startSalesOrdersScheduler()` una vez por instancia, solo en runtime Node.
+- `sales-orders-scheduler.ts` hace un tick cada 5 min que consulta **solo PostgreSQL** y sincroniza Zoho como máximo cada 60 min.
+- `IntegrationSyncRun` (`mode = 'sync'`, `status = 'COMPLETED'`) es la fuente durable, así que un reinicio no reinicia el reloj.
+- Sin Railway Cron Service y sin segundo servicio: todo vive dentro de `unik-system`.
+- Feature flag `ZOHO_SALES_ORDERS_SCHEDULER_ENABLED`, desactivado por defecto.
+- El lock de sincronización se guarda en `globalThis` para que scheduler y endpoint manual compartan un único lock por proceso.
+
+**FASE 4 internal scheduler implemented, pending production enablement.** Requiere una sola réplica del servicio web.
 
 ## External Zoho Verification
 
@@ -66,13 +74,13 @@ Fuera del código de UNIK se probaron manualmente:
 
 - PostgreSQL está conectado.
 - Existen **3 modelos técnicos de integración**: `IntegrationEntityState`, `IntegrationSnapshot`, `IntegrationSyncRun`.
-- Existe una migración versionada, todavía **no aplicada** en producción.
+- Existe una migración versionada, ya aplicada en producción.
 - **No existen modelos de negocio** ni tablas de negocio.
 - Los datos de Zoho solo se guardarían como snapshots RAW, sin normalizar.
 
 ## Not Implemented Yet
 
-- Servicio de cron de Railway configurado en producción (el runner está listo, pero aún no se activa).
+- Activación del scheduler interno en producción (`ZOHO_SALES_ORDERS_SCHEDULER_ENABLED=true` en Railway).
 - Normalización de datos de Zoho.
 - Detección de eliminaciones.
 - Webhooks de Zoho.
@@ -93,4 +101,4 @@ Fuera del código de UNIK se probaron manualmente:
 
 ## Next Planned Phase
 
-Desplegar y medir la FASE 3 en Railway (aplicar migración, ejecutar `scan`, medir volumen y consumo de API) antes de decidir la estrategia de scheduling.
+Activar el scheduler interno en Railway (`ZOHO_SALES_ORDERS_SCHEDULER_ENABLED=true`) y observar el consumo real de API durante varios ciclos antes de decidir la normalización de datos.

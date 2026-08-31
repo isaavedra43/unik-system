@@ -16,8 +16,7 @@
     "format:check": "prettier --check .",
     "typecheck": "tsc --noEmit",
     "prisma:generate": "prisma generate",
-    "prisma:validate": "DATABASE_URL=postgresql://USER:PASSWORD@HOST:PORT/DATABASE prisma validate",
-    "cron:zoho-sales-orders": "node scripts/cron/zoho-sales-orders-sync.mjs"
+    "prisma:validate": "DATABASE_URL=postgresql://USER:PASSWORD@HOST:PORT/DATABASE prisma validate"
   },
   "dependencies": {
     "next": "^15.0.0",
