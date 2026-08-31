@@ -6,3 +6,59 @@ datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
 }
+
+/// Technical integration state per external entity.
+/// Tracks whether the locally stored version is up to date with the remote one.
+model IntegrationEntityState {
+  id                         String    @id @default(cuid())
+  source                     String
+  entityType                 String
+  externalId                 String
+  remoteModifiedAt           DateTime
+  lastSyncedRemoteModifiedAt DateTime?
+  needsSync                  Boolean   @default(true)
+  lastSeenAt                 DateTime
+  lastDetailFetchedAt        DateTime?
+  createdAt                  DateTime  @default(now())
+  updatedAt                  DateTime  @updatedAt
+
+  @@unique([source, entityType, externalId])
+  @@index([source, entityType, needsSync])
+}
+
+/// Immutable RAW payload snapshot of an external entity version.
+model IntegrationSnapshot {
+  id               String   @id @default(cuid())
+  source           String
+  entityType       String
+  externalId       String
+  remoteModifiedAt DateTime
+  payload          Json
+  fetchedAt        DateTime
+  createdAt        DateTime @default(now())
+
+  @@unique([source, entityType, externalId, remoteModifiedAt])
+  @@index([source, entityType, externalId])
+}
+
+/// Technical metadata about a single synchronization execution.
+/// Never stores payloads, tokens or personal information.
+model IntegrationSyncRun {
+  id             String    @id @default(cuid())
+  source         String
+  entityType     String
+  mode           String
+  status         String
+  startedAt      DateTime
+  completedAt    DateTime?
+  pagesScanned   Int       @default(0)
+  recordsSeen    Int       @default(0)
+  recordsPending Int       @default(0)
+  detailsFetched Int       @default(0)
+  detailsFailed  Int       @default(0)
+  apiCalls       Int       @default(0)
+  errorCode      String?
+  createdAt      DateTime  @default(now())
+
+  @@index([source, entityType, startedAt])
+}

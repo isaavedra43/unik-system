@@ -22,50 +22,71 @@
 - `GET /api/health` responde correctamente.
 - Health check devuelve `database: connected` cuando la conexión es exitosa.
 
+## Phase 1 - Zoho Read Integration (implementada)
+
+Capa interna en `src/modules/integrations/zoho/`:
+
+- `config.ts` — configuración validada con Zod, carga lazy.
+- `auth.ts` — OAuth vía refresh token, access token cacheado en memoria con renovación automática y una sola renovación concurrente.
+- `client.ts` — cliente HTTP genérico solo GET hacia Zoho Inventory.
+- `sales-orders.ts` — `listSalesOrders({ page, perPage })` y `getSalesOrder(id)`, devolviendo JSON RAW.
+
+## Phase 2 - Railway Verification (completada)
+
+Endpoints internos protegidos con `X-UNIK-API-Key`, verificados en Railway contra Zoho real:
+
+- `GET /api/internal/zoho/sales-orders`
+- `GET /api/internal/zoho/sales-orders/{id}`
+
+## Phase 3 - Sales Orders Polling Sync (implementada, no desplegada)
+
+- Motor de polling en `sales-orders-sync.ts` con modos `scan` y `sync`.
+- Detección de cambios mediante `last_modified_time` del listado.
+- Snapshots RAW, límite `maxDetailFetches` (default 50, máx 200).
+- Endpoint `POST /api/internal/zoho/sync/sales-orders`.
+- Migración Prisma versionada, generada con tooling oficial.
+
+**Todavía no desplegado ni probado en producción.** La migración no ha sido aplicada a la base de Railway.
+
 ## External Zoho Verification
 
-Fuera del código de UNIK se han probado manualmente:
+Fuera del código de UNIK se probaron manualmente:
 
 - Zoho Self Client.
 - OAuth authorization.
-- Refresh token.
-- Access token.
+- Refresh token y access token.
 - Alcance `ZohoInventory.salesorders.READ`.
-- GET de Sales Orders.
-- GET de Sales Order por ID.
-
-## Not Implemented Yet
-
-- Cliente de Zoho dentro de UNIK.
-- Refresh automático de tokens dentro de UNIK.
-- Webhooks de Zoho.
-- Persistencia de datos Zoho en PostgreSQL.
-- Tablas de negocio.
-- Módulos de ventas, compras, inventario, logística, finanzas, reportes, usuarios e IA.
-- Frontend funcional.
-- Autenticación.
-
-## Current Endpoint
-
-### `GET /api/health`
-
-Verifica que el servicio responda y que Prisma pueda ejecutar `SELECT 1` contra PostgreSQL.
-
-- Responde `200` con `database: connected` cuando la conexión es exitosa.
-- Responde `503` con `database: disconnected` si la conexión falla.
-
-No requiere autenticación.
+- GET de Sales Orders y GET de Sales Order por ID.
 
 ## Database
 
 - PostgreSQL está conectado.
-- Prisma todavía no contiene modelos.
-- No existen migraciones.
-- No existen tablas de negocio.
-- No se persisten todavía datos empresariales.
+- Existen **3 modelos técnicos de integración**: `IntegrationEntityState`, `IntegrationSnapshot`, `IntegrationSyncRun`.
+- Existe una migración versionada, todavía **no aplicada** en producción.
+- **No existen modelos de negocio** ni tablas de negocio.
+- Los datos de Zoho solo se guardarían como snapshots RAW, sin normalizar.
+
+## Not Implemented Yet
+
+- Scheduler o ejecución automática del polling.
+- Normalización de datos de Zoho.
+- Detección de eliminaciones.
+- Webhooks de Zoho.
+- Modelos de negocio (Sales Order, Customer, Item, Invoice, Payment, Vendor).
+- Otros módulos de Zoho fuera de Sales Orders.
+- Módulos de ventas, compras, inventario, logística, finanzas, reportes, usuarios e IA.
+- Frontend funcional.
+- Autenticación de usuarios.
+
+## Endpoints
+
+| Método | Ruta                                   | Auth             |
+| ------ | -------------------------------------- | ---------------- |
+| `GET`  | `/api/health`                          | No               |
+| `GET`  | `/api/internal/zoho/sales-orders`      | `X-UNIK-API-Key` |
+| `GET`  | `/api/internal/zoho/sales-orders/{id}` | `X-UNIK-API-Key` |
+| `POST` | `/api/internal/zoho/sync/sales-orders` | `X-UNIK-API-Key` |
 
 ## Next Planned Phase
 
-**Zoho Read Integration**
-
-Esta fase NO se implementa en la tarea actual.
+Desplegar y medir la FASE 3 en Railway (aplicar migración, ejecutar `scan`, medir volumen y consumo de API) antes de decidir la estrategia de scheduling.
