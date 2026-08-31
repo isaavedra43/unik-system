@@ -32,6 +32,13 @@ export class SyncAlreadyRunningError extends Error {
   }
 }
 
+export class BaselineAlreadyCompletedError extends Error {
+  constructor() {
+    super('A baseline has already been completed for this integration');
+    this.name = 'BaselineAlreadyCompletedError';
+  }
+}
+
 export class SyncFailedError extends Error {
   constructor(
     public readonly errorCode: string,
@@ -428,6 +435,20 @@ export async function baselineSalesOrders(): Promise<BaselineResult> {
   let run: { id: string } | null = null;
 
   try {
+    const existingCompleted = await prisma.integrationSyncRun.findFirst({
+      where: {
+        source: SOURCE,
+        entityType: ENTITY_TYPE,
+        mode: 'baseline',
+        status: SYNC_STATUS.COMPLETED,
+      },
+      select: { id: true },
+    });
+
+    if (existingCompleted) {
+      throw new BaselineAlreadyCompletedError();
+    }
+
     run = await prisma.integrationSyncRun.create({
       data: {
         source: SOURCE,
@@ -474,7 +495,11 @@ export async function baselineSalesOrders(): Promise<BaselineResult> {
     );
 
     return { runId: run.id, mode: 'baseline', baselined: update.count };
-  } catch {
+  } catch (error) {
+    if (error instanceof BaselineAlreadyCompletedError) {
+      throw error;
+    }
+
     const errorCode = SYNC_ERROR_CODE.UNEXPECTED_ERROR;
     const completedAt = new Date();
 

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { ZodError, z } from 'zod';
 import { isInternalApiKeyValid } from '@/lib/internal-api-key';
 import {
+  BaselineAlreadyCompletedError,
   BaselineResult,
   SyncAlreadyRunningError,
   SyncFailedError,
@@ -74,6 +75,10 @@ export async function POST(request: Request) {
   } catch (error) {
     if (error instanceof ZodError) {
       return NextResponse.json({ error: 'Invalid request' }, { status: 400 });
+    }
+
+    if (error instanceof BaselineAlreadyCompletedError) {
+      return NextResponse.json({ error: 'Baseline already completed' }, { status: 409 });
     }
 
     if (error instanceof SyncAlreadyRunningError) {
