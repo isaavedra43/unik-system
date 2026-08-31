@@ -40,9 +40,10 @@ Endpoints internos protegidos con `X-UNIK-API-Key`, verificados en Railway contr
 
 ## Phase 3 - Sales Orders Polling Sync (implementada, no desplegada)
 
-- Motor de polling en `sales-orders-sync.ts` con modos `scan` y `sync`.
+- Motor de polling en `sales-orders-sync.ts` con modos `scan`, `sync` y `baseline`.
 - Detección de cambios mediante `last_modified_time` del listado.
 - Snapshots RAW, límite `maxDetailFetches` (default 50, máx 200).
+- Modo `baseline` para convertir un `scan` histórico en punto de partida sin descargar detalles ni crear snapshots.
 - Endpoint `POST /api/internal/zoho/sync/sales-orders`.
 - Migración Prisma versionada, generada con tooling oficial.
 

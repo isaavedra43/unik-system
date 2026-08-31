@@ -101,7 +101,27 @@ Cada snapshot guarda la respuesta completa de `getSalesOrder(id)` sin normalizar
 { "mode": "sync", "max_detail_fetches": 50 }
 ```
 
-Devuelve únicamente un resumen técnico (`run_id`, `pages_scanned`, `records_seen`, `records_pending`, `details_fetched`, `details_failed`, `api_calls`). Nunca devuelve Sales Orders ni snapshots.
+```json
+{ "mode": "baseline" }
+```
+
+Devuelve únicamente un resumen técnico. Para `scan`/`sync`: `run_id`, `pages_scanned`, `records_seen`, `records_pending`, `details_fetched`, `details_failed`, `api_calls`. Para `baseline`: `run_id`, `baselined`. Nunca devuelve Sales Orders ni snapshots.
+
+### Historical Baseline
+
+El primer `scan` puede descubrir miles de Sales Orders históricas. El modo `baseline` convierte ese estado en un punto de partida sin descargar detalles ni crear `IntegrationSnapshot`:
+
+- Afecta únicamente registros `source = zoho`, `entityType = sales_order`, `needsSync = true`, `lastSyncedRemoteModifiedAt = null` y `lastDetailFetchedAt = null`.
+- Pone `needsSync = false` masivamente con `updateMany`.
+- `lastSyncedRemoteModifiedAt` permanece `null` porque no existe snapshot.
+- Es idempotente: una segunda ejecución devuelve `baselined = 0`.
+- No llama a Zoho y no guarda snapshots.
+
+Después del baseline los futuros `scan` actúan así:
+
+- orden sin cambios → `needsSync` sigue `false`.
+- orden con `last_modified_time` distinto → `needsSync = true`.
+- orden nueva → se crea con `needsSync = true`.
 
 ### Concurrencia
 

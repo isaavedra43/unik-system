@@ -303,18 +303,19 @@ export async function syncSalesOrders(
 
   syncInProgress = true;
   const startedAt = new Date();
-
-  const run = await prisma.integrationSyncRun.create({
-    data: {
-      source: SOURCE,
-      entityType: ENTITY_TYPE,
-      mode,
-      status: SYNC_STATUS.RUNNING,
-      startedAt,
-    },
-  });
+  let run: { id: string } | null = null;
 
   try {
+    run = await prisma.integrationSyncRun.create({
+      data: {
+        source: SOURCE,
+        entityType: ENTITY_TYPE,
+        mode,
+        status: SYNC_STATUS.RUNNING,
+        startedAt,
+      },
+    });
+
     const scan = await scanAllPages();
 
     const details =
@@ -373,22 +374,127 @@ export async function syncSalesOrders(
     const errorCode = resolveErrorCode(error);
     const completedAt = new Date();
 
-    await prisma.integrationSyncRun.update({
-      where: { id: run.id },
-      data: { status: SYNC_STATUS.FAILED, completedAt, errorCode },
-    });
+    if (run) {
+      await prisma.integrationSyncRun.update({
+        where: { id: run.id },
+        data: { status: SYNC_STATUS.FAILED, completedAt, errorCode },
+      });
+    }
 
     console.error(
       JSON.stringify({
         event: 'zoho.sales_orders.sync.failed',
-        runId: run.id,
+        runId: run?.id ?? 'unknown',
         mode,
         errorCode,
         durationMs: completedAt.getTime() - startedAt.getTime(),
       })
     );
 
-    throw new SyncFailedError(errorCode, run.id);
+    throw new SyncFailedError(errorCode, run?.id ?? 'sync-run-creation-failed');
+  } finally {
+    syncInProgress = false;
+  }
+}
+
+export interface BaselineResult {
+  runId: string;
+  mode: 'baseline';
+  baselined: number;
+}
+
+/**
+ * Marks historical Sales Orders discovered by a previous scan as the known
+ * baseline without downloading any detail or creating snapshots.
+ *
+ * Only affects records that:
+ *   - are from source "zoho" and entityType "sales_order"
+ *   - have needsSync = true
+ *   - have never been synced (lastSyncedRemoteModifiedAt IS NULL)
+ *   - have never been fetched (lastDetailFetchedAt IS NULL)
+ *
+ * After baseline those records keep needsSync = false, lastSyncedRemoteModifiedAt
+ * remains null and no IntegrationSnapshot is created. Future scans will mark an
+ * existing order as needsSync = true only when its last_modified_time actually
+ * changes, or when the order is new.
+ */
+export async function baselineSalesOrders(): Promise<BaselineResult> {
+  if (syncInProgress) {
+    throw new SyncAlreadyRunningError();
+  }
+
+  syncInProgress = true;
+  const startedAt = new Date();
+  let run: { id: string } | null = null;
+
+  try {
+    run = await prisma.integrationSyncRun.create({
+      data: {
+        source: SOURCE,
+        entityType: ENTITY_TYPE,
+        mode: 'baseline',
+        status: SYNC_STATUS.RUNNING,
+        startedAt,
+      },
+    });
+
+    const update = await prisma.integrationEntityState.updateMany({
+      where: {
+        source: SOURCE,
+        entityType: ENTITY_TYPE,
+        needsSync: true,
+        lastSyncedRemoteModifiedAt: null,
+        lastDetailFetchedAt: null,
+      },
+      data: { needsSync: false },
+    });
+
+    const completedAt = new Date();
+
+    await prisma.integrationSyncRun.update({
+      where: { id: run.id },
+      data: {
+        status: SYNC_STATUS.COMPLETED,
+        completedAt,
+        recordsSeen: 0,
+        recordsPending: 0,
+        detailsFetched: 0,
+        detailsFailed: 0,
+        apiCalls: 0,
+      },
+    });
+
+    console.info(
+      JSON.stringify({
+        event: 'zoho.sales_orders.baseline.completed',
+        runId: run.id,
+        baselined: update.count,
+        durationMs: completedAt.getTime() - startedAt.getTime(),
+      })
+    );
+
+    return { runId: run.id, mode: 'baseline', baselined: update.count };
+  } catch {
+    const errorCode = SYNC_ERROR_CODE.UNEXPECTED_ERROR;
+    const completedAt = new Date();
+
+    if (run) {
+      await prisma.integrationSyncRun.update({
+        where: { id: run.id },
+        data: { status: SYNC_STATUS.FAILED, completedAt, errorCode },
+      });
+    }
+
+    console.error(
+      JSON.stringify({
+        event: 'zoho.sales_orders.baseline.failed',
+        runId: run?.id ?? 'unknown',
+        errorCode,
+        durationMs: completedAt.getTime() - startedAt.getTime(),
+      })
+    );
+
+    throw new SyncFailedError(errorCode, run?.id ?? 'unknown');
   } finally {
     syncInProgress = false;
   }

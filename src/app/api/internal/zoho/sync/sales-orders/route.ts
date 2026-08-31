@@ -2,8 +2,10 @@ import { NextResponse } from 'next/server';
 import { ZodError, z } from 'zod';
 import { isInternalApiKeyValid } from '@/lib/internal-api-key';
 import {
+  BaselineResult,
   SyncAlreadyRunningError,
   SyncFailedError,
+  baselineSalesOrders,
   syncSalesOrders,
 } from '@/modules/integrations/zoho/sales-orders-sync';
 
@@ -11,10 +13,23 @@ export const runtime = 'nodejs';
 
 const requestBodySchema = z
   .object({
-    mode: z.enum(['scan', 'sync']).optional(),
-    max_detail_fetches: z.number().optional(),
+    mode: z.enum(['scan', 'sync', 'baseline']).optional(),
+    max_detail_fetches: z.number().int().min(1).max(200).optional(),
   })
-  .strict();
+  .strict()
+  .refine((data) => data.mode !== 'baseline' || data.max_detail_fetches === undefined, {
+    message: 'max_detail_fetches is not allowed in baseline mode',
+    path: ['max_detail_fetches'],
+  });
+
+function formatBaselineResult(result: BaselineResult) {
+  return {
+    status: 'completed',
+    mode: result.mode,
+    run_id: result.runId,
+    baselined: result.baselined,
+  };
+}
 
 export async function POST(request: Request) {
   if (!isInternalApiKeyValid(request)) {
@@ -35,6 +50,11 @@ export async function POST(request: Request) {
   }
 
   try {
+    if (parsedBody.data.mode === 'baseline') {
+      const result = await baselineSalesOrders();
+      return NextResponse.json(formatBaselineResult(result));
+    }
+
     const result = await syncSalesOrders({
       mode: parsedBody.data.mode,
       maxDetailFetches: parsedBody.data.max_detail_fetches,
@@ -52,7 +72,6 @@ export async function POST(request: Request) {
       api_calls: result.apiCalls,
     });
   } catch (error) {
-    // maxDetailFetches out of range or an unusable mode reaches us as a ZodError.
     if (error instanceof ZodError) {
       return NextResponse.json({ error: 'Invalid request' }, { status: 400 });
     }
