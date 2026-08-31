@@ -123,14 +123,35 @@ Después del baseline los futuros `scan` actúan así:
 - orden con `last_modified_time` distinto → `needsSync = true`.
 - orden nueva → se crea con `needsSync = true`.
 
+### Automated Sales Orders Sync
+
+Existe un runner para Railway Cron en `scripts/cron/zoho-sales-orders-sync.mjs`:
+
+- Pertenece al **mismo repositorio**, pero se ejecuta como un servicio de cron separado en Railway.
+- Dispara `POST {APP_URL}/api/internal/zoho/sync/sales-orders` con el endpoint existente.
+- Envía `mode: "sync"` y `max_detail_fetches: 50` por defecto.
+- El override `ZOHO_SALES_ORDERS_CRON_MAX_DETAIL_FETCHES` acepta valores `1`–`200`; si no existe, usa `50`.
+- Timeout de `15` minutos.
+- Solo imprime metadata técnica; nunca secretos, payloads ni datos de Sales Orders.
+- Un `HTTP 409 Sync already running` se considera un salto seguro (`exit 0`).
+- Otros errores HTTP o de red terminan con `exit 1`.
+- NO conecta directamente a Zoho ni a PostgreSQL.
+- Requiere `APP_URL` y `UNIK_INTERNAL_API_KEY`.
+- Railway Cron Start Command: `npm run cron:zoho-sales-orders`
+- Railway Cron Schedule: `0 * * * *`
+
+La protección `syncInProgress` vive **únicamente dentro del proceso del Web Service** (`unik-system`). El Railway Cron Service es un contenedor/proceso separado que solo hace HTTP hacia el endpoint; el lock no se comparte entre ellos.
+
+Con una sola réplica del Web Service, la protección process-local es suficiente. Si en el futuro `unik-system` se escala a múltiples réplicas, dos requests podrían atenderse en procesos distintos y el lock en memoria ya no bastará; será necesario un lock distribuido o DB-backed antes de escalar.
+
 ### Concurrencia
 
-Existe una protección **en memoria** que evita dos sincronizaciones simultáneas dentro de la misma instancia. **No es un distributed lock**: con múltiples instancias o réplicas en Railway todavía podrían solaparse. La estrategia definitiva se decidirá junto con el scheduler.
+La protección **en memoria** evita dos sincronizaciones simultáneas dentro de la misma instancia del Web Service. **No es un distributed lock**: si existen múltiples réplicas del Web Service en Railway, todavía podrían solaparse. La estrategia definitiva se decidirá junto con el escalado.
 
 ## Lo que todavía NO existe
 
-- Scheduler o ejecución automática: la sincronización se dispara manualmente. La frecuencia se decidirá después de medir un `scan` real.
 - Webhooks de Zoho.
+- Scheduler automático en el proceso de Next.js: el runner de cron está listo, pero el servicio cron en Railway todavía debe configurarse manualmente en producción.
 - Normalización o modelos de dominio de los datos de Zoho (solo se guardan snapshots RAW).
 - Detección de eliminaciones: no se marca nada como borrado por no aparecer en el listado. `lastSeenAt` queda preparado para analizarlo después.
 - Modelos de negocio (Sales Order, Customer, Item, Invoice, Payment, Vendor).

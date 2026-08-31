@@ -45,9 +45,12 @@ Endpoints internos protegidos con `X-UNIK-API-Key`, verificados en Railway contr
 - Snapshots RAW, límite `maxDetailFetches` (default 50, máx 200).
 - Modo `baseline` para convertir un `scan` histórico en punto de partida sin descargar detalles ni crear snapshots.
 - Endpoint `POST /api/internal/zoho/sync/sales-orders`.
+- `scripts/cron/zoho-sales-orders-sync.mjs` y `npm run cron:zoho-sales-orders` listos para Railway Cron.
+- Motor de sincronización soporta `scan`, `sync`, `baseline` manual y runner de cron como cliente del mismo endpoint vía HTTP.
+- El Railway Cron Service es un proceso separado; el lock en memoria (`syncInProgress`) vive únicamente en el Web Service y es suficiente mientras haya una sola réplica.
 - Migración Prisma versionada, generada con tooling oficial.
 
-**Todavía no desplegado ni probado en producción.** La migración no ha sido aplicada a la base de Railway.
+**Todavía no desplegado ni probado en producción.** La migración no ha sido aplicada a la base de Railway. El servicio de cron en Railway todavía debe configurarse manualmente.
 
 ## External Zoho Verification
 
@@ -69,7 +72,7 @@ Fuera del código de UNIK se probaron manualmente:
 
 ## Not Implemented Yet
 
-- Scheduler o ejecución automática del polling.
+- Servicio de cron de Railway configurado en producción (el runner está listo, pero aún no se activa).
 - Normalización de datos de Zoho.
 - Detección de eliminaciones.
 - Webhooks de Zoho.
