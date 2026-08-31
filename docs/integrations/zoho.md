@@ -141,6 +141,7 @@ Detalles:
 
 - `baseline` y `scan` completados **no** cuentan: no descargan detalles y no deben posponer un sync real.
 - `IntegrationSyncRun` es la fuente durable, así que un reinicio de Railway **no** reinicia el reloj: el nuevo proceso reconstruye la decisión desde PostgreSQL.
+- Cooldown de reintentos: si el intento `sync` más reciente terminó en `FAILED` hace menos de 30 minutos, el scheduler hace skip para evitar consumir el presupuesto de API con fallos repetitivos.
 - Feature flag `ZOHO_SALES_ORDERS_SCHEDULER_ENABLED`. Solo el valor exacto `true` lo activa; el default es desactivado. No se activa por `NODE_ENV`, así que `npm run dev` no consume API de Zoho.
 - El scheduler nunca tumba Next.js: un fallo se loguea y el siguiente tick vuelve a evaluar. No hay retry inmediato.
 - `SyncAlreadyRunningError` (por ejemplo, un sync manual en curso) se trata como _skip_ seguro.

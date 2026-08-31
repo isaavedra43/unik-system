@@ -35,6 +35,9 @@ const STARTUP_DELAY_MS = 30 * 1000;
 /** Detail downloads per scheduled run. Deliberately lower than the API maximum. */
 const SCHEDULER_MAX_DETAIL_FETCHES = 50;
 
+/** After a FAILED sync, wait this long before trying again to preserve API quota. */
+const FAILED_RETRY_COOLDOWN_MS = 30 * 60 * 1000;
+
 const SCHEDULER_STATE_KEY = '__unikZohoSalesOrdersSchedulerState' as const;
 
 interface SchedulerState {
@@ -96,6 +99,31 @@ export async function isSyncDue(now: Date = new Date()): Promise<boolean> {
 }
 
 /**
+ * Prevents retry storms. A recent FAILED sync (within FAILED_RETRY_COOLDOWN_MS)
+ * blocks a new attempt even when the normal 60-minute interval has passed.
+ * The lock in memory already prevents RUNNING overlap, so this is purely a
+ * post-failure cooldown.
+ */
+export async function isSyncCoolingDown(now: Date = new Date()): Promise<boolean> {
+  const lastFailedSync = await prisma.integrationSyncRun.findFirst({
+    where: {
+      source: SOURCE,
+      entityType: ENTITY_TYPE,
+      mode: 'sync',
+      status: SYNC_STATUS.FAILED,
+    },
+    orderBy: { startedAt: 'desc' },
+    select: { startedAt: true },
+  });
+
+  if (!lastFailedSync?.startedAt) {
+    return false;
+  }
+
+  return now.getTime() - lastFailedSync.startedAt.getTime() < FAILED_RETRY_COOLDOWN_MS;
+}
+
+/**
  * One scheduler tick. Never throws: a failing sync must not take down the
  * server, and the next tick will re-evaluate from PostgreSQL.
  */
@@ -110,6 +138,14 @@ export async function runSchedulerCheck(): Promise<void> {
 
   try {
     if (!(await isSyncDue())) {
+      return;
+    }
+
+    if (await isSyncCoolingDown()) {
+      log({
+        event: 'zoho.sales_orders.scheduler.sync_skipped',
+        reason: 'failed_retry_cooldown',
+      });
       return;
     }
 
