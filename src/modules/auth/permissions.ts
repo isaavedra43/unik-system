@@ -96,10 +96,13 @@ export const ROLES_PERMISSIONS: PermissionDefinition[] = [
   },
 ];
 
+import { SALES_ORDERS_PERMISSIONS } from '@/modules/sales/permissions';
+
 /** Every known permission. Future modules spread their definitions here. */
 export const PERMISSION_REGISTRY: PermissionDefinition[] = [
   ...USERS_PERMISSIONS,
   ...ROLES_PERMISSIONS,
+  ...SALES_ORDERS_PERMISSIONS,
 ];
 
 const REGISTRY_KEYS = new Set(PERMISSION_REGISTRY.map((p) => p.key));

@@ -62,6 +62,19 @@ Ejemplo: Sales Orders
 7. Agregar stories si crea componente reusable.
 8. Responsive validation.
 
+## Módulo Sales Orders Workspace
+
+- **Documentación**: `docs/modules/sales-orders.md`
+- **Ruta**: `/app/sales/orders`
+- **Permisos**: `sales_orders.view`, `sales_orders.export`, `sales_orders.watch`, `sales_orders.share_views`
+- **Column registry**: `src/modules/sales/sales-orders-columns.ts` (single source of truth)
+- **Filter schema**: `src/modules/sales/sales-orders-filters.ts` (Zod-validated)
+- **Server actions**: `src/app/app/sales/orders/actions.ts`
+- **UI**: `src/components/sales/` (SalesOrdersWorkspace, SalesOrderPreviewDrawer, SalesOrderDetail, NotificationsPage)
+- **Patrón**: Workspace con tabla avanzada (DnD, resize, pinning, density), filtros avanzados, vistas guardadas, watch, notificaciones, export CSV/XLSX
+- **Persistencia**: UserTablePreference (layout), TableView (vistas), EntityWatch (watch), EntityChangeEvent (diff), Notification (in-app)
+- **Regla**: NUNCA definir columnas ad-hoc en componentes. Siempre usar el column registry.
+
 ## Tarea UI no termina hasta que
 
 - `npm run build` pasa

@@ -147,6 +147,10 @@ model User {
   updatedAt           DateTime      @updatedAt
   roles               UserRole[]
   sessions            AuthSession[]
+  tablePreferences    UserTablePreference[]
+  tableViews          TableView[]
+  entityWatches       EntityWatch[]
+  notifications       Notification[]
 
   @@index([isActive])
 }
@@ -247,4 +251,97 @@ model SalesOrderItem {
   salesOrder     SalesOrder @relation(fields: [salesOrderId], references: [id], onDelete: Cascade)
 
   @@index([salesOrderId])
+}
+
+/// Generic per-user table layout preferences (column order, visibility, widths,
+/// pinning, density, page size). Reusable across modules via `tableKey`.
+/// Source of persistence is PostgreSQL; localStorage may be used as UX cache.
+model UserTablePreference {
+  id        String   @id @default(cuid())
+  userId    String
+  tableKey  String
+  config    Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, tableKey])
+  @@index([userId])
+}
+
+/// Generic saved table view. Combines query state (search, filters, sort) and
+/// presentation state (columns, density, page size). `visibility` is either
+/// "private" (owner only) or "shared" (any user with the module's view perm).
+model TableView {
+  id          String   @id @default(cuid())
+  ownerUserId String
+  tableKey    String
+  name        String
+  visibility  String   @default("private")
+  config      Json
+  isDefault   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  owner       User     @relation(fields: [ownerUserId], references: [id], onDelete: Cascade)
+
+  @@index([ownerUserId])
+  @@index([tableKey, visibility])
+}
+
+/// Generic entity watch. Allows a user to follow an entity (e.g. a SalesOrder)
+/// and receive notifications when it changes. `entityType` is a string key
+/// (e.g. "sales_order"); `entityId` is the internal UNIK id.
+model EntityWatch {
+  id         String   @id @default(cuid())
+  userId     String
+  entityType String
+  entityId   String
+  config     Json?
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, entityType, entityId])
+  @@index([userId])
+  @@index([entityType, entityId])
+  @@index([entityType, entityId, isActive])
+}
+
+/// Generic change event for a watched entity. Stores only the diff (before/after
+/// per field). `sourceSnapshotId` is unique when present to guarantee
+/// idempotency: one snapshot → at most one ChangeEvent.
+model EntityChangeEvent {
+  id                     String    @id @default(cuid())
+  entityType             String
+  entityId               String
+  sourceSnapshotId       String?   @unique
+  sourceRemoteModifiedAt DateTime?
+  changes                Json
+  createdAt              DateTime  @default(now())
+
+  @@index([entityType, entityId, createdAt])
+  @@index([entityType, entityId])
+}
+
+/// Generic in-app notification. Created when an EntityChangeEvent matches an
+/// active EntityWatch. `changeEventId` + `userId` form a logical uniqueness
+/// constraint for idempotency (enforced in service layer).
+model Notification {
+  id            String    @id @default(cuid())
+  userId        String
+  type          String
+  title         String
+  body          String?
+  entityType    String?
+  entityId      String?
+  changeEventId String?
+  metadata      Json?
+  readAt        DateTime?
+  createdAt     DateTime  @default(now())
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt])
+  @@index([userId, createdAt])
+  @@index([userId, changeEventId])
 }

@@ -2,6 +2,7 @@ import { Prisma, PrismaClient } from '@prisma/client';
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { ENTITY_TYPE, SOURCE } from '@/modules/integrations/zoho/sales-orders-sync';
+import { recordSalesOrderChange } from './sales-orders-change-events';
 
 export const CURRENT_SALES_ORDER_NORMALIZER_VERSION = 2;
 
@@ -498,7 +499,34 @@ export async function normalizeSalesOrderSnapshot(
   return prisma.$transaction(async (tx) => {
     const existing = await tx.salesOrder.findUnique({
       where: { zohoSalesOrderId: payload.salesorder_id },
-      select: { id: true, sourceRemoteModifiedAt: true },
+      select: {
+        id: true,
+        sourceRemoteModifiedAt: true,
+        status: true,
+        subStatus: true,
+        paidStatus: true,
+        invoicedStatus: true,
+        shippedStatus: true,
+        customerName: true,
+        customerPhone: true,
+        salespersonName: true,
+        paymentMethod: true,
+        deliveryMethod: true,
+        locationName: true,
+        branchName: true,
+        shippingAddressLine1: true,
+        shippingCity: true,
+        shippingState: true,
+        shippingPostalCode: true,
+        subtotal: true,
+        discountTotal: true,
+        taxTotal: true,
+        shippingCharge: true,
+        adjustment: true,
+        total: true,
+        balance: true,
+        saleMadeInWarehouse: true,
+      },
     });
 
     if (
@@ -509,7 +537,101 @@ export async function normalizeSalesOrderSnapshot(
       return { salesOrderId: existing.id, status: 'skipped' };
     }
 
+    // Capture BEFORE state for change detection (items).
+    let beforeItems: {
+      zohoLineItemId: string | null;
+      zohoItemId: string | null;
+      sku: string | null;
+      name: string | null;
+      quantity: Prisma.Decimal | null;
+      rate: Prisma.Decimal | null;
+      discountAmount: Prisma.Decimal | null;
+      taxPercentage: Prisma.Decimal | null;
+      lineTotal: Prisma.Decimal | null;
+    }[] = [];
+    if (existing) {
+      beforeItems = await tx.salesOrderItem.findMany({
+        where: { salesOrderId: existing.id },
+        orderBy: { sortOrder: 'asc' },
+        select: {
+          zohoLineItemId: true,
+          zohoItemId: true,
+          sku: true,
+          name: true,
+          quantity: true,
+          rate: true,
+          discountAmount: true,
+          taxPercentage: true,
+          lineTotal: true,
+        },
+      });
+    }
+
     const order = await persistNormalizedOrder(tx, payload.salesorder_id, salesOrderData, items);
+
+    // Change detection: compare before vs after, record event + notifications.
+    if (existing) {
+      const afterOrder = await tx.salesOrder.findUnique({
+        where: { id: order.salesOrderId },
+        select: {
+          id: true,
+          status: true,
+          subStatus: true,
+          paidStatus: true,
+          invoicedStatus: true,
+          shippedStatus: true,
+          customerName: true,
+          customerPhone: true,
+          salespersonName: true,
+          paymentMethod: true,
+          deliveryMethod: true,
+          locationName: true,
+          branchName: true,
+          shippingAddressLine1: true,
+          shippingCity: true,
+          shippingState: true,
+          shippingPostalCode: true,
+          subtotal: true,
+          discountTotal: true,
+          taxTotal: true,
+          shippingCharge: true,
+          adjustment: true,
+          total: true,
+          balance: true,
+          saleMadeInWarehouse: true,
+        },
+      });
+      const afterItems = await tx.salesOrderItem.findMany({
+        where: { salesOrderId: order.salesOrderId },
+        orderBy: { sortOrder: 'asc' },
+        select: {
+          zohoLineItemId: true,
+          zohoItemId: true,
+          sku: true,
+          name: true,
+          quantity: true,
+          rate: true,
+          discountAmount: true,
+          taxPercentage: true,
+          lineTotal: true,
+        },
+      });
+
+      if (afterOrder) {
+        await recordSalesOrderChange(
+          tx,
+          order.salesOrderId,
+          payload.salesorder_number ?? null,
+          snapshot.id,
+          snapshot.remoteModifiedAt,
+          existing as Parameters<typeof recordSalesOrderChange>[5],
+          beforeItems,
+          afterOrder as Parameters<typeof recordSalesOrderChange>[7],
+          afterItems
+        );
+      }
+    }
+
     await markSnapshotProcessed(tx, snapshot.id, CURRENT_SALES_ORDER_NORMALIZER_VERSION, null);
 
     log({
