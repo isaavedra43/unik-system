@@ -11,6 +11,7 @@ node_modules
 # Production builds
 /build
 /dist
+/storybook-static
 
 # Environment variables
 .env
@@ -45,6 +46,8 @@ Thumbs.db
 
 # Testing
 /coverage
+/playwright-report
+/test-results
 
 # Temporary files
 *.tmp
