@@ -129,6 +129,99 @@ model SalesOrder {
   @@index([sourceSnapshotId])
 }
 
+/// Application user account. Users are never hard-deleted from the UI;
+/// they are activated/deactivated to preserve history and relations.
+model User {
+  id                  String        @id @default(cuid())
+  username            String        @unique
+  email               String?       @unique
+  name                String
+  passwordHash        String
+  isActive            Boolean       @default(true)
+  mustChangePassword  Boolean       @default(true)
+  failedLoginAttempts Int           @default(0)
+  lockedUntil         DateTime?
+  lastLoginAt         DateTime?
+  passwordChangedAt   DateTime?
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+  roles               UserRole[]
+  sessions            AuthSession[]
+
+  @@index([isActive])
+}
+
+/// Authorization role. `key` is generated at creation time and is immutable.
+model Role {
+  id          String           @id @default(cuid())
+  key         String           @unique
+  name        String
+  description String?
+  isSystem    Boolean          @default(false)
+  isActive    Boolean          @default(true)
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  users       UserRole[]
+  permissions RolePermission[]
+}
+
+/// Join table between User and Role.
+model UserRole {
+  userId     String
+  roleId     String
+  assignedAt DateTime @default(now())
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role       Role     @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([userId, roleId])
+  @@index([roleId])
+}
+
+/// Permission assigned to a role. permissionKey references the code-first
+/// permission registry (src/modules/auth/permissions.ts); it is validated
+/// against that registry before being persisted.
+model RolePermission {
+  roleId        String
+  permissionKey String
+  createdAt     DateTime @default(now())
+  role          Role     @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionKey])
+  @@index([permissionKey])
+}
+
+/// Server-side authentication session. Only the SHA-256 hash of the session
+/// token is stored; the raw token lives exclusively in the HttpOnly cookie.
+model AuthSession {
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String    @unique
+  createdAt DateTime  @default(now())
+  expiresAt DateTime
+  revokedAt DateTime?
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@index([revokedAt])
+}
+
+/// Generic audit log for administrative and security events.
+/// Never stores passwords, hashes, session tokens or cookies.
+model AuditLog {
+  id          String   @id @default(cuid())
+  actorUserId String?
+  action      String
+  targetType  String
+  targetId    String?
+  metadata    Json?
+  createdAt   DateTime @default(now())
+
+  @@index([actorUserId])
+  @@index([createdAt])
+  @@index([action])
+}
+
 /// Business-normalized line items of a Zoho sales order.
 model SalesOrderItem {
   id             String     @id @default(cuid())

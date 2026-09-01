@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { ENTITY_TYPE, SOURCE } from '@/modules/integrations/zoho/sales-orders-sync';
 
-export const CURRENT_SALES_ORDER_NORMALIZER_VERSION = 1;
+export const CURRENT_SALES_ORDER_NORMALIZER_VERSION = 2;
 
 export const NORMALIZATION_ERROR_CODE = {
   SNAPSHOT_SHAPE_INVALID: 'SNAPSHOT_SHAPE_INVALID',
@@ -186,6 +186,9 @@ function toDecimal(value: unknown): Prisma.Decimal | null {
   if (value === null || value === undefined) {
     return null;
   }
+  if (value instanceof Prisma.Decimal) {
+    return value;
+  }
   if (typeof value === 'number') {
     return Number.isFinite(value) ? new Prisma.Decimal(value) : null;
   }
@@ -352,7 +355,7 @@ function buildItems(
       discountAmount: toDecimal(item.discount_amount),
       taxName: item.tax_name ?? null,
       taxPercentage: toDecimal(item.tax_percentage),
-      taxAmount: toDecimal(taxAmount),
+      taxAmount,
       lineTotal: toDecimal(item.item_total),
       locationId: item.location_id ?? null,
       locationName: item.location_name ?? null,

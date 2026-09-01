@@ -75,6 +75,21 @@ Endpoints internos protegidos con `X-UNIK-API-Key`, verificados en Railway contr
 
 **FASE 5 implementation complete, pending production migration, deployment and verification with real Zoho payloads.**
 
+## Phase 6.1 - Authentication / Users / Roles / Permissions (implementada, pendiente de migración, bootstrap y verificación en producción)
+
+- Sesiones respaldadas por PostgreSQL (`AuthSession` guarda solo SHA-256 del token; el token vive en cookie HttpOnly `unik_session`, SameSite=Lax, Secure en producción, TTL 12 h).
+- Modelos nuevos: `User`, `Role`, `UserRole`, `RolePermission`, `AuthSession`, `AuditLog` (migración aditiva `20260831190000_add_auth_foundation`).
+- Passwords con bcryptjs (cost 12); política mínimo 12 caracteres; contraseñas temporales generadas con `crypto.randomBytes`, mostradas una sola vez y nunca persistidas en claro.
+- Lockout: 5 intentos fallidos → 15 minutos de bloqueo (campos en `User`, sin Redis).
+- Permission Registry code-first (`src/modules/auth/permissions.ts`): permisos `users.*` y `roles.*`; `RolePermission.permissionKey` se valida contra el registry. Agregar módulos futuros no requiere migración.
+- `super_admin` (rol de sistema) bypass total de permisos, protegido contra delete/edición, con protecciones de último super admin y escalación de privilegios.
+- Autorización deny-by-default server-side: `requireAuthenticatedUser`, `requirePermission`, `assertPermission`, etc. (`src/modules/auth/authorization.ts`).
+- UI: `/login`, `/change-password` (forzado), `/app` layout protegido, `/app/account/security`, `/app/admin/users`, `/app/admin/roles`, `/app/admin/roles/[id]`; Server Actions + service layer.
+- Bootstrap del primer super_admin: `POST /api/internal/auth/bootstrap` (X-UNIK-API-Key, solo con 0 usuarios, luego 409 permanente).
+- Audit log de eventos administrativos/seguridad (sin UI todavía).
+
+**FASE 6.1 Authentication / Users / Roles / Permissions implemented, pending production migration/bootstrap/verification.**
+
 ## External Zoho Verification
 
 Fuera del código de UNIK se probaron manualmente:
@@ -90,29 +105,35 @@ Fuera del código de UNIK se probaron manualmente:
 - PostgreSQL está conectado.
 - Existen **3 modelos técnicos de integración**: `IntegrationEntityState`, `IntegrationSnapshot`, `IntegrationSyncRun`.
 - Existen **2 modelos de negocio iniciales**: `SalesOrder`, `SalesOrderItem`.
-- Existen dos migraciones versionadas: `20260831182914_add_integration_sync_foundation` y `20260901000000_add_business_sales_orders`.
+- Existen **6 modelos de autenticación/autorización**: `User`, `Role`, `UserRole`, `RolePermission`, `AuthSession`, `AuditLog`.
+- Migraciones versionadas: `20260831182914_add_integration_sync_foundation`, `20260831183000_add_business_sales_orders` y `20260831190000_add_auth_foundation`.
 - Los datos de Zoho se guardan como snapshots RAW + modelos de negocio normalizados.
 
 ## Not Implemented Yet
 
 - Activación del scheduler interno en producción (`ZOHO_SALES_ORDERS_SCHEDULER_ENABLED=true` en Railway).
-- Normalización de datos de Zoho.
+- Migración/bootstrap/verificación de FASE 6.1 en producción.
 - Detección de eliminaciones.
 - Webhooks de Zoho.
-- Modelos de negocio (Sales Order, Customer, Item, Invoice, Payment, Vendor).
+- Modelos de negocio adicionales (Customer, Item, Invoice, Payment, Vendor).
 - Otros módulos de Zoho fuera de Sales Orders.
-- Módulos de ventas, compras, inventario, logística, finanzas, reportes, usuarios e IA.
-- Frontend funcional.
-- Autenticación de usuarios.
+- Módulos de ventas, compras, inventario, logística, finanzas, reportes e IA (frontend de negocio).
+- UI de Audit Log.
 
 ## Endpoints
 
-| Método | Ruta                                   | Auth             |
-| ------ | -------------------------------------- | ---------------- |
-| `GET`  | `/api/health`                          | No               |
-| `GET`  | `/api/internal/zoho/sales-orders`      | `X-UNIK-API-Key` |
-| `GET`  | `/api/internal/zoho/sales-orders/{id}` | `X-UNIK-API-Key` |
-| `POST` | `/api/internal/zoho/sync/sales-orders` | `X-UNIK-API-Key` |
+| Método | Ruta                                        | Auth             |
+| ------ | ------------------------------------------- | ---------------- |
+| `GET`  | `/api/health`                               | No               |
+| `GET`  | `/api/internal/zoho/sales-orders`           | `X-UNIK-API-Key` |
+| `GET`  | `/api/internal/zoho/sales-orders/{id}`      | `X-UNIK-API-Key` |
+| `POST` | `/api/internal/zoho/sync/sales-orders`      | `X-UNIK-API-Key` |
+| `POST` | `/api/internal/zoho/normalize/sales-orders` | `X-UNIK-API-Key` |
+| `GET`  | `/api/internal/sales-orders`                | `X-UNIK-API-Key` |
+| `GET`  | `/api/internal/sales-orders/{id}`           | `X-UNIK-API-Key` |
+| `POST` | `/api/internal/auth/bootstrap`              | `X-UNIK-API-Key` |
+
+Rutas web autenticadas por sesión (cookie `unik_session`): `/login`, `/change-password`, `/app`, `/app/account/security`, `/app/admin/users`, `/app/admin/roles`, `/app/admin/roles/[id]`.
 
 ## Next Planned Phase
 
