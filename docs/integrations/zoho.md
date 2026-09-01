@@ -153,6 +153,28 @@ Requiere que `unik-system` sea un **Persistent Service** que no se duerma; los t
 
 Para verificar una ejecución: revisar los logs del servicio (`zoho.sales_orders.scheduler.*`) o consultar `IntegrationSyncRun` filtrando `mode = 'sync'` y `status = 'COMPLETED'`.
 
+### Business Normalization
+
+`IntegrationSnapshot` sigue siendo la fuente RAW inmutable. Sobre ella se construye una capa normalizada adicional:
+
+- `src/modules/sales/sales-orders-normalizer.ts` convierte el payload de Zoho en `SalesOrder` + `SalesOrderItem`.
+- `CURRENT_SALES_ORDER_NORMALIZER_VERSION = 1` en `IntegrationSnapshot.normalizationVersion` permite re-procesar en el futuro si el mapeo cambia.
+- Si `SalesOrder` ya existe con un `sourceRemoteModifiedAt` más reciente, el snapshot antiguo se salta (`STALE_SNAPSHOT`) y se marca como procesado para no repetirlo.
+- Reemplazo de items en transacción: `deleteMany` + `createMany` dentro de `prisma.$transaction`, garantizando que `SalesOrderItem` represente exactamente la última versión.
+- El normalizador nunca llama Zoho; solo lee PostgreSQL.
+- El scheduler y el endpoint `POST /api/internal/zoho/sync/sales-orders` lanzan normalización de snapshots pendientes **después** de que el RAW quedó seguro en `IntegrationSnapshot`.
+- `POST /api/internal/zoho/normalize/sales-orders` permite normalizar manualmente snapshots pendientes con un `limit` opcional (`1`–`500`, default `100`).
+
+### Endpoints internos adicionales
+
+| Método | Ruta                                        | Auth             |
+| ------ | ------------------------------------------- | ---------------- |
+| `POST` | `/api/internal/zoho/normalize/sales-orders` | `X-UNIK-API-Key` |
+| `GET`  | `/api/internal/sales-orders`                | `X-UNIK-API-Key` |
+| `GET`  | `/api/internal/sales-orders/{id}`           | `X-UNIK-API-Key` |
+
+`GET /api/internal/sales-orders` soporta `page`, `page_size` (máx `100`), `date_from`, `date_to`, `status`, `salesperson`, `payment_method`, `delivery_method` y `search` (por `salesOrderNumber` o `customerName`). Los `Decimal` se serializan como `string` para evitar pérdida de precisión.
+
 ### Concurrencia
 
 El lock que evita dos sincronizaciones simultáneas se guarda en `globalThis`, no en una variable de módulo. Next.js compila el hook de instrumentation y los route handlers en bundles distintos, así que una variable de módulo podría duplicarse y el scheduler no vería el lock tomado por una petición manual. Con `globalThis` existe **un solo lock por proceso**, y el contrato externo no cambia: si hay un sync en curso, el endpoint sigue devolviendo `HTTP 409 Sync already running`.
@@ -163,9 +185,9 @@ El lock que evita dos sincronizaciones simultáneas se guarda en `globalThis`, n
 
 - Webhooks de Zoho.
 - Activación en producción del scheduler interno: el código está listo, pero `ZOHO_SALES_ORDERS_SCHEDULER_ENABLED` todavía no se ha puesto en `true` en Railway.
-- Normalización o modelos de dominio de los datos de Zoho (solo se guardan snapshots RAW).
 - Detección de eliminaciones: no se marca nada como borrado por no aparecer en el listado. `lastSeenAt` queda preparado para analizarlo después.
-- Modelos de negocio (Sales Order, Customer, Item, Invoice, Payment, Vendor).
+- Backfill de las 23.000 Sales Orders históricas: FASE 5 normaliza solo snapshots existentes y futuros.
+- Customer, Item, Invoice, Payment, Vendor como entidades master independientes.
 - Otros módulos de Zoho: solo Sales Orders.
 - Endpoints HTTP públicos de UNIK para esta integración.
 - Escritura hacia Zoho (POST/PUT/PATCH/DELETE).

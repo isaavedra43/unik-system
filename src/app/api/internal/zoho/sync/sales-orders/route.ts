@@ -2,6 +2,11 @@ import { NextResponse } from 'next/server';
 import { ZodError, z } from 'zod';
 import { isInternalApiKeyValid } from '@/lib/internal-api-key';
 import {
+  NormalizationAlreadyRunningError,
+  NormalizePendingSnapshotsResult,
+  normalizePendingSalesOrderSnapshots,
+} from '@/modules/sales/sales-orders-normalizer';
+import {
   BaselineAlreadyCompletedError,
   BaselineResult,
   SyncAlreadyRunningError,
@@ -29,6 +34,24 @@ function formatBaselineResult(result: BaselineResult) {
     mode: result.mode,
     run_id: result.runId,
     baselined: result.baselined,
+  };
+}
+
+function formatSyncResult(
+  result: Awaited<ReturnType<typeof syncSalesOrders>>,
+  normalization: NormalizePendingSnapshotsResult | { already_running: true } | null
+) {
+  return {
+    status: 'completed',
+    mode: result.mode,
+    run_id: result.runId,
+    pages_scanned: result.pagesScanned,
+    records_seen: result.recordsSeen,
+    records_pending: result.recordsPending,
+    details_fetched: result.detailsFetched,
+    details_failed: result.detailsFailed,
+    api_calls: result.apiCalls,
+    normalization,
   };
 }
 
@@ -61,17 +84,22 @@ export async function POST(request: Request) {
       maxDetailFetches: parsedBody.data.max_detail_fetches,
     });
 
-    return NextResponse.json({
-      status: 'completed',
-      mode: result.mode,
-      run_id: result.runId,
-      pages_scanned: result.pagesScanned,
-      records_seen: result.recordsSeen,
-      records_pending: result.recordsPending,
-      details_fetched: result.detailsFetched,
-      details_failed: result.detailsFailed,
-      api_calls: result.apiCalls,
-    });
+    // RAW is now safe. Normalize pending snapshots synchronously so the caller
+    // knows when it finished. A normalization failure is captured independently
+    // and does NOT affect the already-completed RAW sync.
+    let normalization: NormalizePendingSnapshotsResult | { already_running: true } | null = null;
+    try {
+      normalization = await normalizePendingSalesOrderSnapshots({ limit: 100 });
+    } catch (error) {
+      if (error instanceof NormalizationAlreadyRunningError) {
+        normalization = { already_running: true };
+      } else {
+        // Unexpected. Log at server and keep going; the sync itself succeeded.
+        console.error('Normalization failed after sync:', error);
+      }
+    }
+
+    return NextResponse.json(formatSyncResult(result, normalization));
   } catch (error) {
     if (error instanceof ZodError) {
       return NextResponse.json({ error: 'Invalid request' }, { status: 400 });

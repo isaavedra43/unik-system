@@ -28,17 +28,21 @@ model IntegrationEntityState {
 
 /// Immutable RAW payload snapshot of an external entity version.
 model IntegrationSnapshot {
-  id               String   @id @default(cuid())
-  source           String
-  entityType       String
-  externalId       String
-  remoteModifiedAt DateTime
-  payload          Json
-  fetchedAt        DateTime
-  createdAt        DateTime @default(now())
+  id                     String    @id @default(cuid())
+  source                 String
+  entityType             String
+  externalId             String
+  remoteModifiedAt       DateTime
+  payload                Json
+  fetchedAt              DateTime
+  normalizedAt           DateTime?
+  normalizationVersion   Int       @default(0)
+  normalizationErrorCode String?
+  createdAt              DateTime  @default(now())
 
   @@unique([source, entityType, externalId, remoteModifiedAt])
   @@index([source, entityType, externalId])
+  @@index([source, entityType, normalizationVersion])
 }
 
 /// Technical metadata about a single synchronization execution.
@@ -61,4 +65,93 @@ model IntegrationSyncRun {
   createdAt      DateTime  @default(now())
 
   @@index([source, entityType, startedAt])
+}
+
+/// Business-normalized view of a Zoho sales order.
+model SalesOrder {
+  id                     String           @id @default(cuid())
+  zohoSalesOrderId       String           @unique
+  salesOrderNumber       String?
+  referenceNumber        String?
+  orderDate              DateTime?        @db.Date
+  createdTime            DateTime?
+  status                 String?
+  subStatus              String?
+  paidStatus             String?
+  invoicedStatus         String?
+  shippedStatus          String?
+  zohoCustomerId         String?
+  customerName           String?
+  customerEmail          String?
+  customerPhone          String?
+  zohoSalespersonId      String?
+  salespersonName        String?
+  paymentMethod          String?
+  deliveryMethod         String?
+  deliveryMethodId       String?
+  locationId             String?
+  locationName           String?
+  branchId               String?
+  branchName             String?
+  shippingAttention      String?
+  shippingAddressLine1   String?
+  shippingAddressLine2   String?
+  shippingCity           String?
+  shippingState          String?
+  shippingPostalCode     String?
+  shippingCountry        String?
+  shippingPhone          String?
+  currencyCode           String?
+  subtotal               Decimal?         @db.Decimal(18, 4)
+  discountTotal          Decimal?         @db.Decimal(18, 4)
+  taxTotal               Decimal?         @db.Decimal(18, 4)
+  shippingCharge         Decimal?         @db.Decimal(18, 4)
+  adjustment             Decimal?         @db.Decimal(18, 4)
+  total                  Decimal?         @db.Decimal(18, 4)
+  balance                Decimal?         @db.Decimal(18, 4)
+  notes                  String?
+  saleMadeInWarehouse    Boolean?
+  sourceRemoteModifiedAt DateTime
+  sourceSnapshotId       String
+  normalizedAt           DateTime         @default(now())
+  createdAt              DateTime         @default(now())
+  updatedAt              DateTime         @updatedAt
+  items                  SalesOrderItem[]
+
+  @@index([salesOrderNumber])
+  @@index([status])
+  @@index([customerName])
+  @@index([paymentMethod])
+  @@index([deliveryMethod])
+  @@index([salespersonName])
+  @@index([orderDate])
+  @@index([locationName])
+  @@index([sourceSnapshotId])
+}
+
+/// Business-normalized line items of a Zoho sales order.
+model SalesOrderItem {
+  id             String     @id @default(cuid())
+  salesOrderId   String
+  zohoLineItemId String?
+  zohoItemId     String?
+  sku            String?
+  name           String?
+  description    String?
+  quantity       Decimal?   @db.Decimal(18, 4)
+  unit           String?
+  rate           Decimal?   @db.Decimal(18, 4)
+  discountAmount Decimal?   @db.Decimal(18, 4)
+  taxName        String?
+  taxPercentage  Decimal?   @db.Decimal(18, 4)
+  taxAmount      Decimal?   @db.Decimal(18, 4)
+  lineTotal      Decimal?   @db.Decimal(18, 4)
+  locationId     String?
+  locationName   String?
+  sortOrder      Int        @default(0)
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+  salesOrder     SalesOrder @relation(fields: [salesOrderId], references: [id], onDelete: Cascade)
+
+  @@index([salesOrderId])
 }

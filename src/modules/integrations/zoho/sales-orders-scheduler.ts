@@ -1,5 +1,9 @@
 import { prisma } from '@/lib/prisma';
 import {
+  NormalizationAlreadyRunningError,
+  normalizePendingSalesOrderSnapshots,
+} from '@/modules/sales/sales-orders-normalizer';
+import {
   ENTITY_TYPE,
   SOURCE,
   SYNC_STATUS,
@@ -170,6 +174,29 @@ export async function runSchedulerCheck(): Promise<void> {
       apiCalls: result.apiCalls,
       durationMs: Date.now() - startedAt,
     });
+
+    try {
+      const normalizerResult = await normalizePendingSalesOrderSnapshots({ limit: 100 });
+      log({
+        event: 'zoho.sales_orders.scheduler.normalization_completed',
+        seen: normalizerResult.seen,
+        normalized: normalizerResult.normalized,
+        skipped: normalizerResult.skipped,
+        failed: normalizerResult.failed,
+      });
+    } catch (error) {
+      if (error instanceof NormalizationAlreadyRunningError) {
+        log({
+          event: 'zoho.sales_orders.scheduler.normalization_skipped',
+          reason: 'normalization_already_running',
+        });
+      } else {
+        log({
+          event: 'zoho.sales_orders.scheduler.normalization_failed',
+          reason: 'UNEXPECTED_ERROR',
+        });
+      }
+    }
   } catch (error) {
     if (error instanceof SyncAlreadyRunningError) {
       log({

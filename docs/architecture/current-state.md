@@ -60,6 +60,21 @@ Endpoints internos protegidos con `X-UNIK-API-Key`, verificados en Railway contr
 
 **FASE 4 internal scheduler implemented, pending production enablement.** Requiere una sola réplica del servicio web.
 
+## Phase 5 - Business Normalization (implementada, pendiente de migración y verificación)
+
+- Nuevos modelos `SalesOrder` y `SalesOrderItem` en `prisma/schema.prisma`.
+- Migración versionada aditiva `20260901000000_add_business_sales_orders`.
+- Metadata de normalización en `IntegrationSnapshot`: `normalizedAt`, `normalizationVersion`, `normalizationErrorCode`.
+- `src/modules/sales/sales-orders-normalizer.ts` mapea Zoho RAW a datos de negocio con Zod + `Prisma.Decimal`.
+- `CURRENT_SALES_ORDER_NORMALIZER_VERSION = 1`.
+- Normalización automática después de cada sync y scheduler tick.
+- Endpoint manual `POST /api/internal/zoho/normalize/sales-orders`.
+- Endpoints de lectura `GET /api/internal/sales-orders` y `GET /api/internal/sales-orders/{id}`.
+- Serialización de `Decimal` como string.
+- No backfill de 23.000 históricas; no se toca `IntegrationSnapshot.payload`.
+
+**FASE 5 implementation complete, pending production migration, deployment and verification with real Zoho payloads.**
+
 ## External Zoho Verification
 
 Fuera del código de UNIK se probaron manualmente:
@@ -74,9 +89,9 @@ Fuera del código de UNIK se probaron manualmente:
 
 - PostgreSQL está conectado.
 - Existen **3 modelos técnicos de integración**: `IntegrationEntityState`, `IntegrationSnapshot`, `IntegrationSyncRun`.
-- Existe una migración versionada, ya aplicada en producción.
-- **No existen modelos de negocio** ni tablas de negocio.
-- Los datos de Zoho solo se guardarían como snapshots RAW, sin normalizar.
+- Existen **2 modelos de negocio iniciales**: `SalesOrder`, `SalesOrderItem`.
+- Existen dos migraciones versionadas: `20260831182914_add_integration_sync_foundation` y `20260901000000_add_business_sales_orders`.
+- Los datos de Zoho se guardan como snapshots RAW + modelos de negocio normalizados.
 
 ## Not Implemented Yet
 
