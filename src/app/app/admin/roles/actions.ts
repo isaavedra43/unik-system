@@ -66,6 +66,7 @@ export async function createRoleAction(
     });
 
     revalidatePath(ROLES_PATH);
+    revalidatePath('/app/admin/access');
     return { error: null, success: true };
   } catch (error) {
     return { error: errorMessage(error), success: false };
@@ -101,6 +102,7 @@ export async function updateRoleAction(
     });
 
     revalidatePath(ROLES_PATH);
+    revalidatePath('/app/admin/access');
     return { error: null, success: true };
   } catch (error) {
     return { error: errorMessage(error), success: false };
@@ -126,6 +128,7 @@ export async function deleteRoleAction(
     await deleteRole(actor, parsed.data.roleId);
 
     revalidatePath(ROLES_PATH);
+    revalidatePath('/app/admin/access');
     return { error: null, success: true };
   } catch (error) {
     return { error: errorMessage(error), success: false };
@@ -156,6 +159,7 @@ export async function savePermissionsAction(
     await saveRolePermissions(actor, parsed.data.roleId, parsed.data.permissionKeys);
 
     revalidatePath(ROLES_PATH);
+    revalidatePath('/app/admin/access');
     revalidatePath(`${ROLES_PATH}/${parsed.data.roleId}`);
     return { error: null, success: true };
   } catch (error) {

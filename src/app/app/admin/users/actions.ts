@@ -75,6 +75,7 @@ export async function createUserAction(
     });
 
     revalidatePath(USERS_PATH);
+    revalidatePath('/app/admin/access');
     return {
       error: null,
       created: {
@@ -121,6 +122,7 @@ export async function updateUserAction(
     });
 
     revalidatePath(USERS_PATH);
+    revalidatePath('/app/admin/access');
     return { error: null, success: true };
   } catch (error) {
     return { error: errorMessage(error), success: false };
@@ -151,6 +153,7 @@ export async function changeUserStatusAction(
     await changeUserStatus(actor, parsed.data.userId, parsed.data.isActive === 'true');
 
     revalidatePath(USERS_PATH);
+    revalidatePath('/app/admin/access');
     return { error: null, success: true };
   } catch (error) {
     return { error: errorMessage(error), success: false };
@@ -181,6 +184,7 @@ export async function assignRolesAction(
     await assignRoles(actor, parsed.data.userId, parsed.data.roleIds);
 
     revalidatePath(USERS_PATH);
+    revalidatePath('/app/admin/access');
     return { error: null, success: true };
   } catch (error) {
     return { error: errorMessage(error), success: false };
@@ -211,6 +215,7 @@ export async function resetPasswordAction(
     const result = await resetUserPassword(actor, parsed.data.userId);
 
     revalidatePath(USERS_PATH);
+    revalidatePath('/app/admin/access');
     return { error: null, temporaryPassword: result.temporaryPassword };
   } catch (error) {
     return { error: errorMessage(error), temporaryPassword: null };

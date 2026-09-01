@@ -8,35 +8,35 @@ export default async function AccountSecurityPage() {
 
   return (
     <div>
-      <h1>Mi cuenta</h1>
+      <h1 className="page-title">Mi seguridad</h1>
+      <p className="page-description" style={{ marginBottom: '1.5rem' }}>
+        Gestiona tu contraseña y sesiones activas.
+      </p>
+
       <div className="card">
-        <h2>Perfil</h2>
+        <h2 className="heading-3" style={{ marginBottom: '1rem' }}>
+          Perfil
+        </h2>
         <p>
-          {user.name} — <span className="mono">{user.username}</span>
+          <span className="text-strong">{user.name}</span>{' '}
+          <span className="text-muted" style={{ fontFamily: 'var(--unik-font-mono)' }}>
+            {user.username}
+          </span>
         </p>
-        {user.email ? <p className="muted">{user.email}</p> : null}
-        <p className="muted">
-          Roles:{' '}
-          {user.roleKeys.length > 0
-            ? user.roleKeys.map((key) => (
-                <span key={key} className="badge badge-neutral">
-                  {key}
-                </span>
-              ))
-            : 'Sin roles'}
-        </p>
+        {user.email ? <p className="text-muted">{user.email}</p> : null}
       </div>
 
       <div className="card">
-        <h2>Cambiar mi contraseña</h2>
+        <h2 className="heading-3" style={{ marginBottom: '1rem' }}>
+          Cambiar mi contraseña
+        </h2>
         <ChangeOwnPasswordForm />
       </div>
 
       <div className="card">
-        <h2>Sesiones</h2>
-        <p className="muted">
-          Revoca todas las sesiones activas de tu cuenta en todos los dispositivos.
-        </p>
+        <h2 className="heading-3" style={{ marginBottom: '1rem' }}>
+          Sesiones
+        </h2>
         <LogoutAllDevicesForm />
       </div>
     </div>

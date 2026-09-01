@@ -4,10 +4,6 @@ import { ChangePasswordForm } from './change-password-form';
 
 export const runtime = 'nodejs';
 
-/**
- * Forced password change (first login / after admin reset).
- * Regular password changes live in /app/account/security.
- */
 export default async function ChangePasswordPage() {
   const user = await getCurrentUser();
   if (!user) {
@@ -19,15 +15,33 @@ export default async function ChangePasswordPage() {
 
   return (
     <div className="auth-page">
-      <div className="auth-card">
-        <div className="auth-brand">
-          <strong>UNIK</strong>
-          <p className="muted">Cambio de contraseña requerido</p>
+      <div className="auth-hero" aria-hidden="true">
+        <div className="auth-hero-shape" style={{ width: 360, height: 360, top: -80, left: -80 }} />
+        <div
+          className="auth-hero-shape"
+          style={{ width: 240, height: 240, bottom: 40, right: -40 }}
+        />
+        <div
+          className="auth-hero-shape"
+          style={{ width: 120, height: 120, top: '40%', right: '20%' }}
+        />
+        <div className="auth-hero-inner">
+          <h2 className="auth-hero-title">Actualiza tu acceso</h2>
+          <p className="auth-hero-blurb">Es un paso único que mantiene tu cuenta protegida.</p>
         </div>
-        <div className="alert alert-warning">
-          Debes establecer una nueva contraseña antes de continuar.
+      </div>
+
+      <div className="auth-form-wrap">
+        <div className="auth-card">
+          <div className="auth-brand">
+            <strong>UNIK System</strong>
+            <p>Cambio de contraseña requerido</p>
+          </div>
+          <div className="alert alert-warning" style={{ marginBottom: '1.25rem' }}>
+            Por seguridad debes establecer una nueva contraseña antes de continuar.
+          </div>
+          <ChangePasswordForm />
         </div>
-        <ChangePasswordForm />
       </div>
     </div>
   );

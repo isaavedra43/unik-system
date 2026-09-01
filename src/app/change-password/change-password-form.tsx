@@ -1,6 +1,7 @@
 'use client';
 
 import { useActionState } from 'react';
+import { Alert, Button, FormField, Input } from '@/components/ui/primitives';
 import { ChangePasswordFormState, forcedChangePasswordAction } from './actions';
 
 const initialState: ChangePasswordFormState = { error: null };
@@ -10,53 +11,46 @@ export function ChangePasswordForm() {
 
   return (
     <form action={formAction}>
-      {state.error ? <div className="alert alert-error">{state.error}</div> : null}
+      {state.error ? <Alert variant="error">{state.error}</Alert> : null}
 
-      <div className="form-field">
-        <label htmlFor="currentPassword">Contraseña actual</label>
-        <input
+      <FormField label="Contraseña actual" htmlFor="currentPassword">
+        <Input
           id="currentPassword"
           name="currentPassword"
           type="password"
-          className="input"
           autoComplete="current-password"
           required
           autoFocus
         />
-      </div>
+      </FormField>
 
-      <div className="form-field">
-        <label htmlFor="newPassword">Nueva contraseña</label>
-        <input
+      <FormField label="Nueva contraseña" htmlFor="newPassword" help="Mínimo 12 caracteres.">
+        <Input
           id="newPassword"
           name="newPassword"
           type="password"
-          className="input"
           autoComplete="new-password"
           minLength={12}
           maxLength={128}
           required
         />
-        <p className="muted">Mínimo 12 caracteres.</p>
-      </div>
+      </FormField>
 
-      <div className="form-field">
-        <label htmlFor="confirmNewPassword">Confirmar nueva contraseña</label>
-        <input
+      <FormField label="Confirmar nueva contraseña" htmlFor="confirmNewPassword">
+        <Input
           id="confirmNewPassword"
           name="confirmNewPassword"
           type="password"
-          className="input"
           autoComplete="new-password"
           minLength={12}
           maxLength={128}
           required
         />
-      </div>
+      </FormField>
 
-      <button type="submit" className="btn btn-block" disabled={pending}>
-        {pending ? 'Guardando…' : 'Cambiar contraseña'}
-      </button>
+      <Button type="submit" full isLoading={pending} style={{ marginTop: '0.5rem' }}>
+        Cambiar contraseña
+      </Button>
     </form>
   );
 }

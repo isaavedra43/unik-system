@@ -20,12 +20,16 @@ export interface RoleListItem {
   isActive: boolean;
   userCount: number;
   permissionCount: number;
+  permissionKeys: string[];
 }
 
 export async function listRoles(): Promise<RoleListItem[]> {
   const roles = await prisma.role.findMany({
     orderBy: { createdAt: 'asc' },
-    include: { _count: { select: { users: true, permissions: true } } },
+    include: {
+      _count: { select: { users: true, permissions: true } },
+      permissions: true,
+    },
   });
 
   return roles.map((role) => ({
@@ -37,6 +41,7 @@ export async function listRoles(): Promise<RoleListItem[]> {
     isActive: role.isActive,
     userCount: role._count.users,
     permissionCount: role._count.permissions,
+    permissionKeys: role.permissions.map((p) => p.permissionKey),
   }));
 }
 
