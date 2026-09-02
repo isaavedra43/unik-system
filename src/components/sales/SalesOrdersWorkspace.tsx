@@ -47,7 +47,12 @@ import {
   FILTER_OPERATORS_BY_TYPE,
   DATE_SHORTCUTS,
 } from '@/modules/sales/sales-orders-filters';
-import { SalesOrdersListResult, SalesOrderListItem } from '@/modules/sales/sales-orders-service';
+import { SalesOrdersListResult, SalesOrderListRow } from '@/modules/sales/sales-orders-service';
+import {
+  formatCurrency,
+  formatDateOnly,
+  getSalesOrderStatusConfig,
+} from '@/modules/sales/sales-orders-helpers';
 import {
   saveTablePreferenceJson,
   resetTablePreferenceAction,
@@ -297,67 +302,24 @@ function SortableHeader({
   );
 }
 
-function formatCurrency(value: string | null, currency?: string | null): string {
-  if (value === null || value === undefined) return '—';
-  const num = Number(value);
-  if (Number.isNaN(num)) return value;
-  const formatted = num.toLocaleString('es-MX', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-  return currency ? `${formatted} ${currency}` : `$${formatted}`;
+function getStatusDotColor(
+  status: string | null,
+  category?: 'order' | 'payment' | 'invoice' | 'shipping'
+): string {
+  const config = getSalesOrderStatusConfig(status, category);
+  return `so-status-dot-${config.tone}`;
 }
 
-function formatDate(value: string | null): string {
-  if (!value) return '—';
-  try {
-    const d = new Date(value);
-    return d.toLocaleDateString('es-MX', { year: 'numeric', month: 'short', day: 'numeric' });
-  } catch {
-    return value;
-  }
-}
-
-function getStatusDotColor(status: string | null): string {
-  if (!status) return 'so-status-dot-muted';
-  const lower = status.toLowerCase();
-  if (
-    lower.includes('paid') ||
-    lower.includes('pagad') ||
-    lower.includes('complete') ||
-    lower.includes('shipped') ||
-    lower.includes('enviad') ||
-    lower.includes('delivered') ||
-    lower.includes('entregad') ||
-    lower.includes('fulfilled') ||
-    lower.includes('invoiced') ||
-    lower.includes('facturad')
-  ) {
-    return 'so-status-dot-success';
-  }
-  if (
-    lower.includes('pending') ||
-    lower.includes('pend') ||
-    lower.includes('partial') ||
-    lower.includes('parcial') ||
-    lower.includes('process') ||
-    lower.includes('proces')
-  ) {
-    return 'so-status-dot-info';
-  }
-  if (
-    lower.includes('cancel') ||
-    lower.includes('cancelad') ||
-    lower.includes('void') ||
-    lower.includes('draft') ||
-    lower.includes('borrador')
-  ) {
-    return 'so-status-dot-danger';
-  }
-  return 'so-status-dot-muted';
-}
-
-function StatusCell({ value, label }: { value: string | null; label: string }) {
+function StatusCell({
+  value,
+  label,
+  category,
+}: {
+  value: string | null;
+  label: string;
+  category?: 'order' | 'payment' | 'invoice' | 'shipping';
+}) {
+  const config = getSalesOrderStatusConfig(value, category);
   if (!value) {
     return (
       <span className="so-status-cell">
@@ -367,27 +329,33 @@ function StatusCell({ value, label }: { value: string | null; label: string }) {
     );
   }
   return (
-    <span className="so-status-cell" title={`${label}: ${value}`}>
-      <span className={`so-status-dot ${getStatusDotColor(value)}`} />
-      <span>{value}</span>
+    <span className="so-status-cell" title={`${label}: ${config.label}`}>
+      <span className={`so-status-dot ${getStatusDotColor(value, category)}`} />
+      <span>{config.label}</span>
     </span>
   );
 }
 
-function renderCell(item: SalesOrderListItem, column: SalesOrderColumnDefinition): React.ReactNode {
+function renderCell(item: SalesOrderListRow, column: SalesOrderColumnDefinition): React.ReactNode {
   const value = (item as unknown as Record<string, unknown>)[column.id];
   if (column.formatter === 'currency') {
     return (
       <span style={{ fontVariantNumeric: 'tabular-nums', textAlign: 'right', display: 'block' }}>
-        {formatCurrency(value as string | null, item.currency_code)}
+        {formatCurrency(value as string | null, item.currencyCode)}
       </span>
     );
   }
   if (column.formatter === 'date') {
-    return formatDate(value as string | null);
+    return formatDateOnly(value as string | null);
   }
   if (column.formatter === 'statusDot') {
-    return <StatusCell value={value as string | null} label={column.label} />;
+    return (
+      <StatusCell
+        value={value as string | null}
+        label={column.label}
+        category={column.statusCategory}
+      />
+    );
   }
   if (column.formatter === 'boolean') {
     return value === true ? 'Sí' : value === false ? 'No' : '—';
@@ -846,7 +814,7 @@ export function SalesOrdersWorkspace({
   const handleCopyFolios = useCallback(() => {
     const folios = data.data
       .filter((o) => selectedIds.has(o.id))
-      .map((o) => o.sales_order_number)
+      .map((o) => o.salesOrderNumber)
       .filter(Boolean) as string[];
     if (folios.length === 0) return;
     navigator.clipboard.writeText(folios.join('\n'));
@@ -1458,7 +1426,7 @@ export function SalesOrdersWorkspace({
                             type="checkbox"
                             checked={isSelected}
                             onChange={() => toggleRowSelection(item.id)}
-                            aria-label={`Seleccionar ${item.sales_order_number}`}
+                            aria-label={`Seleccionar ${item.salesOrderNumber ?? item.id}`}
                             style={{
                               width: '1rem',
                               height: '1rem',

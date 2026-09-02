@@ -1,7 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
-import { SALES_ORDER_COLUMN_MAP, SALES_ORDER_COLUMNS } from './sales-orders-columns';
+import { SALES_ORDER_COLUMNS, SALES_ORDER_COLUMN_MAP } from './sales-orders-columns';
 import {
   salesOrderFilterGroupSchema,
   salesOrderQueryStateSchema,
@@ -10,6 +10,9 @@ import {
   SalesOrderSort,
   DATE_SHORTCUTS,
 } from './sales-orders-filters';
+import { toSalesOrderListRow, toSalesOrderDetail } from './sales-orders-contract';
+import type { SalesOrderListRow, SalesOrderDetail } from './sales-orders-contract';
+import { formatCurrency, formatDateOnly, getSalesOrderStatusConfig } from './sales-orders-helpers';
 
 const MIN_PAGE = 1;
 const DEFAULT_PAGE_SIZE = 50;
@@ -35,41 +38,10 @@ export const legacySalesOrderListQuerySchema = z.object({
 
 export type LegacySalesOrderListQuery = z.output<typeof legacySalesOrderListQuerySchema>;
 
-function decimalToString(value: Prisma.Decimal | null | undefined): string | null {
-  if (value === null || value === undefined) {
-    return null;
-  }
-  return value.toString();
-}
+export type { SalesOrderListRow, SalesOrderDetail };
 
-export interface SalesOrderListItem {
-  id: string;
-  sales_order_number: string | null;
-  reference_number: string | null;
-  order_date: string | null;
-  customer_name: string | null;
-  customer_phone: string | null;
-  salesperson_name: string | null;
-  payment_method: string | null;
-  delivery_method: string | null;
-  location_name: string | null;
-  branch_name: string | null;
-  status: string | null;
-  sub_status: string | null;
-  paid_status: string | null;
-  invoiced_status: string | null;
-  shipped_status: string | null;
-  currency_code: string | null;
-  subtotal: string | null;
-  discount_total: string | null;
-  tax_total: string | null;
-  shipping_charge: string | null;
-  adjustment: string | null;
-  total: string | null;
-  balance: string | null;
-  sale_made_in_warehouse: boolean | null;
-  source_remote_modified_at: string | null;
-}
+/** @deprecated Use SalesOrderListRow. Kept until all consumers migrate. */
+export type SalesOrderListItem = SalesOrderListRow;
 
 const LIST_SELECT = {
   id: true,
@@ -99,64 +71,6 @@ const LIST_SELECT = {
   saleMadeInWarehouse: true,
   sourceRemoteModifiedAt: true,
 } satisfies Prisma.SalesOrderSelect;
-
-function formatListItem(order: {
-  id: string;
-  salesOrderNumber: string | null;
-  referenceNumber: string | null;
-  orderDate: Date | null;
-  customerName: string | null;
-  customerPhone: string | null;
-  salespersonName: string | null;
-  paymentMethod: string | null;
-  deliveryMethod: string | null;
-  locationName: string | null;
-  branchName: string | null;
-  status: string | null;
-  subStatus: string | null;
-  paidStatus: string | null;
-  invoicedStatus: string | null;
-  shippedStatus: string | null;
-  currencyCode: string | null;
-  subtotal: Prisma.Decimal | null;
-  discountTotal: Prisma.Decimal | null;
-  taxTotal: Prisma.Decimal | null;
-  shippingCharge: Prisma.Decimal | null;
-  adjustment: Prisma.Decimal | null;
-  total: Prisma.Decimal | null;
-  balance: Prisma.Decimal | null;
-  saleMadeInWarehouse: boolean | null;
-  sourceRemoteModifiedAt: Date;
-}): SalesOrderListItem {
-  return {
-    id: order.id,
-    sales_order_number: order.salesOrderNumber,
-    reference_number: order.referenceNumber,
-    order_date: order.orderDate?.toISOString().split('T')[0] ?? null,
-    customer_name: order.customerName,
-    customer_phone: order.customerPhone,
-    salesperson_name: order.salespersonName,
-    payment_method: order.paymentMethod,
-    delivery_method: order.deliveryMethod,
-    location_name: order.locationName,
-    branch_name: order.branchName,
-    status: order.status,
-    sub_status: order.subStatus,
-    paid_status: order.paidStatus,
-    invoiced_status: order.invoicedStatus,
-    shipped_status: order.shippedStatus,
-    currency_code: order.currencyCode,
-    subtotal: decimalToString(order.subtotal),
-    discount_total: decimalToString(order.discountTotal),
-    tax_total: decimalToString(order.taxTotal),
-    shipping_charge: decimalToString(order.shippingCharge),
-    adjustment: decimalToString(order.adjustment),
-    total: decimalToString(order.total),
-    balance: decimalToString(order.balance),
-    sale_made_in_warehouse: order.saleMadeInWarehouse,
-    source_remote_modified_at: order.sourceRemoteModifiedAt.toISOString(),
-  };
-}
 
 // ---------------------------------------------------------------------------
 // Filter → Prisma where
@@ -369,7 +283,7 @@ function buildWhere(query: SalesOrderQueryState): Prisma.SalesOrderWhereInput {
 // ---------------------------------------------------------------------------
 
 export interface SalesOrdersListResult {
-  data: SalesOrderListItem[];
+  data: SalesOrderListRow[];
   pagination: {
     page: number;
     page_size: number;
@@ -408,7 +322,7 @@ export async function getSalesOrdersWorkspace(rawQuery: unknown): Promise<SalesO
   const totalPages = Math.ceil(total / query.page_size);
 
   return {
-    data: orders.map(formatListItem),
+    data: orders.map(toSalesOrderListRow),
     pagination: {
       page: query.page,
       page_size: query.page_size,
@@ -423,84 +337,15 @@ export async function getSalesOrdersWorkspace(rawQuery: unknown): Promise<SalesO
   };
 }
 
-export async function getSalesOrderById(id: string) {
+export async function getSalesOrderById(id: string): Promise<SalesOrderDetail | null> {
   const order = await prisma.salesOrder.findUnique({
     where: { id },
     include: { items: { orderBy: { sortOrder: 'asc' } } },
   });
 
-  if (!order) {
-    return null;
-  }
+  if (!order) return null;
 
-  return {
-    id: order.id,
-    zoho_sales_order_id: order.zohoSalesOrderId,
-    sales_order_number: order.salesOrderNumber,
-    reference_number: order.referenceNumber,
-    order_date: order.orderDate?.toISOString().split('T')[0] ?? null,
-    created_time: order.createdTime?.toISOString() ?? null,
-    status: order.status,
-    sub_status: order.subStatus,
-    paid_status: order.paidStatus,
-    invoiced_status: order.invoicedStatus,
-    shipped_status: order.shippedStatus,
-    zoho_customer_id: order.zohoCustomerId,
-    customer_name: order.customerName,
-    customer_email: order.customerEmail,
-    customer_phone: order.customerPhone,
-    zoho_salesperson_id: order.zohoSalespersonId,
-    salesperson_name: order.salespersonName,
-    payment_method: order.paymentMethod,
-    delivery_method: order.deliveryMethod,
-    delivery_method_id: order.deliveryMethodId,
-    location_id: order.locationId,
-    location_name: order.locationName,
-    branch_id: order.branchId,
-    branch_name: order.branchName,
-    shipping_attention: order.shippingAttention,
-    shipping_address_line_1: order.shippingAddressLine1,
-    shipping_address_line_2: order.shippingAddressLine2,
-    shipping_city: order.shippingCity,
-    shipping_state: order.shippingState,
-    shipping_postal_code: order.shippingPostalCode,
-    shipping_country: order.shippingCountry,
-    shipping_phone: order.shippingPhone,
-    currency_code: order.currencyCode,
-    subtotal: decimalToString(order.subtotal),
-    discount_total: decimalToString(order.discountTotal),
-    tax_total: decimalToString(order.taxTotal),
-    shipping_charge: decimalToString(order.shippingCharge),
-    adjustment: decimalToString(order.adjustment),
-    total: decimalToString(order.total),
-    balance: decimalToString(order.balance),
-    notes: order.notes,
-    sale_made_in_warehouse: order.saleMadeInWarehouse,
-    source_remote_modified_at: order.sourceRemoteModifiedAt.toISOString(),
-    source_snapshot_id: order.sourceSnapshotId,
-    normalized_at: order.normalizedAt.toISOString(),
-    created_at: order.createdAt.toISOString(),
-    updated_at: order.updatedAt.toISOString(),
-    items: order.items.map((item) => ({
-      id: item.id,
-      zoho_line_item_id: item.zohoLineItemId,
-      zoho_item_id: item.zohoItemId,
-      sku: item.sku,
-      name: item.name,
-      description: item.description,
-      quantity: decimalToString(item.quantity),
-      unit: item.unit,
-      rate: decimalToString(item.rate),
-      discount_amount: decimalToString(item.discountAmount),
-      tax_name: item.taxName,
-      tax_percentage: decimalToString(item.taxPercentage),
-      tax_amount: decimalToString(item.taxAmount),
-      line_total: decimalToString(item.lineTotal),
-      location_id: item.locationId,
-      location_name: item.locationName,
-      sort_order: item.sortOrder,
-    })),
-  };
+  return toSalesOrderDetail(order, order.items);
 }
 
 // ---------------------------------------------------------------------------
@@ -531,26 +376,30 @@ function getExportColumns(includeAll: boolean): typeof SALES_ORDER_COLUMNS {
   return SALES_ORDER_COLUMNS.filter((c) => c.defaultVisible);
 }
 
-function formatExportValue(order: SalesOrderListItem, columnId: string): string {
+function formatExportValue(row: SalesOrderListRow, columnId: string): string {
   const column = SALES_ORDER_COLUMN_MAP[columnId];
   if (!column) return '';
-  const value = (order as unknown as Record<string, unknown>)[columnId];
+  const value = (row as unknown as Record<string, unknown>)[columnId];
   if (value === null || value === undefined) return '';
-  if (column.formatter === 'currency') return String(value);
-  if (column.formatter === 'date') return String(value);
-  if (column.formatter === 'boolean') return value === true ? 'Sí' : 'No';
+  if (column.formatter === 'currency')
+    return formatCurrency(value as string | number, row.currencyCode);
+  if (column.formatter === 'date') return formatDateOnly(value as string | Date);
+  if (column.formatter === 'boolean') return value === true ? 'Sí' : value === false ? 'No' : '';
+  if (column.formatter === 'statusDot') {
+    return getSalesOrderStatusConfig(value as string | null, column.statusCategory).label;
+  }
   return String(value);
 }
 
 export async function getSalesOrdersForExport(
   rawQuery: unknown,
   options: ExportOptions
-): Promise<{ rows: SalesOrderListItem[]; columns: typeof SALES_ORDER_COLUMNS }> {
+): Promise<{ rows: SalesOrderListRow[]; columns: typeof SALES_ORDER_COLUMNS }> {
   const query = salesOrderQueryStateSchema.parse(rawQuery);
   const where = buildWhere(query);
   const orderBy = buildSortOrderBy(query.sort);
 
-  let rows: SalesOrderListItem[];
+  let rows: SalesOrderListRow[];
 
   if (options.scope === 'selected' && options.selectedIds && options.selectedIds.length > 0) {
     const selectedWhere = { ...where, id: { in: options.selectedIds } };
@@ -560,7 +409,7 @@ export async function getSalesOrdersForExport(
       take: Math.min(options.selectedIds.length, MAX_EXPORT_ROWS),
       select: LIST_SELECT,
     });
-    rows = orders.map(formatListItem);
+    rows = orders.map(toSalesOrderListRow);
   } else if (options.scope === 'current_page') {
     const skip = ((options.page ?? query.page) - MIN_PAGE) * (options.pageSize ?? query.page_size);
     const orders = await prisma.salesOrder.findMany({
@@ -570,7 +419,7 @@ export async function getSalesOrdersForExport(
       skip,
       select: LIST_SELECT,
     });
-    rows = orders.map(formatListItem);
+    rows = orders.map(toSalesOrderListRow);
   } else {
     const orders = await prisma.salesOrder.findMany({
       where,
@@ -578,16 +427,14 @@ export async function getSalesOrdersForExport(
       take: MAX_EXPORT_ROWS,
       select: LIST_SELECT,
     });
-    rows = orders.map(formatListItem);
+    rows = orders.map(toSalesOrderListRow);
   }
 
   const columns = getExportColumns(options.includeAllColumns ?? false);
   return { rows, columns };
 }
 
-export { MAX_EXPORT_ROWS, EXPORT_COLUMN_IDS as _EXPORT_COLUMN_IDS };
-
-export function buildCsv(rows: SalesOrderListItem[], columns: typeof SALES_ORDER_COLUMNS): string {
+export function buildCsv(rows: SalesOrderListRow[], columns: typeof SALES_ORDER_COLUMNS): string {
   const header = columns.map((c) => `"${c.label.replace(/"/g, '""')}"`).join(',');
   const lines = rows.map((row) =>
     columns
@@ -601,14 +448,14 @@ export function buildCsv(rows: SalesOrderListItem[], columns: typeof SALES_ORDER
 }
 
 export function buildCsvFromRows(
-  rows: SalesOrderListItem[],
+  rows: SalesOrderListRow[],
   columns: typeof SALES_ORDER_COLUMNS
 ): string {
   return buildCsv(rows, columns);
 }
 
 // ---------------------------------------------------------------------------
-// Legacy compat (existing API routes)
+// Legacy compat (existing API route consumers)
 // ---------------------------------------------------------------------------
 
 export const salesOrderListQuerySchema = legacySalesOrderListQuerySchema;
@@ -677,7 +524,7 @@ export async function getSalesOrdersList(query: LegacySalesOrderListQuery) {
       paid_status: o.paidStatus,
       invoiced_status: o.invoicedStatus,
       shipped_status: o.shippedStatus,
-      total: decimalToString(o.total),
+      total: o.total?.toString() ?? null,
       currency_code: o.currencyCode,
     })),
     pagination: {

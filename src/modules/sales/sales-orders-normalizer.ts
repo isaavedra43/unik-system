@@ -297,7 +297,10 @@ function buildSalesOrderData(
     zohoSalespersonId: payload.salesperson_id ?? null,
     salespersonName: payload.salesperson_name ?? null,
     paymentMethod: payload.payment_terms_label ?? null,
-    deliveryMethod: payload.delivery_method ?? null,
+    // delivery_method is the canonical source; per field map shipping_address.address
+    // can contain the delivery instruction (e.g. "RECOGE EN BODEGA") when the
+    // explicit field is empty.
+    deliveryMethod: payload.delivery_method ?? payload.shipping_address?.address ?? null,
     deliveryMethodId: payload.delivery_method_id ?? null,
     locationId: payload.location_id ?? null,
     locationName: payload.location_name ?? null,

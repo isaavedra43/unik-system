@@ -1748,6 +1748,34 @@ textarea.input {
   gap: var(--unik-space-2);
 }
 
+/* Compact status strip used in drawer and detail */
+.so-status-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--unik-space-3);
+}
+
+.so-status-tile {
+  display: flex;
+  align-items: center;
+  gap: var(--unik-space-2);
+  padding: var(--unik-space-3) var(--unik-space-4);
+  border: 1px solid var(--unik-border);
+  border-radius: var(--unik-radius-md);
+  background: var(--unik-surface);
+}
+
+.so-status-tile-label {
+  font-size: var(--unik-text-xs);
+  color: var(--unik-text-muted);
+}
+
+.so-status-tile-value {
+  font-size: var(--unik-text-sm);
+  font-weight: var(--unik-weight-semibold);
+  color: var(--unik-text);
+}
+
 /* Watch indicator */
 .so-watch-indicator {
   display: inline-flex;

@@ -5,58 +5,17 @@ import { ArrowLeft, Bell, BellRing } from 'lucide-react';
 import { toast } from 'sonner';
 import { useState } from 'react';
 import { watchOrderAction, unwatchOrderAction } from '@/app/app/sales/orders/actions';
+import type { SalesOrderDetail } from '@/modules/sales/sales-orders-contract';
+import {
+  formatCurrency,
+  formatDateOnly,
+  formatDateTime,
+  formatQuantity,
+  getSalesOrderStatusConfig,
+} from '@/modules/sales/sales-orders-helpers';
 
 interface SalesOrderDetailProps {
-  order: {
-    id: string;
-    sales_order_number: string | null;
-    reference_number: string | null;
-    order_date: string | null;
-    status: string | null;
-    sub_status: string | null;
-    paid_status: string | null;
-    invoiced_status: string | null;
-    shipped_status: string | null;
-    customer_name: string | null;
-    customer_email: string | null;
-    customer_phone: string | null;
-    salesperson_name: string | null;
-    payment_method: string | null;
-    delivery_method: string | null;
-    location_name: string | null;
-    branch_name: string | null;
-    currency_code: string | null;
-    subtotal: string | null;
-    discount_total: string | null;
-    tax_total: string | null;
-    shipping_charge: string | null;
-    adjustment: string | null;
-    total: string | null;
-    balance: string | null;
-    notes: string | null;
-    shipping_attention: string | null;
-    shipping_address_line_1: string | null;
-    shipping_address_line_2: string | null;
-    shipping_city: string | null;
-    shipping_state: string | null;
-    shipping_postal_code: string | null;
-    shipping_country: string | null;
-    shipping_phone: string | null;
-    items: {
-      id: string;
-      sku: string | null;
-      name: string | null;
-      description: string | null;
-      quantity: string | null;
-      unit: string | null;
-      rate: string | null;
-      discount_amount: string | null;
-      tax_name: string | null;
-      tax_percentage: string | null;
-      tax_amount: string | null;
-      line_total: string | null;
-    }[];
-  };
+  order: SalesOrderDetail;
   changeEvents: {
     id: string;
     changes: unknown;
@@ -65,39 +24,6 @@ interface SalesOrderDetailProps {
   }[];
   isWatched: boolean;
   canWatch: boolean;
-}
-
-function formatCurrency(value: string | null, currency?: string | null): string {
-  if (value === null || value === undefined) return '—';
-  const num = Number(value);
-  if (Number.isNaN(num)) return value;
-  const formatted = num.toLocaleString('es-MX', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-  return currency ? `${formatted} ${currency}` : `$${formatted}`;
-}
-
-function formatDate(value: string | null): string {
-  if (!value) return '—';
-  try {
-    return new Date(value).toLocaleDateString('es-MX', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-    });
-  } catch {
-    return value;
-  }
-}
-
-function formatDateTime(value: string | null): string {
-  if (!value) return '—';
-  try {
-    return new Date(value).toLocaleString('es-MX', { dateStyle: 'short', timeStyle: 'short' });
-  } catch {
-    return value;
-  }
 }
 
 export function SalesOrderDetail({
@@ -112,30 +38,20 @@ export function SalesOrderDetail({
     if (!canWatch) return;
     const formData = new FormData();
     formData.set('entityId', order.id);
-    if (watched) {
-      const result = await unwatchOrderAction(
-        { error: null, success: false, isWatched: true },
-        formData
-      );
-      if (result.success) {
-        setWatched(false);
-        toast.success('Dejaste de seguir la orden');
-      } else {
-        toast.error(result.error ?? 'Error');
-      }
+    const result = watched
+      ? await unwatchOrderAction({ error: null, success: false, isWatched: true }, formData)
+      : await watchOrderAction({ error: null, success: false, isWatched: false }, formData);
+    if (result.success) {
+      setWatched(!watched);
+      toast.success(watched ? 'Dejaste de seguir la orden' : 'Orden seguida');
     } else {
-      const result = await watchOrderAction(
-        { error: null, success: false, isWatched: false },
-        formData
-      );
-      if (result.success) {
-        setWatched(true);
-        toast.success('Orden seguida');
-      } else {
-        toast.error(result.error ?? 'Error');
-      }
+      toast.error(result.error ?? 'Error');
     }
   };
+
+  const shippingAddress = [order.shippingAddressLine1, order.shippingAddressLine2]
+    .filter(Boolean)
+    .join(', ');
 
   return (
     <div className="app-content">
@@ -162,8 +78,8 @@ export function SalesOrderDetail({
           >
             <ArrowLeft size={14} /> Órdenes de venta
           </Link>
-          <h1 className="page-title">{order.sales_order_number ?? 'Orden de venta'}</h1>
-          <p className="page-description">{order.customer_name ?? 'Cliente no especificado'}</p>
+          <h1 className="page-title">{order.salesOrderNumber ?? 'Orden de venta'}</h1>
+          <p className="page-description">{order.customerName ?? 'Cliente no especificado'}</p>
         </div>
         {canWatch ? (
           <button className="btn btn-secondary btn-sm" onClick={handleWatch} aria-pressed={watched}>
@@ -173,201 +89,127 @@ export function SalesOrderDetail({
         ) : null}
       </div>
 
-      {/* Status panel */}
-      <div className="card">
-        <div className="card-header">
-          <h2 className="card-title">Estados</h2>
-        </div>
-        <div className="so-status-panel">
-          <div className="so-status-card">
-            <div className="so-status-card-label">Estado orden</div>
-            <div className="so-status-card-value">{order.status ?? '—'}</div>
-          </div>
-          <div className="so-status-card">
-            <div className="so-status-card-label">Estado pago</div>
-            <div className="so-status-card-value">{order.paid_status ?? '—'}</div>
-          </div>
-          <div className="so-status-card">
-            <div className="so-status-card-label">Facturada</div>
-            <div className="so-status-card-value">{order.invoiced_status ?? '—'}</div>
-          </div>
-          <div className="so-status-card">
-            <div className="so-status-card-label">Estado envío</div>
-            <div className="so-status-card-value">{order.shipped_status ?? '—'}</div>
-          </div>
+      {/* Top summary */}
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+          gap: '0.75rem',
+          marginBottom: '1rem',
+        }}
+      >
+        <SummaryCard label="Total" value={formatCurrency(order.total, order.currencyCode)} large />
+        <SummaryCard label="Saldo" value={formatCurrency(order.balance, order.currencyCode)} />
+        <SummaryCard label="Fecha" value={formatDateOnly(order.orderDate)} />
+        <SummaryCard label="Método de entrega" value={order.deliveryMethod} />
+      </div>
+
+      {/* Status strip */}
+      <div className="card" style={{ padding: '0.75rem 1rem' }}>
+        <div className="so-status-strip">
+          <StatusTile
+            label="Orden"
+            value={getSalesOrderStatusConfig(order.status, 'order').label}
+            tone={getSalesOrderStatusConfig(order.status, 'order').tone}
+          />
+          <StatusTile
+            label="Pago"
+            value={getSalesOrderStatusConfig(order.paidStatus, 'payment').label}
+            tone={getSalesOrderStatusConfig(order.paidStatus, 'payment').tone}
+          />
+          <StatusTile
+            label="Facturación"
+            value={getSalesOrderStatusConfig(order.invoicedStatus, 'invoice').label}
+            tone={getSalesOrderStatusConfig(order.invoicedStatus, 'invoice').tone}
+          />
+          <StatusTile
+            label="Envío"
+            value={getSalesOrderStatusConfig(order.shippedStatus, 'shipping').label}
+            tone={getSalesOrderStatusConfig(order.shippedStatus, 'shipping').tone}
+          />
         </div>
       </div>
 
-      {/* General */}
-      <div className="card">
-        <div className="card-header">
+      {/* Two-column info */}
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
+          gap: '1rem',
+          alignItems: 'start',
+        }}
+      >
+        <div className="card">
           <h2 className="card-title">General</h2>
-        </div>
-        <div className="so-detail-grid">
-          <div className="so-detail-field">
-            <span className="so-detail-field-label">Fecha</span>
-            <span className="so-detail-field-value">{formatDate(order.order_date)}</span>
-          </div>
-          <div className="so-detail-field">
-            <span className="so-detail-field-label">Referencia</span>
-            <span className="so-detail-field-value">{order.reference_number ?? '—'}</span>
-          </div>
-          <div className="so-detail-field">
-            <span className="so-detail-field-label">Vendedor</span>
-            <span className="so-detail-field-value">{order.salesperson_name ?? '—'}</span>
-          </div>
-          <div className="so-detail-field">
-            <span className="so-detail-field-label">Forma de pago</span>
-            <span className="so-detail-field-value">{order.payment_method ?? '—'}</span>
-          </div>
-          <div className="so-detail-field">
-            <span className="so-detail-field-label">Método de entrega</span>
-            <span className="so-detail-field-value">{order.delivery_method ?? '—'}</span>
-          </div>
-          <div className="so-detail-field">
-            <span className="so-detail-field-label">Ubicación</span>
-            <span className="so-detail-field-value">{order.location_name ?? '—'}</span>
-          </div>
-          <div className="so-detail-field">
-            <span className="so-detail-field-label">Sucursal</span>
-            <span className="so-detail-field-value">{order.branch_name ?? '—'}</span>
-          </div>
-          <div className="so-detail-field">
-            <span className="so-detail-field-label">Moneda</span>
-            <span className="so-detail-field-value">{order.currency_code ?? '—'}</span>
+          <div className="so-detail-grid">
+            <Field label="Fecha" value={formatDateOnly(order.orderDate)} />
+            <Field label="Referencia" value={order.referenceNumber} />
+            <Field label="Vendedor" value={order.salespersonName} />
+            <Field label="Forma de pago" value={order.paymentMethod} />
+            <Field label="Ubicación" value={order.locationName} />
+            <Field label="Sucursal" value={order.branchName} />
+            <Field label="Moneda" value={order.currencyCode} />
           </div>
         </div>
-      </div>
 
-      {/* Customer */}
-      <div className="card">
-        <div className="card-header">
+        <div className="card">
           <h2 className="card-title">Cliente</h2>
-        </div>
-        <div className="so-detail-grid">
-          <div className="so-detail-field">
-            <span className="so-detail-field-label">Nombre</span>
-            <span className="so-detail-field-value">{order.customer_name ?? '—'}</span>
-          </div>
-          <div className="so-detail-field">
-            <span className="so-detail-field-label">Correo</span>
-            <span className="so-detail-field-value">{order.customer_email ?? '—'}</span>
-          </div>
-          <div className="so-detail-field">
-            <span className="so-detail-field-label">Teléfono</span>
-            <span className="so-detail-field-value">{order.customer_phone ?? '—'}</span>
+          <div className="so-detail-grid">
+            <Field label="Nombre" value={order.customerName} />
+            <Field label="Correo" value={order.customerEmail} />
+            <Field label="Teléfono" value={order.customerPhone} />
           </div>
         </div>
-      </div>
 
-      {/* Shipping */}
-      <div className="card">
-        <div className="card-header">
+        <div className="card">
           <h2 className="card-title">Envío</h2>
-        </div>
-        <div className="so-detail-grid">
-          <div className="so-detail-field">
-            <span className="so-detail-field-label">Atención</span>
-            <span className="so-detail-field-value">{order.shipping_attention ?? '—'}</span>
-          </div>
-          <div className="so-detail-field">
-            <span className="so-detail-field-label">Dirección</span>
-            <span className="so-detail-field-value">
-              {[order.shipping_address_line_1, order.shipping_address_line_2]
-                .filter(Boolean)
-                .join(', ') || '—'}
-            </span>
-          </div>
-          <div className="so-detail-field">
-            <span className="so-detail-field-label">Ciudad</span>
-            <span className="so-detail-field-value">{order.shipping_city ?? '—'}</span>
-          </div>
-          <div className="so-detail-field">
-            <span className="so-detail-field-label">Estado</span>
-            <span className="so-detail-field-value">{order.shipping_state ?? '—'}</span>
-          </div>
-          <div className="so-detail-field">
-            <span className="so-detail-field-label">Código postal</span>
-            <span className="so-detail-field-value">{order.shipping_postal_code ?? '—'}</span>
-          </div>
-          <div className="so-detail-field">
-            <span className="so-detail-field-label">País</span>
-            <span className="so-detail-field-value">{order.shipping_country ?? '—'}</span>
-          </div>
-          <div className="so-detail-field">
-            <span className="so-detail-field-label">Teléfono</span>
-            <span className="so-detail-field-value">{order.shipping_phone ?? '—'}</span>
+          <div className="so-detail-grid">
+            <Field label="Atención" value={order.shippingAttention} />
+            <Field label="Dirección" value={shippingAddress || null} />
+            <Field label="Ciudad" value={order.shippingCity} />
+            <Field label="Estado" value={order.shippingState} />
+            <Field label="Código postal" value={order.shippingPostalCode} />
+            <Field label="País" value={order.shippingCountry} />
+            <Field label="Teléfono" value={order.shippingPhone} />
           </div>
         </div>
-      </div>
 
-      {/* Totals */}
-      <div className="card">
-        <div className="card-header">
+        <div className="card">
           <h2 className="card-title">Totales</h2>
-        </div>
-        <div className="so-detail-grid">
-          <div className="so-detail-field">
-            <span className="so-detail-field-label">Subtotal</span>
-            <span className="so-detail-field-value">
-              {formatCurrency(order.subtotal, order.currency_code)}
-            </span>
-          </div>
-          <div className="so-detail-field">
-            <span className="so-detail-field-label">Descuento</span>
-            <span className="so-detail-field-value">
-              {formatCurrency(order.discount_total, order.currency_code)}
-            </span>
-          </div>
-          <div className="so-detail-field">
-            <span className="so-detail-field-label">Impuestos</span>
-            <span className="so-detail-field-value">
-              {formatCurrency(order.tax_total, order.currency_code)}
-            </span>
-          </div>
-          <div className="so-detail-field">
-            <span className="so-detail-field-label">Envío</span>
-            <span className="so-detail-field-value">
-              {formatCurrency(order.shipping_charge, order.currency_code)}
-            </span>
-          </div>
-          <div className="so-detail-field">
-            <span className="so-detail-field-label">Ajuste</span>
-            <span className="so-detail-field-value">
-              {formatCurrency(order.adjustment, order.currency_code)}
-            </span>
-          </div>
-          <div className="so-detail-field">
-            <span className="so-detail-field-label">Total</span>
-            <span className="so-detail-field-value" style={{ fontWeight: 700 }}>
-              {formatCurrency(order.total, order.currency_code)}
-            </span>
-          </div>
-          <div className="so-detail-field">
-            <span className="so-detail-field-label">Saldo</span>
-            <span className="so-detail-field-value" style={{ fontWeight: 700 }}>
-              {formatCurrency(order.balance, order.currency_code)}
-            </span>
+          <div className="so-detail-grid">
+            <Field label="Subtotal" value={formatCurrency(order.subtotal, order.currencyCode)} />
+            <Field
+              label="Descuento"
+              value={formatCurrency(order.discountTotal, order.currencyCode)}
+            />
+            <Field label="Impuestos" value={formatCurrency(order.taxTotal, order.currencyCode)} />
+            <Field label="Envío" value={formatCurrency(order.shippingCharge, order.currencyCode)} />
+            <Field label="Ajuste" value={formatCurrency(order.adjustment, order.currencyCode)} />
+            <Field
+              label="Total"
+              value={formatCurrency(order.total, order.currencyCode)}
+              highlighted
+            />
+            <Field
+              label="Saldo"
+              value={formatCurrency(order.balance, order.currencyCode)}
+              highlighted
+            />
           </div>
         </div>
       </div>
 
       {/* Items */}
       <div className="card">
-        <div className="card-header">
-          <h2 className="card-title">Artículos ({order.items.length})</h2>
-        </div>
+        <h2 className="card-title">Artículos ({order.items.length})</h2>
         <div className="table-wrap">
           <table className="table">
             <thead>
               <tr>
                 <th>SKU</th>
-                <th>Nombre</th>
-                <th>Descripción</th>
+                <th>Producto</th>
                 <th style={{ textAlign: 'right' }}>Cantidad</th>
                 <th style={{ textAlign: 'right' }}>Precio</th>
-                <th style={{ textAlign: 'right' }}>Descuento</th>
-                <th>Impuesto</th>
                 <th style={{ textAlign: 'right' }}>Total</th>
               </tr>
             </thead>
@@ -375,20 +217,20 @@ export function SalesOrderDetail({
               {order.items.map((item) => (
                 <tr key={item.id}>
                   <td>{item.sku ?? '—'}</td>
-                  <td>{item.name ?? '—'}</td>
-                  <td style={{ maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {item.description ?? '—'}
+                  <td>
+                    <div>{item.name ?? '—'}</div>
+                    {item.description ? (
+                      <div style={{ fontSize: '0.75rem', color: 'var(--unik-text-muted)' }}>
+                        {item.description}
+                      </div>
+                    ) : null}
                   </td>
-                  <td style={{ textAlign: 'right' }}>{item.quantity ?? '—'}</td>
+                  <td style={{ textAlign: 'right' }}>{formatQuantity(item.quantity, item.unit)}</td>
                   <td style={{ textAlign: 'right' }}>
-                    {formatCurrency(item.rate, order.currency_code)}
+                    {formatCurrency(item.rate, order.currencyCode)}
                   </td>
                   <td style={{ textAlign: 'right' }}>
-                    {formatCurrency(item.discount_amount, order.currency_code)}
-                  </td>
-                  <td>{item.tax_name ?? '—'}</td>
-                  <td style={{ textAlign: 'right' }}>
-                    {formatCurrency(item.line_total, order.currency_code)}
+                    {formatCurrency(item.lineTotal, order.currencyCode)}
                   </td>
                 </tr>
               ))}
@@ -400,9 +242,7 @@ export function SalesOrderDetail({
       {/* Notes */}
       {order.notes ? (
         <div className="card">
-          <div className="card-header">
-            <h2 className="card-title">Notas</h2>
-          </div>
+          <h2 className="card-title">Notas</h2>
           <p
             style={{
               fontSize: '0.875rem',
@@ -415,12 +255,10 @@ export function SalesOrderDetail({
         </div>
       ) : null}
 
-      {/* Activity timeline */}
+      {/* Activity */}
       {changeEvents.length > 0 ? (
         <div className="card">
-          <div className="card-header">
-            <h2 className="card-title">Historial de cambios ({changeEvents.length})</h2>
-          </div>
+          <h2 className="card-title">Historial de cambios ({changeEvents.length})</h2>
           {changeEvents.map((event) => {
             const changes = event.changes as {
               fields?: Record<string, { before: unknown; after: unknown }>;
@@ -452,6 +290,80 @@ export function SalesOrderDetail({
           })}
         </div>
       ) : null}
+    </div>
+  );
+}
+
+function Field({
+  label,
+  value,
+  highlighted,
+}: {
+  label: string;
+  value: string | null;
+  highlighted?: boolean;
+}) {
+  return (
+    <div className="so-detail-field">
+      <span className="so-detail-field-label">{label}</span>
+      <span className="so-detail-field-value" style={highlighted ? { fontWeight: 700 } : undefined}>
+        {value ?? '—'}
+      </span>
+    </div>
+  );
+}
+
+function StatusTile({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: string;
+  tone: 'success' | 'info' | 'warning' | 'danger' | 'muted';
+}) {
+  return (
+    <div className="so-status-tile" title={`${label}: ${value}`}>
+      <span className={`so-status-dot so-status-dot-${tone}`} />
+      <div>
+        <div className="so-status-tile-label">{label}</div>
+        <div className="so-status-tile-value">{value}</div>
+      </div>
+    </div>
+  );
+}
+
+function SummaryCard({
+  label,
+  value,
+  large,
+}: {
+  label: string;
+  value: string | null;
+  large?: boolean;
+}) {
+  return (
+    <div
+      style={{
+        padding: '0.75rem 1rem',
+        background: 'var(--unik-surface)',
+        borderRadius: 'var(--unik-radius-sm)',
+        border: '1px solid var(--unik-border-subtle)',
+      }}
+    >
+      <div
+        style={{
+          fontSize: '0.75rem',
+          color: 'var(--unik-text-muted)',
+          textTransform: 'uppercase',
+          letterSpacing: '0.02em',
+        }}
+      >
+        {label}
+      </div>
+      <div style={{ fontSize: large ? '1.25rem' : '1rem', fontWeight: large ? 700 : 600 }}>
+        {value ?? '—'}
+      </div>
     </div>
   );
 }

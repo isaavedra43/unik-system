@@ -38,6 +38,7 @@ import {
 } from '@/modules/sales/sales-orders-filters';
 import { SALES_ORDERS_TABLE_KEY } from '@/modules/sales/sales-orders-columns';
 import { recordAuditEvent } from '@/modules/auth/audit-service';
+import { formatDateOnly, getSalesOrderStatusConfig } from '@/modules/sales/sales-orders-helpers';
 
 const SALES_ORDERS_PATH = '/app/sales/orders';
 
@@ -512,12 +513,21 @@ export async function exportSalesOrdersAction(
       const rowData: Record<string, unknown> = {};
       for (const col of columns) {
         const val = (row as unknown as Record<string, unknown>)[col.id];
-        if (col.type === 'currency' || col.type === 'number') {
-          rowData[col.id] = val !== null && val !== undefined ? Number(val) : null;
+        if (val === null || val === undefined) {
+          rowData[col.id] = '';
+        } else if (col.type === 'currency' || col.type === 'number') {
+          rowData[col.id] = Number(val);
         } else if (col.type === 'boolean') {
           rowData[col.id] = val === true ? 'Sí' : val === false ? 'No' : '';
+        } else if (col.formatter === 'date') {
+          rowData[col.id] = formatDateOnly(val as string | Date);
+        } else if (col.formatter === 'statusDot') {
+          rowData[col.id] = getSalesOrderStatusConfig(
+            val as string | null,
+            col.statusCategory
+          ).label;
         } else {
-          rowData[col.id] = val ?? '';
+          rowData[col.id] = String(val);
         }
       }
       sheet.addRow(rowData);

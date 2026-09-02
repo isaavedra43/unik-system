@@ -2,6 +2,97 @@
 
 Este documento es OBLIGATORIO para todo agente Devin que modifique UI en UNIK.
 
+## REGLA OPERATIVA PERMANENTE — LIMITACIONES DE DEVIN
+
+### Devin NO tiene acceso a
+
+- Railway producción
+- PostgreSQL producción
+- Zoho real
+- Postman del usuario
+- Navegador autenticado del usuario
+- Credenciales reales
+- Datos reales fuera del repo
+- Infraestructura externa del usuario
+
+### Devin NO debe
+
+- Aplicar migrations (`prisma migrate deploy`, `prisma db push`)
+- Conectarse a DB producción
+- Conectarse a Zoho
+- Llamar APIs reales de UNIK
+- Hacer tests end-to-end reales
+- Crear usuarios reales
+- Modificar una orden real
+- Esperar scheduler real
+- Verificar notificaciones reales
+- Desplegar
+- Hacer commit (sin instrucción explícita del usuario)
+- Hacer push (sin instrucción explícita del usuario)
+- Afirmar que algo funciona en producción
+
+### Devin SÍ debe hacer
+
+- Modificar código
+- Crear archivos Prisma migration SQL
+- Ejecutar `prisma generate`, `prisma format`, `prisma validate`
+- Ejecutar `typecheck`, `lint`, `format check`, `build`
+- Ejecutar Storybook build
+- Ejecutar tests locales que NO dependan de servicios reales
+- Usar mocks/fixtures
+- Revisar SQL generado
+- Revisar seguridad y arquitectura
+- Documentar pruebas manuales posteriores
+
+### Migraciones
+
+1. Modificar `prisma/schema.prisma`
+2. Generar la migration versionada usando tooling oficial/local
+3. Revisar `migration.sql`
+4. Confirmar que es aditiva
+5. Confirmar: NO `DROP TABLE`, NO `DROP COLUMN`, NO `prisma db push`
+6. **NO aplicar la migration**
+
+El USUARIO aplicará después: `npx prisma migrate deploy` mediante el Pre-deploy ya configurado en Railway.
+
+### Testing — Reporte final
+
+Dividir claramente el reporte final en:
+
+**A. VALIDACIONES QUE DEVIN SÍ EJECUTÓ**
+
+`prisma generate`, `prisma validate`, `typecheck`, `lint`, `build`, `storybook`, unit/component tests con mocks, Playwright solo si corre completamente local con fixtures.
+
+**B. PRUEBAS REALES PENDIENTES DEL USUARIO**
+
+Aplicar migration en Railway, verificar health, abrir módulo en producción, probar filtros con datos reales, probar export CSV/XLSX, probar persistencia entre sesiones, seguir una orden real, modificar esa orden en Zoho, esperar/ejecutar sync normal, verificar EntityChangeEvent, verificar Notification, verificar unread badge, verificar historial.
+
+**NO marcar estas pruebas como PASSED.** Deben aparecer como: `PENDIENTE DE VALIDACIÓN MANUAL`.
+
+### Datos reales
+
+Si el repo contiene información/documentación de casos reales, puede usarlos únicamente como **EXPECTED ACCEPTANCE VALUES**, pero NO afirmar que los consultó en producción.
+
+### Playwright
+
+Solo ejecutar Playwright si: la aplicación arranca localmente, no requiere DB producción, usa fixtures/mocks, no requiere credenciales reales. Si no es posible, reportar: _"Playwright real del módulo queda pendiente de validación manual/integración."_
+
+### Storybook
+
+Storybook sí puede utilizar mock data y fixtures. Nunca production data.
+
+### Notificaciones
+
+Devin puede construir EntityWatch, EntityChangeEvent, Notification, services, UI, polling interno de notifications, tests locales con mocks. PERO NO puede comprobar el flujo real: Zoho change → Scheduler → Snapshot → Normalizer → ChangeEvent → Notification. Ese flujo se prueba MANUALMENTE después del deployment.
+
+### Final report
+
+Nunca decir _"funciona en producción"_ si no tuvo acceso real. Usar: _"implementado"_, _"validación estática completada"_, _"build correcto"_, _"listo para validación manual"_. Separar siempre:
+
+- **IMPLEMENTADO**
+- **VALIDADO LOCALMENTE**
+- **PENDIENTE PRODUCCIÓN**
+
 ## Antes de tocar cualquier UI
 
 1. Leer:
