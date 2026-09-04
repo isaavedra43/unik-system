@@ -16,7 +16,7 @@ export async function GET() {
 
 export async function POST() {
   try {
-    const result = await syncSalesOrdersAction({ error: null, success: true });
+    const result = await syncSalesOrdersAction();
     
     revalidatePath('/app/sales/orders');
     

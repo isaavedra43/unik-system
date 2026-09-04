@@ -10,7 +10,7 @@ import {
   TablePreferenceConfig,
 } from '@/modules/sales/sales-orders-filters';
 import { SalesOrdersWorkspace } from '@/components/sales/SalesOrdersWorkspace';
-import type { SyncStatusResult } from '@/app/app/sales/orders/actions-sync';
+import type { SyncStatusResult } from '@/app/app/sales/orders/actions-types';
 
 async function getSyncStatus(): Promise<SyncStatusResult> {
   try {

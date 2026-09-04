@@ -66,7 +66,7 @@ import {
 } from '@/app/app/sales/orders/actions';
 import { SalesOrderPreviewDrawer } from './SalesOrderPreviewDrawer';
 import { TableViewRow } from '@/modules/sales/table-views-service';
-import type { SyncStatusResult } from '@/app/app/sales/orders/actions-sync';
+import type { SyncStatusResult } from '@/app/app/sales/orders/actions-types';
 
 interface SyncIndicatorProps {
   lastSyncAt: string | null;

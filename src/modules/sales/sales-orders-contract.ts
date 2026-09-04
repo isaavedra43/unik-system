@@ -100,9 +100,9 @@ export interface SalesOrderDetail {
   balance: string | null;
   notes: string | null;
   saleMadeInWarehouse: boolean | null;
-  sourceRemoteModifiedAt: string;
-  sourceSnapshotId: string;
-  normalizedAt: string;
+  sourceRemoteModifiedAt: string | null;
+  sourceSnapshotId: string | null;
+  normalizedAt: string | null;
   createdAt: string;
   updatedAt: string;
   items: SalesOrderDetailItem[];
@@ -231,8 +231,8 @@ export function toSalesOrderDetail(
     notes: string | null;
     saleMadeInWarehouse: boolean | null;
     sourceRemoteModifiedAt: Date;
-    sourceSnapshotId: string;
-    normalizedAt: Date;
+    sourceSnapshotId: string | null;
+    normalizedAt: Date | null;
     createdAt: Date;
     updatedAt: Date;
   },
@@ -299,9 +299,9 @@ export function toSalesOrderDetail(
     balance: decimalToString(order.balance),
     notes: order.notes,
     saleMadeInWarehouse: order.saleMadeInWarehouse,
-    sourceRemoteModifiedAt: order.sourceRemoteModifiedAt.toISOString(),
+    sourceRemoteModifiedAt: order.sourceRemoteModifiedAt?.toISOString(),
     sourceSnapshotId: order.sourceSnapshotId,
-    normalizedAt: order.normalizedAt.toISOString(),
+    normalizedAt: order.normalizedAt?.toISOString() ?? null,
     createdAt: order.createdAt.toISOString(),
     updatedAt: order.updatedAt.toISOString(),
     items: items.map((item) => ({

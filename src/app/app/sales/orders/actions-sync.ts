@@ -1,12 +1,8 @@
 'use server';
 
+import { SyncFormState, SyncStatusResult, SyncStatus } from './actions-types';
 import { syncSalesOrders } from '@/modules/integrations/zoho/sales-orders-sync';
 import { prisma } from '@/lib/prisma';
-
-export interface SyncFormState {
-  error: string | null;
-  success: boolean;
-}
 
 export async function syncSalesOrdersAction(): Promise<SyncFormState> {
   try {
@@ -28,20 +24,6 @@ export async function syncSalesOrdersAction(): Promise<SyncFormState> {
     }
     return { error: 'No pudimos iniciar la sincronización', success: false };
   }
-}
-
-export interface SyncStatusResult {
-  id: string | null;
-  status: SyncStatus | null;
-  completedAt: string | null;
-  detailsFetched: number;
-  detailsFailed: number;
-}
-
-export enum SyncStatus {
-  RUNNING = 'RUNNING',
-  COMPLETED = 'COMPLETED',
-  FAILED = 'FAILED',
 }
 
 export async function getSyncStatusAction(): Promise<SyncStatusResult> {
