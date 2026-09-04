@@ -10,6 +10,17 @@ import {
   TablePreferenceConfig,
 } from '@/modules/sales/sales-orders-filters';
 import { SalesOrdersWorkspace } from '@/components/sales/SalesOrdersWorkspace';
+import type { SyncStatusResult } from '@/app/app/sales/orders/actions-sync';
+
+async function getSyncStatus(): Promise<SyncStatusResult> {
+  try {
+    const res = await fetch('/app/sales/orders/api/sync');
+    if (res.ok) {
+      return res.json();
+    }
+  } catch {}
+  return { id: null, status: null, completedAt: null, detailsFetched: 0, detailsFailed: 0 };
+}
 
 export const runtime = 'nodejs';
 
@@ -59,7 +70,7 @@ export default async function SalesOrdersPage({
 
   const query = salesOrderQueryStateSchema.parse(queryInput);
 
-  // Load data server-side
+  // Load data server-side and sync status
   const [result, preference, views, defaultView, unreadCount] = await Promise.all([
     getSalesOrdersWorkspace(query),
     getUserTablePreference(user.id, SALES_ORDERS_TABLE_KEY),
@@ -67,6 +78,8 @@ export default async function SalesOrdersPage({
     getDefaultTableView(user.id, SALES_ORDERS_TABLE_KEY),
     getUnreadNotificationCount(user.id),
   ]);
+
+  const syncStatus = await getSyncStatus();
 
   // Get watched entity IDs for the current page
   const watchedIds = await getWatchedEntityIds(
@@ -102,6 +115,8 @@ export default async function SalesOrdersPage({
       canExport={canExport}
       canWatch={canWatch}
       canShareViews={canShareViews}
+      canSync={true}
+      initialSyncStatus={syncStatus}
     />
   );
 }

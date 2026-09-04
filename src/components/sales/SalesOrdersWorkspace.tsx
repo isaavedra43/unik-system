@@ -15,6 +15,7 @@ import { CSS } from '@dnd-kit/utilities';
 import {
   ArrowDown,
   ArrowUp,
+  CheckCircle,
   Bell,
   BellRing,
   Check,
@@ -29,6 +30,7 @@ import {
   Minimize2,
   Pin,
   Plus,
+  RefreshCw,
   Search,
   SlidersHorizontal,
   Trash2,
@@ -64,6 +66,70 @@ import {
 } from '@/app/app/sales/orders/actions';
 import { SalesOrderPreviewDrawer } from './SalesOrderPreviewDrawer';
 import { TableViewRow } from '@/modules/sales/table-views-service';
+import type { SyncStatusResult } from '@/app/app/sales/orders/actions-sync';
+
+interface SyncIndicatorProps {
+  lastSyncAt: string | null;
+  isLoading: boolean;
+  onManualSync: () => void;
+  initialSyncedAt?: string | null;
+}
+
+function SyncIndicator({ lastSyncAt, isLoading, onManualSync, initialSyncedAt }: SyncIndicatorProps) {
+  const [syncedAt, setSyncedAt] = useState<string | null>(initialSyncedAt ?? null);
+
+  useEffect(() => {
+    if (lastSyncAt) {
+      setSyncedAt(lastSyncAt);
+    }
+  }, [lastSyncAt]);
+
+  // Clear syncedAt when entering loading state
+  useEffect(() => {
+    if (isLoading) {
+      setSyncedAt(null);
+    }
+  }, [isLoading]);
+
+  return (
+    <div className="so-sync-indicator">
+      <div className="so-sync-info">
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          {isLoading ? (
+            <>
+              <RefreshCw size={14} className="animate-spin" />
+              <span>Actualizando...</span>
+            </>
+          ) : syncedAt ? (
+            <span style={{ color: 'var(--unik-text-muted)' }}>
+              Última sincronización: {new Date(syncedAt).toLocaleString('es-MX')}
+            </span>
+          ) : (
+            <span style={{ color: 'var(--unik-text-muted)' }}>Sin datos de Zoho</span>
+          )}
+        </div>
+      </div>
+      <button
+        className="btn btn-primary btn-sm"
+        onClick={onManualSync}
+        disabled={isLoading}
+        aria-label="Sincronizar con Zoho ahora"
+      >
+        {isLoading ? (
+          <>
+            <RefreshCw size={14} className="animate-spin" />
+            Actualizando...
+          </>
+        ) : (
+          <>
+            <CheckCircle size={14} />
+            Actualizar ahora
+          </>
+        )}
+      </button>
+    </div>
+  );
+}
 
 interface WorkspaceProps {
   user: CurrentUser;
@@ -77,6 +143,8 @@ interface WorkspaceProps {
   canExport: boolean;
   canWatch: boolean;
   canShareViews: boolean;
+  canSync?: boolean;
+  initialSyncStatus?: SyncStatusResult | null;
 }
 
 type Density = 'compact' | 'normal' | 'comfortable';
@@ -374,6 +442,8 @@ export function SalesOrdersWorkspace({
   canExport,
   canWatch,
   canShareViews,
+  canSync = false,
+  initialSyncStatus = null,
 }: WorkspaceProps) {
   const router = useRouter();
 
@@ -387,6 +457,12 @@ export function SalesOrdersWorkspace({
   const [fullscreen, setFullscreen] = useState(false);
   const [watchedIds, setWatchedIds] = useState<Set<string>>(initialWatchedIds);
   const [, setUnreadCount] = useState(unreadNotifications);
+
+  // Sync state - initialize with initialSyncStatus if provided
+  const [syncStatus, setSyncStatus] = useState<SyncStatusResult | null>(
+    canSync ? (initialSyncStatus as SyncStatusResult | null) : null
+  );
+  const [isSyncing, setIsSyncing] = useState(false);
 
   // UI panel states
   const [filterPanelOpen, setFilterPanelOpen] = useState(false);
@@ -429,6 +505,18 @@ export function SalesOrdersWorkspace({
       });
       if (!res.ok) throw new Error('No pudimos cargar las órdenes.');
       const json = await res.json();
+      
+      // Also fetch sync status
+      try {
+        const syncRes = await fetch('/app/sales/orders/api/sync');
+        if (syncRes.ok) {
+          const syncData = await syncRes.json();
+          setSyncStatus(syncData);
+        }
+      } catch {
+        // Sync status load is non-blocking
+      }
+      
       setData(json);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No pudimos cargar las órdenes.');
@@ -895,6 +983,43 @@ export function SalesOrdersWorkspace({
     return () => document.removeEventListener('keydown', onKey);
   }, [fullscreen]);
 
+  // Manual sync handler
+  const handleManualSync = useCallback(async () => {
+    setIsSyncing(true);
+    try {
+      const res = await fetch('/app/sales/orders/api/sync', { method: 'POST' });
+      if (!res.ok) {
+        const errorData = await res.json();
+        toast.error(errorData.error ?? 'Error al sincronizar');
+      } else {
+        toast.success('Sincronización iniciada');
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Error al sincronizar');
+    } finally {
+      setIsSyncing(false);
+    }
+  }, []);
+
+  // Sync polling - check status periodically
+  useEffect(() => {
+    if (!canExport) return;
+    
+    const interval = setInterval(async () => {
+      try {
+        const syncRes = await fetch('/app/sales/orders/api/sync');
+        if (syncRes.ok) {
+          const syncData = await syncRes.json();
+          setSyncStatus(syncData);
+        }
+      } catch {
+        // silent - sync polling failures don't break the UI
+      }
+    }, 30_000);
+
+    return () => clearInterval(interval);
+  }, [canExport]);
+
   // Notification polling
   useEffect(() => {
     const interval = setInterval(async () => {
@@ -993,6 +1118,16 @@ export function SalesOrdersWorkspace({
               </div>
             ) : null}
           </div>
+
+          {/* Sync indicator */}
+          {canSync && (
+            <SyncIndicator
+              lastSyncAt={syncStatus?.completedAt ?? null}
+              isLoading={isSyncing}
+              onManualSync={handleManualSync}
+              initialSyncedAt={syncStatus?.completedAt ?? null}
+            />
+          )}
 
           {/* Search */}
           <div className="so-toolbar-search">
