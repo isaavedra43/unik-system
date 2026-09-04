@@ -418,14 +418,29 @@ export function SalesOrdersWorkspace({
     setZohoSyncError(null);
     try {
       const res = await fetch('/app/sales/orders/api/sync', { method: 'POST' });
+      const body = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        completedAt?: string | null;
+        normalized?: number;
+        detailsFetched?: number;
+        recordsPending?: number;
+        recordsSeen?: number;
+      };
       if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.error || 'No se pudo sincronizar con Zoho');
+        throw new Error(
+          body.error || 'No se pudo sincronizar con Zoho'
+        );
       }
-      setZohoSyncAt(new Date().toISOString());
+      // Source of truth: the persisted IntegrationSyncRun.completedAt
+      // returned by the API. Never invent a timestamp client-side.
+      if (body.completedAt) {
+        setZohoSyncAt(body.completedAt);
+      }
       router.refresh();
     } catch (err) {
       setZohoSyncError(err instanceof Error ? err.message : 'Error inesperado');
+      // Make absolutely sure we never display a fake success timestamp.
+      setZohoSyncAt((current) => current);
     } finally {
       setZohoSyncing(false);
     }

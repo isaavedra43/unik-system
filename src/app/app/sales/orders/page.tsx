@@ -77,6 +77,7 @@ export default async function SalesOrdersPage({
         where: {
           source: SOURCE,
           entityType: ENTITY_TYPE,
+          mode: 'sync',
           status: SYNC_STATUS.COMPLETED,
         },
         orderBy: { completedAt: 'desc' },
