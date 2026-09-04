@@ -9,6 +9,12 @@ import {
   salesOrderQueryStateSchema,
   TablePreferenceConfig,
 } from '@/modules/sales/sales-orders-filters';
+import { prisma } from '@/lib/prisma';
+import {
+  ENTITY_TYPE,
+  SOURCE,
+  SYNC_STATUS,
+} from '@/modules/integrations/zoho/sales-orders-sync';
 import { SalesOrdersWorkspace } from '@/components/sales/SalesOrdersWorkspace';
 
 export const runtime = 'nodejs';
@@ -60,13 +66,27 @@ export default async function SalesOrdersPage({
   const query = salesOrderQueryStateSchema.parse(queryInput);
 
   // Load data server-side
-  const [result, preference, views, defaultView, unreadCount] = await Promise.all([
-    getSalesOrdersWorkspace(query),
-    getUserTablePreference(user.id, SALES_ORDERS_TABLE_KEY),
-    listTableViews(user.id, SALES_ORDERS_TABLE_KEY),
-    getDefaultTableView(user.id, SALES_ORDERS_TABLE_KEY),
-    getUnreadNotificationCount(user.id),
-  ]);
+  const [result, preference, views, defaultView, unreadCount, lastZohoSync] =
+    await Promise.all([
+      getSalesOrdersWorkspace(query),
+      getUserTablePreference(user.id, SALES_ORDERS_TABLE_KEY),
+      listTableViews(user.id, SALES_ORDERS_TABLE_KEY),
+      getDefaultTableView(user.id, SALES_ORDERS_TABLE_KEY),
+      getUnreadNotificationCount(user.id),
+      prisma.integrationSyncRun.findFirst({
+        where: {
+          source: SOURCE,
+          entityType: ENTITY_TYPE,
+          status: SYNC_STATUS.COMPLETED,
+        },
+        orderBy: { completedAt: 'desc' },
+        select: { completedAt: true },
+      }),
+    ]);
+
+  const lastZohoSyncAt = lastZohoSync?.completedAt
+    ? lastZohoSync.completedAt.toISOString()
+    : null;
 
   // Get watched entity IDs for the current page
   const watchedIds = await getWatchedEntityIds(
@@ -102,6 +122,7 @@ export default async function SalesOrdersPage({
       canExport={canExport}
       canWatch={canWatch}
       canShareViews={canShareViews}
+      lastZohoSyncAt={lastZohoSyncAt}
     />
   );
 }

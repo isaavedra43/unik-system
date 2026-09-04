@@ -2149,7 +2149,39 @@ textarea.input {
     grid-template-columns: 1fr;
   }
 
-  .so-toolbar {
+.so-zoho-sync {
+  display: flex;
+  align-items: center;
+  gap: var(--unik-space-3);
+  flex-wrap: wrap;
+  font-size: 13px;
+  color: var(--unik-text-muted);
+}
+
+.so-zoho-sync-label {
+  flex: 1;
+  min-width: 0;
+}
+
+.so-zoho-sync-error {
+  color: var(--unik-danger, #c0392b);
+  font-size: 12px;
+}
+
+.so-zoho-sync-icon-spin {
+  animation: so-zoho-sync-spin 1s linear infinite;
+}
+
+@keyframes so-zoho-sync-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.so-toolbar {
     padding: var(--unik-space-3) var(--unik-space-4);
   }
 
