@@ -29,7 +29,6 @@ import {
   Minimize2,
   Pin,
   Plus,
-  RefreshCw,
   Search,
   SlidersHorizontal,
   Trash2,
@@ -66,22 +65,6 @@ import {
 import { SalesOrderPreviewDrawer } from './SalesOrderPreviewDrawer';
 import { TableViewRow } from '@/modules/sales/table-views-service';
 
-function formatZohoSyncAt(iso: string): string {
-  try {
-    const d = new Date(iso);
-    return d.toLocaleString('es-MX', {
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: false,
-    });
-  } catch {
-    return iso;
-  }
-}
-
 interface WorkspaceProps {
   user: CurrentUser;
   initialData: SalesOrdersListResult;
@@ -94,7 +77,6 @@ interface WorkspaceProps {
   canExport: boolean;
   canWatch: boolean;
   canShareViews: boolean;
-  lastZohoSyncAt: string | null;
 }
 
 type Density = 'compact' | 'normal' | 'comfortable';
@@ -392,7 +374,6 @@ export function SalesOrdersWorkspace({
   canExport,
   canWatch,
   canShareViews,
-  lastZohoSyncAt,
 }: WorkspaceProps) {
   const router = useRouter();
 
@@ -406,45 +387,6 @@ export function SalesOrdersWorkspace({
   const [fullscreen, setFullscreen] = useState(false);
   const [watchedIds, setWatchedIds] = useState<Set<string>>(initialWatchedIds);
   const [, setUnreadCount] = useState(unreadNotifications);
-
-  // Zoho sync indicator state
-  const [zohoSyncing, setZohoSyncing] = useState(false);
-  const [zohoSyncError, setZohoSyncError] = useState<string | null>(null);
-  const [zohoSyncAt, setZohoSyncAt] = useState<string | null>(lastZohoSyncAt);
-
-  const handleZohoSync = useCallback(async () => {
-    if (zohoSyncing) return;
-    setZohoSyncing(true);
-    setZohoSyncError(null);
-    try {
-      const res = await fetch('/app/sales/orders/api/sync', { method: 'POST' });
-      const body = (await res.json().catch(() => ({}))) as {
-        error?: string;
-        completedAt?: string | null;
-        normalized?: number;
-        detailsFetched?: number;
-        recordsPending?: number;
-        recordsSeen?: number;
-      };
-      if (!res.ok) {
-        throw new Error(
-          body.error || 'No se pudo sincronizar con Zoho'
-        );
-      }
-      // Source of truth: the persisted IntegrationSyncRun.completedAt
-      // returned by the API. Never invent a timestamp client-side.
-      if (body.completedAt) {
-        setZohoSyncAt(body.completedAt);
-      }
-      router.refresh();
-    } catch (err) {
-      setZohoSyncError(err instanceof Error ? err.message : 'Error inesperado');
-      // Make absolutely sure we never display a fake success timestamp.
-      setZohoSyncAt((current) => current);
-    } finally {
-      setZohoSyncing(false);
-    }
-  }, [zohoSyncing, router]);
 
   // UI panel states
   const [filterPanelOpen, setFilterPanelOpen] = useState(false);
@@ -980,34 +922,6 @@ export function SalesOrdersWorkspace({
     <div className={`so-workspace ${fullscreen ? 'so-workspace-fullscreen' : ''} ${densityClass}`}>
       {/* Toolbar */}
       <div className="so-toolbar">
-        {/* Zoho sync indicator */}
-        <div className="so-zoho-sync">
-          <span className="so-zoho-sync-label">
-            {zohoSyncing
-              ? 'Actualizando desde Zoho...'
-              : zohoSyncAt
-                ? `Última sincronización exitosa de Zoho: ${formatZohoSyncAt(zohoSyncAt)}`
-                : 'Zoho aún no sincronizado'}
-          </span>
-          <button
-            type="button"
-            className="btn btn-secondary btn-sm"
-            onClick={handleZohoSync}
-            disabled={zohoSyncing}
-            aria-busy={zohoSyncing}
-          >
-            <RefreshCw
-              size={14}
-              className={zohoSyncing ? 'so-zoho-sync-icon-spin' : undefined}
-            />
-            {zohoSyncing ? 'Actualizando...' : 'Actualizar ahora'}
-          </button>
-          {zohoSyncError ? (
-            <span className="so-zoho-sync-error" role="alert">
-              {zohoSyncError}
-            </span>
-          ) : null}
-        </div>
         <div className="so-toolbar-top">
           {/* View selector */}
           <div className="so-view-selector" style={{ position: 'relative' }}>
