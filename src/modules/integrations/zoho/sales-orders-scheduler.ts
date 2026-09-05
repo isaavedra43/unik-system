@@ -36,8 +36,8 @@ const CHECK_INTERVAL_MS = 5 * 60 * 1000;
 /** Grace period so Next.js and Railway finish booting before the first check. */
 const STARTUP_DELAY_MS = 30 * 1000;
 
-/** Detail downloads per scheduled run. Deliberately lower than the API maximum. */
-const SCHEDULER_MAX_DETAIL_FETCHES = 50;
+/** Detail downloads per scheduled run. Higher than quick sync to drain backlog. */
+const SCHEDULER_MAX_DETAIL_FETCHES = 100;
 
 /** After a FAILED sync, wait this long before trying again to preserve API quota. */
 const FAILED_RETRY_COOLDOWN_MS = 30 * 60 * 1000;

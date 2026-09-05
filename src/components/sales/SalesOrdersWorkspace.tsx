@@ -29,6 +29,7 @@ import {
   Minimize2,
   Pin,
   Plus,
+  RefreshCw,
   Search,
   SlidersHorizontal,
   Trash2,
@@ -65,6 +66,25 @@ import {
 import { SalesOrderPreviewDrawer } from './SalesOrderPreviewDrawer';
 import { TableViewRow } from '@/modules/sales/table-views-service';
 
+interface SyncRunInfo {
+  run_id: string;
+  mode: string;
+  status: string;
+  started_at: string;
+  completed_at: string | null;
+  pages_scanned?: number;
+  records_seen?: number;
+  records_pending?: number;
+  details_fetched?: number;
+  details_failed?: number;
+  error_code?: string | null;
+}
+
+interface SyncStatus {
+  active_run: SyncRunInfo | null;
+  latest_run: SyncRunInfo | null;
+}
+
 interface WorkspaceProps {
   user: CurrentUser;
   initialData: SalesOrdersListResult;
@@ -77,6 +97,7 @@ interface WorkspaceProps {
   canExport: boolean;
   canWatch: boolean;
   canShareViews: boolean;
+  initialSyncStatus?: SyncStatus | null;
 }
 
 type Density = 'compact' | 'normal' | 'comfortable';
@@ -374,6 +395,7 @@ export function SalesOrdersWorkspace({
   canExport,
   canWatch,
   canShareViews,
+  initialSyncStatus,
 }: WorkspaceProps) {
   const router = useRouter();
 
@@ -387,6 +409,11 @@ export function SalesOrdersWorkspace({
   const [fullscreen, setFullscreen] = useState(false);
   const [watchedIds, setWatchedIds] = useState<Set<string>>(initialWatchedIds);
   const [, setUnreadCount] = useState(unreadNotifications);
+
+  // Sync state
+  const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(initialSyncStatus ?? null);
+  const [syncTriggering, setSyncTriggering] = useState(false);
+  const syncPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // UI panel states
   const [filterPanelOpen, setFilterPanelOpen] = useState(false);
@@ -911,6 +938,99 @@ export function SalesOrdersWorkspace({
     return () => clearInterval(interval);
   }, []);
 
+  // Sync: fetch current status
+  const fetchSyncStatus = useCallback(async () => {
+    try {
+      const res = await fetch('/app/sales/orders/sync/status');
+      if (res.ok) {
+        const json = await res.json();
+        setSyncStatus(json);
+        return json as SyncStatus;
+      }
+    } catch {
+      // silent
+    }
+    return null;
+  }, []);
+
+  // Sync: poll while a run is active
+  useEffect(() => {
+    const isActive = syncStatus?.active_run != null;
+    if (!isActive) {
+      if (syncPollRef.current) {
+        clearInterval(syncPollRef.current);
+        syncPollRef.current = null;
+      }
+      return;
+    }
+
+    if (!syncPollRef.current) {
+      syncPollRef.current = setInterval(async () => {
+        const status = await fetchSyncStatus();
+        // When the run completes or fails, stop polling and refresh data.
+        if (status && !status.active_run) {
+          if (syncPollRef.current) {
+            clearInterval(syncPollRef.current);
+            syncPollRef.current = null;
+          }
+          fetchData(query);
+          router.refresh();
+        }
+      }, 5000);
+    }
+
+    return () => {
+      if (syncPollRef.current) {
+        clearInterval(syncPollRef.current);
+        syncPollRef.current = null;
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [syncStatus?.active_run]);
+
+  // Sync: trigger a quick sync
+  const handleSyncNow = useCallback(async () => {
+    if (syncTriggering) return;
+    setSyncTriggering(true);
+    try {
+      const res = await fetch('/app/sales/orders/sync', { method: 'POST' });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.already_running) {
+          toast.info('Ya hay una sincronización en curso');
+        } else {
+          toast.success('Sincronización iniciada');
+        }
+        await fetchSyncStatus();
+      } else if (res.status === 409) {
+        toast.info('Ya hay una sincronización en curso');
+        await fetchSyncStatus();
+      } else {
+        toast.error('No pudimos iniciar la sincronización');
+      }
+    } catch {
+      toast.error('No pudimos iniciar la sincronización');
+    } finally {
+      setSyncTriggering(false);
+    }
+  }, [syncTriggering, fetchSyncStatus]);
+
+  // Sync: format last sync time for display
+  const lastSyncLabel = useMemo(() => {
+    const latest = syncStatus?.latest_run;
+    if (!latest || !latest.completed_at) return null;
+    const date = new Date(latest.completed_at);
+    if (latest.status === 'FAILED') return null;
+    return date.toLocaleString('es-MX', {
+      day: '2-digit',
+      month: 'short',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  }, [syncStatus?.latest_run]);
+
+  const isSyncing = syncStatus?.active_run != null;
+
   const densityClass = `so-density-${pref.density}`;
   const pinnedLeft = pref.columnPinning.left;
   const pinnedRight = pref.columnPinning.right;
@@ -1132,6 +1252,16 @@ export function SalesOrdersWorkspace({
             <button className="btn btn-secondary btn-sm" onClick={handleCopyUrl}>
               <Copy size={14} />
               Compartir
+            </button>
+            <button
+              className="btn btn-secondary btn-sm"
+              onClick={handleSyncNow}
+              disabled={isSyncing || syncTriggering}
+              aria-label={isSyncing ? 'Sincronizando...' : 'Actualizar ahora'}
+              title={lastSyncLabel ? `Última sync: ${lastSyncLabel}` : 'Actualizar ahora'}
+            >
+              <RefreshCw size={14} className={isSyncing ? 'spin' : ''} />
+              {isSyncing ? 'Actualizando...' : 'Actualizar'}
             </button>
             <button
               className="btn btn-secondary btn-sm"

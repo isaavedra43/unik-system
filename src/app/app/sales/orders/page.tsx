@@ -10,6 +10,11 @@ import {
   TablePreferenceConfig,
 } from '@/modules/sales/sales-orders-filters';
 import { SalesOrdersWorkspace } from '@/components/sales/SalesOrdersWorkspace';
+import {
+  getLatestSyncRun,
+  getActiveSyncRun,
+  SyncRunStatus,
+} from '@/modules/integrations/zoho/sales-orders-sync';
 
 export const runtime = 'nodejs';
 
@@ -60,13 +65,16 @@ export default async function SalesOrdersPage({
   const query = salesOrderQueryStateSchema.parse(queryInput);
 
   // Load data server-side
-  const [result, preference, views, defaultView, unreadCount] = await Promise.all([
-    getSalesOrdersWorkspace(query),
-    getUserTablePreference(user.id, SALES_ORDERS_TABLE_KEY),
-    listTableViews(user.id, SALES_ORDERS_TABLE_KEY),
-    getDefaultTableView(user.id, SALES_ORDERS_TABLE_KEY),
-    getUnreadNotificationCount(user.id),
-  ]);
+  const [result, preference, views, defaultView, unreadCount, activeSyncRun, latestSyncRun] =
+    await Promise.all([
+      getSalesOrdersWorkspace(query),
+      getUserTablePreference(user.id, SALES_ORDERS_TABLE_KEY),
+      listTableViews(user.id, SALES_ORDERS_TABLE_KEY),
+      getDefaultTableView(user.id, SALES_ORDERS_TABLE_KEY),
+      getUnreadNotificationCount(user.id),
+      getActiveSyncRun(),
+      getLatestSyncRun(),
+    ]);
 
   // Get watched entity IDs for the current page
   const watchedIds = await getWatchedEntityIds(
@@ -102,6 +110,36 @@ export default async function SalesOrdersPage({
       canExport={canExport}
       canWatch={canWatch}
       canShareViews={canShareViews}
+      initialSyncStatus={formatSyncStatus(latestSyncRun, activeSyncRun)}
     />
   );
+}
+
+function formatSyncStatus(latestRun: SyncRunStatus | null, activeRun: SyncRunStatus | null) {
+  return {
+    active_run: activeRun
+      ? {
+          run_id: activeRun.runId,
+          mode: activeRun.mode,
+          status: activeRun.status,
+          started_at: activeRun.startedAt.toISOString(),
+          completed_at: activeRun.completedAt?.toISOString() ?? null,
+        }
+      : null,
+    latest_run: latestRun
+      ? {
+          run_id: latestRun.runId,
+          mode: latestRun.mode,
+          status: latestRun.status,
+          started_at: latestRun.startedAt.toISOString(),
+          completed_at: latestRun.completedAt?.toISOString() ?? null,
+          pages_scanned: latestRun.pagesScanned,
+          records_seen: latestRun.recordsSeen,
+          records_pending: latestRun.recordsPending,
+          details_fetched: latestRun.detailsFetched,
+          details_failed: latestRun.detailsFailed,
+          error_code: latestRun.errorCode,
+        }
+      : null,
+  };
 }

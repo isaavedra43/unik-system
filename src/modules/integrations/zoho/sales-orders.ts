@@ -6,6 +6,8 @@ const salesOrderIdSchema = z.string().min(1).max(30).regex(/^\d+$/, 'salesOrderI
 export interface ListSalesOrdersOptions {
   page?: number;
   perPage?: number;
+  sortColumn?: string;
+  sortOrder?: 'ascending' | 'descending';
 }
 
 /**
@@ -22,6 +24,14 @@ export async function listSalesOrders(options?: ListSalesOrdersOptions): Promise
 
   if (options?.perPage !== undefined) {
     query.per_page = String(options.perPage);
+  }
+
+  if (options?.sortColumn) {
+    query.sort_column = options.sortColumn;
+  }
+
+  if (options?.sortOrder) {
+    query.sort_order = options.sortOrder;
   }
 
   return zohoGet('/salesorders', Object.keys(query).length > 0 ? query : undefined);

@@ -19,7 +19,7 @@ export const runtime = 'nodejs';
 
 const requestBodySchema = z
   .object({
-    mode: z.enum(['scan', 'sync', 'baseline']).optional(),
+    mode: z.enum(['scan', 'sync', 'quick', 'baseline']).optional(),
     max_detail_fetches: z.number().int().min(1).max(200).optional(),
   })
   .strict()

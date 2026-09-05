@@ -24,6 +24,7 @@ model IntegrationEntityState {
 
   @@unique([source, entityType, externalId])
   @@index([source, entityType, needsSync])
+  @@index([source, entityType, needsSync, remoteModifiedAt])
 }
 
 /// Immutable RAW payload snapshot of an external entity version.
@@ -132,19 +133,19 @@ model SalesOrder {
 /// Application user account. Users are never hard-deleted from the UI;
 /// they are activated/deactivated to preserve history and relations.
 model User {
-  id                  String        @id @default(cuid())
-  username            String        @unique
-  email               String?       @unique
+  id                  String                @id @default(cuid())
+  username            String                @unique
+  email               String?               @unique
   name                String
   passwordHash        String
-  isActive            Boolean       @default(true)
-  mustChangePassword  Boolean       @default(true)
-  failedLoginAttempts Int           @default(0)
+  isActive            Boolean               @default(true)
+  mustChangePassword  Boolean               @default(true)
+  failedLoginAttempts Int                   @default(0)
   lockedUntil         DateTime?
   lastLoginAt         DateTime?
   passwordChangedAt   DateTime?
-  createdAt           DateTime      @default(now())
-  updatedAt           DateTime      @updatedAt
+  createdAt           DateTime              @default(now())
+  updatedAt           DateTime              @updatedAt
   roles               UserRole[]
   sessions            AuthSession[]
   tablePreferences    UserTablePreference[]

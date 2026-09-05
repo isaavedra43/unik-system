@@ -50,7 +50,7 @@ export class SyncFailedError extends Error {
 }
 
 export const syncSalesOrdersOptionsSchema = z.object({
-  mode: z.enum(['scan', 'sync']).default('scan'),
+  mode: z.enum(['scan', 'sync', 'quick']).default('scan'),
   maxDetailFetches: z.number().int().min(1).max(200).default(50),
 });
 
@@ -181,6 +181,58 @@ async function scanAllPages(): Promise<ScanOutcome> {
   return { pagesScanned, recordsSeen, apiCalls };
 }
 
+/**
+ * Quick scan: reads only the first page of Sales Orders from Zoho.
+ *
+ * Zoho Inventory returns records sorted by creation date descending by default,
+ * so the first page contains the most recent records. This is used by the
+ * quick/incremental sync to discover newly created or recently modified orders
+ * without walking all 116+ pages.
+ *
+ * The `sortColumn` / `sortOrder` query params are sent explicitly to guarantee
+ * the most recently modified records appear on page 1 regardless of Zoho's
+ * default sort behavior.
+ */
+const QUICK_SCAN_PAGES = 3;
+
+async function scanRecentPages(): Promise<ScanOutcome> {
+  let pagesScanned = 0;
+  let recordsSeen = 0;
+  let apiCalls = 0;
+
+  for (let page = 1; page <= QUICK_SCAN_PAGES; page++) {
+    const rawPage = await listSalesOrders({
+      page,
+      perPage: PER_PAGE,
+      sortColumn: 'last_modified_time',
+      sortOrder: 'descending',
+    });
+    apiCalls += 1;
+
+    const parsed = salesOrdersListSchema.safeParse(rawPage);
+    if (!parsed.success) {
+      // If the first page fails, propagate; if later pages fail, stop gracefully.
+      if (page === 1) {
+        throw new SyncInvalidListError();
+      }
+      break;
+    }
+
+    pagesScanned += 1;
+
+    for (const summary of parsed.data.salesorders) {
+      await recordSummary(summary.salesorder_id, summary.last_modified_time);
+      recordsSeen += 1;
+    }
+
+    if (!parsed.data.page_context?.has_more_page) {
+      break;
+    }
+  }
+
+  return { pagesScanned, recordsSeen, apiCalls };
+}
+
 class SyncPageLimitError extends Error {
   readonly errorCode = SYNC_ERROR_CODE.PAGE_LIMIT_EXCEEDED;
 }
@@ -239,7 +291,7 @@ async function fetchPendingDetails(
 ): Promise<{ detailsFetched: number; detailsFailed: number; apiCalls: number }> {
   const pending = await prisma.integrationEntityState.findMany({
     where: { source: SOURCE, entityType: ENTITY_TYPE, needsSync: true },
-    orderBy: { remoteModifiedAt: 'asc' },
+    orderBy: [{ remoteModifiedAt: 'desc' }, { externalId: 'asc' }],
     take: maxDetailFetches,
   });
 
@@ -319,6 +371,9 @@ function resolveErrorCode(error: unknown): string {
  *
  * scan: walks every page and refreshes summarized state only.
  * sync: same scan, then downloads details for pending entities up to maxDetailFetches.
+ * quick: scans only the first few pages (sorted by last_modified_time desc),
+ *        then downloads details for the most recently modified pending entities.
+ *        Designed for user-triggered incremental updates.
  */
 export async function syncSalesOrders(
   options: SyncSalesOrdersOptions = {}
@@ -345,7 +400,7 @@ export async function syncSalesOrders(
       },
     });
 
-    const scan = await scanAllPages();
+    const scan = mode === 'quick' ? await scanRecentPages() : await scanAllPages();
 
     const details =
       mode === 'sync'
@@ -421,6 +476,261 @@ export async function syncSalesOrders(
     );
 
     throw new SyncFailedError(errorCode, run?.id ?? 'sync-run-creation-failed');
+  } finally {
+    lock.inProgress = false;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Background sync + status polling
+// ---------------------------------------------------------------------------
+
+/** Maximum time a RUNNING sync run may stay active before being considered stale. */
+const STALE_RUN_THRESHOLD_MS = 10 * 60 * 1000;
+
+export interface SyncRunStatus {
+  runId: string;
+  mode: string;
+  status: string;
+  startedAt: Date;
+  completedAt: Date | null;
+  pagesScanned: number;
+  recordsSeen: number;
+  recordsPending: number;
+  detailsFetched: number;
+  detailsFailed: number;
+  apiCalls: number;
+  errorCode: string | null;
+}
+
+/**
+ * Returns the most recent IntegrationSyncRun for Zoho sales orders, or null
+ * if none exists. This is the durable source of truth that the UI polls.
+ */
+export async function getLatestSyncRun(): Promise<SyncRunStatus | null> {
+  const run = await prisma.integrationSyncRun.findFirst({
+    where: { source: SOURCE, entityType: ENTITY_TYPE },
+    orderBy: { startedAt: 'desc' },
+  });
+
+  if (!run) return null;
+
+  return {
+    runId: run.id,
+    mode: run.mode,
+    status: run.status,
+    startedAt: run.startedAt,
+    completedAt: run.completedAt,
+    pagesScanned: run.pagesScanned,
+    recordsSeen: run.recordsSeen,
+    recordsPending: run.recordsPending,
+    detailsFetched: run.detailsFetched,
+    detailsFailed: run.detailsFailed,
+    apiCalls: run.apiCalls,
+    errorCode: run.errorCode,
+  };
+}
+
+/**
+ * Returns the currently RUNNING sync run if one exists, or null.
+ * Also marks stale RUNNING runs (older than STALE_RUN_THRESHOLD_MS) as FAILED
+ * so a crashed process does not permanently block new syncs.
+ */
+export async function getActiveSyncRun(now: Date = new Date()): Promise<SyncRunStatus | null> {
+  const staleCutoff = new Date(now.getTime() - STALE_RUN_THRESHOLD_MS);
+
+  // Mark stale RUNNING runs as FAILED. This handles the case where a process
+  // crashed mid-sync and the in-memory lock was lost.
+  await prisma.integrationSyncRun.updateMany({
+    where: {
+      source: SOURCE,
+      entityType: ENTITY_TYPE,
+      status: SYNC_STATUS.RUNNING,
+      startedAt: { lt: staleCutoff },
+    },
+    data: {
+      status: SYNC_STATUS.FAILED,
+      completedAt: now,
+      errorCode: SYNC_ERROR_CODE.UNEXPECTED_ERROR,
+    },
+  });
+
+  const run = await prisma.integrationSyncRun.findFirst({
+    where: {
+      source: SOURCE,
+      entityType: ENTITY_TYPE,
+      status: SYNC_STATUS.RUNNING,
+    },
+    orderBy: { startedAt: 'desc' },
+  });
+
+  if (!run) return null;
+
+  return {
+    runId: run.id,
+    mode: run.mode,
+    status: run.status,
+    startedAt: run.startedAt,
+    completedAt: run.completedAt,
+    pagesScanned: run.pagesScanned,
+    recordsSeen: run.recordsSeen,
+    recordsPending: run.recordsPending,
+    detailsFetched: run.detailsFetched,
+    detailsFailed: run.detailsFailed,
+    apiCalls: run.apiCalls,
+    errorCode: run.errorCode,
+  };
+}
+
+export interface StartSyncResult {
+  runId: string;
+  alreadyRunning: boolean;
+}
+
+/**
+ * Starts a sync in the background and returns immediately with the run ID.
+ *
+ * The caller (HTTP handler) receives the run ID within milliseconds. The
+ * actual sync runs as a fire-and-forget promise inside the same process.
+ * The in-memory lock prevents concurrent syncs. The IntegrationSyncRun record
+ * in PostgreSQL is the durable status that the UI polls.
+ *
+ * If a sync is already running (in-memory lock OR a non-stale RUNNING run in
+ * the database), returns `alreadyRunning: true` with the existing run ID.
+ */
+export async function startSyncSalesOrders(
+  options: SyncSalesOrdersOptions = {}
+): Promise<StartSyncResult> {
+  const { mode, maxDetailFetches } = syncSalesOrdersOptionsSchema.parse(options);
+  const lock = getSyncLock();
+
+  // Check in-memory lock first (fast path).
+  if (lock.inProgress) {
+    const activeRun = await getActiveSyncRun();
+    if (activeRun) {
+      return { runId: activeRun.runId, alreadyRunning: true };
+    }
+    // Lock is held but no RUNNING run in DB — stale lock from a crashed sync.
+    // Reset the lock so a new sync can start.
+    lock.inProgress = false;
+  }
+
+  // Check DB for a non-stale RUNNING run (covers multi-process scenarios).
+  const activeRun = await getActiveSyncRun();
+  if (activeRun) {
+    return { runId: activeRun.runId, alreadyRunning: true };
+  }
+
+  // Acquire lock and create the run record immediately so the caller has an ID.
+  lock.inProgress = true;
+  const startedAt = new Date();
+  const run = await prisma.integrationSyncRun.create({
+    data: {
+      source: SOURCE,
+      entityType: ENTITY_TYPE,
+      mode,
+      status: SYNC_STATUS.RUNNING,
+      startedAt,
+    },
+  });
+
+  // Fire-and-forget: the sync runs in the background inside this process.
+  // Errors are caught and persisted on the run record.
+  void runSyncInBackground(run.id, mode, maxDetailFetches, startedAt);
+
+  return { runId: run.id, alreadyRunning: false };
+}
+
+/**
+ * Background worker that executes the actual sync logic and updates the run
+ * record. Mirrors the inner logic of `syncSalesOrders` but operates on a
+ * pre-created run record.
+ */
+async function runSyncInBackground(
+  runId: string,
+  mode: SyncMode,
+  maxDetailFetches: number,
+  startedAt: Date
+): Promise<void> {
+  const lock = getSyncLock();
+
+  try {
+    const scan = mode === 'quick' ? await scanRecentPages() : await scanAllPages();
+
+    const details =
+      mode === 'scan'
+        ? { detailsFetched: 0, detailsFailed: 0, apiCalls: 0 }
+        : await fetchPendingDetails(maxDetailFetches);
+
+    const recordsPending = await prisma.integrationEntityState.count({
+      where: { source: SOURCE, entityType: ENTITY_TYPE, needsSync: true },
+    });
+
+    const completedAt = new Date();
+
+    await prisma.integrationSyncRun.update({
+      where: { id: runId },
+      data: {
+        status: SYNC_STATUS.COMPLETED,
+        completedAt,
+        pagesScanned: scan.pagesScanned,
+        recordsSeen: scan.recordsSeen,
+        recordsPending,
+        detailsFetched: details.detailsFetched,
+        detailsFailed: details.detailsFailed,
+        apiCalls: scan.apiCalls + details.apiCalls,
+      },
+    });
+
+    console.info(
+      JSON.stringify({
+        event: 'zoho.sales_orders.sync.completed',
+        runId,
+        mode,
+        pagesScanned: scan.pagesScanned,
+        recordsSeen: scan.recordsSeen,
+        recordsPending,
+        detailsFetched: details.detailsFetched,
+        detailsFailed: details.detailsFailed,
+        apiCalls: scan.apiCalls + details.apiCalls,
+        durationMs: completedAt.getTime() - startedAt.getTime(),
+        background: true,
+      })
+    );
+
+    // Normalize after a successful background sync.
+    try {
+      const { normalizePendingSalesOrderSnapshots } =
+        await import('@/modules/sales/sales-orders-normalizer');
+      await normalizePendingSalesOrderSnapshots({ limit: 100 });
+    } catch (error) {
+      console.error(
+        JSON.stringify({
+          event: 'zoho.sales_orders.sync.background_normalization_failed',
+          runId,
+          error: error instanceof Error ? error.message : 'unknown',
+        })
+      );
+    }
+  } catch (error) {
+    const errorCode = resolveErrorCode(error);
+    const completedAt = new Date();
+
+    await prisma.integrationSyncRun.update({
+      where: { id: runId },
+      data: { status: SYNC_STATUS.FAILED, completedAt, errorCode },
+    });
+
+    console.error(
+      JSON.stringify({
+        event: 'zoho.sales_orders.sync.failed',
+        runId,
+        mode,
+        errorCode,
+        durationMs: completedAt.getTime() - startedAt.getTime(),
+        background: true,
+      })
+    );
   } finally {
     lock.inProgress = false;
   }

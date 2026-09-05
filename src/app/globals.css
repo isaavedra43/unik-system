@@ -1238,6 +1238,10 @@ textarea.input {
   }
 }
 
+.spin {
+  animation: spin 1s linear infinite;
+}
+
 .temp-password-box {
   display: flex;
   align-items: center;
