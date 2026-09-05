@@ -271,13 +271,26 @@ async function scanRecentPages(): Promise<ScanOutcome> {
       return r;
     } catch (error) {
       apiCalls += 1;
-      if (error instanceof ZohoApiError || error instanceof SyncInvalidListError) {
+      const isTimeout = error instanceof DOMException && error.name === 'TimeoutError';
+      const isAbort = error instanceof DOMException && error.name === 'AbortError';
+      if (
+        error instanceof ZohoApiError ||
+        error instanceof SyncInvalidListError ||
+        isTimeout ||
+        isAbort
+      ) {
         console.warn(
           JSON.stringify({
             event: 'zoho.sales_orders.quick_scan.page_failed',
             page,
             sorted,
-            reason: error instanceof ZohoApiError ? 'zoho_api_error' : 'invalid_list',
+            reason: isTimeout
+              ? 'timeout'
+              : isAbort
+                ? 'aborted'
+                : error instanceof ZohoApiError
+                  ? 'zoho_api_error'
+                  : 'invalid_list',
           })
         );
         return null;
@@ -374,7 +387,8 @@ async function recordSummary(externalId: string, remoteModifiedAt: Date): Promis
  * transaction, so a state can never be marked synced without its snapshot.
  */
 async function fetchPendingDetails(
-  maxDetailFetches: number
+  maxDetailFetches: number,
+  shouldAbort?: () => boolean
 ): Promise<{ detailsFetched: number; detailsFailed: number; apiCalls: number }> {
   const pending = await prisma.integrationEntityState.findMany({
     where: { source: SOURCE, entityType: ENTITY_TYPE, needsSync: true },
@@ -387,6 +401,7 @@ async function fetchPendingDetails(
   let apiCalls = 0;
 
   for (const entity of pending) {
+    if (shouldAbort?.()) break;
     try {
       const rawDetail = await getSalesOrder(entity.externalId);
       apiCalls += 1;
@@ -729,9 +744,23 @@ export async function startSyncSalesOrders(
 }
 
 /**
+ * Maximum wall-clock time a background sync may run before being forced FAILED.
+ * Quick sync gets a shorter timeout because it scans fewer pages.
+ */
+const BACKGROUND_SYNC_TIMEOUT_MS: Record<SyncMode, number> = {
+  quick: 3 * 60 * 1000,
+  scan: 5 * 60 * 1000,
+  sync: 15 * 60 * 1000,
+};
+
+/**
  * Background worker that executes the actual sync logic and updates the run
  * record. Mirrors the inner logic of `syncSalesOrders` but operates on a
  * pre-created run record.
+ *
+ * Wrapped in a total timeout so the run can never stay RUNNING forever —
+ * even if a Zoho API call hangs or the DB stalls, the run is marked FAILED
+ * and the lock is released.
  */
 async function runSyncInBackground(
   runId: string,
@@ -740,14 +769,74 @@ async function runSyncInBackground(
   startedAt: Date
 ): Promise<void> {
   const lock = getSyncLock();
+  const timeoutMs = BACKGROUND_SYNC_TIMEOUT_MS[mode];
+  let timedOut = false;
+
+  // Enforce a hard wall-clock limit. If the sync exceeds it the run is
+  // marked FAILED so the UI stops spinning. The lock is NOT released here —
+  // it is released in the finally block when the sync actually finishes,
+  // preventing a second sync from starting while this one is still running.
+  const timeoutId = setTimeout(() => {
+    timedOut = true;
+    console.error(
+      JSON.stringify({
+        event: 'zoho.sales_orders.sync.timeout',
+        runId,
+        mode,
+        durationMs: timeoutMs,
+      })
+    );
+    void (async () => {
+      try {
+        await prisma.integrationSyncRun.update({
+          where: { id: runId },
+          data: {
+            status: SYNC_STATUS.FAILED,
+            completedAt: new Date(),
+            errorCode: SYNC_ERROR_CODE.UNEXPECTED_ERROR,
+          },
+        });
+      } catch {
+        // Best-effort: if we can't write to DB the finally block still
+        // releases the lock when the sync eventually ends.
+      }
+      // Release the lock so a future sync can start even if this one
+      // is permanently stuck (e.g. a fetch that never resolves).
+      lock.inProgress = false;
+    })();
+  }, timeoutMs);
 
   try {
+    console.info(
+      JSON.stringify({ event: 'zoho.sales_orders.sync.background_started', runId, mode })
+    );
+
     const scan = mode === 'quick' ? await scanRecentPages() : await scanAllPages();
+
+    console.info(
+      JSON.stringify({
+        event: 'zoho.sales_orders.sync.background_scan_done',
+        runId,
+        mode,
+        pagesScanned: scan.pagesScanned,
+        recordsSeen: scan.recordsSeen,
+      })
+    );
 
     const details =
       mode === 'scan'
         ? { detailsFetched: 0, detailsFailed: 0, apiCalls: 0 }
-        : await fetchPendingDetails(maxDetailFetches);
+        : await fetchPendingDetails(maxDetailFetches, () => timedOut);
+
+    console.info(
+      JSON.stringify({
+        event: 'zoho.sales_orders.sync.background_details_done',
+        runId,
+        mode,
+        detailsFetched: details.detailsFetched,
+        detailsFailed: details.detailsFailed,
+      })
+    );
 
     const recordsPending = await prisma.integrationEntityState.count({
       where: { source: SOURCE, entityType: ENTITY_TYPE, needsSync: true },
@@ -772,19 +861,39 @@ async function runSyncInBackground(
 
     const completedAt = new Date();
 
-    await prisma.integrationSyncRun.update({
-      where: { id: runId },
-      data: {
-        status: SYNC_STATUS.COMPLETED,
-        completedAt,
-        pagesScanned: scan.pagesScanned,
-        recordsSeen: scan.recordsSeen,
-        recordsPending,
-        detailsFetched: details.detailsFetched,
-        detailsFailed: details.detailsFailed,
-        apiCalls: scan.apiCalls + details.apiCalls,
-      },
-    });
+    try {
+      // Guard: only mark COMPLETED if the run is still RUNNING — the
+      // background timeout may have already marked it FAILED.
+      const current = await prisma.integrationSyncRun.findUnique({
+        where: { id: runId },
+        select: { status: true },
+      });
+      if (current?.status === SYNC_STATUS.RUNNING) {
+        await prisma.integrationSyncRun.update({
+          where: { id: runId },
+          data: {
+            status: SYNC_STATUS.COMPLETED,
+            completedAt,
+            pagesScanned: scan.pagesScanned,
+            recordsSeen: scan.recordsSeen,
+            recordsPending,
+            detailsFetched: details.detailsFetched,
+            detailsFailed: details.detailsFailed,
+            apiCalls: scan.apiCalls + details.apiCalls,
+          },
+        });
+      }
+    } catch (updateError) {
+      // If we can't mark the run as COMPLETED the stale-detection or the
+      // timeout will clean it up. Log and continue.
+      console.error(
+        JSON.stringify({
+          event: 'zoho.sales_orders.sync.completion_update_failed',
+          runId,
+          error: updateError instanceof Error ? updateError.message : 'unknown',
+        })
+      );
+    }
 
     console.info(
       JSON.stringify({
@@ -805,10 +914,20 @@ async function runSyncInBackground(
     const errorCode = resolveErrorCode(error);
     const completedAt = new Date();
 
-    await prisma.integrationSyncRun.update({
-      where: { id: runId },
-      data: { status: SYNC_STATUS.FAILED, completedAt, errorCode },
-    });
+    try {
+      await prisma.integrationSyncRun.update({
+        where: { id: runId },
+        data: { status: SYNC_STATUS.FAILED, completedAt, errorCode },
+      });
+    } catch (updateError) {
+      console.error(
+        JSON.stringify({
+          event: 'zoho.sales_orders.sync.failure_update_failed',
+          runId,
+          error: updateError instanceof Error ? updateError.message : 'unknown',
+        })
+      );
+    }
 
     console.error(
       JSON.stringify({
@@ -821,6 +940,7 @@ async function runSyncInBackground(
       })
     );
   } finally {
+    clearTimeout(timeoutId);
     lock.inProgress = false;
   }
 }

@@ -26,6 +26,9 @@ interface ZohoEnvelope {
  * @param path  Logical Inventory path, e.g. "/salesorders"
  * @param query Optional extra query parameters
  */
+/** Max time to wait for a single Zoho API call before aborting. */
+const ZOHO_REQUEST_TIMEOUT_MS = 30_000;
+
 export async function zohoGet<T = unknown>(
   path: string,
   query?: Record<string, string>
@@ -45,6 +48,7 @@ export async function zohoGet<T = unknown>(
   const response = await fetch(url, {
     method: 'GET',
     headers: { Authorization: `Zoho-oauthtoken ${accessToken}` },
+    signal: AbortSignal.timeout(ZOHO_REQUEST_TIMEOUT_MS),
   });
 
   let json: unknown;

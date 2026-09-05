@@ -16,6 +16,9 @@ interface TokenCache {
 let tokenCache: TokenCache | null = null;
 let refreshInFlight: Promise<string> | null = null;
 
+/** Max time to wait for a Zoho OAuth token refresh. */
+const TOKEN_REQUEST_TIMEOUT_MS = 15_000;
+
 async function requestAccessToken(): Promise<string> {
   const config = getZohoConfig();
 
@@ -30,6 +33,7 @@ async function requestAccessToken(): Promise<string> {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body,
+    signal: AbortSignal.timeout(TOKEN_REQUEST_TIMEOUT_MS),
   });
 
   if (!response.ok) {
