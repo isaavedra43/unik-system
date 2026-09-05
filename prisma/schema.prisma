@@ -68,6 +68,41 @@ model IntegrationSyncRun {
   @@index([source, entityType, startedAt])
 }
 
+/// Configurable runtime parameters for one integration source.
+/// Stored as JSON so each integration can extend its own settings without
+/// migrating the schema. Updated from the admin UI; read by the scheduler
+/// and sync workers on every tick so changes apply immediately.
+model IntegrationConfig {
+  id          String   @id @default(cuid())
+  source      String   @unique
+  displayName String
+  isEnabled   Boolean  @default(true)
+  /// Free-form JSON bag: intervals, timeouts, maxDetailFetches, quotas, etc.
+  settings    Json
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+/// One row per outbound API call made to any integration.
+/// Captures method, path, status, duration, error and a truncated preview
+/// of the response payload for observability. Never stores auth tokens.
+model IntegrationApiCall {
+  id              String   @id @default(cuid())
+  source          String
+  method          String
+  path            String
+  httpStatus      Int?
+  durationMs      Int
+  success         Boolean
+  errorCode       String?
+  /// Truncated preview of the response body (max ~4KB) for debugging.
+  responsePreview String?
+  createdAt       DateTime @default(now())
+
+  @@index([source, createdAt])
+  @@index([source, success, createdAt])
+}
+
 /// Business-normalized view of a Zoho sales order.
 model SalesOrder {
   id                     String           @id @default(cuid())

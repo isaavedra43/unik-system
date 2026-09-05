@@ -38,6 +38,18 @@ const mockPrismaClient = {
     findFirst: vi.fn(),
     findUnique: vi.fn(),
   },
+  integrationConfig: {
+    findUnique: vi.fn(),
+    create: vi.fn(),
+    update: vi.fn(),
+    findMany: vi.fn(),
+  },
+  integrationApiCall: {
+    create: vi.fn(),
+    count: vi.fn(),
+    aggregate: vi.fn(),
+    findMany: vi.fn(),
+  },
   $transaction: vi.fn((args: unknown[]) => Promise.all(args)),
 };
 
@@ -134,6 +146,39 @@ describe('Zoho Sales Orders sync pipeline', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     resetSyncLock();
+
+    // IntegrationConfig: return null so getIntegrationSettings seeds defaults,
+    // and create returns a row with default settings.
+    mockPrismaClient.integrationConfig.findUnique.mockResolvedValue(null);
+    mockPrismaClient.integrationConfig.create.mockResolvedValue({
+      id: 'cfg-1',
+      source: 'zoho',
+      displayName: 'Zoho Inventory',
+      isEnabled: true,
+      settings: {
+        syncIntervalMs: 3_600_000,
+        checkIntervalMs: 300_000,
+        startupDelayMs: 30_000,
+        schedulerMaxDetailFetches: 100,
+        failedRetryCooldownMs: 1_800_000,
+        quickScanPages: 2,
+        quickMaxDetailFetches: 20,
+        fullMaxDetailFetches: 50,
+        recentThresholdMs: 86_400_000,
+        perPage: 200,
+        maxPages: 200,
+        zohoRequestTimeoutMs: 30_000,
+        prismaTimeoutMs: 15_000,
+        quickSyncTimeoutMs: 180_000,
+        scanSyncTimeoutMs: 300_000,
+        fullSyncTimeoutMs: 900_000,
+        staleRunThresholdMs: 600_000,
+        schedulerEnabled: false,
+      },
+    });
+    mockPrismaClient.integrationConfig.findMany.mockResolvedValue([]);
+    mockPrismaClient.integrationConfig.update.mockResolvedValue({});
+    mockPrismaClient.integrationApiCall.create.mockResolvedValue({});
   });
 
   describe('fetchPendingDetails ordering (FASE 2)', () => {

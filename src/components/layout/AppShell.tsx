@@ -8,7 +8,7 @@ import { logoutAction } from '@/app/app/actions';
 import { Avatar } from '@/components/ui/primitives';
 import { DropdownMenu } from '@/components/ui/composite';
 import { ChevronDown, Home, LogOut, Menu, Shield, Users } from '@/components/ui/icons';
-import { Bell, ShoppingCart } from 'lucide-react';
+import { Bell, ShoppingCart, Plug } from 'lucide-react';
 
 interface AppShellProps {
   user: CurrentUser;
@@ -273,6 +273,12 @@ function buildBreadcrumbs(pathname: string): { label: string; href?: string }[] 
       { label: 'Usuarios y permisos' },
     ];
   }
+  if (pathname.startsWith('/app/admin/integrations')) {
+    return [
+      { label: 'Administración', href: '/app/admin/integrations' },
+      { label: 'Integraciones' },
+    ];
+  }
   if (pathname.startsWith('/app/account/security')) {
     return [{ label: 'Cuenta' }, { label: 'Seguridad' }];
   }
@@ -322,6 +328,13 @@ export default function AppShell({ user, children }: AppShellProps) {
             user.permissionKeys.includes('users.view') ||
             user.permissionKeys.includes('roles.view') ||
             user.isSuperAdmin,
+        },
+        {
+          href: '/app/admin/integrations',
+          label: 'Integraciones',
+          icon: <Plug size={18} />,
+          visible:
+            user.permissionKeys.includes('integrations.view') || user.isSuperAdmin,
         },
       ],
     },

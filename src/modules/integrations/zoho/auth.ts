@@ -1,5 +1,7 @@
 import { z } from 'zod';
 import { getZohoConfig } from './config';
+import { INTEGRATION_SOURCE_ZOHO } from '../integration-config-service';
+import { logIntegrationApiCall } from '../integration-api-call-logger';
 
 const tokenResponseSchema = z.object({
   access_token: z.string().min(1),
@@ -29,14 +31,43 @@ async function requestAccessToken(): Promise<string> {
     grant_type: 'refresh_token',
   });
 
-  const response = await fetch(`${config.accountsBaseUrl}/oauth/v2/token`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body,
-    signal: AbortSignal.timeout(TOKEN_REQUEST_TIMEOUT_MS),
-  });
+  const startedAt = Date.now();
+  let response: Response;
+
+  try {
+    response = await fetch(`${config.accountsBaseUrl}/oauth/v2/token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body,
+      signal: AbortSignal.timeout(TOKEN_REQUEST_TIMEOUT_MS),
+    });
+  } catch (error) {
+    const durationMs = Date.now() - startedAt;
+    const isTimeout = error instanceof DOMException && error.name === 'TimeoutError';
+    logIntegrationApiCall({
+      source: INTEGRATION_SOURCE_ZOHO,
+      method: 'POST',
+      path: '/oauth/v2/token',
+      durationMs,
+      success: false,
+      errorCode: isTimeout ? 'TIMEOUT' : 'FETCH_ERROR',
+      responsePreview: error instanceof Error ? error.message : 'unknown',
+    });
+    throw error;
+  }
 
   if (!response.ok) {
+    const durationMs = Date.now() - startedAt;
+    logIntegrationApiCall({
+      source: INTEGRATION_SOURCE_ZOHO,
+      method: 'POST',
+      path: '/oauth/v2/token',
+      httpStatus: response.status,
+      durationMs,
+      success: false,
+      errorCode: 'HTTP_ERROR',
+      responsePreview: `[HTTP ${response.status}] token refresh failed`,
+    });
     throw new Error(`Zoho OAuth token request failed with HTTP status ${response.status}`);
   }
 
@@ -44,8 +75,30 @@ async function requestAccessToken(): Promise<string> {
   const parsed = tokenResponseSchema.safeParse(json);
 
   if (!parsed.success) {
+    const durationMs = Date.now() - startedAt;
+    logIntegrationApiCall({
+      source: INTEGRATION_SOURCE_ZOHO,
+      method: 'POST',
+      path: '/oauth/v2/token',
+      httpStatus: response.status,
+      durationMs,
+      success: false,
+      errorCode: 'INVALID_TOKEN_RESPONSE',
+      responsePreview: 'token response missing access_token or expires_in',
+    });
     throw new Error('Zoho OAuth token response did not contain a valid access token');
   }
+
+  const durationMs = Date.now() - startedAt;
+  logIntegrationApiCall({
+    source: INTEGRATION_SOURCE_ZOHO,
+    method: 'POST',
+    path: '/oauth/v2/token',
+    httpStatus: response.status,
+    durationMs,
+    success: true,
+    responsePreview: `[token refreshed, expires in ${parsed.data.expires_in}s]`,
+  });
 
   tokenCache = {
     accessToken: parsed.data.access_token,

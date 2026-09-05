@@ -3,13 +3,14 @@ import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { ZohoApiError } from './client';
 import { getSalesOrder, listSalesOrders } from './sales-orders';
+import {
+  INTEGRATION_SOURCE_ZOHO,
+  getIntegrationSettings,
+  type ZohoSettings,
+} from '../integration-config-service';
 
 export const SOURCE = 'zoho';
 export const ENTITY_TYPE = 'sales_order';
-const PER_PAGE = 200;
-
-/** Defensive upper bound so a broken pagination contract can never loop forever. */
-const MAX_PAGES = 200;
 
 export const SYNC_STATUS = {
   RUNNING: 'RUNNING',
@@ -70,15 +71,19 @@ export interface SyncSalesOrdersResult {
 
 const SYNC_LOCK_KEY = '__unikZohoSalesOrdersSyncLock' as const;
 
-/** Max time to wait for a single Prisma/DB call before treating it as hung. */
-const PRISMA_TIMEOUT_MS = 15_000;
+/**
+ * Prisma timeout for the current sync execution. Set from IntegrationConfig
+ * at the start of each sync run. Defaults to 15s if no config is loaded yet
+ * (e.g. in tests).
+ */
+let currentPrismaTimeoutMs = 15_000;
 
 /**
  * Wraps a promise in a timeout so a stalled DB or network call can never
  * hang the sync pipeline forever. The underlying promise keeps running in
  * the background — the caller simply stops waiting for it.
  */
-function withTimeout<T>(promise: Promise<T>, ms: number = PRISMA_TIMEOUT_MS): Promise<T> {
+function withTimeout<T>(promise: Promise<T>, ms: number = currentPrismaTimeoutMs): Promise<T> {
   const timeout = new Promise<T>((_, reject) =>
     setTimeout(() => reject(new Error(`Operation timed out after ${ms}ms`)), ms)
   );
@@ -160,21 +165,33 @@ interface ScanOutcome {
 }
 
 /**
+ * Parameters read from IntegrationConfig at the start of a sync run.
+ * Passed through to scan and detail-fetch functions so they respect the
+ * admin-configured values instead of hardcoded constants.
+ */
+interface SyncParams {
+  perPage: number;
+  maxPages: number;
+  quickScanPages: number;
+  recentThresholdMs: number;
+}
+
+/**
  * Walks every Sales Orders page and records only the summarized state.
  * Never fetches details and never stores snapshots.
  */
-async function scanAllPages(): Promise<ScanOutcome> {
+async function scanAllPages(params: SyncParams): Promise<ScanOutcome> {
   let pagesScanned = 0;
   let recordsSeen = 0;
   let apiCalls = 0;
   let page = 1;
 
   for (;;) {
-    if (page > MAX_PAGES) {
+    if (page > params.maxPages) {
       throw new SyncPageLimitError();
     }
 
-    const rawPage = await listSalesOrders({ page, perPage: PER_PAGE });
+    const rawPage = await listSalesOrders({ page, perPage: params.perPage });
     apiCalls += 1;
 
     const parsed = salesOrdersListSchema.safeParse(rawPage);
@@ -211,10 +228,8 @@ async function scanAllPages(): Promise<ScanOutcome> {
  * the most recently modified records appear on page 1 regardless of Zoho's
  * default sort behavior.
  */
-const QUICK_SCAN_PAGES = 2;
 
 /** Records whose last_modified_time is within this window are "recent". */
-const RECENT_THRESHOLD_MS = 24 * 60 * 60 * 1000;
 
 interface PageScanResult {
   recordsSeen: number;
@@ -222,8 +237,8 @@ interface PageScanResult {
   hasMore: boolean;
 }
 
-function isRecent(newest: Date | null, now: number): boolean {
-  return newest !== null && now - newest.getTime() < RECENT_THRESHOLD_MS;
+function isRecent(newest: Date | null, now: number, thresholdMs: number): boolean {
+  return newest !== null && now - newest.getTime() < thresholdMs;
 }
 
 /**
@@ -231,8 +246,12 @@ function isRecent(newest: Date | null, now: number): boolean {
  * Returns the newest remoteModifiedAt found on the page so the caller can
  * decide whether the ordering is correct.
  */
-async function scanSinglePage(page: number, sorted: boolean): Promise<PageScanResult> {
-  const opts: Parameters<typeof listSalesOrders>[0] = { page, perPage: PER_PAGE };
+async function scanSinglePage(
+  page: number,
+  sorted: boolean,
+  perPage: number
+): Promise<PageScanResult> {
+  const opts: Parameters<typeof listSalesOrders>[0] = { page, perPage };
   if (sorted) {
     opts.sortColumn = 'last_modified_time';
     opts.sortOrder = 'D';
@@ -270,9 +289,9 @@ async function scanSinglePage(page: number, sorted: boolean): Promise<PageScanRe
  *      the end. Uses IntegrationEntityState count to estimate the last page.
  *
  * The scan stops early as soon as a page contains at least one record whose
- * `remoteModifiedAt` is within RECENT_THRESHOLD_MS.
+ * `remoteModifiedAt` is within recentThresholdMs.
  */
-async function scanRecentPages(): Promise<ScanOutcome> {
+async function scanRecentPages(params: SyncParams): Promise<ScanOutcome> {
   let pagesScanned = 0;
   let recordsSeen = 0;
   let apiCalls = 0;
@@ -282,7 +301,7 @@ async function scanRecentPages(): Promise<ScanOutcome> {
   /** Scan one page and accumulate counters. Returns null on tolerated failure. */
   const tryPage = async (page: number, sorted: boolean): Promise<PageScanResult | null> => {
     try {
-      const r = await scanSinglePage(page, sorted);
+      const r = await scanSinglePage(page, sorted, params.perPage);
       apiCalls += 1;
       pagesScanned += 1;
       recordsSeen += r.recordsSeen;
@@ -318,19 +337,19 @@ async function scanRecentPages(): Promise<ScanOutcome> {
   };
 
   // ── Pass 1: sorted by last_modified_time desc ────────────────────────
-  for (let page = 1; page <= QUICK_SCAN_PAGES; page++) {
+  for (let page = 1; page <= params.quickScanPages; page++) {
     const r = await tryPage(page, true);
     if (!r) break;
-    if (isRecent(r.newestRemoteModifiedAt, now)) foundRecent = true;
+    if (isRecent(r.newestRemoteModifiedAt, now, params.recentThresholdMs)) foundRecent = true;
     if (!r.hasMore) break;
   }
   if (foundRecent) return { pagesScanned, recordsSeen, apiCalls };
 
   // ── Pass 2: unsorted — Zoho default order ────────────────────────────
-  for (let page = 1; page <= QUICK_SCAN_PAGES; page++) {
+  for (let page = 1; page <= params.quickScanPages; page++) {
     const r = await tryPage(page, false);
     if (!r) break;
-    if (isRecent(r.newestRemoteModifiedAt, now)) foundRecent = true;
+    if (isRecent(r.newestRemoteModifiedAt, now, params.recentThresholdMs)) foundRecent = true;
     if (!r.hasMore) break;
   }
   if (foundRecent) return { pagesScanned, recordsSeen, apiCalls };
@@ -339,13 +358,13 @@ async function scanRecentPages(): Promise<ScanOutcome> {
   const totalEntities = await prisma.integrationEntityState.count({
     where: { source: SOURCE, entityType: ENTITY_TYPE },
   });
-  const lastPage = Math.max(1, Math.ceil(totalEntities / PER_PAGE));
-  const startPage = Math.max(1, lastPage - QUICK_SCAN_PAGES + 1);
+  const lastPage = Math.max(1, Math.ceil(totalEntities / params.perPage));
+  const startPage = Math.max(1, lastPage - params.quickScanPages + 1);
 
   for (let page = lastPage; page >= startPage; page--) {
     const r = await tryPage(page, false);
     if (!r) break;
-    if (isRecent(r.newestRemoteModifiedAt, now)) break;
+    if (isRecent(r.newestRemoteModifiedAt, now, params.recentThresholdMs)) break;
   }
 
   return { pagesScanned, recordsSeen, apiCalls };
@@ -499,14 +518,19 @@ function resolveErrorCode(error: unknown): string {
 }
 
 /**
- * Maximum wall-clock time a sync may run before being forced FAILED.
+ * Resolves the wall-clock timeout for a sync mode from the loaded settings.
  * Quick sync gets a shorter timeout because it scans fewer pages.
  */
-const BACKGROUND_SYNC_TIMEOUT_MS: Record<SyncMode, number> = {
-  quick: 3 * 60 * 1000,
-  scan: 5 * 60 * 1000,
-  sync: 15 * 60 * 1000,
-};
+function getSyncTimeoutMs(settings: ZohoSettings, mode: SyncMode): number {
+  switch (mode) {
+    case 'quick':
+      return settings.quickSyncTimeoutMs;
+    case 'scan':
+      return settings.scanSyncTimeoutMs;
+    case 'sync':
+      return settings.fullSyncTimeoutMs;
+  }
+}
 
 /**
  * Runs one controlled Sales Orders synchronization.
@@ -527,6 +551,17 @@ export async function syncSalesOrders(
     throw new SyncAlreadyRunningError();
   }
 
+  // Load live configuration from IntegrationConfig (with defaults fallback).
+  const settings = await getIntegrationSettings(INTEGRATION_SOURCE_ZOHO);
+  currentPrismaTimeoutMs = settings.prismaTimeoutMs;
+
+  const params: SyncParams = {
+    perPage: settings.perPage,
+    maxPages: settings.maxPages,
+    quickScanPages: settings.quickScanPages,
+    recentThresholdMs: settings.recentThresholdMs,
+  };
+
   lock.inProgress = true;
   const startedAt = new Date();
   let run: { id: string } | null = null;
@@ -534,7 +569,7 @@ export async function syncSalesOrders(
 
   // Hard wall-clock limit — if the sync exceeds it the run is marked FAILED
   // and the lock released so the next sync can start.
-  const timeoutMs = BACKGROUND_SYNC_TIMEOUT_MS[mode];
+  const timeoutMs = getSyncTimeoutMs(settings, mode);
   const timeoutId = setTimeout(() => {
     timedOut = true;
     console.error(
@@ -557,7 +592,8 @@ export async function syncSalesOrders(
                 completedAt: new Date(),
                 errorCode: SYNC_ERROR_CODE.UNEXPECTED_ERROR,
               },
-            })
+            }),
+            settings.prismaTimeoutMs
           );
         } catch {
           // Best-effort — stale detection cleans up on next poll.
@@ -579,7 +615,7 @@ export async function syncSalesOrders(
       })
     );
 
-    const scan = mode === 'quick' ? await scanRecentPages() : await scanAllPages();
+    const scan = mode === 'quick' ? await scanRecentPages(params) : await scanAllPages(params);
 
     // Both 'quick' and 'sync' fetch pending details — 'quick' only scans
     // recent pages while 'sync' walks all pages. 'scan' never fetches.
@@ -700,7 +736,7 @@ export async function syncSalesOrders(
 // ---------------------------------------------------------------------------
 
 /** Maximum time a RUNNING sync run may stay active before being considered stale. */
-const STALE_RUN_THRESHOLD_MS = 10 * 60 * 1000;
+const DEFAULT_STALE_RUN_THRESHOLD_MS = 10 * 60 * 1000;
 
 export interface SyncRunStatus {
   runId: string;
@@ -749,11 +785,19 @@ export async function getLatestSyncRun(): Promise<SyncRunStatus | null> {
 
 /**
  * Returns the currently RUNNING sync run if one exists, or null.
- * Also marks stale RUNNING runs (older than STALE_RUN_THRESHOLD_MS) as FAILED
- * so a crashed process does not permanently block new syncs.
+ * Also marks stale RUNNING runs (older than staleRunThresholdMs from config)
+ * as FAILED so a crashed process does not permanently block new syncs.
  */
 export async function getActiveSyncRun(now: Date = new Date()): Promise<SyncRunStatus | null> {
-  const staleCutoff = new Date(now.getTime() - STALE_RUN_THRESHOLD_MS);
+  let staleThresholdMs = DEFAULT_STALE_RUN_THRESHOLD_MS;
+  try {
+    const settings = await getIntegrationSettings(INTEGRATION_SOURCE_ZOHO);
+    staleThresholdMs = settings.staleRunThresholdMs;
+  } catch {
+    // Fall back to default if config can't be loaded.
+  }
+
+  const staleCutoff = new Date(now.getTime() - staleThresholdMs);
 
   // Mark stale RUNNING runs as FAILED. This handles the case where a process
   // crashed mid-sync and the in-memory lock was lost.
@@ -885,7 +929,19 @@ async function runSyncInBackground(
   startedAt: Date
 ): Promise<void> {
   const lock = getSyncLock();
-  const timeoutMs = BACKGROUND_SYNC_TIMEOUT_MS[mode];
+
+  // Load live configuration from IntegrationConfig.
+  const settings = await getIntegrationSettings(INTEGRATION_SOURCE_ZOHO);
+  currentPrismaTimeoutMs = settings.prismaTimeoutMs;
+
+  const params: SyncParams = {
+    perPage: settings.perPage,
+    maxPages: settings.maxPages,
+    quickScanPages: settings.quickScanPages,
+    recentThresholdMs: settings.recentThresholdMs,
+  };
+
+  const timeoutMs = getSyncTimeoutMs(settings, mode);
   let timedOut = false;
 
   // Enforce a hard wall-clock limit. If the sync exceeds it the run is
@@ -913,7 +969,8 @@ async function runSyncInBackground(
               completedAt: new Date(),
               errorCode: SYNC_ERROR_CODE.UNEXPECTED_ERROR,
             },
-          })
+          }),
+          settings.prismaTimeoutMs
         );
       } catch {
         // Best-effort: if we can't write to DB the stale-detection sweep
@@ -927,7 +984,7 @@ async function runSyncInBackground(
       JSON.stringify({ event: 'zoho.sales_orders.sync.background_started', runId, mode })
     );
 
-    const scan = mode === 'quick' ? await scanRecentPages() : await scanAllPages();
+    const scan = mode === 'quick' ? await scanRecentPages(params) : await scanAllPages(params);
 
     console.info(
       JSON.stringify({

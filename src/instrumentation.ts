@@ -10,5 +10,5 @@ export async function register() {
   const { startSalesOrdersScheduler } =
     await import('@/modules/integrations/zoho/sales-orders-scheduler');
 
-  startSalesOrdersScheduler();
+  void startSalesOrdersScheduler();
 }

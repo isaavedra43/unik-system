@@ -7,36 +7,24 @@ import {
   SyncFailedError,
   syncSalesOrders,
 } from './sales-orders-sync';
+import {
+  INTEGRATION_SOURCE_ZOHO,
+  getIntegrationSettings,
+  isIntegrationEnabled,
+} from '../integration-config-service';
 
 /**
  * Internal scheduler for Zoho Sales Orders.
  *
  * It runs inside the persistent web service (no external cron service). The
  * frequent tick only reads PostgreSQL; Zoho is contacted at most once per
- * SYNC_INTERVAL_MS. IntegrationSyncRun is the durable source of truth, so a
+ * syncIntervalMs. IntegrationSyncRun is the durable source of truth, so a
  * restart never resets the schedule.
  *
- * API budget with the current volume (~115 pages per scan):
- *   115 calls x 24 runs/day  ~= 2,760 calls/day
- *   + up to 50 detail fetches x 24 ~= 1,200 calls/day
- *   ~= 3,960 calls/day against a 5,000/day quota.
- * If pagesScanned grows significantly, SYNC_INTERVAL_MS must be recalculated.
+ * All tuning parameters (intervals, timeouts, max detail fetches) are read
+ * from the IntegrationConfig table and can be changed live from the admin UI
+ * without restarting the service.
  */
-
-/** Zoho is polled at most once per hour. */
-const SYNC_INTERVAL_MS = 60 * 60 * 1000;
-
-/** Local PostgreSQL check cadence. Does NOT consume Zoho API calls. */
-const CHECK_INTERVAL_MS = 5 * 60 * 1000;
-
-/** Grace period so Next.js and Railway finish booting before the first check. */
-const STARTUP_DELAY_MS = 30 * 1000;
-
-/** Detail downloads per scheduled run. Higher than quick sync to drain backlog. */
-const SCHEDULER_MAX_DETAIL_FETCHES = 100;
-
-/** After a FAILED sync, wait this long before trying again to preserve API quota. */
-const FAILED_RETRY_COOLDOWN_MS = 30 * 60 * 1000;
 
 const SCHEDULER_STATE_KEY = '__unikZohoSalesOrdersSchedulerState' as const;
 
@@ -64,11 +52,6 @@ function log(payload: Record<string, unknown>) {
   console.info(JSON.stringify(payload));
 }
 
-/** Opt-in only. Never enabled implicitly by NODE_ENV. */
-export function isSchedulerEnabled(): boolean {
-  return process.env.ZOHO_SALES_ORDERS_SCHEDULER_ENABLED === 'true';
-}
-
 /** `next build` must never contact Zoho or start timers. */
 function isBuildPhase(): boolean {
   return process.env.NEXT_PHASE === 'phase-production-build';
@@ -76,10 +59,12 @@ function isBuildPhase(): boolean {
 
 /**
  * A sync is due when there is no successful sync yet, or when the most recent
- * one is older than SYNC_INTERVAL_MS. Only `mode = 'sync'` runs count: baseline
+ * one is older than syncIntervalMs. Only `mode = 'sync'` runs count: baseline
  * and scan runs do not download details and must not postpone a real sync.
  */
 export async function isSyncDue(now: Date = new Date()): Promise<boolean> {
+  const settings = await getIntegrationSettings(INTEGRATION_SOURCE_ZOHO);
+
   const lastCompletedSync = await prisma.integrationSyncRun.findFirst({
     where: {
       source: SOURCE,
@@ -95,16 +80,18 @@ export async function isSyncDue(now: Date = new Date()): Promise<boolean> {
     return true;
   }
 
-  return now.getTime() - lastCompletedSync.completedAt.getTime() >= SYNC_INTERVAL_MS;
+  return now.getTime() - lastCompletedSync.completedAt.getTime() >= settings.syncIntervalMs;
 }
 
 /**
- * Prevents retry storms. A recent FAILED sync (within FAILED_RETRY_COOLDOWN_MS)
- * blocks a new attempt even when the normal 60-minute interval has passed.
+ * Prevents retry storms. A recent FAILED sync (within failedRetryCooldownMs)
+ * blocks a new attempt even when the normal interval has passed.
  * The lock in memory already prevents RUNNING overlap, so this is purely a
  * post-failure cooldown.
  */
 export async function isSyncCoolingDown(now: Date = new Date()): Promise<boolean> {
+  const settings = await getIntegrationSettings(INTEGRATION_SOURCE_ZOHO);
+
   const lastFailedSync = await prisma.integrationSyncRun.findFirst({
     where: {
       source: SOURCE,
@@ -120,7 +107,7 @@ export async function isSyncCoolingDown(now: Date = new Date()): Promise<boolean
     return false;
   }
 
-  return now.getTime() - lastFailedSync.startedAt.getTime() < FAILED_RETRY_COOLDOWN_MS;
+  return now.getTime() - lastFailedSync.startedAt.getTime() < settings.failedRetryCooldownMs;
 }
 
 /**
@@ -130,7 +117,7 @@ export async function isSyncCoolingDown(now: Date = new Date()): Promise<boolean
 export async function runSchedulerCheck(): Promise<void> {
   const state = getSchedulerState();
 
-  if (!isSchedulerEnabled() || state.tickInProgress) {
+  if (!(await isIntegrationEnabled(INTEGRATION_SOURCE_ZOHO)) || state.tickInProgress) {
     return;
   }
 
@@ -151,12 +138,13 @@ export async function runSchedulerCheck(): Promise<void> {
 
     log({ event: 'zoho.sales_orders.scheduler.due' });
     const startedAt = Date.now();
+    const settings = await getIntegrationSettings(INTEGRATION_SOURCE_ZOHO);
 
     log({ event: 'zoho.sales_orders.scheduler.sync_started' });
 
     const result = await syncSalesOrders({
       mode: 'sync',
-      maxDetailFetches: SCHEDULER_MAX_DETAIL_FETCHES,
+      maxDetailFetches: settings.schedulerMaxDetailFetches,
     });
 
     log({
@@ -192,8 +180,11 @@ export async function runSchedulerCheck(): Promise<void> {
 /**
  * Starts the scheduler loop once per process. Safe to call multiple times and
  * never throws, so a scheduler problem can never break server startup.
+ *
+ * The check interval is read from IntegrationConfig once at startup. To change
+ * it live, restart the process after updating the config from the admin UI.
  */
-export function startSalesOrdersScheduler(): void {
+export async function startSalesOrdersScheduler(): Promise<void> {
   const state = getSchedulerState();
 
   if (state.started) {
@@ -204,10 +195,13 @@ export function startSalesOrdersScheduler(): void {
     return;
   }
 
-  if (!isSchedulerEnabled()) {
+  const enabled = await isIntegrationEnabled(INTEGRATION_SOURCE_ZOHO);
+  if (!enabled) {
     log({ event: 'zoho.sales_orders.scheduler.disabled' });
     return;
   }
+
+  const settings = await getIntegrationSettings(INTEGRATION_SOURCE_ZOHO);
 
   state.started = true;
 
@@ -217,14 +211,14 @@ export function startSalesOrdersScheduler(): void {
 
   setTimeout(() => {
     tick();
-    setInterval(tick, CHECK_INTERVAL_MS);
-  }, STARTUP_DELAY_MS);
+    setInterval(tick, settings.checkIntervalMs);
+  }, settings.startupDelayMs);
 
   log({
     event: 'zoho.sales_orders.scheduler.started',
-    startupDelayMs: STARTUP_DELAY_MS,
-    checkIntervalMs: CHECK_INTERVAL_MS,
-    syncIntervalMs: SYNC_INTERVAL_MS,
-    maxDetailFetches: SCHEDULER_MAX_DETAIL_FETCHES,
+    startupDelayMs: settings.startupDelayMs,
+    checkIntervalMs: settings.checkIntervalMs,
+    syncIntervalMs: settings.syncIntervalMs,
+    maxDetailFetches: settings.schedulerMaxDetailFetches,
   });
 }
