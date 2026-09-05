@@ -195,39 +195,126 @@ async function scanAllPages(): Promise<ScanOutcome> {
  */
 const QUICK_SCAN_PAGES = 3;
 
+/** Records whose last_modified_time is within this window are "recent". */
+const RECENT_THRESHOLD_MS = 24 * 60 * 60 * 1000;
+
+interface PageScanResult {
+  recordsSeen: number;
+  newestRemoteModifiedAt: Date | null;
+  hasMore: boolean;
+}
+
+function isRecent(newest: Date | null, now: number): boolean {
+  return newest !== null && now - newest.getTime() < RECENT_THRESHOLD_MS;
+}
+
+/**
+ * Scans a single page of Sales Orders, optionally with sort params.
+ * Returns the newest remoteModifiedAt found on the page so the caller can
+ * decide whether the ordering is correct.
+ */
+async function scanSinglePage(page: number, sorted: boolean): Promise<PageScanResult> {
+  const opts: Parameters<typeof listSalesOrders>[0] = { page, perPage: PER_PAGE };
+  if (sorted) {
+    opts.sortColumn = 'last_modified_time';
+    opts.sortOrder = 'D';
+  }
+
+  const rawPage = await listSalesOrders(opts);
+  const parsed = salesOrdersListSchema.safeParse(rawPage);
+  if (!parsed.success) {
+    throw new SyncInvalidListError();
+  }
+
+  let newest: Date | null = null;
+  for (const summary of parsed.data.salesorders) {
+    await recordSummary(summary.salesorder_id, summary.last_modified_time);
+    if (!newest || summary.last_modified_time.getTime() > newest.getTime()) {
+      newest = summary.last_modified_time;
+    }
+  }
+
+  return {
+    recordsSeen: parsed.data.salesorders.length,
+    newestRemoteModifiedAt: newest,
+    hasMore: parsed.data.page_context?.has_more_page ?? false,
+  };
+}
+
+/**
+ * Quick scan: discovers recently created/modified Sales Orders without
+ * walking all 116+ pages.
+ *
+ * Three passes in order:
+ *   1. Sorted by last_modified_time desc (Zoho `sort_order=D`).
+ *   2. Unsorted — Zoho default order.
+ *   3. Last pages — if the list is ascending, the newest records are at
+ *      the end. Uses IntegrationEntityState count to estimate the last page.
+ *
+ * The scan stops early as soon as a page contains at least one record whose
+ * `remoteModifiedAt` is within RECENT_THRESHOLD_MS.
+ */
 async function scanRecentPages(): Promise<ScanOutcome> {
   let pagesScanned = 0;
   let recordsSeen = 0;
   let apiCalls = 0;
+  const now = Date.now();
+  let foundRecent = false;
 
-  for (let page = 1; page <= QUICK_SCAN_PAGES; page++) {
-    const rawPage = await listSalesOrders({
-      page,
-      perPage: PER_PAGE,
-      sortColumn: 'last_modified_time',
-      sortOrder: 'descending',
-    });
-    apiCalls += 1;
-
-    const parsed = salesOrdersListSchema.safeParse(rawPage);
-    if (!parsed.success) {
-      // If the first page fails, propagate; if later pages fail, stop gracefully.
-      if (page === 1) {
-        throw new SyncInvalidListError();
+  /** Scan one page and accumulate counters. Returns null on tolerated failure. */
+  const tryPage = async (page: number, sorted: boolean): Promise<PageScanResult | null> => {
+    try {
+      const r = await scanSinglePage(page, sorted);
+      apiCalls += 1;
+      pagesScanned += 1;
+      recordsSeen += r.recordsSeen;
+      return r;
+    } catch (error) {
+      apiCalls += 1;
+      if (error instanceof ZohoApiError || error instanceof SyncInvalidListError) {
+        console.warn(
+          JSON.stringify({
+            event: 'zoho.sales_orders.quick_scan.page_failed',
+            page,
+            sorted,
+            reason: error instanceof ZohoApiError ? 'zoho_api_error' : 'invalid_list',
+          })
+        );
+        return null;
       }
-      break;
+      throw error;
     }
+  };
 
-    pagesScanned += 1;
+  // ── Pass 1: sorted by last_modified_time desc ────────────────────────
+  for (let page = 1; page <= QUICK_SCAN_PAGES; page++) {
+    const r = await tryPage(page, true);
+    if (!r) break;
+    if (isRecent(r.newestRemoteModifiedAt, now)) foundRecent = true;
+    if (!r.hasMore) break;
+  }
+  if (foundRecent) return { pagesScanned, recordsSeen, apiCalls };
 
-    for (const summary of parsed.data.salesorders) {
-      await recordSummary(summary.salesorder_id, summary.last_modified_time);
-      recordsSeen += 1;
-    }
+  // ── Pass 2: unsorted — Zoho default order ────────────────────────────
+  for (let page = 1; page <= QUICK_SCAN_PAGES; page++) {
+    const r = await tryPage(page, false);
+    if (!r) break;
+    if (isRecent(r.newestRemoteModifiedAt, now)) foundRecent = true;
+    if (!r.hasMore) break;
+  }
+  if (foundRecent) return { pagesScanned, recordsSeen, apiCalls };
 
-    if (!parsed.data.page_context?.has_more_page) {
-      break;
-    }
+  // ── Pass 3: last pages — ascending order fallback ────────────────────
+  const totalEntities = await prisma.integrationEntityState.count({
+    where: { source: SOURCE, entityType: ENTITY_TYPE },
+  });
+  const lastPage = Math.max(1, Math.ceil(totalEntities / PER_PAGE));
+  const startPage = Math.max(1, lastPage - QUICK_SCAN_PAGES + 1);
+
+  for (let page = lastPage; page >= startPage; page--) {
+    const r = await tryPage(page, false);
+    if (!r) break;
+    if (isRecent(r.newestRemoteModifiedAt, now)) break;
   }
 
   return { pagesScanned, recordsSeen, apiCalls };
@@ -666,6 +753,23 @@ async function runSyncInBackground(
       where: { source: SOURCE, entityType: ENTITY_TYPE, needsSync: true },
     });
 
+    // Normalize snapshots → SalesOrder BEFORE marking the run as COMPLETED.
+    // This ensures the UI does not refresh data before the normalized rows
+    // are actually visible.
+    try {
+      const { normalizePendingSalesOrderSnapshots } =
+        await import('@/modules/sales/sales-orders-normalizer');
+      await normalizePendingSalesOrderSnapshots({ limit: 100 });
+    } catch (error) {
+      console.error(
+        JSON.stringify({
+          event: 'zoho.sales_orders.sync.background_normalization_failed',
+          runId,
+          error: error instanceof Error ? error.message : 'unknown',
+        })
+      );
+    }
+
     const completedAt = new Date();
 
     await prisma.integrationSyncRun.update({
@@ -697,21 +801,6 @@ async function runSyncInBackground(
         background: true,
       })
     );
-
-    // Normalize after a successful background sync.
-    try {
-      const { normalizePendingSalesOrderSnapshots } =
-        await import('@/modules/sales/sales-orders-normalizer');
-      await normalizePendingSalesOrderSnapshots({ limit: 100 });
-    } catch (error) {
-      console.error(
-        JSON.stringify({
-          event: 'zoho.sales_orders.sync.background_normalization_failed',
-          runId,
-          error: error instanceof Error ? error.message : 'unknown',
-        })
-      );
-    }
   } catch (error) {
     const errorCode = resolveErrorCode(error);
     const completedAt = new Date();

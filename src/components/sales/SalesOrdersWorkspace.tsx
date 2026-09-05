@@ -973,6 +973,14 @@ export function SalesOrdersWorkspace({
             clearInterval(syncPollRef.current);
             syncPollRef.current = null;
           }
+          const latest = status.latest_run;
+          if (latest?.status === 'FAILED') {
+            toast.error('La sincronización falló. Intenta de nuevo más tarde.');
+          } else if (latest?.status === 'COMPLETED') {
+            toast.success(
+              `Sincronización completada: ${latest.details_fetched ?? 0} órdenes actualizadas`
+            );
+          }
           fetchData(query);
           router.refresh();
         }
@@ -1001,7 +1009,24 @@ export function SalesOrdersWorkspace({
         } else {
           toast.success('Sincronización iniciada');
         }
-        await fetchSyncStatus();
+        const status = await fetchSyncStatus();
+        // Edge case: the sync may have already completed or failed before the
+        // first poll interval fires (e.g., instant ZohoApiError). Show feedback
+        // and refresh data so the user is not left without information.
+        if (status && !status.active_run && status.latest_run) {
+          const latest = status.latest_run;
+          const startedAt = new Date(latest.started_at);
+          const isRecent = Date.now() - startedAt.getTime() < 60_000;
+          if (isRecent && latest.status === 'FAILED') {
+            toast.error('La sincronización falló. Intenta de nuevo más tarde.');
+          } else if (isRecent && latest.status === 'COMPLETED') {
+            toast.success(
+              `Sincronización completada: ${latest.details_fetched ?? 0} órdenes actualizadas`
+            );
+            fetchData(query);
+            router.refresh();
+          }
+        }
       } else if (res.status === 409) {
         toast.info('Ya hay una sincronización en curso');
         await fetchSyncStatus();
@@ -1013,7 +1038,8 @@ export function SalesOrdersWorkspace({
     } finally {
       setSyncTriggering(false);
     }
-  }, [syncTriggering, fetchSyncStatus]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [syncTriggering, fetchSyncStatus, fetchData, query, router]);
 
   // Sync: format last sync time for display
   const lastSyncLabel = useMemo(() => {

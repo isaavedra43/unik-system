@@ -326,15 +326,15 @@ describe('Zoho Sales Orders sync pipeline', () => {
       let pagesCalled = 0;
       const seenIds: string[] = [];
 
-      mockListSalesOrders.mockImplementation((opts?: { page?: number }) => {
+      mockListSalesOrders.mockImplementation((opts?: { page?: number; sortColumn?: string }) => {
         pagesCalled++;
         const page = opts?.page ?? 1;
         if (page === 1) {
           return Promise.resolve(
             makeZohoListResponse(
               [
-                { id: '23239', modifiedAt: '2026-09-04T12:00:00Z' },
-                { id: '23238', modifiedAt: '2026-09-04T11:00:00Z' },
+                { id: '23239', modifiedAt: new Date().toISOString() },
+                { id: '23238', modifiedAt: new Date(Date.now() - 3600_000).toISOString() },
               ],
               true
             )
@@ -342,7 +342,10 @@ describe('Zoho Sales Orders sync pipeline', () => {
         }
         if (page === 2) {
           return Promise.resolve(
-            makeZohoListResponse([{ id: '23237', modifiedAt: '2026-09-04T10:00:00Z' }], false)
+            makeZohoListResponse(
+              [{ id: '23237', modifiedAt: new Date(Date.now() - 7200_000).toISOString() }],
+              false
+            )
           );
         }
         return Promise.resolve(makeZohoListResponse([], false));
@@ -366,14 +369,14 @@ describe('Zoho Sales Orders sync pipeline', () => {
 
       const result = await syncSalesOrders({ mode: 'quick', maxDetailFetches: 50 });
 
-      // Quick scan should stop after 2 pages (has_more_page=false on page 2).
+      // Sorted pass finds recent records on page 1, continues to page 2.
       expect(pagesCalled).toBe(2);
       expect(result.pagesScanned).toBe(2);
       expect(result.recordsSeen).toBe(3);
       expect(seenIds).toContain('23239');
     });
 
-    it('quick sync passes sortColumn=last_modified_time to Zoho', async () => {
+    it('quick sync passes sortColumn=last_modified_time and sortOrder=D to Zoho', async () => {
       let capturedQuery: Record<string, string> | undefined;
       mockListSalesOrders.mockImplementation(
         (opts?: { page?: number; sortColumn?: string; sortOrder?: string }) => {
@@ -381,9 +384,14 @@ describe('Zoho Sales Orders sync pipeline', () => {
             sortColumn: opts?.sortColumn ?? '',
             sortOrder: opts?.sortOrder ?? '',
           };
-          return Promise.resolve(makeZohoListResponse([], false));
+          // Return a recent record so Pass 1 finds something and stops.
+          return Promise.resolve(
+            makeZohoListResponse([{ id: '999', modifiedAt: new Date().toISOString() }], false)
+          );
         }
       );
+      mockPrismaClient.integrationEntityState.findUnique.mockResolvedValue(null);
+      mockPrismaClient.integrationEntityState.create.mockResolvedValue({ id: 'ent-999' });
       mockPrismaClient.integrationEntityState.findMany.mockResolvedValue([]);
       mockPrismaClient.integrationEntityState.count.mockResolvedValue(0);
       mockPrismaClient.integrationSyncRun.create.mockResolvedValue({ id: 'run-1' });
@@ -394,7 +402,82 @@ describe('Zoho Sales Orders sync pipeline', () => {
       await syncSalesOrders({ mode: 'quick' });
 
       expect(capturedQuery?.sortColumn).toBe('last_modified_time');
-      expect(capturedQuery?.sortOrder).toBe('descending');
+      expect(capturedQuery?.sortOrder).toBe('D');
+    });
+
+    it('quick sync falls back to unsorted scan if sorted scan fails with ZohoApiError', async () => {
+      const { ZohoApiError } = await import('@/modules/integrations/zoho/client');
+      let calls = 0;
+      mockListSalesOrders.mockImplementation((opts?: { page?: number; sortColumn?: string }) => {
+        calls++;
+        if (opts?.sortColumn) {
+          // Simulate Zoho rejecting the sort params.
+          return Promise.reject(new ZohoApiError('Invalid sort_order', 'GET /salesorders', 400));
+        }
+        return Promise.resolve(
+          makeZohoListResponse([{ id: '999', modifiedAt: new Date().toISOString() }], false)
+        );
+      });
+      mockPrismaClient.integrationEntityState.findUnique.mockResolvedValue(null);
+      mockPrismaClient.integrationEntityState.create.mockResolvedValue({ id: 'ent-999' });
+      mockPrismaClient.integrationEntityState.findMany.mockResolvedValue([]);
+      mockPrismaClient.integrationEntityState.count.mockResolvedValue(0);
+      mockPrismaClient.integrationSyncRun.create.mockResolvedValue({ id: 'run-1' });
+      mockPrismaClient.integrationSyncRun.update.mockResolvedValue({});
+
+      const { syncSalesOrders } = await import('@/modules/integrations/zoho/sales-orders-sync');
+
+      const result = await syncSalesOrders({ mode: 'quick' });
+
+      // Pass 1: sorted page 1 fails → break. Pass 2: unsorted page 1 succeeds, recent found.
+      expect(calls).toBe(2);
+      expect(result.recordsSeen).toBe(1);
+    });
+
+    it('quick sync scans last pages when first pages have only old records', async () => {
+      const oldDate = '2020-01-01T00:00:00Z';
+      let calls = 0;
+
+      mockListSalesOrders.mockImplementation((opts?: { page?: number; sortColumn?: string }) => {
+        calls++;
+        const page = opts?.page ?? 1;
+        const sorted = opts?.sortColumn !== undefined;
+
+        if (sorted) {
+          // Sorted scan returns old records (sort_order=D ignored → ascending).
+          return Promise.resolve(
+            makeZohoListResponse([{ id: 'old-' + page, modifiedAt: oldDate }], page < 3)
+          );
+        }
+
+        if (page <= 3) {
+          // Unsorted scan also returns old records.
+          return Promise.resolve(
+            makeZohoListResponse([{ id: 'old-unsorted-' + page, modifiedAt: oldDate }], true)
+          );
+        }
+
+        // Last pages return recent records.
+        return Promise.resolve(
+          makeZohoListResponse([{ id: 'new-' + page, modifiedAt: new Date().toISOString() }], false)
+        );
+      });
+
+      mockPrismaClient.integrationEntityState.findUnique.mockResolvedValue(null);
+      mockPrismaClient.integrationEntityState.create.mockResolvedValue({ id: 'ent' });
+      mockPrismaClient.integrationEntityState.findMany.mockResolvedValue([]);
+      mockPrismaClient.integrationEntityState.count.mockResolvedValue(1000);
+      mockPrismaClient.integrationSyncRun.create.mockResolvedValue({ id: 'run-1' });
+      mockPrismaClient.integrationSyncRun.update.mockResolvedValue({});
+
+      const { syncSalesOrders } = await import('@/modules/integrations/zoho/sales-orders-sync');
+
+      const result = await syncSalesOrders({ mode: 'quick' });
+
+      // Pass 1: 3 sorted pages (all old). Pass 2: 3 unsorted pages (all old).
+      // Pass 3: scans last page (page 5 for 1000 entities / 200 per page) — finds recent.
+      expect(calls).toBeGreaterThanOrEqual(7);
+      expect(result.recordsSeen).toBeGreaterThanOrEqual(7);
     });
   });
 

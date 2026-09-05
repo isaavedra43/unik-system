@@ -6,8 +6,10 @@ const salesOrderIdSchema = z.string().min(1).max(30).regex(/^\d+$/, 'salesOrderI
 export interface ListSalesOrdersOptions {
   page?: number;
   perPage?: number;
+  /** Column to sort by, e.g. 'last_modified_time', 'created_time'. */
   sortColumn?: string;
-  sortOrder?: 'ascending' | 'descending';
+  /** Zoho API expects 'A' (ascending) or 'D' (descending), NOT 'ascending'/'descending'. */
+  sortOrder?: 'A' | 'D';
 }
 
 /**
