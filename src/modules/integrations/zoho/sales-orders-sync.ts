@@ -70,6 +70,24 @@ export interface SyncSalesOrdersResult {
 
 const SYNC_LOCK_KEY = '__unikZohoSalesOrdersSyncLock' as const;
 
+/** Max time to wait for a single Prisma/DB call before treating it as hung. */
+const PRISMA_TIMEOUT_MS = 15_000;
+
+/**
+ * Wraps a promise in a timeout so a stalled DB or network call can never
+ * hang the sync pipeline forever. The underlying promise keeps running in
+ * the background — the caller simply stops waiting for it.
+ */
+function withTimeout<T>(promise: Promise<T>, ms: number = PRISMA_TIMEOUT_MS): Promise<T> {
+  const timeout = new Promise<T>((_, reject) =>
+    setTimeout(() => reject(new Error(`Operation timed out after ${ms}ms`)), ms)
+  );
+  // Prevent unhandled rejection when the timeout wins but the underlying
+  // promise later rejects.
+  promise.catch(() => {});
+  return Promise.race([promise, timeout]);
+}
+
 interface SyncLockState {
   inProgress: boolean;
 }
@@ -193,7 +211,7 @@ async function scanAllPages(): Promise<ScanOutcome> {
  * the most recently modified records appear on page 1 regardless of Zoho's
  * default sort behavior.
  */
-const QUICK_SCAN_PAGES = 3;
+const QUICK_SCAN_PAGES = 2;
 
 /** Records whose last_modified_time is within this window are "recent". */
 const RECENT_THRESHOLD_MS = 24 * 60 * 60 * 1000;
@@ -349,36 +367,44 @@ class SyncInvalidListError extends Error {
 async function recordSummary(externalId: string, remoteModifiedAt: Date): Promise<void> {
   const now = new Date();
 
-  const existing = await prisma.integrationEntityState.findUnique({
-    where: {
-      source_entityType_externalId: {
-        source: SOURCE,
-        entityType: ENTITY_TYPE,
-        externalId,
+  const existing = await withTimeout(
+    prisma.integrationEntityState.findUnique({
+      where: {
+        source_entityType_externalId: {
+          source: SOURCE,
+          entityType: ENTITY_TYPE,
+          externalId,
+        },
       },
-    },
-  });
+    })
+  );
 
   if (!existing) {
-    await prisma.integrationEntityState.create({
-      data: {
-        source: SOURCE,
-        entityType: ENTITY_TYPE,
-        externalId,
-        remoteModifiedAt,
-        needsSync: true,
-        lastSeenAt: now,
-      },
-    });
+    await withTimeout(
+      prisma.integrationEntityState.create({
+        data: {
+          source: SOURCE,
+          entityType: ENTITY_TYPE,
+          externalId,
+          remoteModifiedAt,
+          needsSync: true,
+          lastSeenAt: now,
+        },
+      })
+    );
     return;
   }
 
   const hasChanged = existing.remoteModifiedAt.getTime() !== remoteModifiedAt.getTime();
 
-  await prisma.integrationEntityState.update({
-    where: { id: existing.id },
-    data: hasChanged ? { remoteModifiedAt, needsSync: true, lastSeenAt: now } : { lastSeenAt: now },
-  });
+  await withTimeout(
+    prisma.integrationEntityState.update({
+      where: { id: existing.id },
+      data: hasChanged
+        ? { remoteModifiedAt, needsSync: true, lastSeenAt: now }
+        : { lastSeenAt: now },
+    })
+  );
 }
 
 /**
@@ -390,11 +416,13 @@ async function fetchPendingDetails(
   maxDetailFetches: number,
   shouldAbort?: () => boolean
 ): Promise<{ detailsFetched: number; detailsFailed: number; apiCalls: number }> {
-  const pending = await prisma.integrationEntityState.findMany({
-    where: { source: SOURCE, entityType: ENTITY_TYPE, needsSync: true },
-    orderBy: [{ remoteModifiedAt: 'desc' }, { externalId: 'asc' }],
-    take: maxDetailFetches,
-  });
+  const pending = await withTimeout(
+    prisma.integrationEntityState.findMany({
+      where: { source: SOURCE, entityType: ENTITY_TYPE, needsSync: true },
+      orderBy: [{ remoteModifiedAt: 'desc' }, { externalId: 'asc' }],
+      take: maxDetailFetches,
+    })
+  );
 
   let detailsFetched = 0;
   let detailsFailed = 0;
@@ -414,36 +442,38 @@ async function fetchPendingDetails(
 
       const fetchedAt = new Date();
 
-      await prisma.$transaction([
-        prisma.integrationSnapshot.upsert({
-          where: {
-            source_entityType_externalId_remoteModifiedAt: {
+      await withTimeout(
+        prisma.$transaction([
+          prisma.integrationSnapshot.upsert({
+            where: {
+              source_entityType_externalId_remoteModifiedAt: {
+                source: SOURCE,
+                entityType: ENTITY_TYPE,
+                externalId: entity.externalId,
+                remoteModifiedAt: effectiveModifiedAt,
+              },
+            },
+            create: {
               source: SOURCE,
               entityType: ENTITY_TYPE,
               externalId: entity.externalId,
               remoteModifiedAt: effectiveModifiedAt,
+              payload: rawDetail as Prisma.InputJsonValue,
+              fetchedAt,
             },
-          },
-          create: {
-            source: SOURCE,
-            entityType: ENTITY_TYPE,
-            externalId: entity.externalId,
-            remoteModifiedAt: effectiveModifiedAt,
-            payload: rawDetail as Prisma.InputJsonValue,
-            fetchedAt,
-          },
-          update: {},
-        }),
-        prisma.integrationEntityState.update({
-          where: { id: entity.id },
-          data: {
-            remoteModifiedAt: effectiveModifiedAt,
-            lastSyncedRemoteModifiedAt: effectiveModifiedAt,
-            needsSync: false,
-            lastDetailFetchedAt: fetchedAt,
-          },
-        }),
-      ]);
+            update: {},
+          }),
+          prisma.integrationEntityState.update({
+            where: { id: entity.id },
+            data: {
+              remoteModifiedAt: effectiveModifiedAt,
+              lastSyncedRemoteModifiedAt: effectiveModifiedAt,
+              needsSync: false,
+              lastDetailFetchedAt: fetchedAt,
+            },
+          }),
+        ])
+      );
 
       detailsFetched += 1;
     } catch {
@@ -469,6 +499,16 @@ function resolveErrorCode(error: unknown): string {
 }
 
 /**
+ * Maximum wall-clock time a sync may run before being forced FAILED.
+ * Quick sync gets a shorter timeout because it scans fewer pages.
+ */
+const BACKGROUND_SYNC_TIMEOUT_MS: Record<SyncMode, number> = {
+  quick: 3 * 60 * 1000,
+  scan: 5 * 60 * 1000,
+  sync: 15 * 60 * 1000,
+};
+
+/**
  * Runs one controlled Sales Orders synchronization.
  *
  * scan: walks every page and refreshes summarized state only.
@@ -490,28 +530,85 @@ export async function syncSalesOrders(
   lock.inProgress = true;
   const startedAt = new Date();
   let run: { id: string } | null = null;
+  let timedOut = false;
+
+  // Hard wall-clock limit — if the sync exceeds it the run is marked FAILED
+  // and the lock released so the next sync can start.
+  const timeoutMs = BACKGROUND_SYNC_TIMEOUT_MS[mode];
+  const timeoutId = setTimeout(() => {
+    timedOut = true;
+    console.error(
+      JSON.stringify({
+        event: 'zoho.sales_orders.sync.timeout',
+        runId: run?.id ?? 'unknown',
+        mode,
+        durationMs: timeoutMs,
+      })
+    );
+    lock.inProgress = false;
+    if (run) {
+      void (async () => {
+        try {
+          await withTimeout(
+            prisma.integrationSyncRun.update({
+              where: { id: run.id },
+              data: {
+                status: SYNC_STATUS.FAILED,
+                completedAt: new Date(),
+                errorCode: SYNC_ERROR_CODE.UNEXPECTED_ERROR,
+              },
+            })
+          );
+        } catch {
+          // Best-effort — stale detection cleans up on next poll.
+        }
+      })();
+    }
+  }, timeoutMs);
 
   try {
-    run = await prisma.integrationSyncRun.create({
-      data: {
-        source: SOURCE,
-        entityType: ENTITY_TYPE,
-        mode,
-        status: SYNC_STATUS.RUNNING,
-        startedAt,
-      },
-    });
+    run = await withTimeout(
+      prisma.integrationSyncRun.create({
+        data: {
+          source: SOURCE,
+          entityType: ENTITY_TYPE,
+          mode,
+          status: SYNC_STATUS.RUNNING,
+          startedAt,
+        },
+      })
+    );
 
     const scan = mode === 'quick' ? await scanRecentPages() : await scanAllPages();
 
+    // Both 'quick' and 'sync' fetch pending details — 'quick' only scans
+    // recent pages while 'sync' walks all pages. 'scan' never fetches.
     const details =
-      mode === 'sync'
-        ? await fetchPendingDetails(maxDetailFetches)
-        : { detailsFetched: 0, detailsFailed: 0, apiCalls: 0 };
+      mode === 'scan'
+        ? { detailsFetched: 0, detailsFailed: 0, apiCalls: 0 }
+        : await fetchPendingDetails(maxDetailFetches, () => timedOut);
 
-    const recordsPending = await prisma.integrationEntityState.count({
-      where: { source: SOURCE, entityType: ENTITY_TYPE, needsSync: true },
-    });
+    const recordsPending = await withTimeout(
+      prisma.integrationEntityState.count({
+        where: { source: SOURCE, entityType: ENTITY_TYPE, needsSync: true },
+      })
+    );
+
+    // Normalize snapshots → SalesOrder BEFORE marking the run as COMPLETED.
+    // This ensures the UI sees fresh data when the sync finishes.
+    try {
+      const { normalizePendingSalesOrderSnapshots } =
+        await import('@/modules/sales/sales-orders-normalizer');
+      await withTimeout(normalizePendingSalesOrderSnapshots({ limit: 100 }), 30_000);
+    } catch (error) {
+      console.error(
+        JSON.stringify({
+          event: 'zoho.sales_orders.sync.normalization_failed',
+          runId: run.id,
+          error: error instanceof Error ? error.message : 'unknown',
+        })
+      );
+    }
 
     const result: SyncSalesOrdersResult = {
       runId: run.id,
@@ -526,19 +623,31 @@ export async function syncSalesOrders(
 
     const completedAt = new Date();
 
-    await prisma.integrationSyncRun.update({
-      where: { id: run.id },
-      data: {
-        status: SYNC_STATUS.COMPLETED,
-        completedAt,
-        pagesScanned: result.pagesScanned,
-        recordsSeen: result.recordsSeen,
-        recordsPending: result.recordsPending,
-        detailsFetched: result.detailsFetched,
-        detailsFailed: result.detailsFailed,
-        apiCalls: result.apiCalls,
-      },
-    });
+    // Guard: only mark COMPLETED if the run is still RUNNING — the
+    // background timeout may have already marked it FAILED.
+    const currentRun = await withTimeout(
+      prisma.integrationSyncRun.findUnique({
+        where: { id: run.id },
+        select: { status: true },
+      })
+    );
+    if (currentRun?.status === SYNC_STATUS.RUNNING) {
+      await withTimeout(
+        prisma.integrationSyncRun.update({
+          where: { id: run.id },
+          data: {
+            status: SYNC_STATUS.COMPLETED,
+            completedAt,
+            pagesScanned: result.pagesScanned,
+            recordsSeen: result.recordsSeen,
+            recordsPending: result.recordsPending,
+            detailsFetched: result.detailsFetched,
+            detailsFailed: result.detailsFailed,
+            apiCalls: result.apiCalls,
+          },
+        })
+      );
+    }
 
     console.info(
       JSON.stringify({
@@ -561,10 +670,12 @@ export async function syncSalesOrders(
     const completedAt = new Date();
 
     if (run) {
-      await prisma.integrationSyncRun.update({
-        where: { id: run.id },
-        data: { status: SYNC_STATUS.FAILED, completedAt, errorCode },
-      });
+      await withTimeout(
+        prisma.integrationSyncRun.update({
+          where: { id: run.id },
+          data: { status: SYNC_STATUS.FAILED, completedAt, errorCode },
+        })
+      );
     }
 
     console.error(
@@ -579,6 +690,7 @@ export async function syncSalesOrders(
 
     throw new SyncFailedError(errorCode, run?.id ?? 'sync-run-creation-failed');
   } finally {
+    clearTimeout(timeoutId);
     lock.inProgress = false;
   }
 }
@@ -610,10 +722,12 @@ export interface SyncRunStatus {
  * if none exists. This is the durable source of truth that the UI polls.
  */
 export async function getLatestSyncRun(): Promise<SyncRunStatus | null> {
-  const run = await prisma.integrationSyncRun.findFirst({
-    where: { source: SOURCE, entityType: ENTITY_TYPE },
-    orderBy: { startedAt: 'desc' },
-  });
+  const run = await withTimeout(
+    prisma.integrationSyncRun.findFirst({
+      where: { source: SOURCE, entityType: ENTITY_TYPE },
+      orderBy: { startedAt: 'desc' },
+    })
+  );
 
   if (!run) return null;
 
@@ -643,28 +757,32 @@ export async function getActiveSyncRun(now: Date = new Date()): Promise<SyncRunS
 
   // Mark stale RUNNING runs as FAILED. This handles the case where a process
   // crashed mid-sync and the in-memory lock was lost.
-  await prisma.integrationSyncRun.updateMany({
-    where: {
-      source: SOURCE,
-      entityType: ENTITY_TYPE,
-      status: SYNC_STATUS.RUNNING,
-      startedAt: { lt: staleCutoff },
-    },
-    data: {
-      status: SYNC_STATUS.FAILED,
-      completedAt: now,
-      errorCode: SYNC_ERROR_CODE.UNEXPECTED_ERROR,
-    },
-  });
+  await withTimeout(
+    prisma.integrationSyncRun.updateMany({
+      where: {
+        source: SOURCE,
+        entityType: ENTITY_TYPE,
+        status: SYNC_STATUS.RUNNING,
+        startedAt: { lt: staleCutoff },
+      },
+      data: {
+        status: SYNC_STATUS.FAILED,
+        completedAt: now,
+        errorCode: SYNC_ERROR_CODE.UNEXPECTED_ERROR,
+      },
+    })
+  );
 
-  const run = await prisma.integrationSyncRun.findFirst({
-    where: {
-      source: SOURCE,
-      entityType: ENTITY_TYPE,
-      status: SYNC_STATUS.RUNNING,
-    },
-    orderBy: { startedAt: 'desc' },
-  });
+  const run = await withTimeout(
+    prisma.integrationSyncRun.findFirst({
+      where: {
+        source: SOURCE,
+        entityType: ENTITY_TYPE,
+        status: SYNC_STATUS.RUNNING,
+      },
+      orderBy: { startedAt: 'desc' },
+    })
+  );
 
   if (!run) return null;
 
@@ -693,7 +811,7 @@ export interface StartSyncResult {
  * Starts a sync in the background and returns immediately with the run ID.
  *
  * The caller (HTTP handler) receives the run ID within milliseconds. The
- * actual sync runs as a fire-and-forget promise inside the same process.
+ * actual sync runs on the next event-loop tick inside the same process.
  * The in-memory lock prevents concurrent syncs. The IntegrationSyncRun record
  * in PostgreSQL is the durable status that the UI polls.
  *
@@ -726,32 +844,30 @@ export async function startSyncSalesOrders(
   // Acquire lock and create the run record immediately so the caller has an ID.
   lock.inProgress = true;
   const startedAt = new Date();
-  const run = await prisma.integrationSyncRun.create({
-    data: {
-      source: SOURCE,
-      entityType: ENTITY_TYPE,
-      mode,
-      status: SYNC_STATUS.RUNNING,
-      startedAt,
-    },
-  });
+  const run = await withTimeout(
+    prisma.integrationSyncRun.create({
+      data: {
+        source: SOURCE,
+        entityType: ENTITY_TYPE,
+        mode,
+        status: SYNC_STATUS.RUNNING,
+        startedAt,
+      },
+    })
+  );
 
-  // Fire-and-forget: the sync runs in the background inside this process.
-  // Errors are caught and persisted on the run record.
-  void runSyncInBackground(run.id, mode, maxDetailFetches, startedAt);
+  // Fire-and-forget: defer to the next tick so the HTTP response is sent
+  // before the background work begins. `setImmediate` is more explicit than
+  // `void` and guarantees the function runs on a clean event-loop turn.
+  setImmediate(() => {
+    runSyncInBackground(run.id, mode, maxDetailFetches, startedAt).catch(() => {
+      // Errors are already handled inside runSyncInBackground.
+      // This catch prevents unhandled rejection warnings.
+    });
+  });
 
   return { runId: run.id, alreadyRunning: false };
 }
-
-/**
- * Maximum wall-clock time a background sync may run before being forced FAILED.
- * Quick sync gets a shorter timeout because it scans fewer pages.
- */
-const BACKGROUND_SYNC_TIMEOUT_MS: Record<SyncMode, number> = {
-  quick: 3 * 60 * 1000,
-  scan: 5 * 60 * 1000,
-  sync: 15 * 60 * 1000,
-};
 
 /**
  * Background worker that executes the actual sync logic and updates the run
@@ -773,9 +889,9 @@ async function runSyncInBackground(
   let timedOut = false;
 
   // Enforce a hard wall-clock limit. If the sync exceeds it the run is
-  // marked FAILED so the UI stops spinning. The lock is NOT released here —
-  // it is released in the finally block when the sync actually finishes,
-  // preventing a second sync from starting while this one is still running.
+  // marked FAILED so the UI stops spinning. The lock IS released here as a
+  // safety net — even if the sync's own finally block never runs (e.g. a
+  // permanently stuck fetch or DB call), the next sync can still start.
   const timeoutId = setTimeout(() => {
     timedOut = true;
     console.error(
@@ -786,23 +902,23 @@ async function runSyncInBackground(
         durationMs: timeoutMs,
       })
     );
+    lock.inProgress = false;
     void (async () => {
       try {
-        await prisma.integrationSyncRun.update({
-          where: { id: runId },
-          data: {
-            status: SYNC_STATUS.FAILED,
-            completedAt: new Date(),
-            errorCode: SYNC_ERROR_CODE.UNEXPECTED_ERROR,
-          },
-        });
+        await withTimeout(
+          prisma.integrationSyncRun.update({
+            where: { id: runId },
+            data: {
+              status: SYNC_STATUS.FAILED,
+              completedAt: new Date(),
+              errorCode: SYNC_ERROR_CODE.UNEXPECTED_ERROR,
+            },
+          })
+        );
       } catch {
-        // Best-effort: if we can't write to DB the finally block still
-        // releases the lock when the sync eventually ends.
+        // Best-effort: if we can't write to DB the stale-detection sweep
+        // will clean it up on the next getActiveSyncRun() call.
       }
-      // Release the lock so a future sync can start even if this one
-      // is permanently stuck (e.g. a fetch that never resolves).
-      lock.inProgress = false;
     })();
   }, timeoutMs);
 
@@ -826,7 +942,7 @@ async function runSyncInBackground(
     const details =
       mode === 'scan'
         ? { detailsFetched: 0, detailsFailed: 0, apiCalls: 0 }
-        : await fetchPendingDetails(maxDetailFetches, () => timedOut);
+        : await withTimeout(fetchPendingDetails(maxDetailFetches, () => timedOut));
 
     console.info(
       JSON.stringify({
@@ -838,9 +954,11 @@ async function runSyncInBackground(
       })
     );
 
-    const recordsPending = await prisma.integrationEntityState.count({
-      where: { source: SOURCE, entityType: ENTITY_TYPE, needsSync: true },
-    });
+    const recordsPending = await withTimeout(
+      prisma.integrationEntityState.count({
+        where: { source: SOURCE, entityType: ENTITY_TYPE, needsSync: true },
+      })
+    );
 
     // Normalize snapshots → SalesOrder BEFORE marking the run as COMPLETED.
     // This ensures the UI does not refresh data before the normalized rows
@@ -864,24 +982,28 @@ async function runSyncInBackground(
     try {
       // Guard: only mark COMPLETED if the run is still RUNNING — the
       // background timeout may have already marked it FAILED.
-      const current = await prisma.integrationSyncRun.findUnique({
-        where: { id: runId },
-        select: { status: true },
-      });
-      if (current?.status === SYNC_STATUS.RUNNING) {
-        await prisma.integrationSyncRun.update({
+      const current = await withTimeout(
+        prisma.integrationSyncRun.findUnique({
           where: { id: runId },
-          data: {
-            status: SYNC_STATUS.COMPLETED,
-            completedAt,
-            pagesScanned: scan.pagesScanned,
-            recordsSeen: scan.recordsSeen,
-            recordsPending,
-            detailsFetched: details.detailsFetched,
-            detailsFailed: details.detailsFailed,
-            apiCalls: scan.apiCalls + details.apiCalls,
-          },
-        });
+          select: { status: true },
+        })
+      );
+      if (current?.status === SYNC_STATUS.RUNNING) {
+        await withTimeout(
+          prisma.integrationSyncRun.update({
+            where: { id: runId },
+            data: {
+              status: SYNC_STATUS.COMPLETED,
+              completedAt,
+              pagesScanned: scan.pagesScanned,
+              recordsSeen: scan.recordsSeen,
+              recordsPending,
+              detailsFetched: details.detailsFetched,
+              detailsFailed: details.detailsFailed,
+              apiCalls: scan.apiCalls + details.apiCalls,
+            },
+          })
+        );
       }
     } catch (updateError) {
       // If we can't mark the run as COMPLETED the stale-detection or the
@@ -915,10 +1037,12 @@ async function runSyncInBackground(
     const completedAt = new Date();
 
     try {
-      await prisma.integrationSyncRun.update({
-        where: { id: runId },
-        data: { status: SYNC_STATUS.FAILED, completedAt, errorCode },
-      });
+      await withTimeout(
+        prisma.integrationSyncRun.update({
+          where: { id: runId },
+          data: { status: SYNC_STATUS.FAILED, completedAt, errorCode },
+        })
+      );
     } catch (updateError) {
       console.error(
         JSON.stringify({

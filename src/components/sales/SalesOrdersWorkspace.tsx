@@ -1002,37 +1002,33 @@ export function SalesOrdersWorkspace({
     setSyncTriggering(true);
     try {
       const res = await fetch('/app/sales/orders/sync', { method: 'POST' });
+      const json = await res.json().catch(() => null);
       if (res.ok) {
-        const json = await res.json();
-        if (json.already_running) {
+        if (json?.already_running) {
           toast.info('Ya hay una sincronización en curso');
+        } else if (json?.result) {
+          // The POST ran the sync synchronously and returned the result.
+          toast.success(
+            `Sincronización completada: ${json.result.details_fetched ?? 0} órdenes actualizadas`
+          );
+          fetchData(query);
+          router.refresh();
         } else {
           toast.success('Sincronización iniciada');
         }
-        const status = await fetchSyncStatus();
-        // Edge case: the sync may have already completed or failed before the
-        // first poll interval fires (e.g., instant ZohoApiError). Show feedback
-        // and refresh data so the user is not left without information.
-        if (status && !status.active_run && status.latest_run) {
-          const latest = status.latest_run;
-          const startedAt = new Date(latest.started_at);
-          const isRecent = Date.now() - startedAt.getTime() < 60_000;
-          if (isRecent && latest.status === 'FAILED') {
-            toast.error('La sincronización falló. Intenta de nuevo más tarde.');
-          } else if (isRecent && latest.status === 'COMPLETED') {
-            toast.success(
-              `Sincronización completada: ${latest.details_fetched ?? 0} órdenes actualizadas`
-            );
-            fetchData(query);
-            router.refresh();
-          }
-        }
+      } else if (res.status === 202) {
+        // The route-level timeout fired but the sync is still running in
+        // the background. Fall back to polling — the status endpoint will
+        // report when it finishes.
+        toast.info('La sincronización está en curso...');
       } else if (res.status === 409) {
         toast.info('Ya hay una sincronización en curso');
-        await fetchSyncStatus();
       } else {
         toast.error('No pudimos iniciar la sincronización');
       }
+      // Always refresh status so the "last sync" label and polling state
+      // are accurate regardless of the response path.
+      await fetchSyncStatus();
     } catch {
       toast.error('No pudimos iniciar la sincronización');
     } finally {
@@ -1055,7 +1051,7 @@ export function SalesOrdersWorkspace({
     });
   }, [syncStatus?.latest_run]);
 
-  const isSyncing = syncStatus?.active_run != null;
+  const isSyncing = syncStatus?.active_run != null || syncTriggering;
 
   const densityClass = `so-density-${pref.density}`;
   const pinnedLeft = pref.columnPinning.left;

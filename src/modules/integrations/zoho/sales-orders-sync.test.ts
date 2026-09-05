@@ -36,6 +36,7 @@ const mockPrismaClient = {
     update: vi.fn(),
     updateMany: vi.fn(),
     findFirst: vi.fn(),
+    findUnique: vi.fn(),
   },
   $transaction: vi.fn((args: unknown[]) => Promise.all(args)),
 };
@@ -64,6 +65,14 @@ vi.mock('@/modules/integrations/zoho/client', () => ({
       this.name = 'ZohoApiError';
     }
   },
+}));
+
+// The normalizer is dynamically imported inside the sync functions —
+// mock it so tests don't need a real SalesOrder table.
+vi.doMock('@/modules/sales/sales-orders-normalizer', () => ({
+  normalizePendingSalesOrderSnapshots: vi
+    .fn()
+    .mockResolvedValue({ normalized: 0, skipped: 0 }),
 }));
 
 // --- Helpers ------------------------------------------------------------
@@ -136,6 +145,7 @@ describe('Zoho Sales Orders sync pipeline', () => {
       mockPrismaClient.integrationEntityState.count.mockResolvedValue(0);
       mockPrismaClient.integrationSyncRun.create.mockResolvedValue({ id: 'run-1' });
       mockPrismaClient.integrationSyncRun.update.mockResolvedValue({});
+      mockPrismaClient.integrationSyncRun.findUnique.mockResolvedValue({ status: 'RUNNING' });
 
       const { syncSalesOrders } = await import('@/modules/integrations/zoho/sales-orders-sync');
 
@@ -180,6 +190,7 @@ describe('Zoho Sales Orders sync pipeline', () => {
       mockPrismaClient.integrationEntityState.count.mockResolvedValue(0);
       mockPrismaClient.integrationSyncRun.create.mockResolvedValue({ id: 'run-1' });
       mockPrismaClient.integrationSyncRun.update.mockResolvedValue({});
+      mockPrismaClient.integrationSyncRun.findUnique.mockResolvedValue({ status: 'RUNNING' });
       mockListSalesOrders.mockResolvedValue(makeZohoListResponse([], false));
 
       const { syncSalesOrders } = await import('@/modules/integrations/zoho/sales-orders-sync');
@@ -208,6 +219,7 @@ describe('Zoho Sales Orders sync pipeline', () => {
       mockPrismaClient.integrationEntityState.count.mockResolvedValue(0);
       mockPrismaClient.integrationSyncRun.create.mockResolvedValue({ id: 'run-1' });
       mockPrismaClient.integrationSyncRun.update.mockResolvedValue({});
+      mockPrismaClient.integrationSyncRun.findUnique.mockResolvedValue({ status: 'RUNNING' });
       mockListSalesOrders.mockResolvedValue(makeZohoListResponse([], false));
 
       const { syncSalesOrders } = await import('@/modules/integrations/zoho/sales-orders-sync');
@@ -234,6 +246,7 @@ describe('Zoho Sales Orders sync pipeline', () => {
       mockPrismaClient.integrationEntityState.count.mockResolvedValue(0);
       mockPrismaClient.integrationSyncRun.create.mockResolvedValue({ id: 'run-1' });
       mockPrismaClient.integrationSyncRun.update.mockResolvedValue({});
+      mockPrismaClient.integrationSyncRun.findUnique.mockResolvedValue({ status: 'RUNNING' });
 
       // Zoho returns the same last_modified_time.
       mockListSalesOrders.mockResolvedValue(
@@ -267,6 +280,7 @@ describe('Zoho Sales Orders sync pipeline', () => {
       mockPrismaClient.integrationEntityState.count.mockResolvedValue(0);
       mockPrismaClient.integrationSyncRun.create.mockResolvedValue({ id: 'run-1' });
       mockPrismaClient.integrationSyncRun.update.mockResolvedValue({});
+      mockPrismaClient.integrationSyncRun.findUnique.mockResolvedValue({ status: 'RUNNING' });
 
       mockListSalesOrders.mockResolvedValue(
         makeZohoListResponse([{ id: '123', modifiedAt: '2026-09-04T12:00:00Z' }], false)
@@ -286,6 +300,7 @@ describe('Zoho Sales Orders sync pipeline', () => {
     it('409 / SyncAlreadyRunningError only while a run is active', async () => {
       mockPrismaClient.integrationSyncRun.create.mockResolvedValue({ id: 'run-1' });
       mockPrismaClient.integrationSyncRun.update.mockResolvedValue({});
+      mockPrismaClient.integrationSyncRun.findUnique.mockResolvedValue({ status: 'RUNNING' });
       mockPrismaClient.integrationEntityState.count.mockResolvedValue(0);
       mockListSalesOrders.mockResolvedValue(makeZohoListResponse([], false));
 
@@ -306,6 +321,7 @@ describe('Zoho Sales Orders sync pipeline', () => {
     it('lock is released when sync fails', async () => {
       mockPrismaClient.integrationSyncRun.create.mockResolvedValue({ id: 'run-1' });
       mockPrismaClient.integrationSyncRun.update.mockResolvedValue({});
+      mockPrismaClient.integrationSyncRun.findUnique.mockResolvedValue({ status: 'RUNNING' });
       mockListSalesOrders.mockRejectedValue(new Error('Zoho down'));
 
       const { syncSalesOrders, SyncFailedError } =
@@ -364,6 +380,7 @@ describe('Zoho Sales Orders sync pipeline', () => {
       mockPrismaClient.integrationEntityState.count.mockResolvedValue(0);
       mockPrismaClient.integrationSyncRun.create.mockResolvedValue({ id: 'run-1' });
       mockPrismaClient.integrationSyncRun.update.mockResolvedValue({});
+      mockPrismaClient.integrationSyncRun.findUnique.mockResolvedValue({ status: 'RUNNING' });
 
       const { syncSalesOrders } = await import('@/modules/integrations/zoho/sales-orders-sync');
 
@@ -396,6 +413,7 @@ describe('Zoho Sales Orders sync pipeline', () => {
       mockPrismaClient.integrationEntityState.count.mockResolvedValue(0);
       mockPrismaClient.integrationSyncRun.create.mockResolvedValue({ id: 'run-1' });
       mockPrismaClient.integrationSyncRun.update.mockResolvedValue({});
+      mockPrismaClient.integrationSyncRun.findUnique.mockResolvedValue({ status: 'RUNNING' });
 
       const { syncSalesOrders } = await import('@/modules/integrations/zoho/sales-orders-sync');
 
@@ -424,6 +442,7 @@ describe('Zoho Sales Orders sync pipeline', () => {
       mockPrismaClient.integrationEntityState.count.mockResolvedValue(0);
       mockPrismaClient.integrationSyncRun.create.mockResolvedValue({ id: 'run-1' });
       mockPrismaClient.integrationSyncRun.update.mockResolvedValue({});
+      mockPrismaClient.integrationSyncRun.findUnique.mockResolvedValue({ status: 'RUNNING' });
 
       const { syncSalesOrders } = await import('@/modules/integrations/zoho/sales-orders-sync');
 
@@ -469,15 +488,16 @@ describe('Zoho Sales Orders sync pipeline', () => {
       mockPrismaClient.integrationEntityState.count.mockResolvedValue(1000);
       mockPrismaClient.integrationSyncRun.create.mockResolvedValue({ id: 'run-1' });
       mockPrismaClient.integrationSyncRun.update.mockResolvedValue({});
+      mockPrismaClient.integrationSyncRun.findUnique.mockResolvedValue({ status: 'RUNNING' });
 
       const { syncSalesOrders } = await import('@/modules/integrations/zoho/sales-orders-sync');
 
       const result = await syncSalesOrders({ mode: 'quick' });
 
-      // Pass 1: 3 sorted pages (all old). Pass 2: 3 unsorted pages (all old).
-      // Pass 3: scans last page (page 5 for 1000 entities / 200 per page) — finds recent.
-      expect(calls).toBeGreaterThanOrEqual(7);
-      expect(result.recordsSeen).toBeGreaterThanOrEqual(7);
+      // Pass 1: 2 sorted pages (all old). Pass 2: 2 unsorted pages (all old).
+      // Pass 3: scans last 2 pages (page 5 for 1000 entities / 200 per page) — finds recent.
+      expect(calls).toBeGreaterThanOrEqual(5);
+      expect(result.recordsSeen).toBeGreaterThanOrEqual(5);
     });
   });
 
@@ -507,6 +527,7 @@ describe('Zoho Sales Orders sync pipeline', () => {
       mockPrismaClient.integrationEntityState.count.mockResolvedValue(0);
       mockPrismaClient.integrationSyncRun.create.mockResolvedValue({ id: 'run-1' });
       mockPrismaClient.integrationSyncRun.update.mockResolvedValue({});
+      mockPrismaClient.integrationSyncRun.findUnique.mockResolvedValue({ status: 'RUNNING' });
 
       const { syncSalesOrders } = await import('@/modules/integrations/zoho/sales-orders-sync');
 
@@ -526,6 +547,7 @@ describe('Zoho Sales Orders sync pipeline', () => {
       mockPrismaClient.integrationEntityState.findMany.mockResolvedValue([]);
       mockPrismaClient.integrationEntityState.count.mockResolvedValue(0);
       mockPrismaClient.integrationSyncRun.update.mockResolvedValue({});
+      mockPrismaClient.integrationSyncRun.findUnique.mockResolvedValue({ status: 'RUNNING' });
 
       const { startSyncSalesOrders } =
         await import('@/modules/integrations/zoho/sales-orders-sync');
