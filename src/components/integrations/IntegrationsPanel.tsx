@@ -9,12 +9,13 @@ import {
   PauseCircle,
   PlayCircle,
   RefreshCw,
+  RotateCcw,
   Settings as SettingsIcon,
   XCircle,
   Zap,
 } from 'lucide-react';
-import { Badge, Button, FormField, Input, Alert } from '@/components/ui/primitives';
-import { Drawer, EmptyState, Toast } from '@/components/ui/composite';
+import { Alert, Badge, Button, FormField, Input, Select } from '@/components/ui/primitives';
+import { Drawer, EmptyState, Modal, Toast } from '@/components/ui/composite';
 
 /* ------------------------------------------------------------------ */
 /* Types                                                               */
@@ -104,6 +105,60 @@ function formatDateTime(iso: string): string {
 }
 
 /* ------------------------------------------------------------------ */
+/* Setting field definitions                                           */
+/* ------------------------------------------------------------------ */
+
+interface SettingField {
+  key: string;
+  label: string;
+  help: string;
+  unit: string;
+  min: number;
+  max: number;
+  step: number;
+}
+
+const SETTING_FIELDS: SettingField[] = [
+  { key: 'syncIntervalMs', label: 'Intervalo entre syncs', help: 'Tiempo mínimo entre syncs automáticos', unit: 'ms', min: 60_000, max: 86_400_000, step: 60_000 },
+  { key: 'checkIntervalMs', label: 'Intervalo de check', help: 'Cada cuánto revisar la DB (no consume API)', unit: 'ms', min: 10_000, max: 3_600_000, step: 10_000 },
+  { key: 'startupDelayMs', label: 'Delay de inicio', help: 'Gracia antes del primer check tras boot', unit: 'ms', min: 0, max: 300_000, step: 1000 },
+  { key: 'schedulerMaxDetailFetches', label: 'Detalles por sync (scheduler)', help: 'Máximo de detalles a descargar por sync programado', unit: '', min: 1, max: 200, step: 1 },
+  { key: 'failedRetryCooldownMs', label: 'Cooldown tras fallo', help: 'Tiempo de espera antes de reintentar tras un fallo', unit: 'ms', min: 0, max: 3_600_000, step: 60_000 },
+  { key: 'quickScanPages', label: 'Páginas quick scan', help: 'Páginas recientes a escanear en quick sync', unit: '', min: 1, max: 20, step: 1 },
+  { key: 'quickMaxDetailFetches', label: 'Detalles quick sync', help: 'Máximo de detalles en sync manual', unit: '', min: 1, max: 200, step: 1 },
+  { key: 'fullMaxDetailFetches', label: 'Detalles full sync', help: 'Máximo de detalles en sync completo', unit: '', min: 1, max: 200, step: 1 },
+  { key: 'recentThresholdMs', label: 'Umbral "reciente"', help: 'Ventana para considerar un registro como reciente', unit: 'ms', min: 3_600_000, max: 7 * 86_400_000, step: 3_600_000 },
+  { key: 'perPage', label: 'Registros por página', help: 'Tamaño de página al listar de Zoho', unit: '', min: 10, max: 200, step: 10 },
+  { key: 'maxPages', label: 'Máximo de páginas', help: 'Límite defensivo anti-loop', unit: '', min: 1, max: 1000, step: 1 },
+  { key: 'zohoRequestTimeoutMs', label: 'Timeout Zoho', help: 'Timeout por llamada HTTP a Zoho', unit: 'ms', min: 5_000, max: 120_000, step: 1000 },
+  { key: 'prismaTimeoutMs', label: 'Timeout Prisma', help: 'Timeout por operación de DB', unit: 'ms', min: 5_000, max: 60_000, step: 1000 },
+  { key: 'quickSyncTimeoutMs', label: 'Timeout total quick', help: 'Wall-clock máximo para quick sync', unit: 'ms', min: 30_000, max: 600_000, step: 30_000 },
+  { key: 'scanSyncTimeoutMs', label: 'Timeout total scan', help: 'Wall-clock máximo para scan', unit: 'ms', min: 60_000, max: 1_800_000, step: 60_000 },
+  { key: 'fullSyncTimeoutMs', label: 'Timeout total full', help: 'Wall-clock máximo para full sync', unit: 'ms', min: 60_000, max: 3_600_000, step: 60_000 },
+  { key: 'staleRunThresholdMs', label: 'Umbral stale run', help: 'RUNNING más antiguo que esto se marca FAILED', unit: 'ms', min: 60_000, max: 3_600_000, step: 60_000 },
+];
+
+const DEFAULT_VALUES: Record<string, number> = {
+  syncIntervalMs: 3_600_000,
+  checkIntervalMs: 300_000,
+  startupDelayMs: 30_000,
+  schedulerMaxDetailFetches: 100,
+  failedRetryCooldownMs: 1_800_000,
+  quickScanPages: 2,
+  quickMaxDetailFetches: 20,
+  fullMaxDetailFetches: 50,
+  recentThresholdMs: 86_400_000,
+  perPage: 200,
+  maxPages: 200,
+  zohoRequestTimeoutMs: 30_000,
+  prismaTimeoutMs: 15_000,
+  quickSyncTimeoutMs: 180_000,
+  scanSyncTimeoutMs: 300_000,
+  fullSyncTimeoutMs: 900_000,
+  staleRunThresholdMs: 600_000,
+};
+
+/* ------------------------------------------------------------------ */
 /* Main panel                                                          */
 /* ------------------------------------------------------------------ */
 
@@ -116,6 +171,9 @@ export function IntegrationsPanel({ canManage }: { canManage: boolean }) {
   const [loadingStats, setLoadingStats] = useState(false);
   const [loadingCalls, setLoadingCalls] = useState(false);
   const [onlyErrors, setOnlyErrors] = useState(false);
+  const [statsError, setStatsError] = useState<string | null>(null);
+  const [callsError, setCallsError] = useState<string | null>(null);
+  const [configsError, setConfigsError] = useState<string | null>(null);
   const [toast, setToast] = useState<{ visible: boolean; message: string; variant: 'success' | 'error' | 'info' }>({
     visible: false,
     message: '',
@@ -141,14 +199,19 @@ export function IntegrationsPanel({ canManage }: { canManage: boolean }) {
 
   const loadConfigs = useCallback(async () => {
     setLoadingConfigs(true);
+    setConfigsError(null);
     try {
       const res = await fetch('/app/admin/integrations/api/configs');
       if (res.ok) {
         const json = await res.json();
         setConfigs(json.data);
+      } else if (res.status === 403) {
+        setConfigsError('Sin permiso para ver configuraciones.');
+      } else {
+        setConfigsError('Error al cargar configuraciones.');
       }
     } catch {
-      // silent
+      setConfigsError('Error de red al cargar configuraciones.');
     } finally {
       setLoadingConfigs(false);
     }
@@ -156,13 +219,18 @@ export function IntegrationsPanel({ canManage }: { canManage: boolean }) {
 
   const loadStats = useCallback(async () => {
     setLoadingStats(true);
+    setStatsError(null);
     try {
       const res = await fetch(`/app/admin/integrations/api/stats?source=${selectedSource}`);
       if (res.ok) {
         setStats(await res.json());
+      } else if (res.status === 403) {
+        setStatsError('Sin permiso para ver estadísticas.');
+      } else {
+        setStatsError('Error al cargar estadísticas.');
       }
     } catch {
-      // silent
+      setStatsError('Error de red al cargar estadísticas.');
     } finally {
       setLoadingStats(false);
     }
@@ -170,6 +238,7 @@ export function IntegrationsPanel({ canManage }: { canManage: boolean }) {
 
   const loadCalls = useCallback(async () => {
     setLoadingCalls(true);
+    setCallsError(null);
     try {
       const params = new URLSearchParams({
         source: selectedSource,
@@ -180,9 +249,13 @@ export function IntegrationsPanel({ canManage }: { canManage: boolean }) {
       if (res.ok) {
         const json = await res.json();
         setCalls(json.data);
+      } else if (res.status === 403) {
+        setCallsError('Sin permiso para ver llamadas.');
+      } else {
+        setCallsError('Error al cargar llamadas.');
       }
     } catch {
-      // silent
+      setCallsError('Error de red al cargar llamadas.');
     } finally {
       setLoadingCalls(false);
     }
@@ -229,10 +302,14 @@ export function IntegrationsPanel({ canManage }: { canManage: boolean }) {
           }),
         });
         if (res.ok) {
-          showToast(`${config.displayName} ${config.isEnabled ? 'desactivada' : 'activada'}`, 'success');
+          showToast(
+            `${config.displayName} ${config.isEnabled ? 'desactivada' : 'activada'}`,
+            'success'
+          );
           void loadConfigs();
         } else {
-          showToast('Error al cambiar estado', 'error');
+          const json = await res.json().catch(() => ({}));
+          showToast(json.error ?? 'Error al cambiar estado', 'error');
         }
       } catch {
         showToast('Error de red', 'error');
@@ -328,25 +405,23 @@ export function IntegrationsPanel({ canManage }: { canManage: boolean }) {
 
       {/* Source selector */}
       <div className="integrations-source-bar">
-        <label className="form-label" htmlFor="source-select">
-          API
-        </label>
-        <select
-          id="source-select"
-          className="input"
-          value={selectedSource}
-          onChange={(e) => setSelectedSource(e.target.value)}
-        >
-          {configs.length === 0 ? (
-            <option value="zoho">Zoho Inventory</option>
-          ) : (
-            configs.map((c) => (
-              <option key={c.source} value={c.source}>
-                {c.displayName}
-              </option>
-            ))
-          )}
-        </select>
+        <FormField label="API" htmlFor="source-select">
+          <Select
+            id="source-select"
+            value={selectedSource}
+            onChange={(e) => setSelectedSource(e.target.value)}
+          >
+            {configs.length === 0 ? (
+              <option value="zoho">Zoho Inventory</option>
+            ) : (
+              configs.map((c) => (
+                <option key={c.source} value={c.source}>
+                  {c.displayName}
+                </option>
+              ))
+            )}
+          </Select>
+        </FormField>
         <Button
           variant="ghost"
           size="sm"
@@ -354,6 +429,7 @@ export function IntegrationsPanel({ canManage }: { canManage: boolean }) {
           onClick={() => {
             void loadStats();
             if (activeTab === 'calls') void loadCalls();
+            if (activeTab === 'config') void loadConfigs();
           }}
           aria-label="Refrescar"
         >
@@ -382,6 +458,7 @@ export function IntegrationsPanel({ canManage }: { canManage: boolean }) {
         <OverviewTab
           stats={stats}
           loading={loadingStats}
+          error={statsError}
           canManage={canManage}
           triggering={triggering}
           triggerError={triggerError}
@@ -394,6 +471,7 @@ export function IntegrationsPanel({ canManage }: { canManage: boolean }) {
         <CallsTab
           calls={calls}
           loading={loadingCalls}
+          error={callsError}
           onlyErrors={onlyErrors}
           onToggleOnlyErrors={() => setOnlyErrors((v) => !v)}
           onSelectCall={setSelectedCall}
@@ -405,6 +483,7 @@ export function IntegrationsPanel({ canManage }: { canManage: boolean }) {
         <ConfigTab
           configs={configs}
           loading={loadingConfigs}
+          error={configsError}
           canManage={canManage}
           onToggleEnabled={handleToggleEnabled}
           onEdit={(c) => {
@@ -429,9 +508,13 @@ export function IntegrationsPanel({ canManage }: { canManage: boolean }) {
       />
 
       {/* Call detail modal */}
-      {selectedCall ? (
-        <CallDetailModal call={selectedCall} onClose={() => setSelectedCall(null)} />
-      ) : null}
+      <Modal
+        open={selectedCall !== null}
+        onClose={() => setSelectedCall(null)}
+        title="Detalle de llamada"
+      >
+        {selectedCall ? <CallDetailContent call={selectedCall} /> : null}
+      </Modal>
     </div>
   );
 }
@@ -443,6 +526,7 @@ export function IntegrationsPanel({ canManage }: { canManage: boolean }) {
 function OverviewTab({
   stats,
   loading,
+  error,
   canManage,
   triggering,
   triggerError,
@@ -450,6 +534,7 @@ function OverviewTab({
 }: {
   stats: StatsPayload | null;
   loading: boolean;
+  error: string | null;
   canManage: boolean;
   triggering: boolean;
   triggerError: string | null;
@@ -458,8 +543,16 @@ function OverviewTab({
   if (loading && !stats) {
     return (
       <div className="integrations-loading">
-        <Loader2 className="animate-spin" size={24} />
+        <Loader2 className="spin" size={24} />
         <span>Cargando estadísticas…</span>
+      </div>
+    );
+  }
+
+  if (error && !stats) {
+    return (
+      <div className="integrations-error-state">
+        <Alert variant="error">{error}</Alert>
       </div>
     );
   }
@@ -475,10 +568,13 @@ function OverviewTab({
   }
 
   const { stats: s, active_run: activeRun, latest_run: latestRun } = stats;
-  const successRate = s.totalCalls > 0 ? ((s.successCount / s.totalCalls) * 100).toFixed(1) : '—';
+  const successRate =
+    s.totalCalls > 0 ? ((s.successCount / s.totalCalls) * 100).toFixed(1) : '—';
 
   return (
     <div className="integrations-overview">
+      {error ? <Alert variant="warning">{error}</Alert> : null}
+
       {/* Stat cards */}
       <div className="integrations-stat-grid">
         <StatCard
@@ -576,6 +672,7 @@ function OverviewTab({
               icon={<Zap size={16} />}
               isLoading={triggering}
               onClick={() => onTrigger('quick')}
+              disabled={triggering}
             >
               Quick sync
             </Button>
@@ -585,6 +682,7 @@ function OverviewTab({
               icon={<RefreshCw size={16} />}
               isLoading={triggering}
               onClick={() => onTrigger('scan')}
+              disabled={triggering}
             >
               Scan
             </Button>
@@ -594,6 +692,7 @@ function OverviewTab({
               icon={<Activity size={16} />}
               isLoading={triggering}
               onClick={() => onTrigger('sync')}
+              disabled={triggering}
             >
               Full sync
             </Button>
@@ -641,12 +740,14 @@ function StatCard({
 function CallsTab({
   calls,
   loading,
+  error,
   onlyErrors,
   onToggleOnlyErrors,
   onSelectCall,
 }: {
   calls: ApiCallRow[];
   loading: boolean;
+  error: string | null;
   onlyErrors: boolean;
   onToggleOnlyErrors: () => void;
   onSelectCall: (call: ApiCallRow) => void;
@@ -660,18 +761,24 @@ function CallsTab({
         </label>
         {loading ? (
           <span className="integrations-loading-inline">
-            <Loader2 className="animate-spin" size={14} /> Actualizando…
+            <Loader2 className="spin" size={14} /> Actualizando…
           </span>
         ) : null}
       </div>
 
-      {calls.length === 0 ? (
+      {error ? <Alert variant="error">{error}</Alert> : null}
+
+      {!error && calls.length === 0 ? (
         <EmptyState
           icon="check"
           title="Sin llamadas"
-          message={onlyErrors ? 'No hay llamadas con error.' : 'Aún no se han registrado llamadas.'}
+          message={
+            onlyErrors ? 'No hay llamadas con error.' : 'Aún no se han registrado llamadas.'
+          }
         />
-      ) : (
+      ) : null}
+
+      {!error && calls.length > 0 ? (
         <div className="table-wrap">
           <table className="table">
             <thead>
@@ -695,7 +802,9 @@ function CallsTab({
                 >
                   <td className="integrations-call-time">{formatDateTime(call.createdAt)}</td>
                   <td>
-                    <span className="integrations-method integrations-method-${call.method.toLowerCase()}">
+                    <span
+                      className={`integrations-method integrations-method-${call.method.toLowerCase()}`}
+                    >
                       {call.method}
                     </span>
                   </td>
@@ -719,7 +828,7 @@ function CallsTab({
             </tbody>
           </table>
         </div>
-      )}
+      ) : null}
     </div>
   );
 }
@@ -731,12 +840,14 @@ function CallsTab({
 function ConfigTab({
   configs,
   loading,
+  error,
   canManage,
   onToggleEnabled,
   onEdit,
 }: {
   configs: ConfigRow[];
   loading: boolean;
+  error: string | null;
   canManage: boolean;
   onToggleEnabled: (config: ConfigRow) => void;
   onEdit: (config: ConfigRow) => void;
@@ -744,8 +855,16 @@ function ConfigTab({
   if (loading && configs.length === 0) {
     return (
       <div className="integrations-loading">
-        <Loader2 className="animate-spin" size={24} />
+        <Loader2 className="spin" size={24} />
         <span>Cargando configuraciones…</span>
+      </div>
+    );
+  }
+
+  if (error && configs.length === 0) {
+    return (
+      <div className="integrations-error-state">
+        <Alert variant="error">{error}</Alert>
       </div>
     );
   }
@@ -762,6 +881,7 @@ function ConfigTab({
 
   return (
     <div className="integrations-config-list">
+      {error ? <Alert variant="warning">{error}</Alert> : null}
       {configs.map((config) => (
         <div key={config.id} className="card card-compact integrations-config-card">
           <div className="integrations-config-header">
@@ -778,7 +898,9 @@ function ConfigTab({
                   <Button
                     variant="ghost"
                     size="sm"
-                    icon={config.isEnabled ? <PauseCircle size={16} /> : <PlayCircle size={16} />}
+                    icon={
+                      config.isEnabled ? <PauseCircle size={16} /> : <PlayCircle size={16} />
+                    }
                     onClick={() => onToggleEnabled(config)}
                   >
                     {config.isEnabled ? 'Pausar' : 'Activar'}
@@ -808,7 +930,8 @@ function ConfigTab({
               <strong>Quick pages:</strong> {config.settings.quickScanPages as number}
             </span>
             <span>
-              <strong>Max details:</strong> {config.settings.schedulerMaxDetailFetches as number}
+              <strong>Max details:</strong>{' '}
+              {config.settings.schedulerMaxDetailFetches as number}
             </span>
           </div>
         </div>
@@ -820,34 +943,6 @@ function ConfigTab({
 /* ------------------------------------------------------------------ */
 /* Config drawer                                                       */
 /* ------------------------------------------------------------------ */
-
-const SETTING_FIELDS: {
-  key: string;
-  label: string;
-  help: string;
-  unit: string;
-  min: number;
-  max: number;
-  step: number;
-}[] = [
-  { key: 'syncIntervalMs', label: 'Intervalo entre syncs', help: 'Tiempo mínimo entre syncs automáticos', unit: 'ms', min: 60_000, max: 86_400_000, step: 60_000 },
-  { key: 'checkIntervalMs', label: 'Intervalo de check', help: 'Cada cuánto revisar la DB (no consume API)', unit: 'ms', min: 10_000, max: 3_600_000, step: 10_000 },
-  { key: 'startupDelayMs', label: 'Delay de inicio', help: 'Gracia antes del primer check tras boot', unit: 'ms', min: 0, max: 300_000, step: 1000 },
-  { key: 'schedulerMaxDetailFetches', label: 'Detalles por sync (scheduler)', help: 'Máximo de detalles a descargar por sync programado', unit: '', min: 1, max: 200, step: 1 },
-  { key: 'failedRetryCooldownMs', label: 'Cooldown tras fallo', help: 'Tiempo de espera antes de reintentar tras un fallo', unit: 'ms', min: 0, max: 3_600_000, step: 60_000 },
-  { key: 'quickScanPages', label: 'Páginas quick scan', help: 'Páginas recientes a escanear en quick sync', unit: '', min: 1, max: 20, step: 1 },
-  { key: 'quickMaxDetailFetches', label: 'Detalles quick sync', help: 'Máximo de detalles en sync manual', unit: '', min: 1, max: 200, step: 1 },
-  { key: 'fullMaxDetailFetches', label: 'Detalles full sync', help: 'Máximo de detalles en sync completo', unit: '', min: 1, max: 200, step: 1 },
-  { key: 'recentThresholdMs', label: 'Umbral "reciente"', help: 'Ventana para considerar un registro como reciente', unit: 'ms', min: 3_600_000, max: 7 * 86_400_000, step: 3_600_000 },
-  { key: 'perPage', label: 'Registros por página', help: 'Tamaño de página al listar de Zoho', unit: '', min: 10, max: 200, step: 10 },
-  { key: 'maxPages', label: 'Máximo de páginas', help: 'Límite defensivo anti-loop', unit: '', min: 1, max: 1000, step: 1 },
-  { key: 'zohoRequestTimeoutMs', label: 'Timeout Zoho', help: 'Timeout por llamada HTTP a Zoho', unit: 'ms', min: 5_000, max: 120_000, step: 1000 },
-  { key: 'prismaTimeoutMs', label: 'Timeout Prisma', help: 'Timeout por operación de DB', unit: 'ms', min: 5_000, max: 60_000, step: 1000 },
-  { key: 'quickSyncTimeoutMs', label: 'Timeout total quick', help: 'Wall-clock máximo para quick sync', unit: 'ms', min: 30_000, max: 600_000, step: 30_000 },
-  { key: 'scanSyncTimeoutMs', label: 'Timeout total scan', help: 'Wall-clock máximo para scan', unit: 'ms', min: 60_000, max: 1_800_000, step: 60_000 },
-  { key: 'fullSyncTimeoutMs', label: 'Timeout total full', help: 'Wall-clock máximo para full sync', unit: 'ms', min: 60_000, max: 3_600_000, step: 60_000 },
-  { key: 'staleRunThresholdMs', label: 'Umbral stale run', help: 'RUNNING más antiguo que esto se marca FAILED', unit: 'ms', min: 60_000, max: 3_600_000, step: 60_000 },
-];
 
 function ConfigDrawer({
   open,
@@ -864,24 +959,42 @@ function ConfigDrawer({
   onClose: () => void;
   onSave: (settings: Record<string, unknown>) => void;
 }) {
-  const [draft, setDraft] = useState<Record<string, number>>({});
+  const [draft, setDraft] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (config) {
-      const numeric: Record<string, number> = {};
+      const values: Record<string, string> = {};
       for (const field of SETTING_FIELDS) {
         const v = config.settings[field.key];
-        numeric[field.key] = typeof v === 'number' ? v : (DEFAULTS[field.key] ?? 0);
+        values[field.key] = typeof v === 'number' ? String(v) : String(DEFAULT_VALUES[field.key] ?? 0);
       }
-      setDraft(numeric);
+      setDraft(values);
     }
   }, [config]);
 
-  if (!config) return null;
+  const handleReset = () => {
+    const values: Record<string, string> = {};
+    for (const field of SETTING_FIELDS) {
+      values[field.key] = String(DEFAULT_VALUES[field.key] ?? 0);
+    }
+    setDraft(values);
+  };
 
   const handleSave = () => {
-    onSave(draft);
+    const numeric: Record<string, number> = {};
+    for (const field of SETTING_FIELDS) {
+      const raw = draft[field.key];
+      const parsed = parseInt(raw, 10);
+      if (Number.isNaN(parsed)) {
+        numeric[field.key] = DEFAULT_VALUES[field.key] ?? 0;
+      } else {
+        numeric[field.key] = Math.max(field.min, Math.min(field.max, parsed));
+      }
+    }
+    onSave(numeric);
   };
+
+  if (!config) return null;
 
   return (
     <Drawer
@@ -892,10 +1005,23 @@ function ConfigDrawer({
       size="lg"
       footer={
         <>
-          <Button variant="ghost" onClick={onClose}>
+          <Button
+            variant="ghost"
+            icon={<RotateCcw size={16} />}
+            onClick={handleReset}
+            disabled={saving}
+          >
+            Reset
+          </Button>
+          <Button variant="ghost" onClick={onClose} disabled={saving}>
             Cancelar
           </Button>
-          <Button type="button" isLoading={saving} onClick={handleSave}>
+          <Button
+            type="button"
+            isLoading={saving}
+            onClick={handleSave}
+            disabled={saving}
+          >
             Guardar
           </Button>
         </>
@@ -919,8 +1045,7 @@ function ConfigDrawer({
               step={field.step}
               value={draft[field.key] ?? ''}
               onChange={(e) => {
-                const v = parseInt(e.target.value, 10);
-                setDraft((d) => ({ ...d, [field.key]: Number.isNaN(v) ? 0 : v }));
+                setDraft((d) => ({ ...d, [field.key]: e.target.value }));
               }}
             />
           </FormField>
@@ -930,88 +1055,61 @@ function ConfigDrawer({
   );
 }
 
-const DEFAULTS: Record<string, number> = {
-  syncIntervalMs: 3_600_000,
-  checkIntervalMs: 300_000,
-  startupDelayMs: 30_000,
-  schedulerMaxDetailFetches: 100,
-  failedRetryCooldownMs: 1_800_000,
-  quickScanPages: 2,
-  quickMaxDetailFetches: 20,
-  fullMaxDetailFetches: 50,
-  recentThresholdMs: 86_400_000,
-  perPage: 200,
-  maxPages: 200,
-  zohoRequestTimeoutMs: 30_000,
-  prismaTimeoutMs: 15_000,
-  quickSyncTimeoutMs: 180_000,
-  scanSyncTimeoutMs: 300_000,
-  fullSyncTimeoutMs: 900_000,
-  staleRunThresholdMs: 600_000,
-};
-
 /* ------------------------------------------------------------------ */
-/* Call detail modal                                                   */
+/* Call detail modal content                                           */
 /* ------------------------------------------------------------------ */
 
-function CallDetailModal({ call, onClose }: { call: ApiCallRow; onClose: () => void }) {
+function CallDetailContent({ call }: { call: ApiCallRow }) {
   return (
-    <>
-      <div className="overlay" onClick={onClose} aria-hidden="true" />
-      <div className="modal-panel" role="dialog" aria-modal="true" style={{ maxWidth: '800px' }}>
-        <div className="modal-header">
-          <h3 className="modal-title">Detalle de llamada</h3>
-          <button type="button" className="icon-btn" onClick={onClose} aria-label="Cerrar">
-            <XCircle size={18} />
-          </button>
-        </div>
-        <div className="modal-body">
-          <div className="integrations-call-detail">
-            <div className="integrations-call-detail-row">
-              <span className="integrations-call-detail-label">Hora</span>
-              <span>{formatDateTime(call.createdAt)}</span>
-            </div>
-            <div className="integrations-call-detail-row">
-              <span className="integrations-call-detail-label">Método</span>
-              <span>{call.method}</span>
-            </div>
-            <div className="integrations-call-detail-row">
-              <span className="integrations-call-detail-label">Path</span>
-              <span className="integrations-call-detail-path">{call.path}</span>
-            </div>
-            <div className="integrations-call-detail-row">
-              <span className="integrations-call-detail-label">HTTP Status</span>
-              <span>{call.httpStatus ?? '—'}</span>
-            </div>
-            <div className="integrations-call-detail-row">
-              <span className="integrations-call-detail-label">Duración</span>
-              <span>{formatDuration(call.durationMs)}</span>
-            </div>
-            <div className="integrations-call-detail-row">
-              <span className="integrations-call-detail-label">Estado</span>
-              <span>
-                {call.success ? (
-                  <Badge variant="success">OK</Badge>
-                ) : (
-                  <Badge variant="danger">Error</Badge>
-                )}
-              </span>
-            </div>
-            {call.errorCode ? (
-              <div className="integrations-call-detail-row">
-                <span className="integrations-call-detail-label">Código de error</span>
-                <span className="integrations-call-errorcode">{call.errorCode}</span>
-              </div>
-            ) : null}
-            {call.responsePreview ? (
-              <div className="integrations-call-detail-preview">
-                <span className="integrations-call-detail-label">Respuesta (preview)</span>
-                <pre className="integrations-call-pre">{call.responsePreview}</pre>
-              </div>
-            ) : null}
-          </div>
-        </div>
+    <div className="integrations-call-detail">
+      <div className="integrations-call-detail-row">
+        <span className="integrations-call-detail-label">Hora</span>
+        <span>{formatDateTime(call.createdAt)}</span>
       </div>
-    </>
+      <div className="integrations-call-detail-row">
+        <span className="integrations-call-detail-label">Método</span>
+        <span>
+          <span
+            className={`integrations-method integrations-method-${call.method.toLowerCase()}`}
+          >
+            {call.method}
+          </span>
+        </span>
+      </div>
+      <div className="integrations-call-detail-row">
+        <span className="integrations-call-detail-label">Path</span>
+        <span className="integrations-call-detail-path">{call.path}</span>
+      </div>
+      <div className="integrations-call-detail-row">
+        <span className="integrations-call-detail-label">HTTP Status</span>
+        <span>{call.httpStatus ?? '—'}</span>
+      </div>
+      <div className="integrations-call-detail-row">
+        <span className="integrations-call-detail-label">Duración</span>
+        <span>{formatDuration(call.durationMs)}</span>
+      </div>
+      <div className="integrations-call-detail-row">
+        <span className="integrations-call-detail-label">Estado</span>
+        <span>
+          {call.success ? (
+            <Badge variant="success">OK</Badge>
+          ) : (
+            <Badge variant="danger">Error</Badge>
+          )}
+        </span>
+      </div>
+      {call.errorCode ? (
+        <div className="integrations-call-detail-row">
+          <span className="integrations-call-detail-label">Código de error</span>
+          <span className="integrations-call-errorcode">{call.errorCode}</span>
+        </div>
+      ) : null}
+      {call.responsePreview ? (
+        <div className="integrations-call-detail-preview">
+          <span className="integrations-call-detail-label">Respuesta (preview)</span>
+          <pre className="integrations-call-pre">{call.responsePreview}</pre>
+        </div>
+      ) : null}
+    </div>
   );
 }

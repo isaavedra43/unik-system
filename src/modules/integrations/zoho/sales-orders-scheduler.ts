@@ -117,7 +117,18 @@ export async function isSyncCoolingDown(now: Date = new Date()): Promise<boolean
 export async function runSchedulerCheck(): Promise<void> {
   const state = getSchedulerState();
 
-  if (!(await isIntegrationEnabled(INTEGRATION_SOURCE_ZOHO)) || state.tickInProgress) {
+  if (state.tickInProgress) {
+    return;
+  }
+
+  try {
+    const enabled = await isIntegrationEnabled(INTEGRATION_SOURCE_ZOHO);
+    if (!enabled) return;
+  } catch (error) {
+    log({
+      event: 'zoho.sales_orders.scheduler.tick_skipped',
+      reason: error instanceof Error ? error.message : 'db_unreachable',
+    });
     return;
   }
 
@@ -195,13 +206,25 @@ export async function startSalesOrdersScheduler(): Promise<void> {
     return;
   }
 
-  const enabled = await isIntegrationEnabled(INTEGRATION_SOURCE_ZOHO);
+  let enabled: boolean;
+  let settings;
+  try {
+    enabled = await isIntegrationEnabled(INTEGRATION_SOURCE_ZOHO);
+    settings = await getIntegrationSettings(INTEGRATION_SOURCE_ZOHO);
+  } catch (error) {
+    // DB not reachable — don't crash the server. The next request that
+    // touches the config will retry. Log and bail out.
+    log({
+      event: 'zoho.sales_orders.scheduler.start_failed',
+      reason: error instanceof Error ? error.message : 'db_unreachable',
+    });
+    return;
+  }
+
   if (!enabled) {
     log({ event: 'zoho.sales_orders.scheduler.disabled' });
     return;
   }
-
-  const settings = await getIntegrationSettings(INTEGRATION_SOURCE_ZOHO);
 
   state.started = true;
 

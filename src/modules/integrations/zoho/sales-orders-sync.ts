@@ -6,6 +6,7 @@ import { getSalesOrder, listSalesOrders } from './sales-orders';
 import {
   INTEGRATION_SOURCE_ZOHO,
   getIntegrationSettings,
+  DEFAULT_SETTINGS,
   type ZohoSettings,
 } from '../integration-config-service';
 
@@ -552,7 +553,13 @@ export async function syncSalesOrders(
   }
 
   // Load live configuration from IntegrationConfig (with defaults fallback).
-  const settings = await getIntegrationSettings(INTEGRATION_SOURCE_ZOHO);
+  // If the DB is unreachable, fall back to defaults so the sync can still run.
+  let settings: ZohoSettings;
+  try {
+    settings = await getIntegrationSettings(INTEGRATION_SOURCE_ZOHO);
+  } catch {
+    settings = DEFAULT_SETTINGS[INTEGRATION_SOURCE_ZOHO];
+  }
   currentPrismaTimeoutMs = settings.prismaTimeoutMs;
 
   const params: SyncParams = {
@@ -930,8 +937,13 @@ async function runSyncInBackground(
 ): Promise<void> {
   const lock = getSyncLock();
 
-  // Load live configuration from IntegrationConfig.
-  const settings = await getIntegrationSettings(INTEGRATION_SOURCE_ZOHO);
+  // Load live configuration from IntegrationConfig (with defaults fallback).
+  let settings: ZohoSettings;
+  try {
+    settings = await getIntegrationSettings(INTEGRATION_SOURCE_ZOHO);
+  } catch {
+    settings = DEFAULT_SETTINGS[INTEGRATION_SOURCE_ZOHO];
+  }
   currentPrismaTimeoutMs = settings.prismaTimeoutMs;
 
   const params: SyncParams = {
