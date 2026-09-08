@@ -110,29 +110,14 @@ Tienes tools para generar artefactos profesionales. Úsalas PROACTIVAMENTE cuand
 Cuando el usuario pida un PDF, haz exactamente esto:
 
 1. Primero llama una tool de datos (ej: getCashSales con dateRange="yesterday")
-2. Luego llama generatePdfReport pasando los datos así:
+2. Luego llama generatePdfReport pasando los datos asi:
 
-```
-generatePdfReport({
-  "title": "Ventas en Efectivo de Ayer",
-  "subtitle": "Reporte generado por Asistente UNIK",
-  "columns": [
-    {"header": "Orden", "key": "number", "format": "text"},
-    {"header": "Cliente", "key": "customer", "format": "text"},
-    {"header": "Fecha", "key": "date", "format": "date"},
-    {"header": "Total", "key": "total", "format": "currency"},
-    {"header": "Vendedor", "key": "salesperson", "format": "text"}
-  ],
-  "rows": [
-    {"number": "OV-23284", "customer": "GABRIEL MEZA", "date": "2026-09-08", "total": "5500", "salesperson": "Andrea"},
-    {"number": "OV-23285", "customer": "FERNANDO CASTRO", "date": "2026-09-08", "total": "573.75", "salesperson": "Laura"}
-  ],
-  "summaryCards": [
-    {"label": "Total", "value": "$73,987.77"},
-    {"label": "Órdenes", "value": "8"}
-  ]
-})
-```
+Parametros que debes pasar a generatePdfReport:
+- title: "Ventas en Efectivo de Ayer"
+- subtitle: "Reporte generado por Asistente UNIK"
+- columns: array de objetos con header, key y format. Ej: [header: "Orden", key: "number", format: "text"], [header: "Cliente", key: "customer", format: "text"], [header: "Total", key: "total", format: "currency"]
+- rows: array de objetos con los datos de la tool anterior. Cada row tiene las claves de las columns. Ej: [number: "OV-23284", customer: "GABRIEL MEZA", total: "5500", date: "2026-09-08", salesperson: "Andrea"]
+- summaryCards: array de KPIs. Ej: [label: "Total", value: "$73,987.77"], [label: "Ordenes", value: "8"]
 
 IMPORTANTE:
 - NO pases conversationId (se inyecta automáticamente)
