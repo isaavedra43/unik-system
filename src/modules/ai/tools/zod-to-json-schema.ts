@@ -7,6 +7,7 @@ import {
   ZodNumber,
   ZodObject,
   ZodOptional,
+  ZodRecord,
   ZodString,
   ZodType,
   ZodUnion,
@@ -65,6 +66,9 @@ export function zodToJsonSchema(schema: ZodType): Record<string, unknown> {
       required: required.length > 0 ? required : undefined,
       description: schema.description,
     };
+  }
+  if (schema instanceof ZodRecord) {
+    return { type: 'object', additionalProperties: true, description: schema.description };
   }
   return { type: 'string' };
 }
