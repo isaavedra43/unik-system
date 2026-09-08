@@ -2550,9 +2550,15 @@ textarea.input {
   display: flex;
   flex-direction: column;
   height: calc(100vh - var(--unik-topbar-height));
+  height: calc(100dvh - var(--unik-topbar-height));
   max-width: none;
   margin: 0;
   padding: 0;
+  overflow: hidden;
+}
+
+.assistant-page .page-header {
+  flex-shrink: 0;
 }
 
 .assistant-page-body {
@@ -2579,6 +2585,7 @@ textarea.input {
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
+  min-height: 0;
   background: var(--unik-surface);
   border-right: 1px solid var(--unik-border);
   overflow: hidden;
@@ -2634,6 +2641,7 @@ textarea.input {
 
 .assistant-sidebar-list {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: var(--unik-space-2);
 }
@@ -2730,11 +2738,12 @@ textarea.input {
   flex-direction: column;
   flex: 1;
   min-height: 0;
-  height: 100%;
+  overflow: hidden;
 }
 
 .assistant-chat-messages {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: var(--unik-space-6) var(--unik-space-6) var(--unik-space-4);
   display: flex;
@@ -3032,6 +3041,7 @@ textarea.input {
   align-items: center;
   gap: var(--unik-space-2);
   width: 100%;
+  min-width: 0;
   padding: 0.35rem 0.6rem;
   border: none;
   background: var(--unik-surface-hover);
@@ -3048,7 +3058,11 @@ textarea.input {
 
 .assistant-tool-card-name {
   flex: 1;
+  min-width: 0;
   font-family: var(--unik-font-mono);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .assistant-tool-card-badge {
@@ -4155,11 +4169,6 @@ textarea.input {
   animation: assistant-welcome-in 0.42s ease-out;
 }
 
-/* Empty state: hide the scroll marker so the welcome is the only child */
-.assistant-chat-empty .assistant-messages-end {
-  display: none;
-}
-
 @keyframes assistant-welcome-in {
   from {
     opacity: 0;
@@ -4228,9 +4237,12 @@ textarea.input {
 
 .assistant-msg {
   max-width: 78%;
+  min-width: 0;
   border-radius: var(--unik-radius-xl);
   box-shadow: var(--unik-shadow-sm);
   line-height: 1.6;
+  overflow-wrap: break-word;
+  word-wrap: break-word;
 }
 
 .assistant-msg-user {

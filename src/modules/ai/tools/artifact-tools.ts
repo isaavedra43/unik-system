@@ -71,7 +71,7 @@ registerTool({
   requiredPermission: 'sales_orders.view',
   enabledByDefault: true,
   parameters: z.object({
-    conversationId: z.string().describe('ID de la conversación actual'),
+    conversationId: z.string().optional().describe('Se inyecta automáticamente, no lo pongas.'),
     data: dataSourceSchema,
     style: styleSchema,
   }),
@@ -152,7 +152,7 @@ registerTool({
   requiredPermission: 'sales_orders.view',
   enabledByDefault: true,
   parameters: z.object({
-    conversationId: z.string(),
+    conversationId: z.string().optional().describe('Se inyecta automáticamente, no lo pongas.'),
     data: dataSourceSchema,
     style: styleSchema,
   }),
@@ -219,7 +219,7 @@ registerTool({
   requiredPermission: 'sales_orders.view',
   enabledByDefault: true,
   parameters: z.object({
-    conversationId: z.string(),
+    conversationId: z.string().optional().describe('Se inyecta automáticamente, no lo pongas.'),
     data: dataSourceSchema,
     title: z.string().optional().describe('Título del reporte (se incluye como metadata)'),
   }),
@@ -287,7 +287,7 @@ registerTool({
   requiredPermission: 'sales_orders.view',
   enabledByDefault: true,
   parameters: z.object({
-    conversationId: z.string(),
+    conversationId: z.string().optional().describe('Se inyecta automáticamente, no lo pongas.'),
     chartType: z.enum(['bar', 'horizontal-bar', 'line', 'pie', 'doughnut'])
       .describe('Tipo de gráfica'),
     title: z.string().describe('Título de la gráfica'),
@@ -362,7 +362,7 @@ registerTool({
   requiredPermission: 'sales_orders.view',
   enabledByDefault: true,
   parameters: z.object({
-    conversationId: z.string(),
+    conversationId: z.string().optional().describe('Se inyecta automáticamente, no lo pongas.'),
     title: z.string().describe('Título de la tabla'),
     subtitle: z.string().optional(),
     columns: z.array(
@@ -436,7 +436,7 @@ registerTool({
   requiredPermission: 'sales_orders.view',
   enabledByDefault: true,
   parameters: z.object({
-    conversationId: z.string(),
+    conversationId: z.string().optional().describe('Se inyecta automáticamente, no lo pongas.'),
   }),
   execute: async (_actor, rawArgs) => {
     const args = rawArgs as { conversationId: string };

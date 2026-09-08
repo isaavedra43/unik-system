@@ -250,9 +250,32 @@ export async function updateAiConfig(patch: {
       ? (current.settings as Record<string, unknown>)
       : {};
 
+  // Merge incoming settings, but preserve API keys that are sent empty.
+  // Password inputs don't retain their value in the browser, so when the
+  // user saves other settings, the API key field comes back empty.
+  // We detect this and keep the previously stored value.
+  let incomingSettings = patch.settings ?? {};
+  if (incomingSettings.providerConfigs && currentSettings.providerConfigs) {
+    const currentProviders = currentSettings.providerConfigs as Record<string, { apiKey?: string; endpoint?: string; enabled?: boolean }>;
+    const incomingProviders = incomingSettings.providerConfigs as Record<string, { apiKey?: string; endpoint?: string; enabled?: boolean }>;
+    const mergedProviders: Record<string, { apiKey?: string; endpoint?: string; enabled?: boolean }> = {};
+    for (const [providerId, incoming] of Object.entries(incomingProviders)) {
+      const existing = currentProviders[providerId] ?? {};
+      mergedProviders[providerId] = {
+        ...existing,
+        ...incoming,
+        // If apiKey is empty/undefined in incoming, keep the existing one
+        apiKey: (incoming.apiKey && incoming.apiKey.length > 0)
+          ? incoming.apiKey
+          : existing.apiKey ?? '',
+      };
+    }
+    incomingSettings = { ...incomingSettings, providerConfigs: mergedProviders };
+  }
+
   const mergedSettings =
     patch.settings !== undefined
-      ? mergeWithDefaults({ ...currentSettings, ...patch.settings })
+      ? mergeWithDefaults({ ...currentSettings, ...incomingSettings })
       : mergeWithDefaults(current.settings);
 
   await prisma.aiConfig.update({

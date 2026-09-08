@@ -225,7 +225,7 @@ export function AssistantAdminConfig({ canManage }: { canManage: boolean }) {
                     />
                     <span className="assistant-admin-config-hint">
                       {isConfigured
-                        ? '✓ Configurada. Deja vacío para mantener.'
+                        ? '✓ Configurada. Deja vacío para mantener la actual.'
                         : 'Pega tu API key aquí'}
                     </span>
                   </div>

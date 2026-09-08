@@ -42,7 +42,6 @@ export function AssistantChat({
   const [error, setError] = useState<string | null>(null);
   const [loadingConv, setLoadingConv] = useState(false);
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
 
@@ -293,7 +292,6 @@ export function AssistantChat({
             <span>{error}</span>
           </div>
         )}
-        <div ref={messagesEndRef} className="assistant-messages-end" />
       </div>
       {messages.length === 0 && !streaming && (
         <AssistantSuggestions suggestions={suggestions} onSelect={handleSend} />

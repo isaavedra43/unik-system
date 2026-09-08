@@ -230,6 +230,14 @@ export async function* runAssistant(
         parsedArgs = {};
       }
 
+      // Inject conversationId for artifact tools that need it
+      if (parsedArgs && typeof parsedArgs === 'object') {
+        const argsObj = parsedArgs as Record<string, unknown>;
+        if (!argsObj.conversationId) {
+          argsObj.conversationId = input.conversationId;
+        }
+      }
+
       const result = await executeTool(tc.name, input.actor, parsedArgs);
 
       // If the tool generated an artifact, emit an artifact event
