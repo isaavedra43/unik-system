@@ -133,7 +133,7 @@ export const DEFAULT_AI_SETTINGS: AiSettings = {
   artifactTtlHours: 168, // 7 días
   voiceEnabled: false,
   sttModel: 'whisper-1',
-  ttsVoice: 'es-MX-Dalia',
+  ttsVoice: 'coral',
   inputMaxLength: 10_000,
   promptInjectionDetection: true,
   autonomousModeEnabled: false,

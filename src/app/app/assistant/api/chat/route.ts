@@ -12,6 +12,7 @@ const chatRequestSchema = z.object({
   context: z
     .object({
       page: z.string().optional(),
+      voice: z.boolean().optional(),
     })
     .optional(),
   model: z.string().optional(),

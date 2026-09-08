@@ -2,9 +2,7 @@ import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { registerTool } from './registry';
 import {
-  resolveDateRange,
   formatDate,
-  buildOrderDateWhere,
   buildOrderDateWhereFlexible,
   dateRangeSchema,
 } from './date-helpers';
@@ -178,9 +176,10 @@ registerTool({
     dateRange: dateRangeSchema,
     dateFrom: z.string().optional().describe("Fecha inicio YYYY-MM-DD. Para fechas especificas (ej: 19 de agosto 2026 = 2026-08-19) o meses (ej: agosto 2026 = 2026-08-01)."),
     dateTo: z.string().optional().describe("Fecha fin YYYY-MM-DD. Misma fecha que dateFrom para un dia especifico (ej: 2026-08-19) o fin de mes (ej: 2026-08-31)."),
-    bodega: z.boolean().describe(
+    bodega: z.boolean().default(false).describe(
       'false = solo EFECTIVO. true = solo EFECTIVO EN BODEGA. ' +
-      'Si el usuario pide "efectivo en bodega", pasa true. Si pide solo "efectivo", pasa false.'
+      'Si el usuario pide "efectivo en bodega", pasa true. Si pide solo "efectivo", pasa false. ' +
+      'Default: false.'
     ),
   }),
   execute: async (_actor, rawArgs) => {

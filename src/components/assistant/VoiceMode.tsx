@@ -268,7 +268,7 @@ export function VoiceMode({ conversationId, context, onClose, onConversationCrea
       body: JSON.stringify({
         conversationId: currentConvIdRef.current,
         message: text,
-        context,
+        context: { ...context, voice: true },
       }),
     });
 
@@ -337,10 +337,13 @@ export function VoiceMode({ conversationId, context, onClose, onConversationCrea
     stopVAD();
 
     try {
+      // Truncate long text for faster TTS response (first ~500 chars is enough for voice)
+      const ttsText = text.length > 500 ? text.slice(0, 500) + '...' : text;
+
       const res = await fetch('/app/assistant/api/voice/speak', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text }),
+        body: JSON.stringify({ text: ttsText }),
       });
 
       if (!res.ok) {
@@ -398,8 +401,8 @@ export function VoiceMode({ conversationId, context, onClose, onConversationCrea
     if (!analyser) return;
 
     const dataArray = new Uint8Array(analyser.frequencyBinCount);
-    const SPEECH_THRESHOLD = 12; // Volume level to count as speech
-    const SILENCE_DURATION_MS = 1200; // Silence duration to trigger stop
+    const SPEECH_THRESHOLD = 8; // Volume level to count as speech (lower = more sensitive)
+    const SILENCE_DURATION_MS = 700; // Silence duration to trigger stop (lower = faster)
 
     silenceStartRef.current = null;
     hasSpeechRef.current = false;

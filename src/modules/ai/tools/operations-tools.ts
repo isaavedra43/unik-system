@@ -106,8 +106,9 @@ registerTool({
   parameters: z.object({
     unreadOnly: z
       .boolean()
-      .describe('true = solo no leídas, false = todas.'),
-    limit: z.number().min(1).max(50).describe('Número máximo de notificaciones (1-50).'),
+      .default(false)
+      .describe('true = solo no leídas, false = todas. Default: false.'),
+    limit: z.number().min(1).max(50).default(20).describe('Número máximo de notificaciones (1-50). Default: 20.'),
   }),
   execute: async (actor, rawArgs) => {
     const args = rawArgs as { unreadOnly: boolean; limit: number };
@@ -399,7 +400,7 @@ registerTool({
     dateFrom: z.string().optional().describe('Fecha inicio YYYY-MM-DD.'),
     dateTo: z.string().optional().describe('Fecha fin YYYY-MM-DD.'),
     search: z.string().describe('Texto a buscar en nombre o SKU del producto.'),
-    limit: z.number().min(1).max(50).describe('Número máximo de resultados (1-50).'),
+    limit: z.number().min(1).max(50).default(20).describe('Número máximo de resultados (1-50). Default: 20.'),
   }),
   execute: async (_actor, rawArgs) => {
     const args = rawArgs as {

@@ -30,7 +30,7 @@ export interface OrchestratorInput {
   conversationId: string;
   message: string;
   actor: CurrentUser;
-  context?: { page?: string };
+  context?: { page?: string; voice?: boolean };
   /** Optional model override — user can pick a model in the chat UI. */
   model?: string;
   /** Optional attachments (images/PDFs uploaded by the user). */

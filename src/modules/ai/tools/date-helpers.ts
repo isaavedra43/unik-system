@@ -41,9 +41,11 @@ export type DateRangeShortcut = (typeof DATE_SHORTCUTS)[number];
  */
 export const dateRangeSchema = z
   .enum(DATE_SHORTCUTS)
+  .default('today')
   .describe(
     'Período de tiempo. VALORES: "today" (hoy), "yesterday" (ayer), "this_week" (esta semana), "this_month" (este mes), "last_month" (mes pasado), "last_7_days" (últimos 7 días), "last_30_days" (últimos 30 días), "custom" (fecha específica — requiere dateFrom y dateTo), "all" (todo). ' +
-    'PARA FECHAS ESPECÍFICAS usa "custom" + dateFrom + dateTo. NUNCA uses "today" cuando el usuario pide una fecha específica.'
+    'PARA FECHAS ESPECÍFICAS usa "custom" + dateFrom + dateTo. NUNCA uses "today" cuando el usuario pide una fecha específica. ' +
+    'Si no estás seguro del período, usa "today" por defecto.'
   );
 
 /**

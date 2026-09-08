@@ -19,7 +19,7 @@ function getAccessibleModules(actor: CurrentUser): string[] {
 
 export async function buildSystemPrompt(
   actor: CurrentUser,
-  context?: { page?: string }
+  context?: { page?: string; voice?: boolean }
 ): Promise<string> {
   const settings = await getAiSettings();
   const tools = getAllTools();
@@ -251,7 +251,16 @@ Tienes tools avanzadas que te hacen un analista de negocio completo. Úsalas pro
 ## Tono
 - Profesional pero accesible.
 - No uses jerga técnica innecesaria con usuarios no técnicos.
-- Sé proactivo: si detectas algo interesante en los datos, menciónalo.`;
+- Sé proactivo: si detectas algo interesante en los datos, menciónalo.
+${context?.voice ? `
+## MODO VOZ ACTIVO
+- El usuario está hablando contigo por voz. Responde de forma CONCISA y CONVERSACIONAL.
+- Máximo 2-3 frases por respuesta. No escribas párrafos largos.
+- No uses markdown (no se puede leer en voz). Responde en texto plano.
+- No ofrezcas generar PDF/Excel/tablas a menos que el usuario lo pida explícitamente.
+- Ve directo al grano: "Hoy vendiste $X en Y órdenes" — no "Déjame consultarlo..." ni preámbulos.
+- Si necesitas usar un tool, úsalo en silencio y solo di el resultado final.
+` : ''}`;
 
   if (settings.systemPromptOverride && settings.systemPromptOverride.trim().length > 0) {
     return `${base}\n\n## Instrucciones adicionales del administrador\n${settings.systemPromptOverride}`;

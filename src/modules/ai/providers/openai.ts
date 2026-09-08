@@ -292,7 +292,11 @@ export const openaiProvider: AiProvider = {
    */
   async speak(text: string, voice?: string): Promise<Buffer> {
     const client = await getClient();
-    const ttsVoice = voice ?? 'es-MX-Dalia';
+    const VALID_VOICES = ['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer', 'coral', 'verse', 'ballad', 'ash', 'sage', 'marin', 'cedar'];
+    let ttsVoice = voice ?? 'coral';
+    if (!VALID_VOICES.includes(ttsVoice)) {
+      ttsVoice = 'coral';
+    }
     try {
       const mp3 = await client.audio.speech.create({
         model: 'gpt-4o-mini-tts',
