@@ -395,14 +395,14 @@ registerTool({
   enabledByDefault: true,
   parameters: z.object({
     conversationId: z.string().optional().describe('Se inyecta automáticamente, no lo pongas.'),
-    chartType: z.enum(['bar', 'horizontal-bar', 'line', 'pie', 'doughnut']).describe('Tipo de gráfica'),
-    title: z.string().describe('Título de la gráfica'),
+    chartType: z.enum(['bar', 'horizontal-bar', 'line', 'pie', 'doughnut']).default('bar').describe('Tipo de gráfica'),
+    title: z.string().default('Gráfica de Datos').describe('Título de la gráfica'),
     subtitle: z.string().optional(),
-    labels: z.array(z.string()).describe('Etiquetas (ej: ["Axel", "Andrea", "Laura"])'),
+    labels: z.array(z.string()).optional().describe('Etiquetas (se auto-generan de los datos)'),
     series: z.array(z.object({
       label: z.string().describe('Nombre de la serie'),
-      values: z.array(z.number()).describe('Valores (ej: [47052, 27064, 2664])'),
-    })).describe('Series de datos'),
+      values: z.array(z.number()).describe('Valores'),
+    })).optional().describe('Series de datos (se auto-generan de los datos)'),
     colors: z.array(z.string()).optional(),
     showValues: z.boolean().optional(),
     showLegend: z.boolean().optional(),
@@ -414,13 +414,17 @@ registerTool({
       chartType: 'bar' | 'horizontal-bar' | 'line' | 'pie' | 'doughnut';
       title: string;
       subtitle?: string;
-      labels: string[];
-      series: Array<{ label: string; values: number[] }>;
+      labels?: string[];
+      series?: Array<{ label: string; values: number[] }>;
       colors?: string[];
       showValues?: boolean;
       showLegend?: boolean;
       brandColor?: string;
     };
+
+    if (!args.labels || !args.series) {
+      return { error: 'No hay datos para generar la gráfica. Llama primero una tool de datos (ej: getCashSales, getTopProducts).' };
+    }
 
     const svg = generateChartSvg({
       type: args.chartType,

@@ -126,6 +126,41 @@ export async function* runAssistant(
   let lastToolRows: Record<string, unknown>[] | null = null;
   let lastToolName: string | null = null;
 
+  // Scan conversation history for the last tool result with data rows
+  // This handles "generame un excel con la info que te pedi" (data from a previous message)
+  for (let i = history.length - 1; i >= 0; i--) {
+    const m = history[i];
+    if (m.role === 'tool' && m.content) {
+      try {
+        const parsed = JSON.parse(m.content);
+        if (parsed && typeof parsed === 'object' && !parsed.error) {
+          // Find the array of objects in the result
+          for (const key of Object.keys(parsed)) {
+            const val = parsed[key];
+            if (Array.isArray(val) && val.length > 0 && typeof val[0] === 'object') {
+              lastToolRows = val as Record<string, unknown>[];
+              // Find the tool name from the previous assistant message's toolCalls
+              for (let j = i - 1; j >= 0; j--) {
+                const am = history[j];
+                if (am.role === 'assistant' && am.toolCalls) {
+                  const calls = am.toolCalls as Array<{ name: string; arguments: string }>;
+                  if (calls.length > 0) {
+                    lastToolName = calls[calls.length - 1].name;
+                  }
+                  break;
+                }
+              }
+              break;
+            }
+          }
+          if (lastToolRows) break;
+        }
+      } catch {
+        // Not JSON, skip
+      }
+    }
+  }
+
   const ARTIFACT_TOOLS = new Set([
     'generatePdfReport',
     'generateExcelReport',
@@ -255,7 +290,6 @@ export async function* runAssistant(
             argsObj.rows = lastToolRows;
           }
           if (!argsObj.title && lastToolName) {
-            // Auto-generate a title from the last tool name
             const titleMap: Record<string, string> = {
               getCashSales: 'Ventas en Efectivo',
               getSalesOrdersSummary: 'Resumen de Ventas',
@@ -275,6 +309,58 @@ export async function* runAssistant(
               getLowStockAlerts: 'Alertas de Bajo Stock',
             };
             argsObj.title = titleMap[lastToolName] ?? 'Reporte UNIK';
+          }
+        }
+
+        // Auto-inject chart params for generateChart
+        if (tc.name === 'generateChart' && lastToolRows && lastToolRows.length > 0) {
+          if (!argsObj.title) {
+            const titleMap: Record<string, string> = {
+              getCashSales: 'Ventas en Efectivo',
+              getSalesOrdersSummary: 'Resumen de Ventas',
+              getTopProducts: 'Productos Más Vendidos',
+              getSalesBySalesperson: 'Ventas por Vendedor',
+              getSalesByLocation: 'Ventas por Sucursal',
+              getSalesByStatus: 'Ventas por Estado',
+              getSalesByPaymentMethod: 'Ventas por Método de Pago',
+              getSalesTrend: 'Tendencia de Ventas',
+              getTopCustomers: 'Top Clientes',
+            };
+            argsObj.title = titleMap[lastToolName ?? ''] ?? 'Gráfica de Datos';
+          }
+          if (!argsObj.chartType) {
+            argsObj.chartType = 'bar';
+          }
+          if (!argsObj.labels && lastToolRows.length > 0) {
+            // Use 'customer' or 'number' or first string field as labels
+            const firstRow = lastToolRows[0];
+            let labelKey = 'customer';
+            if (!('customer' in firstRow)) {
+              // Find first string field
+              for (const k of Object.keys(firstRow)) {
+                if (typeof firstRow[k] === 'string' && k !== 'date' && k !== 'status') {
+                  labelKey = k;
+                  break;
+                }
+              }
+            }
+            argsObj.labels = lastToolRows.map((r) => String(r[labelKey] ?? '').slice(0, 30));
+          }
+          if (!argsObj.series && lastToolRows.length > 0) {
+            // Use 'total' or first numeric field as values
+            const firstRow = lastToolRows[0];
+            let valueKey = 'total';
+            if (!('total' in firstRow)) {
+              for (const k of Object.keys(firstRow)) {
+                const v = firstRow[k];
+                if (typeof v === 'number' || (typeof v === 'string' && !isNaN(Number(v)) && v !== '')) {
+                  valueKey = k;
+                  break;
+                }
+              }
+            }
+            const values = lastToolRows.map((r) => Number(r[valueKey] ?? 0));
+            argsObj.series = [{ label: argsObj.title as string, values }];
           }
         }
       }
