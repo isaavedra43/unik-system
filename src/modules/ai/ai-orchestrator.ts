@@ -26,7 +26,7 @@ export interface OrchestratorInput {
 }
 
 export interface OrchestratorEvent {
-  type: 'token' | 'tool_call_start' | 'tool_call_end' | 'done' | 'error';
+  type: 'token' | 'tool_call_start' | 'tool_call_end' | 'artifact' | 'done' | 'error';
   data?: unknown;
 }
 
@@ -211,6 +211,28 @@ export async function* runAssistant(
       }
 
       const result = await executeTool(tc.name, input.actor, parsedArgs);
+
+      // If the tool generated an artifact, emit an artifact event
+      if (result.success && result.result && typeof result.result === 'object') {
+        const toolResult = result.result as Record<string, unknown>;
+        if (toolResult.artifactId && toolResult.type) {
+          yield {
+            type: 'artifact',
+            data: {
+              artifactId: toolResult.artifactId,
+              type: toolResult.type,
+              title: toolResult.title,
+              filename: toolResult.filename,
+              downloadUrl: toolResult.downloadUrl,
+              inlineRender: toolResult.inlineRender,
+              rowCount: toolResult.rowCount,
+              sizeBytes: toolResult.sizeBytes,
+              pageCount: toolResult.pageCount,
+              chartType: toolResult.chartType,
+            },
+          };
+        }
+      }
 
       // Audit tool call
       await recordAiToolCall({

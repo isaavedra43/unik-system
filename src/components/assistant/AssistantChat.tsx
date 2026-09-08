@@ -6,6 +6,7 @@ import type { CurrentUser } from '@/modules/auth/authorization';
 import { AssistantMessage, type AssistantMessageData } from './AssistantMessage';
 import { AssistantInput } from './AssistantInput';
 import { ModelSelector } from './ModelSelector';
+import { ArtifactRenderer, type ArtifactData } from './ArtifactRenderer';
 import {
   AssistantSuggestions,
   getSuggestionsForPage,
@@ -37,6 +38,7 @@ export function AssistantChat({
   const [streaming, setStreaming] = useState(false);
   const [streamingContent, setStreamingContent] = useState('');
   const [activeToolCalls, setActiveToolCalls] = useState<ActiveToolCall[]>([]);
+  const [artifacts, setArtifacts] = useState<ArtifactData[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loadingConv, setLoadingConv] = useState(false);
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
@@ -78,6 +80,7 @@ export function AssistantChat({
       loadConversation(conversationId);
     } else {
       setMessages([]);
+      setArtifacts([]);
     }
   }, [conversationId, loadConversation]);
 
@@ -113,6 +116,7 @@ export function AssistantChat({
     setStreaming(true);
     setStreamingContent('');
     setActiveToolCalls([]);
+    setArtifacts([]);
 
     const controller = new AbortController();
     abortRef.current = controller;
@@ -171,6 +175,8 @@ export function AssistantChat({
                 };
                 setActiveToolCalls([...toolCalls]);
               }
+            } else if (event.type === 'artifact') {
+              setArtifacts((prev) => [...prev, event.data as ArtifactData]);
             } else if (event.type === 'done') {
               setStreamingContent('');
               setActiveToolCalls([]);
@@ -250,6 +256,13 @@ export function AssistantChat({
                 </div>
               )}
             </div>
+          </div>
+        )}
+        {artifacts.length > 0 && (
+          <div className="assistant-artifacts">
+            {artifacts.map((a) => (
+              <ArtifactRenderer key={a.artifactId} artifact={a} />
+            ))}
           </div>
         )}
         {error && (

@@ -86,7 +86,7 @@ export const DEFAULT_AI_SETTINGS: AiSettings = {
   systemPromptOverride: '',
   enabledTools: [
     // Sales
-    'getCashSalesToday',
+    'getCashSales',
     'getSalesOrdersSummary',
     'searchSalesOrders',
     'getSalesOrderDetail',
@@ -115,6 +115,14 @@ export const DEFAULT_AI_SETTINGS: AiSettings = {
     'getSalesKPIs',
     'getHourlySalesPattern',
     'getWeekdaySalesPattern',
+    // Artifacts
+    'generatePdfReport',
+    'generateExcelReport',
+    'generateCsvExport',
+    'generateChart',
+    'generateTable',
+    'listArtifacts',
+    'cleanupArtifacts',
     // System
     'getCurrentUserContext',
     'getModuleList',

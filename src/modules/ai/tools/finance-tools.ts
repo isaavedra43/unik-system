@@ -1,85 +1,7 @@
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { registerTool } from './registry';
-import { dateToIsoDateOnly } from '@/modules/sales/sales-orders-helpers';
-
-/* ------------------------------------------------------------------ */
-/* Helpers                                                            */
-/* ------------------------------------------------------------------ */
-
-function startOfDay(d: Date): Date {
-  const x = new Date(d);
-  x.setHours(0, 0, 0, 0);
-  return x;
-}
-
-function endOfDay(d: Date): Date {
-  const x = new Date(d);
-  x.setHours(23, 59, 59, 999);
-  return x;
-}
-
-function startOfWeek(d: Date): Date {
-  const x = startOfDay(d);
-  const day = x.getDay();
-  const diff = (day + 6) % 7;
-  x.setDate(x.getDate() - diff);
-  return x;
-}
-
-function startOfMonth(d: Date): Date {
-  return new Date(d.getFullYear(), d.getMonth(), 1);
-}
-
-const dateRangeSchema = z.union([
-  z.enum(['today', 'yesterday', 'this_week', 'this_month', 'last_7_days', 'last_30_days']),
-  z.object({
-    from: z.union([z.string(), z.date()]).describe('Fecha inicial (ISO o YYYY-MM-DD)'),
-    to: z.union([z.string(), z.date()]).describe('Fecha final (ISO o YYYY-MM-DD)'),
-  }),
-]);
-
-type DateRangeShortcut =
-  | 'today'
-  | 'yesterday'
-  | 'this_week'
-  | 'this_month'
-  | 'last_7_days'
-  | 'last_30_days';
-
-function resolveDateRange(range: DateRangeShortcut | { from: string | Date; to: string | Date } | undefined): {
-  from: Date;
-  to: Date;
-} {
-  const now = new Date();
-  if (range === undefined || range === 'today') {
-    return { from: startOfDay(now), to: endOfDay(now) };
-  }
-  if (range === 'yesterday') {
-    const y = new Date(now);
-    y.setDate(y.getDate() - 1);
-    return { from: startOfDay(y), to: endOfDay(y) };
-  }
-  if (range === 'this_week') {
-    return { from: startOfWeek(now), to: endOfDay(now) };
-  }
-  if (range === 'this_month') {
-    return { from: startOfMonth(now), to: endOfDay(now) };
-  }
-  if (range === 'last_7_days') {
-    const from = new Date(now);
-    from.setDate(from.getDate() - 6);
-    return { from: startOfDay(from), to: endOfDay(now) };
-  }
-  if (range === 'last_30_days') {
-    const from = new Date(now);
-    from.setDate(from.getDate() - 29);
-    return { from: startOfDay(from), to: endOfDay(now) };
-  }
-  const from = typeof range.from === 'string' ? new Date(range.from) : range.from;
-  const to = typeof range.to === 'string' ? new Date(range.to) : range.to;
-  return { from: startOfDay(from), to: endOfDay(to) };
-}
+import { resolveDateRange, dateRangeSchema, formatDate } from './date-helpers';
 
 /* ------------------------------------------------------------------ */
 /* Tools                                                              */
@@ -157,7 +79,7 @@ registerTool({
       orders: orders.map((o) => ({
         number: o.salesOrderNumber,
         customer: o.customerName,
-        date: o.orderDate ? dateToIsoDateOnly(o.orderDate) : null,
+        date: o.orderDate ? formatDate(o.orderDate) : null,
         total: Number(o.total ?? 0).toFixed(2),
         balance: Number(o.balance ?? 0).toFixed(2),
         status: o.status,
@@ -247,7 +169,7 @@ registerTool({
     const byDay = new Map<string, { billed: number; collected: number; pending: number; count: number }>();
     for (const o of orders) {
       if (!o.orderDate) continue;
-      const key = dateToIsoDateOnly(o.orderDate) ?? 'Sin fecha';
+      const key = formatDate(o.orderDate) ?? 'Sin fecha';
       const entry = byDay.get(key) ?? { billed: 0, collected: 0, pending: 0, count: 0 };
       entry.billed += Number(o.total ?? 0);
       entry.collected += Number(o.total ?? 0) - Number(o.balance ?? 0);

@@ -27,5 +27,8 @@ import './finance-tools';
 // Analytics tools (comparaciones, rankings, métricas avanzadas)
 import './analytics-tools';
 
+// Artifact tools (PDF, Excel, CSV, tablas, gráficas)
+import './artifact-tools';
+
 // Export the registry API for consumers
 export * from './registry';
