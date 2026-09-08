@@ -85,6 +85,7 @@ export const DEFAULT_AI_SETTINGS: AiSettings = {
   maxToolIterations: 5,
   systemPromptOverride: '',
   enabledTools: [
+    // Sales
     'getCashSalesToday',
     'getSalesOrdersSummary',
     'searchSalesOrders',
@@ -95,6 +96,26 @@ export const DEFAULT_AI_SETTINGS: AiSettings = {
     'getSalesTrend',
     'getSalesByStatus',
     'getSalesByPaymentMethod',
+    // Inventory
+    'getProductCatalog',
+    'getStockMovement',
+    'getLowStockAlerts',
+    'getProductDetails',
+    // Customers
+    'getTopCustomers',
+    'getCustomerDetails',
+    'getCustomerSegments',
+    // Finance
+    'getAccountsReceivable',
+    'getRevenueAnalysis',
+    'getDailyRevenue',
+    // Analytics
+    'comparePeriods',
+    'getSalesRanking',
+    'getSalesKPIs',
+    'getHourlySalesPattern',
+    'getWeekdaySalesPattern',
+    // System
     'getCurrentUserContext',
     'getModuleList',
     'getSystemTime',

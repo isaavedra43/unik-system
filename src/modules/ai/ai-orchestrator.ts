@@ -5,7 +5,7 @@ import {
   getAvailableTools,
   executeTool,
   toOpenAiTools,
-} from './tools/registry';
+} from './tools/index';
 import { getAiSettings } from './ai-admin-config-service';
 import {
   getMessages,
