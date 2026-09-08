@@ -195,6 +195,7 @@ export async function* runAssistant(
   // Track the last data tool result so we can auto-inject it into artifact tools
   let lastToolRows: Record<string, unknown>[] | null = null;
   let lastToolName: string | null = null;
+  let lastToolArgs: Record<string, unknown> | null = null;
 
   // Scan conversation history for the last tool result with data rows
   // This handles "generame un excel con la info que te pedi" (data from a previous message)
@@ -209,13 +210,18 @@ export async function* runAssistant(
             const val = parsed[key];
             if (Array.isArray(val) && val.length > 0 && typeof val[0] === 'object') {
               lastToolRows = val as Record<string, unknown>[];
-              // Find the tool name from the previous assistant message's toolCalls
+              // Find the tool name and args from the previous assistant message's toolCalls
               for (let j = i - 1; j >= 0; j--) {
                 const am = history[j];
                 if (am.role === 'assistant' && am.toolCalls) {
                   const calls = am.toolCalls as Array<{ name: string; arguments: string }>;
                   if (calls.length > 0) {
                     lastToolName = calls[calls.length - 1].name;
+                    try {
+                      lastToolArgs = JSON.parse(calls[calls.length - 1].arguments);
+                    } catch {
+                      lastToolArgs = null;
+                    }
                   }
                   break;
                 }
@@ -360,9 +366,21 @@ export async function* runAssistant(
             argsObj.rows = lastToolRows;
           }
           if (!argsObj.title && lastToolName) {
+            // Build title based on tool name AND its arguments
+            const isBodega = lastToolArgs?.bodega === true;
+            const dateRange = lastToolArgs?.dateRange as string | undefined;
+            const dateLabel = dateRange === 'today' ? ' de Hoy'
+              : dateRange === 'yesterday' ? ' de Ayer'
+              : dateRange === 'this_week' ? ' de Esta Semana'
+              : dateRange === 'this_month' ? ' de Este Mes'
+              : dateRange === 'last_month' ? ' del Mes Pasado'
+              : '';
+
             const titleMap: Record<string, string> = {
-              getCashSales: 'Ventas en Efectivo',
-              getSalesOrdersSummary: 'Resumen de Ventas',
+              getCashSales: isBodega
+                ? `Ventas en Efectivo en Bodega${dateLabel}`
+                : `Ventas en Efectivo${dateLabel}`,
+              getSalesOrdersSummary: `Resumen de Ventas${dateLabel}`,
               getTopProducts: 'Productos Más Vendidos',
               getSalesBySalesperson: 'Ventas por Vendedor',
               getSalesByLocation: 'Ventas por Sucursal',
@@ -385,8 +403,9 @@ export async function* runAssistant(
         // Auto-inject chart params for generateChart
         if (tc.name === 'generateChart' && lastToolRows && lastToolRows.length > 0) {
           if (!argsObj.title) {
+            const isBodega = lastToolArgs?.bodega === true;
             const titleMap: Record<string, string> = {
-              getCashSales: 'Ventas en Efectivo',
+              getCashSales: isBodega ? 'Ventas en Efectivo en Bodega' : 'Ventas en Efectivo',
               getSalesOrdersSummary: 'Resumen de Ventas',
               getTopProducts: 'Productos Más Vendidos',
               getSalesBySalesperson: 'Ventas por Vendedor',
@@ -452,6 +471,7 @@ export async function* runAssistant(
         if (foundRows) {
           lastToolRows = foundRows;
           lastToolName = tc.name;
+          lastToolArgs = (parsedArgs as Record<string, unknown>) ?? null;
         }
       }
 

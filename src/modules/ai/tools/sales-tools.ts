@@ -45,8 +45,8 @@ registerTool({
   enabledByDefault: true,
   parameters: z.object({
     dateRange: dateRangeSchema,
-    dateFrom: z.string().optional().describe("Fecha inicio YYYY-MM-DD. Para meses especificos (ej: agosto 2026 = 2026-08-01)."),
-    dateTo: z.string().optional().describe("Fecha fin YYYY-MM-DD (ej: 2026-08-31)."),
+    dateFrom: z.string().optional().describe("Fecha inicio YYYY-MM-DD. Para fechas especificas (ej: 19 de agosto 2026 = 2026-08-19) o meses (ej: agosto 2026 = 2026-08-01)."),
+    dateTo: z.string().optional().describe("Fecha fin YYYY-MM-DD. Misma fecha que dateFrom para un dia especifico (ej: 2026-08-19) o fin de mes (ej: 2026-08-31)."),
     paymentMethod: z.string().optional().describe('Valor EXACTO: "EFECTIVO", "EFECTIVO EN BODEGA", o "TRANSFERENCIA". NO uses coincidencia parcial.'),
     status: z.string().optional().describe('Filtrar por estado de orden.'),
     salesperson: z.string().optional(),
@@ -176,8 +176,8 @@ registerTool({
   enabledByDefault: true,
   parameters: z.object({
     dateRange: dateRangeSchema,
-    dateFrom: z.string().optional().describe("Fecha inicio YYYY-MM-DD. Para meses especificos (ej: agosto 2026 = 2026-08-01)."),
-    dateTo: z.string().optional().describe("Fecha fin YYYY-MM-DD (ej: 2026-08-31)."),
+    dateFrom: z.string().optional().describe("Fecha inicio YYYY-MM-DD. Para fechas especificas (ej: 19 de agosto 2026 = 2026-08-19) o meses (ej: agosto 2026 = 2026-08-01)."),
+    dateTo: z.string().optional().describe("Fecha fin YYYY-MM-DD. Misma fecha que dateFrom para un dia especifico (ej: 2026-08-19) o fin de mes (ej: 2026-08-31)."),
     bodega: z.boolean().default(false).describe(
       'false = solo EFECTIVO (default). true = solo EFECTIVO EN BODEGA. ' +
       'Si el usuario pide "efectivo en bodega", pasa true. Si pide solo "efectivo", pasa false.'
@@ -237,8 +237,8 @@ registerTool({
   enabledByDefault: true,
   parameters: z.object({
     dateRange: dateRangeSchema,
-    dateFrom: z.string().optional().describe("Fecha inicio YYYY-MM-DD. Para meses especificos (ej: agosto 2026 = 2026-08-01)."),
-    dateTo: z.string().optional().describe("Fecha fin YYYY-MM-DD (ej: 2026-08-31)."),
+    dateFrom: z.string().optional().describe("Fecha inicio YYYY-MM-DD. Para fechas especificas (ej: 19 de agosto 2026 = 2026-08-19) o meses (ej: agosto 2026 = 2026-08-01)."),
+    dateTo: z.string().optional().describe("Fecha fin YYYY-MM-DD. Misma fecha que dateFrom para un dia especifico (ej: 2026-08-19) o fin de mes (ej: 2026-08-31)."),
     customer: z.string().optional().describe('Nombre del cliente (búsqueda parcial).'),
     status: z.string().optional(),
     salesperson: z.string().optional(),
@@ -409,8 +409,8 @@ registerTool({
   enabledByDefault: true,
   parameters: z.object({
     dateRange: dateRangeSchema,
-    dateFrom: z.string().optional().describe("Fecha inicio YYYY-MM-DD. Para meses especificos (ej: agosto 2026 = 2026-08-01)."),
-    dateTo: z.string().optional().describe("Fecha fin YYYY-MM-DD (ej: 2026-08-31)."),
+    dateFrom: z.string().optional().describe("Fecha inicio YYYY-MM-DD. Para fechas especificas (ej: 19 de agosto 2026 = 2026-08-19) o meses (ej: agosto 2026 = 2026-08-01)."),
+    dateTo: z.string().optional().describe("Fecha fin YYYY-MM-DD. Misma fecha que dateFrom para un dia especifico (ej: 2026-08-19) o fin de mes (ej: 2026-08-31)."),
     limit: z.number().int().min(1).max(50).default(10),
   }),
   execute: async (_actor, rawArgs) => {
@@ -454,8 +454,8 @@ registerTool({
   enabledByDefault: true,
   parameters: z.object({
     dateRange: dateRangeSchema,
-    dateFrom: z.string().optional().describe("Fecha inicio YYYY-MM-DD. Para meses especificos (ej: agosto 2026 = 2026-08-01)."),
-    dateTo: z.string().optional().describe("Fecha fin YYYY-MM-DD (ej: 2026-08-31)."),
+    dateFrom: z.string().optional().describe("Fecha inicio YYYY-MM-DD. Para fechas especificas (ej: 19 de agosto 2026 = 2026-08-19) o meses (ej: agosto 2026 = 2026-08-01)."),
+    dateTo: z.string().optional().describe("Fecha fin YYYY-MM-DD. Misma fecha que dateFrom para un dia especifico (ej: 2026-08-19) o fin de mes (ej: 2026-08-31)."),
   }),
   execute: async (_actor, rawArgs) => {
     const args = rawArgs as { dateRange: string; dateFrom?: string; dateTo?: string };
@@ -498,8 +498,8 @@ registerTool({
   enabledByDefault: true,
   parameters: z.object({
     dateRange: dateRangeSchema,
-    dateFrom: z.string().optional().describe("Fecha inicio YYYY-MM-DD. Para meses especificos (ej: agosto 2026 = 2026-08-01)."),
-    dateTo: z.string().optional().describe("Fecha fin YYYY-MM-DD (ej: 2026-08-31)."),
+    dateFrom: z.string().optional().describe("Fecha inicio YYYY-MM-DD. Para fechas especificas (ej: 19 de agosto 2026 = 2026-08-19) o meses (ej: agosto 2026 = 2026-08-01)."),
+    dateTo: z.string().optional().describe("Fecha fin YYYY-MM-DD. Misma fecha que dateFrom para un dia especifico (ej: 2026-08-19) o fin de mes (ej: 2026-08-31)."),
   }),
   execute: async (_actor, rawArgs) => {
     const args = rawArgs as { dateRange: string; dateFrom?: string; dateTo?: string };
@@ -537,8 +537,8 @@ registerTool({
   enabledByDefault: true,
   parameters: z.object({
     dateRange: dateRangeSchema,
-    dateFrom: z.string().optional().describe("Fecha inicio YYYY-MM-DD. Para meses especificos (ej: agosto 2026 = 2026-08-01)."),
-    dateTo: z.string().optional().describe("Fecha fin YYYY-MM-DD (ej: 2026-08-31)."),
+    dateFrom: z.string().optional().describe("Fecha inicio YYYY-MM-DD. Para fechas especificas (ej: 19 de agosto 2026 = 2026-08-19) o meses (ej: agosto 2026 = 2026-08-01)."),
+    dateTo: z.string().optional().describe("Fecha fin YYYY-MM-DD. Misma fecha que dateFrom para un dia especifico (ej: 2026-08-19) o fin de mes (ej: 2026-08-31)."),
     granularity: z.enum(['day', 'week', 'month']).default('day'),
   }),
   execute: async (_actor, rawArgs) => {
@@ -592,8 +592,8 @@ registerTool({
   enabledByDefault: true,
   parameters: z.object({
     dateRange: dateRangeSchema,
-    dateFrom: z.string().optional().describe("Fecha inicio YYYY-MM-DD. Para meses especificos (ej: agosto 2026 = 2026-08-01)."),
-    dateTo: z.string().optional().describe("Fecha fin YYYY-MM-DD (ej: 2026-08-31)."),
+    dateFrom: z.string().optional().describe("Fecha inicio YYYY-MM-DD. Para fechas especificas (ej: 19 de agosto 2026 = 2026-08-19) o meses (ej: agosto 2026 = 2026-08-01)."),
+    dateTo: z.string().optional().describe("Fecha fin YYYY-MM-DD. Misma fecha que dateFrom para un dia especifico (ej: 2026-08-19) o fin de mes (ej: 2026-08-31)."),
   }),
   execute: async (_actor, rawArgs) => {
     const args = rawArgs as { dateRange: string; dateFrom?: string; dateTo?: string };
@@ -631,8 +631,8 @@ registerTool({
   enabledByDefault: true,
   parameters: z.object({
     dateRange: dateRangeSchema,
-    dateFrom: z.string().optional().describe("Fecha inicio YYYY-MM-DD. Para meses especificos (ej: agosto 2026 = 2026-08-01)."),
-    dateTo: z.string().optional().describe("Fecha fin YYYY-MM-DD (ej: 2026-08-31)."),
+    dateFrom: z.string().optional().describe("Fecha inicio YYYY-MM-DD. Para fechas especificas (ej: 19 de agosto 2026 = 2026-08-19) o meses (ej: agosto 2026 = 2026-08-01)."),
+    dateTo: z.string().optional().describe("Fecha fin YYYY-MM-DD. Misma fecha que dateFrom para un dia especifico (ej: 2026-08-19) o fin de mes (ej: 2026-08-31)."),
   }),
   execute: async (_actor, rawArgs) => {
     const args = rawArgs as { dateRange: string; dateFrom?: string; dateTo?: string };
@@ -670,8 +670,8 @@ registerTool({
   enabledByDefault: true,
   parameters: z.object({
     dateRange: dateRangeSchema,
-    dateFrom: z.string().optional().describe("Fecha inicio YYYY-MM-DD. Para meses especificos (ej: agosto 2026 = 2026-08-01)."),
-    dateTo: z.string().optional().describe("Fecha fin YYYY-MM-DD (ej: 2026-08-31)."),
+    dateFrom: z.string().optional().describe("Fecha inicio YYYY-MM-DD. Para fechas especificas (ej: 19 de agosto 2026 = 2026-08-19) o meses (ej: agosto 2026 = 2026-08-01)."),
+    dateTo: z.string().optional().describe("Fecha fin YYYY-MM-DD. Misma fecha que dateFrom para un dia especifico (ej: 2026-08-19) o fin de mes (ej: 2026-08-31)."),
     limit: z.number().int().min(1).max(100).default(20),
   }),
   execute: async (_actor, rawArgs) => {
