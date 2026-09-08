@@ -97,6 +97,19 @@ export function getSalesOrderStatusLabel(
   return getSalesOrderStatusConfig(raw, category).label;
 }
 
+export function getSalesOrderStatusOptions(
+  category: StatusCategory
+): { value: string; label: string }[] {
+  const seen = new Set<string>();
+  return Object.values(CATEGORY_MAPS[category])
+    .map((config) => ({ value: config.raw, label: config.label }))
+    .filter((opt) => {
+      if (seen.has(opt.value)) return false;
+      seen.add(opt.value);
+      return true;
+    });
+}
+
 /**
  * Formats a commercial date (YYYY-MM-DD) for display without timezone shifting.
  * Accepts ISO date strings (`2026-09-01`) or JS Date objects.

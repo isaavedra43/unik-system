@@ -47,13 +47,17 @@ import {
   SalesOrderQueryState,
   TablePreferenceConfig,
   FILTER_OPERATORS_BY_TYPE,
+  FILTER_OPERATOR_LABELS,
   DATE_SHORTCUTS,
+  DATE_SHORTCUT_LABELS,
 } from '@/modules/sales/sales-orders-filters';
 import { SalesOrdersListResult, SalesOrderListRow } from '@/modules/sales/sales-orders-service';
 import {
   formatCurrency,
   formatDateOnly,
   getSalesOrderStatusConfig,
+  getSalesOrderStatusLabel,
+  getSalesOrderStatusOptions,
 } from '@/modules/sales/sales-orders-helpers';
 import {
   saveTablePreferenceJson,
@@ -1338,10 +1342,21 @@ export function SalesOrdersWorkspace({
             {query.filters.rules.map((rule, i) => {
               const col = SALES_ORDER_COLUMNS.find((c) => c.field === rule.field);
               if (!col) return null;
-              const val = 'value' in rule ? String(rule.value ?? '') : '';
+              const displayValue = (() => {
+                if (!('value' in rule) || rule.value === undefined || rule.value === null) return '';
+                if (col.type === 'boolean') return rule.value === true ? 'Sí' : 'No';
+                if (col.type === 'status' && col.statusCategory) {
+                  return getSalesOrderStatusLabel(String(rule.value), col.statusCategory);
+                }
+                return String(rule.value);
+              })();
+              const valTo = 'valueTo' in rule ? String(rule.valueTo ?? '') : '';
+              const fullValue =
+                rule.operator === 'between' && valTo ? `${displayValue} y ${valTo}` : displayValue;
+              const operatorLabel = FILTER_OPERATOR_LABELS[rule.operator] ?? rule.operator;
               return (
                 <span key={i} className="so-filter-chip">
-                  <strong>{col.label}:</strong> {rule.operator} {val}
+                  <strong>{col.label}:</strong> {operatorLabel} {fullValue}
                   <button onClick={() => removeFilter(i)} aria-label="Quitar filtro">
                     <X size={12} />
                   </button>
@@ -1387,23 +1402,71 @@ export function SalesOrdersWorkspace({
                   >
                     {operators.map((op) => (
                       <option key={op} value={op}>
-                        {op.replace(/_/g, ' ')}
+                        {FILTER_OPERATOR_LABELS[op] ?? op.replace(/_/g, ' ')}
                       </option>
                     ))}
                   </select>
                   {rule.operator !== 'is_empty' && rule.operator !== 'is_not_empty' ? (
-                    <input
-                      type={
-                        col?.type === 'number' || col?.type === 'currency'
-                          ? 'number'
-                          : col?.type === 'date'
-                            ? 'date'
-                            : 'text'
-                      }
-                      value={'value' in rule ? String(rule.value ?? '') : ''}
-                      onChange={(e) => updateFilter(i, { value: e.target.value })}
-                      placeholder="Valor..."
-                    />
+                    <div className="so-filter-values" style={{ display: 'flex', gap: '0.5rem' }}>
+                      {col?.type === 'status' && col.statusCategory ? (
+                        <select
+                          value={String(rule.value ?? '')}
+                          onChange={(e) => updateFilter(i, { value: e.target.value })}
+                        >
+                          <option value="">Seleccionar...</option>
+                          {getSalesOrderStatusOptions(col.statusCategory).map((opt) => (
+                            <option key={opt.value} value={opt.value}>
+                              {opt.label}
+                            </option>
+                          ))}
+                        </select>
+                      ) : col?.type === 'boolean' ? (
+                        <select
+                          value={
+                            rule.value === true ? 'true' : rule.value === false ? 'false' : ''
+                          }
+                          onChange={(e) => {
+                            const boolValue =
+                              e.target.value === 'true'
+                                ? true
+                                : e.target.value === 'false'
+                                  ? false
+                                  : undefined;
+                            updateFilter(i, { value: boolValue });
+                          }}
+                        >
+                          <option value="">Seleccionar...</option>
+                          <option value="true">Sí</option>
+                          <option value="false">No</option>
+                        </select>
+                      ) : (
+                        <input
+                          type={
+                            col?.type === 'number' || col?.type === 'currency'
+                              ? 'number'
+                              : col?.type === 'date'
+                                ? 'date'
+                                : 'text'
+                          }
+                          value={'value' in rule ? String(rule.value ?? '') : ''}
+                          onChange={(e) => updateFilter(i, { value: e.target.value })}
+                          placeholder={rule.operator === 'between' ? 'Desde...' : 'Valor...'}
+                        />
+                      )}
+                      {rule.operator === 'between' &&
+                      (col?.type === 'number' || col?.type === 'currency' || col?.type === 'date') ? (
+                        <input
+                          type={
+                            col?.type === 'number' || col?.type === 'currency'
+                              ? 'number'
+                              : 'date'
+                          }
+                          value={'valueTo' in rule ? String(rule.valueTo ?? '') : ''}
+                          onChange={(e) => updateFilter(i, { valueTo: e.target.value })}
+                          placeholder="Hasta..."
+                        />
+                      ) : null}
+                    </div>
                   ) : null}
                   {col?.type === 'date' && 'shortcut' in rule ? (
                     <select
@@ -1413,7 +1476,7 @@ export function SalesOrdersWorkspace({
                       <option value="">Sin atajo</option>
                       {DATE_SHORTCUTS.map((s) => (
                         <option key={s} value={s}>
-                          {s.replace(/_/g, ' ')}
+                          {DATE_SHORTCUT_LABELS[s] ?? s.replace(/_/g, ' ')}
                         </option>
                       ))}
                     </select>

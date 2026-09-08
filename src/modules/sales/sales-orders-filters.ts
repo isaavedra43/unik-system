@@ -54,6 +54,34 @@ export const FILTER_OPERATORS_BY_TYPE: Record<string, readonly string[]> = {
   boolean: BOOLEAN_OPERATORS,
 };
 
+export const FILTER_OPERATOR_LABELS: Record<string, string> = {
+  contains: 'Contiene',
+  not_contains: 'No contiene',
+  equals: 'Es igual a',
+  not_equals: 'No es igual a',
+  starts_with: 'Comienza con',
+  is_empty: 'Está vacío',
+  is_not_empty: 'No está vacío',
+  in: 'Es uno de',
+  not_in: 'No es uno de',
+  greater_than: 'Mayor que',
+  greater_or_equal: 'Mayor o igual que',
+  less_than: 'Menor que',
+  less_or_equal: 'Menor o igual que',
+  between: 'Entre',
+  before: 'Antes de',
+  after: 'Después de',
+};
+
+export const DATE_SHORTCUT_LABELS: Record<string, string> = {
+  today: 'Hoy',
+  yesterday: 'Ayer',
+  this_week: 'Esta semana',
+  this_month: 'Este mes',
+  last_7_days: 'Últimos 7 días',
+  last_30_days: 'Últimos 30 días',
+};
+
 /** Date shortcut keys the UI can send instead of explicit dates. */
 export const DATE_SHORTCUTS = [
   'today',
