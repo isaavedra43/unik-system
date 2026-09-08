@@ -1,5 +1,6 @@
 import type { CurrentUser } from '@/modules/auth/authorization';
 import { chatCompletionStream, type ChatMessage, type ToolSpec } from './ai-client';
+import { AiApiError } from './ai-client';
 import { buildSystemPrompt } from './ai-context-builder';
 import {
   getAvailableTools,
@@ -111,10 +112,15 @@ export async function* runAssistant(
   const availableTools = getAvailableTools(input.actor, settings.enabledTools);
   const toolSpecs: ToolSpec[] = toOpenAiTools(availableTools);
 
+  // Resolve effective model: user override > default
+  const effectiveModel = input.model ?? settings.deployment;
+  const fallbackModel = settings.fallbackDeployment;
+
   // 9. Agent loop (max maxToolIterations)
   let iteration = 0;
   let totalPromptTokens = 0;
   let totalCompletionTokens = 0;
+  let usingFallback = false;
 
   while (iteration < settings.maxToolIterations) {
     iteration++;
@@ -123,15 +129,18 @@ export async function* runAssistant(
     let iterationToolCalls: Array<{ id: string; name: string; arguments: string }> | undefined;
     let finishReason: string | undefined;
 
-    for await (const chunk of chatCompletionStream({
-      messages,
-      tools: toolSpecs.length > 0 ? toolSpecs : undefined,
-      temperature: settings.temperature,
-      maxTokens: settings.maxTokens,
-      userId: input.actor.id,
-      conversationId: input.conversationId,
-      model: input.model,
-    })) {
+    const modelToUse = usingFallback ? fallbackModel : effectiveModel;
+
+    try {
+      for await (const chunk of chatCompletionStream({
+        messages,
+        tools: toolSpecs.length > 0 ? toolSpecs : undefined,
+        temperature: settings.temperature,
+        maxTokens: settings.maxTokens,
+        userId: input.actor.id,
+        conversationId: input.conversationId,
+        model: modelToUse,
+      })) {
       if (chunk.delta) {
         iterationContent += chunk.delta;
         yield { type: 'token', data: { delta: chunk.delta } };
@@ -147,6 +156,17 @@ export async function* runAssistant(
         totalCompletionTokens += chunk.usage.completionTokens;
         recordTokenUsage(input.actor.id, chunk.usage.totalTokens);
       }
+    }
+    } catch (err) {
+      // Handle 429 rate limit: try fallback model
+      if (err instanceof AiApiError && err.code === 'rate_limit' && !usingFallback && fallbackModel) {
+        console.warn(`[ai-orchestrator] Rate limited on ${modelToUse}, falling back to ${fallbackModel}`);
+        usingFallback = true;
+        iteration--; // Don't count this failed attempt
+        continue;
+      }
+      // Re-throw other errors
+      throw err;
     }
 
     // If no tool calls, we're done

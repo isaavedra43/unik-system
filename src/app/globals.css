@@ -4239,6 +4239,25 @@ textarea.input {
   border-bottom-right-radius: var(--unik-radius-sm);
 }
 
+.assistant-msg-user .assistant-md,
+.assistant-msg-user .assistant-md-p,
+.assistant-msg-user .assistant-md-heading,
+.assistant-msg-user .assistant-md-list,
+.assistant-msg-user .assistant-md-quote,
+.assistant-msg-user .assistant-md-table th,
+.assistant-msg-user .assistant-md-table td {
+  color: var(--unik-text-inverse);
+}
+
+.assistant-msg-user .assistant-md-link {
+  color: var(--unik-text-inverse);
+  text-decoration: underline;
+}
+
+.assistant-msg-user .assistant-md-link:hover {
+  color: var(--unik-text-inverse);
+}
+
 .assistant-msg-assistant {
   background: var(--unik-surface);
   color: var(--unik-text);
