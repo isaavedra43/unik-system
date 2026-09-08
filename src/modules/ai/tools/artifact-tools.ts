@@ -89,7 +89,7 @@ registerTool({
     conversationId: z.string().optional().describe('Se inyecta automáticamente, no lo pongas.'),
     title: z.string().default('Reporte UNIK').describe('Título del reporte (ej: "Ventas en Efectivo de Ayer")'),
     subtitle: z.string().optional().describe('Subtítulo opcional'),
-    rows: z.array(z.record(z.unknown())).describe(
+    rows: z.array(z.record(z.unknown())).optional().describe(
       'Los datos a mostrar. Pasa el array de la tool anterior. ' +
       'EJ: si getCashSales devolvió orders, pasa ese array. ' +
       'EJ: si getTopProducts devolvió topProducts, pasa ese array.'
@@ -112,17 +112,22 @@ registerTool({
       conversationId: string;
       title: string;
       subtitle?: string;
-      rows: Record<string, unknown>[];
+      rows?: Record<string, unknown>[];
       columns?: Array<{ header: string; key: string; format?: string }>;
       summaryCards?: Array<{ label: string; value: string }>;
       brandColor?: string;
     };
 
+    const rows = args.rows ?? [];
+    if (rows.length === 0) {
+      return { error: 'No hay datos para generar el PDF. Llama primero una tool de datos (ej: getCashSales, getTopProducts).' };
+    }
+
     await ensureArtifactsDir();
     const artifactId = `pdf-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const filePath = getArtifactPath(artifactId, 'pdf');
 
-    const cols = args.columns ?? autoColumns(args.rows);
+    const cols = args.columns ?? autoColumns(rows);
 
     const pdfColumns: PdfTableColumn[] = cols.map((c) => ({
       header: c.header,
@@ -136,7 +141,7 @@ registerTool({
       brandColor: args.brandColor,
       logoText: 'UNIK',
       columns: pdfColumns,
-      rows: args.rows,
+      rows,
       summaryCards: args.summaryCards,
     });
 
@@ -150,7 +155,7 @@ registerTool({
         mimeType: 'application/pdf',
         sizeBytes,
         pageCount,
-        rowCount: args.rows.length,
+        rowCount: rows.length,
         columns: cols.map((c) => c.header),
         brandColor: args.brandColor,
       },
@@ -163,7 +168,7 @@ registerTool({
       filename: `${args.title.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`,
       sizeBytes,
       pageCount,
-      rowCount: args.rows.length,
+      rowCount: rows.length,
       downloadUrl: `/app/assistant/api/artifacts/${artifact.id}/download`,
     };
   },
@@ -181,7 +186,7 @@ registerTool({
     conversationId: z.string().optional().describe('Se inyecta automáticamente, no lo pongas.'),
     title: z.string().default('Reporte UNIK').describe('Título del reporte'),
     subtitle: z.string().optional(),
-    rows: z.array(z.record(z.unknown())).describe('Los datos a mostrar (array de la tool anterior)'),
+    rows: z.array(z.record(z.unknown())).optional().describe('Los datos a mostrar (array de la tool anterior)'),
     columns: z.array(z.object({
       header: z.string(),
       key: z.string(),
@@ -195,17 +200,22 @@ registerTool({
       conversationId: string;
       title: string;
       subtitle?: string;
-      rows: Record<string, unknown>[];
+      rows?: Record<string, unknown>[];
       columns?: Array<{ header: string; key: string; format?: string }>;
       summaryCards?: Array<{ label: string; value: string }>;
       brandColor?: string;
     };
 
+    const rows = args.rows ?? [];
+    if (rows.length === 0) {
+      return { error: 'No hay datos para generar el Excel. Llama primero una tool de datos.' };
+    }
+
     await ensureArtifactsDir();
     const artifactId = `xlsx-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const filePath = getArtifactPath(artifactId, 'xlsx');
 
-    const cols = args.columns ?? autoColumns(args.rows);
+    const cols = args.columns ?? autoColumns(rows);
 
     const excelColumns: ExcelColumn[] = cols.map((c) => ({
       header: c.header,
@@ -218,7 +228,7 @@ registerTool({
       subtitle: args.subtitle,
       brandColor: args.brandColor ? args.brandColor.replace('#', 'FF').toUpperCase() : undefined,
       columns: excelColumns,
-      rows: args.rows,
+      rows,
       summaryCards: args.summaryCards,
     });
 
@@ -231,7 +241,7 @@ registerTool({
         filename: `${args.title.replace(/[^a-zA-Z0-9]/g, '_')}.xlsx`,
         mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         sizeBytes,
-        rowCount: args.rows.length,
+        rowCount: rows.length,
         columns: cols.map((c) => c.header),
       },
     });
@@ -242,7 +252,7 @@ registerTool({
       title: args.title,
       filename: `${args.title.replace(/[^a-zA-Z0-9]/g, '_')}.xlsx`,
       sizeBytes,
-      rowCount: args.rows.length,
+      rowCount: rows.length,
       downloadUrl: `/app/assistant/api/artifacts/${artifact.id}/download`,
     };
   },
@@ -259,7 +269,7 @@ registerTool({
   parameters: z.object({
     conversationId: z.string().optional().describe('Se inyecta automáticamente, no lo pongas.'),
     title: z.string().default('Export UNIK').describe('Título'),
-    rows: z.array(z.record(z.unknown())).describe('Los datos a exportar (array de la tool anterior)'),
+    rows: z.array(z.record(z.unknown())).optional().describe('Los datos a exportar (array de la tool anterior)'),
     columns: z.array(z.object({
       header: z.string(),
       key: z.string(),
@@ -270,15 +280,20 @@ registerTool({
     const args = rawArgs as {
       conversationId: string;
       title: string;
-      rows: Record<string, unknown>[];
+      rows?: Record<string, unknown>[];
       columns?: Array<{ header: string; key: string; format?: string }>;
     };
+
+    const rows = args.rows ?? [];
+    if (rows.length === 0) {
+      return { error: 'No hay datos para generar el CSV. Llama primero una tool de datos.' };
+    }
 
     await ensureArtifactsDir();
     const artifactId = `csv-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const filePath = getArtifactPath(artifactId, 'csv');
 
-    const cols = args.columns ?? autoColumns(args.rows);
+    const cols = args.columns ?? autoColumns(rows);
 
     const { sizeBytes } = generateCsvReport(filePath, {
       title: args.title,
@@ -287,7 +302,7 @@ registerTool({
         key: c.key,
         format: (v: unknown) => formatValue(v, c.format),
       })),
-      rows: args.rows,
+      rows,
       includeMetadata: true,
     });
 
@@ -300,7 +315,7 @@ registerTool({
         filename: `${args.title.replace(/[^a-zA-Z0-9]/g, '_')}.csv`,
         mimeType: 'text/csv',
         sizeBytes,
-        rowCount: args.rows.length,
+        rowCount: rows.length,
         columns: cols.map((c) => c.header),
       },
     });
@@ -311,7 +326,7 @@ registerTool({
       title: args.title,
       filename: `${args.title.replace(/[^a-zA-Z0-9]/g, '_')}.csv`,
       sizeBytes,
-      rowCount: args.rows.length,
+      rowCount: rows.length,
       downloadUrl: `/app/assistant/api/artifacts/${artifact.id}/download`,
     };
   },
@@ -401,7 +416,7 @@ registerTool({
     conversationId: z.string().optional().describe('Se inyecta automáticamente, no lo pongas.'),
     title: z.string().describe('Título de la tabla'),
     subtitle: z.string().optional(),
-    rows: z.array(z.record(z.unknown())).describe('Los datos a mostrar (array de la tool anterior)'),
+    rows: z.array(z.record(z.unknown())).optional().describe('Los datos a mostrar (array de la tool anterior)'),
     columns: z.array(z.object({
       header: z.string(),
       key: z.string(),
@@ -415,13 +430,18 @@ registerTool({
       conversationId: string;
       title: string;
       subtitle?: string;
-      rows: Record<string, unknown>[];
+      rows?: Record<string, unknown>[];
       columns?: Array<{ header: string; key: string; format?: string }>;
       summary?: Array<{ label: string; value: string }>;
       brandColor?: string;
     };
 
-    const cols = args.columns ?? autoColumns(args.rows);
+    const rows = args.rows ?? [];
+    if (rows.length === 0) {
+      return { error: 'No hay datos para generar la tabla. Llama primero una tool de datos.' };
+    }
+
+    const cols = args.columns ?? autoColumns(rows);
 
     const tableData = generateTableData({
       title: args.title,
@@ -431,7 +451,7 @@ registerTool({
         key: c.key,
         format: c.format as 'currency' | 'number' | 'percentage' | 'date' | 'text' | undefined,
       })),
-      rows: args.rows,
+      rows,
       summary: args.summary,
       brandColor: args.brandColor,
     });
@@ -442,7 +462,7 @@ registerTool({
       inlineData: tableData as never,
       meta: {
         title: args.title,
-        rowCount: args.rows.length,
+        rowCount: rows.length,
         columns: cols.map((c) => c.header),
         brandColor: args.brandColor,
       },

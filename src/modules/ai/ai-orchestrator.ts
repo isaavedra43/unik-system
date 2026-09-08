@@ -122,6 +122,17 @@ export async function* runAssistant(
   let totalCompletionTokens = 0;
   let usingFallback = false;
 
+  // Track the last data tool result so we can auto-inject it into artifact tools
+  let lastToolRows: Record<string, unknown>[] | null = null;
+  let lastToolName: string | null = null;
+
+  const ARTIFACT_TOOLS = new Set([
+    'generatePdfReport',
+    'generateExcelReport',
+    'generateCsvExport',
+    'generateTable',
+  ]);
+
   while (iteration < settings.maxToolIterations) {
     iteration++;
 
@@ -236,9 +247,57 @@ export async function* runAssistant(
         if (!argsObj.conversationId) {
           argsObj.conversationId = input.conversationId;
         }
+
+        // Auto-inject rows and title for artifact tools when the IA didn't pass them
+        if (ARTIFACT_TOOLS.has(tc.name)) {
+          if (!argsObj.rows && lastToolRows && lastToolRows.length > 0) {
+            console.log(`[ai-orchestrator] Auto-injecting ${lastToolRows.length} rows from ${lastToolName} into ${tc.name}`);
+            argsObj.rows = lastToolRows;
+          }
+          if (!argsObj.title && lastToolName) {
+            // Auto-generate a title from the last tool name
+            const titleMap: Record<string, string> = {
+              getCashSales: 'Ventas en Efectivo',
+              getSalesOrdersSummary: 'Resumen de Ventas',
+              getTopProducts: 'Productos Más Vendidos',
+              getSalesBySalesperson: 'Ventas por Vendedor',
+              getSalesByLocation: 'Ventas por Sucursal',
+              getSalesByStatus: 'Ventas por Estado',
+              getSalesByPaymentMethod: 'Ventas por Método de Pago',
+              getSalesTrend: 'Tendencia de Ventas',
+              getTopCustomers: 'Top Clientes',
+              getAccountsReceivable: 'Cuentas por Cobrar',
+              getRevenueAnalysis: 'Análisis de Ingresos',
+              getDailyRevenue: 'Ingresos Diarios',
+              getSalesRanking: 'Ranking de Ventas',
+              getSalesKPIs: 'KPIs de Ventas',
+              getProductCatalog: 'Catálogo de Productos',
+              getLowStockAlerts: 'Alertas de Bajo Stock',
+            };
+            argsObj.title = titleMap[lastToolName] ?? 'Reporte UNIK';
+          }
+        }
       }
 
       const result = await executeTool(tc.name, input.actor, parsedArgs);
+
+      // Track the last data tool result for auto-injection into artifact tools
+      if (result.success && result.result && typeof result.result === 'object' && !ARTIFACT_TOOLS.has(tc.name)) {
+        const toolResult = result.result as Record<string, unknown>;
+        // Find the array of objects in the result (common keys: orders, products, rows, items, customers, etc.)
+        let foundRows: Record<string, unknown>[] | null = null;
+        for (const key of Object.keys(toolResult)) {
+          const val = toolResult[key];
+          if (Array.isArray(val) && val.length > 0 && typeof val[0] === 'object') {
+            foundRows = val as Record<string, unknown>[];
+            break;
+          }
+        }
+        if (foundRows) {
+          lastToolRows = foundRows;
+          lastToolName = tc.name;
+        }
+      }
 
       // If the tool generated an artifact, emit an artifact event
       if (result.success && result.result && typeof result.result === 'object') {
