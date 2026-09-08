@@ -21,6 +21,8 @@ export interface OrchestratorInput {
   message: string;
   actor: CurrentUser;
   context?: { page?: string };
+  /** Optional model override — user can pick a model in the chat UI. */
+  model?: string;
 }
 
 export interface OrchestratorEvent {
@@ -128,6 +130,7 @@ export async function* runAssistant(
       maxTokens: settings.maxTokens,
       userId: input.actor.id,
       conversationId: input.conversationId,
+      model: input.model,
     })) {
       if (chunk.delta) {
         iterationContent += chunk.delta;

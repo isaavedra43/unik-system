@@ -4,20 +4,15 @@ import { PROVIDER_IDS } from './providers/types';
 import { getAiSettings } from './ai-admin-config-service';
 
 /**
- * AI provider configuration (provider-agnostic).
+ * AI provider configuration (provider-agnostic, multi-provider).
  *
  * Configuration is resolved in this order:
- *   1. Database (AiConfig.settings) — editable from the admin panel
- *   2. Environment variables — fallback for initial setup / CI
+ *   1. Database providerConfigs[provider] (admin panel — multi-provider)
+ *   2. Database legacy fields (apiKey, endpoint — single provider fallback)
+ *   3. Environment variables — fallback for initial setup / CI
  *
- * The active provider is selected via settings.provider (DB) or AI_PROVIDER (env).
- * Each provider reads its own env vars as fallback when DB fields are empty.
- *
- * Supported providers:
- *   - openai    → OpenAI direct API (ChatGPT API)
- *   - anthropic → Anthropic Claude (future)
- *   - gemini    → Google Gemini (future)
- *   - local     → Ollama / LM Studio (future)
+ * Multiple providers can be configured simultaneously. The chat UI lets
+ * users pick which model to use per conversation.
  */
 
 const PROVIDER_ENV_MAP: Record<
@@ -64,7 +59,7 @@ export interface ProviderConfig {
   endpoint: string | null;
 }
 
-/** Returns the active provider id from env (sync, no DB). Used for early init. */
+/** Returns the default provider id from env (sync, no DB). */
 export function getActiveProviderIdFromEnv(): ProviderId {
   const raw = process.env.AI_PROVIDER?.trim().toLowerCase();
   if (raw && (PROVIDER_IDS as string[]).includes(raw)) {
@@ -73,10 +68,7 @@ export function getActiveProviderIdFromEnv(): ProviderId {
   return 'openai';
 }
 
-/**
- * Returns the active provider id, preferring DB settings over env.
- * Async because it reads from the database.
- */
+/** Returns the default provider id, preferring DB settings over env. */
 export async function getActiveProviderId(): Promise<ProviderId> {
   try {
     const settings = await getAiSettings();
@@ -85,14 +77,14 @@ export async function getActiveProviderId(): Promise<ProviderId> {
       return raw as ProviderId;
     }
   } catch {
-    // DB not available yet (e.g. during build) — fall back to env
+    // DB not available yet
   }
   return getActiveProviderIdFromEnv();
 }
 
 /**
  * Returns the configuration for a specific provider.
- * DB settings take priority; env vars are the fallback.
+ * Resolution order: providerConfigs[provider] → legacy fields → env vars → defaults
  */
 export async function getProviderConfig(provider: ProviderId): Promise<ProviderConfig> {
   const env = PROVIDER_ENV_MAP[provider];
@@ -105,9 +97,19 @@ export async function getProviderConfig(provider: ProviderId): Promise<ProviderC
 
   try {
     const settings = await getAiSettings();
-    if (settings.provider === provider) {
+    // 1. Multi-provider config (preferred)
+    const multiConfig = settings.providerConfigs?.[provider];
+    if (multiConfig) {
+      dbApiKey = multiConfig.apiKey ?? '';
+      dbEndpoint = multiConfig.endpoint ?? '';
+    }
+    // 2. Legacy single-provider fields (fallback if provider matches default)
+    if (!dbApiKey && settings.provider === provider) {
       dbApiKey = settings.apiKey ?? '';
       dbEndpoint = settings.endpoint ?? '';
+    }
+    // Model/fallback always from top-level settings (shared across providers)
+    if (settings.provider === provider) {
       dbModel = settings.deployment ?? '';
       dbFallbackModel = settings.fallbackDeployment ?? '';
     }
@@ -124,10 +126,23 @@ export async function getProviderConfig(provider: ProviderId): Promise<ProviderC
   };
 }
 
-/** Returns the configuration for the currently active provider. */
+/** Returns the configuration for the currently active (default) provider. */
 export async function getActiveProviderConfig(): Promise<ProviderConfig> {
   const provider = await getActiveProviderId();
   return getProviderConfig(provider);
+}
+
+/**
+ * Returns the provider for a given model id, checking the model catalog.
+ * Used when the user selects a specific model in the chat UI.
+ */
+export async function getProviderForModelId(modelId: string): Promise<ProviderId> {
+  // Check the model catalog first
+  const { getModelById } = await import('./model-catalog');
+  const model = getModelById(modelId);
+  if (model) return model.provider;
+  // Fall back to the default provider
+  return getActiveProviderId();
 }
 
 /** For the admin panel: status without exposing the key. Async (reads DB). */
@@ -161,6 +176,23 @@ export async function getAiConfigStatus(): Promise<{
     endpoint: config.endpoint,
     missingVars,
   };
+}
+
+/**
+ * Returns the list of configured (enabled + has API key) providers.
+ * Used by the model selector to show only providers that are actually connected.
+ */
+export async function getConfiguredProviders(): Promise<ProviderId[]> {
+  const result: ProviderId[] = [];
+  for (const provider of PROVIDER_IDS) {
+    const config = await getProviderConfig(provider);
+    if (provider === 'local') {
+      if (config.endpoint) result.push(provider);
+    } else if (config.apiKey) {
+      result.push(provider);
+    }
+  }
+  return result;
 }
 
 // Keep zod import used for future schema validation extension

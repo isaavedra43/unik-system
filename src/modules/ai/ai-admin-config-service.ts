@@ -13,13 +13,22 @@ import { prisma } from '@/lib/prisma';
 
 const AI_CONFIG_KEY = 'global' as const;
 
+export interface ProviderConfigEntry {
+  apiKey: string; // stored in DB, NEVER sent to client
+  endpoint: string; // custom endpoint, empty = provider default
+  enabled: boolean; // whether this provider is available for selection
+}
+
 export interface AiSettings {
   // Global enable/disable
   isEnabled: boolean;
-  // Provider config (editable from admin panel, falls back to env vars)
+  // Default provider (used when no model is selected in chat)
   provider: string; // 'openai' | 'anthropic' | 'gemini' | 'local'
+  // Legacy single-provider fields (kept for backwards compat, used as fallback)
   apiKey: string; // stored in DB, NEVER sent to client
   endpoint: string; // custom endpoint, empty = provider default
+  // Multi-provider configs: store API keys for ALL providers at once
+  providerConfigs: Record<string, ProviderConfigEntry>;
   // Modelo
   deployment: string;
   fallbackDeployment: string;
@@ -60,6 +69,12 @@ export const DEFAULT_AI_SETTINGS: AiSettings = {
   provider: 'openai',
   apiKey: '', // empty = fall back to env var
   endpoint: '', // empty = use provider default endpoint
+  providerConfigs: {
+    openai: { apiKey: '', endpoint: '', enabled: true },
+    anthropic: { apiKey: '', endpoint: '', enabled: false },
+    gemini: { apiKey: '', endpoint: '', enabled: false },
+    local: { apiKey: 'ollama', endpoint: '', enabled: false },
+  },
   deployment: 'gpt-4o',
   fallbackDeployment: 'gpt-4o-mini',
   temperature: 0.3,

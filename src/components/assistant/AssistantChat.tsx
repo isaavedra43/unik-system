@@ -5,6 +5,7 @@ import { AlertCircle, Bot } from 'lucide-react';
 import type { CurrentUser } from '@/modules/auth/authorization';
 import { AssistantMessage, type AssistantMessageData } from './AssistantMessage';
 import { AssistantInput } from './AssistantInput';
+import { ModelSelector } from './ModelSelector';
 import {
   AssistantSuggestions,
   getSuggestionsForPage,
@@ -38,6 +39,7 @@ export function AssistantChat({
   const [activeToolCalls, setActiveToolCalls] = useState<ActiveToolCall[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loadingConv, setLoadingConv] = useState(false);
+  const [selectedModel, setSelectedModel] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
 
@@ -80,6 +82,7 @@ export function AssistantChat({
   }, [conversationId, loadConversation]);
 
   useEffect(() => {
+    if (messages.length === 0 && !streamingContent) return;
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, streamingContent, activeToolCalls]);
 
@@ -122,6 +125,7 @@ export function AssistantChat({
           conversationId: convId,
           message: text,
           context,
+          model: selectedModel ?? undefined,
         }),
         signal: controller.signal,
       });
@@ -195,8 +199,10 @@ export function AssistantChat({
 
   const suggestions = getSuggestionsForPage(context?.page);
 
+  const isEmpty = messages.length === 0 && !streaming;
+
   return (
-    <div className="assistant-chat">
+    <div className={`assistant-chat ${isEmpty ? 'assistant-chat-empty' : ''}`}>
       <div className="assistant-chat-messages" role="log" aria-live="polite">
         {loadingConv && <div className="assistant-chat-loading">Cargando…</div>}
         {!loadingConv && messages.length === 0 && !streaming && (
@@ -207,9 +213,6 @@ export function AssistantChat({
             <h3 className="assistant-welcome-title">Asistente de UNIK</h3>
             <p className="assistant-welcome-text">
               Pregúntame sobre tus ventas, productos, vendedores y más.
-            </p>
-            <p className="assistant-welcome-privacy">
-              Las conversaciones pueden ser revisadas por el administrador del sistema.
             </p>
           </div>
         )}
@@ -255,12 +258,15 @@ export function AssistantChat({
             <span>{error}</span>
           </div>
         )}
-        <div ref={messagesEndRef} />
+        <div ref={messagesEndRef} className="assistant-messages-end" />
       </div>
       {messages.length === 0 && !streaming && (
         <AssistantSuggestions suggestions={suggestions} onSelect={handleSend} />
       )}
-      <AssistantInput onSend={handleSend} disabled={loadingConv} streaming={streaming} />
+      <div className="assistant-input-bar">
+        <ModelSelector value={selectedModel} onChange={setSelectedModel} />
+        <AssistantInput onSend={handleSend} disabled={loadingConv} streaming={streaming} />
+      </div>
     </div>
   );
 }

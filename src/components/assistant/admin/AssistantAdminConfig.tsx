@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useState, useCallback } from 'react';
-import { Save, AlertCircle, CheckCircle2, Key, Cloud, Cpu } from 'lucide-react';
+import { Save, AlertCircle, CheckCircle2, Key, Cloud, Cpu, Check, X } from 'lucide-react';
 import { updateAiConfigAction, toggleAiEnabledAction } from '@/app/app/admin/assistant/actions';
 
 interface AiConfigData {
@@ -13,15 +13,21 @@ interface AiConfigData {
   updatedAt: string;
 }
 
+interface ProviderConfigEntry {
+  apiKey: string;
+  endpoint: string;
+  enabled: boolean;
+}
+
 const PROVIDER_OPTIONS = [
-  { value: 'openai', label: 'OpenAI (ChatGPT API)', hint: 'GPT-4o, GPT-4o-mini, o1, etc.' },
-  { value: 'anthropic', label: 'Anthropic (Claude)', hint: 'Claude Sonnet, Haiku, Opus (futuro)' },
-  { value: 'gemini', label: 'Google (Gemini)', hint: 'Gemini 2.0 Flash, etc. (futuro)' },
-  { value: 'local', label: 'Local (Ollama / LM Studio)', hint: 'Modelos locales en tu máquina (futuro)' },
+  { value: 'openai', label: 'OpenAI (ChatGPT API)', hint: 'GPT-4o, GPT-4o-mini, o1, etc.', implemented: true },
+  { value: 'anthropic', label: 'Anthropic (Claude)', hint: 'Claude Sonnet, Haiku, Opus (futuro)', implemented: false },
+  { value: 'gemini', label: 'Google (Gemini)', hint: 'Gemini 2.0 Flash, etc. (futuro)', implemented: false },
+  { value: 'local', label: 'Local (Ollama / LM Studio)', hint: 'Modelos locales en tu máquina (futuro)', implemented: false },
 ];
 
 const SETTING_FIELDS: Array<{ key: string; label: string; type: 'number' | 'string' | 'boolean' | 'list' | 'textarea' | 'password'; hint?: string }> = [
-  { key: 'deployment', label: 'Modelo principal', type: 'string', hint: 'Ej: gpt-4o, gpt-4o-mini, gpt-4.1' },
+  { key: 'deployment', label: 'Modelo principal (default)', type: 'string', hint: 'Ej: gpt-4o, gpt-4o-mini, gpt-4.1' },
   { key: 'fallbackDeployment', label: 'Modelo fallback', type: 'string', hint: 'Ej: gpt-4o-mini' },
   { key: 'temperature', label: 'Temperature', type: 'number', hint: '0.0 - 2.0' },
   { key: 'maxTokens', label: 'Max tokens por respuesta', type: 'number' },
@@ -101,11 +107,21 @@ export function AssistantAdminConfig({ canManage }: { canManage: boolean }) {
     setSettings((prev) => ({ ...prev, [key]: value }));
   }
 
+  function updateProviderConfig(provider: string, field: keyof ProviderConfigEntry, value: unknown) {
+    const current = (settings.providerConfigs as Record<string, ProviderConfigEntry>) ?? {};
+    const entry = current[provider] ?? { apiKey: '', endpoint: '', enabled: false };
+    const updated = {
+      ...current,
+      [provider]: { ...entry, [field]: value },
+    };
+    updateSetting('providerConfigs', updated);
+  }
+
   if (loading) return <div className="assistant-admin-loading">Cargando…</div>;
   if (!config) return <div className="assistant-admin-error">No se pudo cargar la configuración</div>;
 
-  const hasApiKey = Boolean(settings.hasApiKey);
   const currentProvider = (settings.provider as string) || 'openai';
+  const providerConfigs = (settings.providerConfigs as Record<string, ProviderConfigEntry>) ?? {};
 
   return (
     <div className="assistant-admin-tab">
@@ -130,18 +146,20 @@ export function AssistantAdminConfig({ canManage }: { canManage: boolean }) {
         )}
       </div>
 
-      {/* ===== Sección: Proveedor IA ===== */}
+      {/* ===== Sección: Multi-provider ===== */}
       <div className="assistant-admin-config-section">
         <h3 className="assistant-admin-section-title">
-          <Cloud size={18} /> Proveedor de IA
+          <Cloud size={18} /> Proveedores de IA
         </h3>
         <p className="assistant-admin-config-hint" style={{ marginBottom: 16 }}>
-          Configura qué proveedor de IA usa el asistente. Los cambios aplican inmediatamente (no necesitas redeployar).
+          Configura múltiples proveedores a la vez. Los usuarios podrán seleccionar el modelo en cada conversación.
+          Solo los proveedores con API key configurada aparecerán en el selector del chat.
         </p>
 
-        <div className="assistant-admin-config-grid">
+        {/* Default provider selector */}
+        <div className="assistant-admin-config-grid" style={{ marginBottom: 16 }}>
           <div className="assistant-admin-config-field">
-            <label htmlFor="cfg-provider">Proveedor</label>
+            <label htmlFor="cfg-provider">Proveedor default</label>
             <select
               id="cfg-provider"
               value={currentProvider}
@@ -156,44 +174,81 @@ export function AssistantAdminConfig({ canManage }: { canManage: boolean }) {
               ))}
             </select>
             <span className="assistant-admin-config-hint">
-              {PROVIDER_OPTIONS.find((o) => o.value === currentProvider)?.hint ?? ''}
+              Se usa cuando el usuario no selecciona un modelo específico
             </span>
           </div>
+        </div>
 
-          <div className="assistant-admin-config-field">
-            <label htmlFor="cfg-apiKey">
-              <Key size={14} style={{ display: 'inline', marginRight: 4 }} />
-              API Key
-            </label>
-            <input
-              id="cfg-apiKey"
-              type="password"
-              value={settings.apiKey as string ?? ''}
-              onChange={(e) => updateSetting('apiKey', e.target.value)}
-              disabled={!canManage}
-              placeholder={hasApiKey ? '•••••••••••••••• (configurada)' : 'Pega tu API key aquí'}
-            />
-            <span className="assistant-admin-config-hint">
-              {hasApiKey
-                ? '✓ API key configurada. Deja vacío para mantener la actual.'
-                : 'No configurada. Pega tu API key aquí.'}
-            </span>
-          </div>
-
-          <div className="assistant-admin-config-field">
-            <label htmlFor="cfg-endpoint">Endpoint personalizado (opcional)</label>
-            <input
-              id="cfg-endpoint"
-              type="text"
-              value={String(settings.endpoint ?? '')}
-              onChange={(e) => updateSetting('endpoint', e.target.value)}
-              disabled={!canManage}
-              placeholder="Vacío = endpoint default del proveedor"
-            />
-            <span className="assistant-admin-config-hint">
-              Para OpenAI: dejar vacío (usa https://api.openai.com)
-            </span>
-          </div>
+        {/* Multi-provider cards */}
+        <div className="provider-cards-grid">
+          {PROVIDER_OPTIONS.map((opt) => {
+            const entry = providerConfigs[opt.value] ?? { apiKey: '', endpoint: '', enabled: false };
+            const isConfigured = Boolean(entry.apiKey) || (opt.value === 'local' && Boolean(entry.endpoint));
+            return (
+              <div key={opt.value} className={`provider-card ${entry.enabled ? 'provider-card-enabled' : ''}`}>
+                <div className="provider-card-header">
+                  <div className="provider-card-title">
+                    <span className="provider-card-name">{opt.label}</span>
+                    {!opt.implemented && (
+                      <span className="provider-card-badge provider-card-badge-future">Futuro</span>
+                    )}
+                    {isConfigured && (
+                      <span className="provider-card-badge provider-card-badge-ok">
+                        <Check size={12} /> Configurado
+                      </span>
+                    )}
+                  </div>
+                  <label className="provider-card-toggle">
+                    <input
+                      type="checkbox"
+                      checked={entry.enabled}
+                      onChange={(e) => updateProviderConfig(opt.value, 'enabled', e.target.checked)}
+                      disabled={!canManage}
+                    />
+                    <span>Habilitar</span>
+                  </label>
+                </div>
+                <p className="provider-card-hint">{opt.hint}</p>
+                <div className="provider-card-fields">
+                  <div className="provider-card-field">
+                    <label htmlFor={`cfg-${opt.value}-apiKey`}>
+                      <Key size={12} style={{ display: 'inline', marginRight: 4 }} />
+                      API Key
+                    </label>
+                    <input
+                      id={`cfg-${opt.value}-apiKey`}
+                      type="password"
+                      value={entry.apiKey ?? ''}
+                      onChange={(e) => updateProviderConfig(opt.value, 'apiKey', e.target.value)}
+                      disabled={!canManage}
+                      placeholder={isConfigured ? '•••••••••••••••• (configurada)' : `Pega tu API key de ${opt.label}`}
+                    />
+                    <span className="assistant-admin-config-hint">
+                      {isConfigured
+                        ? '✓ Configurada. Deja vacío para mantener.'
+                        : 'Pega tu API key aquí'}
+                    </span>
+                  </div>
+                  <div className="provider-card-field">
+                    <label htmlFor={`cfg-${opt.value}-endpoint`}>Endpoint (opcional)</label>
+                    <input
+                      id={`cfg-${opt.value}-endpoint`}
+                      type="text"
+                      value={entry.endpoint ?? ''}
+                      onChange={(e) => updateProviderConfig(opt.value, 'endpoint', e.target.value)}
+                      disabled={!canManage}
+                      placeholder="Vacío = endpoint default"
+                    />
+                  </div>
+                </div>
+                {!opt.implemented && (
+                  <p className="provider-card-warning">
+                    <AlertCircle size={12} /> Este proveedor aún no está implementado. La arquitectura está lista.
+                  </p>
+                )}
+              </div>
+            );
+          })}
         </div>
       </div>
 

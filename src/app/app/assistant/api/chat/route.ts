@@ -14,6 +14,7 @@ const chatRequestSchema = z.object({
       page: z.string().optional(),
     })
     .optional(),
+  model: z.string().optional(),
 });
 
 export async function POST(request: NextRequest) {
@@ -49,6 +50,7 @@ export async function POST(request: NextRequest) {
           message: parsed.data.message,
           actor: session.user,
           context: parsed.data.context,
+          model: parsed.data.model,
         })) {
           const data = `data: ${JSON.stringify(event)}\n\n`;
           controller.enqueue(encoder.encode(data));
