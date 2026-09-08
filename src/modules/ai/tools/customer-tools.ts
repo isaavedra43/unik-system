@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { registerTool } from './registry';
-import { resolveDateRange, dateRangeSchema, formatDate } from './date-helpers';
+import { dateRangeSchema, formatDate, buildOrderDateWhere } from './date-helpers';
 
 /* ------------------------------------------------------------------ */
 /* Tools                                                              */
@@ -16,15 +16,15 @@ registerTool({
   requiredPermission: 'sales_orders.view',
   enabledByDefault: true,
   parameters: z.object({
-    dateRange: dateRangeSchema.optional(),
+    dateRange: dateRangeSchema,
     limit: z.number().int().min(1).max(50).default(10),
     sortBy: z.enum(['total', 'orders']).default('total').describe('Ordenar por monto total o número de órdenes.'),
   }),
   execute: async (_actor, rawArgs) => {
-    const args = rawArgs as { dateRange?: z.infer<typeof dateRangeSchema>; limit: number; sortBy: 'total' | 'orders' };
-    const { from, to } = resolveDateRange(args.dateRange);
+    const args = rawArgs as { dateRange: string; limit: number; sortBy: 'total' | 'orders' };
+    const dateWhere = buildOrderDateWhere(args.dateRange);
     const rows = await prisma.salesOrder.findMany({
-      where: { orderDate: { gte: from, lte: to } },
+      where: dateWhere as never,
       select: { customerName: true, customerEmail: true, total: true, orderDate: true },
     });
     const byCustomer = new Map<string, { email: string | null; count: number; total: number; lastDate: Date | null }>();
@@ -140,13 +140,13 @@ registerTool({
   requiredPermission: 'sales_orders.view',
   enabledByDefault: true,
   parameters: z.object({
-    dateRange: dateRangeSchema.optional(),
+    dateRange: dateRangeSchema,
   }),
   execute: async (_actor, rawArgs) => {
-    const args = rawArgs as { dateRange?: z.infer<typeof dateRangeSchema> };
-    const { from, to } = resolveDateRange(args.dateRange ?? 'last_30_days');
+    const args = rawArgs as { dateRange: string };
+    const dateWhere = buildOrderDateWhere(args.dateRange);
     const rows = await prisma.salesOrder.findMany({
-      where: { orderDate: { gte: from, lte: to } },
+      where: dateWhere as never,
       select: { customerName: true, total: true },
     });
     const byCustomer = new Map<string, { count: number; total: number }>();

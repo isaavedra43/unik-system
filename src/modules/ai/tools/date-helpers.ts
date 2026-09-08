@@ -14,54 +14,63 @@
 
 import { z } from 'zod';
 
-export type DateRangeShortcut =
-  | 'today'
-  | 'yesterday'
-  | 'this_week'
-  | 'this_month'
-  | 'last_7_days'
-  | 'last_30_days';
+/**
+ * Date range shortcuts understood by resolveDateRange.
+ * "all" means no date filter (all history).
+ */
+export const DATE_SHORTCUTS = [
+  'today',
+  'yesterday',
+  'this_week',
+  'this_month',
+  'last_7_days',
+  'last_30_days',
+  'all',
+] as const;
 
-export const dateRangeSchema = z.union([
-  z.enum(['today', 'yesterday', 'this_week', 'this_month', 'last_7_days', 'last_30_days']),
-  z.object({
-    from: z.union([z.string(), z.date()]).describe('Fecha inicial (ISO o YYYY-MM-DD)'),
-    to: z.union([z.string(), z.date()]).describe('Fecha final (ISO o YYYY-MM-DD)'),
-  }),
-]);
+export type DateRangeShortcut = (typeof DATE_SHORTCUTS)[number];
+
+/**
+ * Simple string enum schema for date range — compatible with OpenAI
+ * function calling (no union/anyOf which OpenAI doesn't support well).
+ *
+ * The AI should pass one of these string values. For custom ranges,
+ * the AI can pass dateFrom + dateTo as separate YYYY-MM-DD strings.
+ */
+export const dateRangeSchema = z
+  .enum(DATE_SHORTCUTS)
+  .describe(
+    'Período de tiempo a consultar. VALORES: "today" (hoy), "yesterday" (ayer), "this_week" (esta semana), "this_month" (este mes), "last_7_days" (últimos 7 días), "last_30_days" (últimos 30 días), "all" (todo el historial). ' +
+    'REGLA: Si el usuario dice "hoy" → "today". Si dice "ayer" → "yesterday". Si dice "esta semana" → "this_week". Si dice "este mes" → "this_month". Si no menciona fecha → "today".'
+  );
 
 /**
  * Creates a UTC-midnight Date for the given local date components.
- * This ensures that Prisma comparisons with @db.Date fields work correctly.
  */
 function utcDateFromLocal(d: Date): Date {
-  const y = d.getFullYear();
-  const m = d.getMonth();
-  const day = d.getDate();
-  return new Date(Date.UTC(y, m, day));
+  return new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
 }
 
 /**
  * Creates a UTC end-of-day Date (23:59:59.999Z) for the given local date.
  */
 function utcEndOfDayFromLocal(d: Date): Date {
-  const y = d.getFullYear();
-  const m = d.getMonth();
-  const day = d.getDate();
-  return new Date(Date.UTC(y, m, day, 23, 59, 59, 999));
+  return new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999));
 }
 
 /**
- * Resolves a date range shortcut or explicit range into UTC Date objects
- * suitable for Prisma queries on @db.Date fields.
+ * Resolves a date range shortcut into UTC Date objects suitable for Prisma
+ * queries on @db.Date fields.
  *
- * Returns { from, to } where:
+ * Returns { from: Date, to: Date } where:
  * - from = UTC midnight of the start date
  * - to = UTC end-of-day (23:59:59.999Z) of the end date
+ *
+ * For "all", returns { from: null, to: null } meaning no date filter.
  */
 export function resolveDateRange(
-  range: DateRangeShortcut | { from: string | Date; to: string | Date } | undefined
-): { from: Date; to: Date } {
+  range: DateRangeShortcut | string | undefined
+): { from: Date | null; to: Date | null } {
   const now = new Date();
 
   if (range === undefined || range === 'today') {
@@ -83,7 +92,7 @@ export function resolveDateRange(
   if (range === 'this_week') {
     // Monday-based week start
     const day = now.getDay();
-    const diff = (day + 6) % 7; // days since Monday
+    const diff = (day + 6) % 7;
     const monday = new Date(now);
     monday.setDate(monday.getDate() - diff);
     return {
@@ -118,18 +127,19 @@ export function resolveDateRange(
     };
   }
 
-  // Custom { from, to }
-  const fromDate = typeof range.from === 'string' ? new Date(range.from) : range.from;
-  const toDate = typeof range.to === 'string' ? new Date(range.to) : range.to;
+  if (range === 'all') {
+    return { from: null, to: null };
+  }
+
+  // Unknown string — default to today
   return {
-    from: utcDateFromLocal(fromDate),
-    to: utcEndOfDayFromLocal(toDate),
+    from: utcDateFromLocal(now),
+    to: utcEndOfDayFromLocal(now),
   };
 }
 
 /**
  * Formats a Date as YYYY-MM-DD using UTC parts.
- * Useful for displaying dates that come from @db.Date fields.
  */
 export function formatDate(date: Date | null | undefined): string | null {
   if (!date) return null;
@@ -137,4 +147,16 @@ export function formatDate(date: Date | null | undefined): string | null {
   const m = String(date.getUTCMonth() + 1).padStart(2, '0');
   const d = String(date.getUTCDate()).padStart(2, '0');
   return `${y}-${m}-${d}`;
+}
+
+/**
+ * Builds a Prisma where clause for orderDate from a resolved date range.
+ * Returns an empty object if from/to are null (meaning "all history").
+ */
+export function buildOrderDateWhere(
+  range: DateRangeShortcut | string | undefined
+): Record<string, unknown> {
+  const { from, to } = resolveDateRange(range);
+  if (from === null || to === null) return {};
+  return { orderDate: { gte: from, lte: to } };
 }

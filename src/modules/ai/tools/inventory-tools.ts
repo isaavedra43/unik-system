@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { registerTool } from './registry';
-import { resolveDateRange, dateRangeSchema, formatDate } from './date-helpers';
+import { dateRangeSchema, formatDate, buildOrderDateWhere } from './date-helpers';
 
 /* ------------------------------------------------------------------ */
 /* Tools                                                              */
@@ -56,14 +56,14 @@ registerTool({
   requiredPermission: 'sales_orders.view',
   enabledByDefault: true,
   parameters: z.object({
-    dateRange: dateRangeSchema.optional(),
+    dateRange: dateRangeSchema,
     limit: z.number().int().min(1).max(100).default(20),
   }),
   execute: async (_actor, rawArgs) => {
-    const args = rawArgs as { dateRange?: z.infer<typeof dateRangeSchema>; limit: number };
-    const { from, to } = resolveDateRange(args.dateRange);
+    const args = rawArgs as { dateRange: string; limit: number };
+    const dateWhere = buildOrderDateWhere(args.dateRange);
     const items = await prisma.salesOrderItem.findMany({
-      where: { salesOrder: { orderDate: { gte: from, lte: to } } },
+      where: { salesOrder: dateWhere } as never,
       select: { name: true, sku: true, quantity: true, lineTotal: true },
     });
     const byProduct = new Map<string, { sku: string | null; quantity: number; revenue: number; orders: number }>();
@@ -98,14 +98,14 @@ registerTool({
   requiredPermission: 'sales_orders.view',
   enabledByDefault: true,
   parameters: z.object({
-    dateRange: dateRangeSchema.optional(),
+    dateRange: dateRangeSchema,
     threshold: z.number().int().min(1).default(5).describe('Unidades mínimas vendidas para no considerar bajo.'),
   }),
   execute: async (_actor, rawArgs) => {
-    const args = rawArgs as { dateRange?: z.infer<typeof dateRangeSchema>; threshold: number };
-    const { from, to } = resolveDateRange(args.dateRange ?? 'last_30_days');
+    const args = rawArgs as { dateRange: string; threshold: number };
+    const dateWhere = buildOrderDateWhere(args.dateRange);
     const items = await prisma.salesOrderItem.findMany({
-      where: { salesOrder: { orderDate: { gte: from, lte: to } } },
+      where: { salesOrder: dateWhere } as never,
       select: { name: true, sku: true, quantity: true },
     });
     const byProduct = new Map<string, { sku: string | null; quantity: number; orders: number }>();
@@ -139,19 +139,19 @@ registerTool({
   enabledByDefault: true,
   parameters: z.object({
     skuOrName: z.string().min(1).describe('SKU o nombre del producto (búsqueda parcial).'),
-    dateRange: dateRangeSchema.optional(),
+    dateRange: dateRangeSchema,
   }),
   execute: async (_actor, rawArgs) => {
-    const args = rawArgs as { skuOrName: string; dateRange?: z.infer<typeof dateRangeSchema> };
-    const { from, to } = resolveDateRange(args.dateRange ?? 'last_30_days');
+    const args = rawArgs as { skuOrName: string; dateRange: string };
+    const dateWhere = buildOrderDateWhere(args.dateRange);
     const items = await prisma.salesOrderItem.findMany({
       where: {
         OR: [
           { sku: { contains: args.skuOrName, mode: 'insensitive' } },
           { name: { contains: args.skuOrName, mode: 'insensitive' } },
         ],
-        salesOrder: { orderDate: { gte: from, lte: to } },
-      },
+        salesOrder: dateWhere,
+      } as never,
       select: {
         name: true,
         sku: true,
