@@ -39,6 +39,7 @@ export type DateRangeShortcut = (typeof DATE_SHORTCUTS)[number];
  */
 export const dateRangeSchema = z
   .enum(DATE_SHORTCUTS)
+  .default('today')
   .describe(
     'Período de tiempo a consultar. VALORES: "today" (hoy), "yesterday" (ayer), "this_week" (esta semana), "this_month" (este mes), "last_7_days" (últimos 7 días), "last_30_days" (últimos 30 días), "all" (todo el historial). ' +
     'REGLA: Si el usuario dice "hoy" → "today". Si dice "ayer" → "yesterday". Si dice "esta semana" → "this_week". Si dice "este mes" → "this_month". Si no menciona fecha → "today".'

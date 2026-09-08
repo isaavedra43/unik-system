@@ -55,7 +55,7 @@ export function zodToJsonSchema(schema: ZodType): Record<string, unknown> {
     const required: string[] = [];
     for (const [key, value] of Object.entries(shape)) {
       properties[key] = zodToJsonSchema(value as ZodType);
-      if (!(value instanceof ZodOptional)) {
+      if (!(value instanceof ZodOptional) && !(value instanceof ZodDefault)) {
         required.push(key);
       }
     }
