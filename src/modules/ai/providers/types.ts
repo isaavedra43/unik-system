@@ -113,6 +113,12 @@ export interface AiProvider {
 
   /** Lightweight connection test for the admin panel. */
   testConnection(): Promise<ConnectionTestResult>;
+
+  /** Speech-to-Text: transcribe audio buffer to text. */
+  transcribe?(audio: Buffer, mimeType: string, model?: string): Promise<string>;
+
+  /** Text-to-Speech: generate audio buffer from text. */
+  speak?(text: string, voice?: string): Promise<Buffer>;
 }
 
 /** Error thrown by providers, with a stable code for auditing. */

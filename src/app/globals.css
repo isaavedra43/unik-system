@@ -5119,4 +5119,242 @@ textarea.input {
   height: auto;
 }
 
+/* ===== Voice Mode — Full-screen conversational overlay ===== */
+
+.voice-mode-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: radial-gradient(ellipse at center, #0a0e1a 0%, #000000 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(20px);
+}
+
+.voice-mode-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2rem;
+  max-width: 600px;
+  width: 90%;
+  padding: 2rem;
+}
+
+.voice-mode-close {
+  position: absolute;
+  top: 1.5rem;
+  right: 1.5rem;
+  background: rgba(255, 255, 255, 0.1);
+  border: none;
+  border-radius: 50%;
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: rgba(255, 255, 255, 0.7);
+  transition: background 0.2s ease, color 0.2s ease, transform 0.2s ease;
+}
+
+.voice-mode-close:hover {
+  background: rgba(255, 255, 255, 0.2);
+  color: white;
+  transform: scale(1.1);
+}
+
+.voice-mode-label {
+  font-size: 1.25rem;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.9);
+  text-align: center;
+  letter-spacing: 0.02em;
+  min-height: 1.5em;
+}
+
+.voice-mode-transcript {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  width: 100%;
+  max-height: 300px;
+  overflow-y: auto;
+  padding: 0 1rem;
+}
+
+.voice-mode-user-text,
+.voice-mode-ai-text {
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 0.95rem;
+  line-height: 1.5;
+  padding: 0.75rem 1rem;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.voice-mode-ai-text {
+  background: rgba(30, 58, 95, 0.15);
+  border-color: rgba(30, 58, 95, 0.3);
+}
+
+.voice-mode-speaker {
+  font-weight: 600;
+  color: var(--unik-brand);
+  margin-right: 0.5rem;
+}
+
+.voice-mode-user-text .voice-mode-speaker {
+  color: #60a5fa;
+}
+
+.voice-mode-error {
+  color: #ef4444;
+  font-size: 0.875rem;
+  text-align: center;
+  padding: 0.5rem 1rem;
+  background: rgba(239, 68, 68, 0.1);
+  border-radius: 8px;
+}
+
+.voice-mode-privacy {
+  position: absolute;
+  bottom: 1.5rem;
+  font-size: 0.75rem;
+  color: rgba(255, 255, 255, 0.3);
+  text-align: center;
+}
+
+/* ===== Voice Orb ===== */
+
+.voice-orb-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.voice-orb-ripple {
+  pointer-events: none;
+}
+
+.voice-orb-ring {
+  mask: radial-gradient(transparent 60%, black 62%);
+  -webkit-mask: radial-gradient(transparent 60%, black 62%);
+}
+
+.voice-orb-body {
+  cursor: pointer;
+}
+
+.voice-orb-waveform {
+  pointer-events: none;
+}
+
+.voice-orb-icon {
+  pointer-events: none;
+}
+
+/* ===== Voice Input (mic button in input bar) ===== */
+
+.voice-input-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.voice-input-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--unik-border);
+  border-radius: 50%;
+  background: var(--unik-surface);
+  color: var(--unik-text-secondary);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+}
+
+.voice-input-btn:hover:not(:disabled) {
+  border-color: var(--unik-brand);
+  color: var(--unik-brand-text);
+  background: var(--unik-brand-subtle);
+}
+
+.voice-input-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.voice-input-btn.recording {
+  border-color: #ef4444;
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.08);
+  animation: voice-input-pulse 1.5s ease-in-out infinite;
+}
+
+.voice-input-recording-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #ef4444;
+}
+
+@keyframes voice-input-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.3);
+  }
+  50% {
+    box-shadow: 0 0 0 8px rgba(239, 68, 68, 0);
+  }
+}
+
+.voice-input-error {
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  margin-bottom: 8px;
+  padding: 0.4rem 0.75rem;
+  background: #ef4444;
+  color: white;
+  font-size: 0.75rem;
+  border-radius: 6px;
+  white-space: nowrap;
+  z-index: 10;
+}
+
+/* ===== Voice Mode button (in input bar) ===== */
+
+.voice-mode-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--unik-border);
+  border-radius: 50%;
+  background: var(--unik-surface);
+  color: var(--unik-text-secondary);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+}
+
+.voice-mode-btn:hover {
+  border-color: var(--unik-brand);
+  color: var(--unik-brand-text);
+  background: var(--unik-brand-subtle);
+  transform: scale(1.05);
+}
+
+/* Dark mode adjustments for voice mode */
+.dark .voice-mode-overlay {
+  background: radial-gradient(ellipse at center, #0a0e1a 0%, #000000 100%);
+}
+
 

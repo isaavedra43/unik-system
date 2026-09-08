@@ -31,3 +31,4 @@ export function getAllProviders(): AiProvider[] {
 
 export { PROVIDER_IDS, PROVIDER_LABELS };
 export type { AiProvider, ProviderId };
+export { openaiProvider };

@@ -265,4 +265,45 @@ export const openaiProvider: AiProvider = {
       };
     }
   },
+
+  /**
+   * Speech-to-Text: transcribe audio using Whisper.
+   * Accepts an audio buffer (webm/wav/mp3) and returns text.
+   */
+  async transcribe(audio: Buffer, mimeType: string, model?: string): Promise<string> {
+    const client = await getClient();
+    const sttModel = model ?? 'whisper-1';
+    const ext = mimeType.includes('webm') ? 'webm' : mimeType.includes('mp3') ? 'mp3' : 'wav';
+    try {
+      const result = await client.audio.transcriptions.create({
+        file: new File([new Uint8Array(audio)], `audio.${ext}`, { type: mimeType }),
+        model: sttModel,
+        language: 'es',
+      });
+      return result.text;
+    } catch (err) {
+      throw classifyError(err);
+    }
+  },
+
+  /**
+   * Text-to-Speech: generate audio from text using OpenAI TTS.
+   * Returns an audio buffer (mp3).
+   */
+  async speak(text: string, voice?: string): Promise<Buffer> {
+    const client = await getClient();
+    const ttsVoice = voice ?? 'es-MX-Dalia';
+    try {
+      const mp3 = await client.audio.speech.create({
+        model: 'gpt-4o-mini-tts',
+        voice: ttsVoice,
+        input: text,
+        response_format: 'mp3',
+      });
+      const arrayBuffer = await mp3.arrayBuffer();
+      return Buffer.from(arrayBuffer);
+    } catch (err) {
+      throw classifyError(err);
+    }
+  },
 };

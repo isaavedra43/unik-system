@@ -2,6 +2,7 @@
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { AlertCircle, Bot } from 'lucide-react';
+import { AnimatePresence } from 'framer-motion';
 import type { CurrentUser } from '@/modules/auth/authorization';
 import { AssistantMessage, type AssistantMessageData } from './AssistantMessage';
 import { AssistantInput } from './AssistantInput';
@@ -11,6 +12,8 @@ import {
   AssistantSuggestions,
   getSuggestionsForPage,
 } from './AssistantSuggestions';
+import { VoiceMode } from './VoiceMode';
+import { VoiceInput } from './VoiceInput';
 import { createConversationAction } from '@/app/app/assistant/actions';
 
 export interface AssistantChatProps {
@@ -29,10 +32,9 @@ interface ActiveToolCall {
 export function AssistantChat({
   conversationId: externalId,
   context,
-  user: _user,
+  user,
   onConversationCreated,
 }: AssistantChatProps) {
-  void _user;
   const [conversationId, setConversationId] = useState<string | null>(externalId);
   const [messages, setMessages] = useState<AssistantMessageData[]>([]);
   const [streaming, setStreaming] = useState(false);
@@ -42,8 +44,11 @@ export function AssistantChat({
   const [error, setError] = useState<string | null>(null);
   const [loadingConv, setLoadingConv] = useState(false);
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
+  const [voiceModeOpen, setVoiceModeOpen] = useState(false);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+
+  const canUseVoice = user.permissionKeys.includes('assistant.voice') || user.isSuperAdmin;
 
   useEffect(() => {
     setConversationId(externalId);
@@ -298,8 +303,43 @@ export function AssistantChat({
       )}
       <div className="assistant-input-bar">
         <ModelSelector value={selectedModel} onChange={setSelectedModel} />
+        {canUseVoice && (
+          <button
+            type="button"
+            className="voice-mode-btn"
+            onClick={() => setVoiceModeOpen(true)}
+            aria-label="Modo voz"
+            title="Modo voz conversacional"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+              <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+              <line x1="12" y1="19" x2="12" y2="22" />
+            </svg>
+          </button>
+        )}
+        {canUseVoice && (
+          <VoiceInput
+            onTranscribed={(text) => handleSend(text)}
+            disabled={loadingConv || streaming}
+          />
+        )}
         <AssistantInput onSend={handleSend} disabled={loadingConv} streaming={streaming} />
       </div>
+      <AnimatePresence>
+        {voiceModeOpen && (
+          <VoiceMode
+            conversationId={conversationId}
+            context={context}
+            onClose={() => setVoiceModeOpen(false)}
+            onConversationCreated={(id) => {
+              setConversationId(id);
+              onConversationCreated?.(id);
+            }}
+            user={{ id: user.id, name: user.name, username: user.username, isSuperAdmin: user.isSuperAdmin }}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 }
