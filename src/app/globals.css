@@ -288,6 +288,8 @@ button {
   margin: 0;
   padding: 0;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 /* =====================================================
@@ -412,6 +414,7 @@ button {
   gap: var(--unik-space-4);
   min-width: 0;
   overflow: hidden;
+  flex-shrink: 0;
   position: sticky;
   top: 0;
   z-index: 20;
@@ -1641,8 +1644,8 @@ textarea.input {
 .so-workspace {
   display: flex;
   flex-direction: column;
-  height: calc(100vh - var(--unik-topbar-height));
-  height: calc(100dvh - var(--unik-topbar-height));
+  flex: 1;
+  min-height: 0;
   max-width: none;
   margin: 0;
   padding: 0;
@@ -2861,7 +2864,7 @@ textarea.input {
 .assistant-page {
   display: flex;
   flex-direction: column;
-  height: 100%;
+  flex: 1;
   min-height: 0;
   max-width: none;
   margin: 0;
@@ -6090,9 +6093,8 @@ textarea.input {
 @media (max-width: 768px) {
   /* ---- Sales Orders Workspace ---- */
   .so-workspace {
-    height: auto;
-    height: auto;
-    min-height: calc(100dvh - var(--unik-topbar-height));
+    flex: 1;
+    min-height: 0;
   }
 
   .so-toolbar {
@@ -6142,26 +6144,42 @@ textarea.input {
 
   /* ---- AI Assistant ---- */
   .assistant-page {
-    height: auto;
-    min-height: calc(100dvh - var(--unik-topbar-height));
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .assistant-page .page-header {
+    padding: var(--unik-space-2) var(--unik-space-3) 0;
+  }
+
+  .assistant-page .page-title {
+    font-size: var(--unik-text-base);
+  }
+
+  .assistant-page .page-description {
+    display: none;
   }
 
   .assistant-page-body {
-    overflow: visible;
+    overflow: hidden;
   }
 
   .assistant-page-main {
-    overflow: visible;
+    overflow: hidden;
   }
 
   .assistant-chat {
-    overflow: visible;
+    overflow: hidden;
   }
 
   .assistant-chat-messages {
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
-    min-height: 300px;
+    min-height: 0;
+    flex: 1;
+    padding: var(--unik-space-3) var(--unik-space-3) var(--unik-space-4);
+    gap: var(--unik-space-3);
   }
 
   .assistant-msg {
@@ -6174,6 +6192,10 @@ textarea.input {
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
     display: block;
+  }
+
+  .assistant-welcome {
+    padding: var(--unik-space-6) var(--unik-space-4);
   }
 
   .assistant-input-bar {
@@ -6422,6 +6444,26 @@ textarea.input {
 
   .home-quick-desc {
     font-size: var(--unik-text-xs);
+  }
+}
+
+/* ============================================================
+   PWA STANDALONE MODE — Safe area insets for installed app
+   Only applies when running as installed PWA (display: standalone)
+   ============================================================ */
+
+@media (display-mode: standalone) {
+  .app-shell {
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  .assistant-input-bar {
+    padding-bottom: calc(var(--unik-space-3) + env(safe-area-inset-bottom));
+  }
+
+  .so-pagination {
+    padding-bottom: calc(var(--unik-space-2) + env(safe-area-inset-bottom));
   }
 }
 
