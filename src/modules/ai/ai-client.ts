@@ -23,9 +23,10 @@ import type {
   ChatCompletionResult,
   StreamChunk,
   ConnectionTestResult,
+  ContentPart,
 } from './providers/types';
 export { AiApiError } from './providers/types';
-export type { ChatMessage, ToolSpec, ChatCompletionOptions, ChatCompletionResult, StreamChunk };
+export type { ChatMessage, ToolSpec, ChatCompletionOptions, ChatCompletionResult, StreamChunk, ContentPart };
 
 /**
  * Resolves the provider to use based on the optional model override.

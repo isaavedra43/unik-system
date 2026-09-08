@@ -5357,4 +5357,122 @@ textarea.input {
   background: radial-gradient(ellipse at center, #0a0e1a 0%, #000000 100%);
 }
 
+/* ===== Attachments UI ===== */
+
+.assistant-input-container {
+  display: flex;
+  flex-direction: column;
+  gap: var(--unik-space-2);
+}
+
+.assistant-attachments-preview {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding: 0.5rem 0;
+}
+
+.attachment-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.3rem 0.6rem;
+  background: var(--unik-brand-subtle);
+  border: 1px solid var(--unik-border);
+  border-radius: var(--unik-radius-full);
+  font-size: var(--unik-text-xs);
+  color: var(--unik-text);
+  max-width: 240px;
+}
+
+.attachment-chip-icon {
+  color: var(--unik-brand);
+  flex-shrink: 0;
+}
+
+.attachment-chip-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.attachment-chip-size {
+  color: var(--unik-text-secondary);
+  font-size: 0.7rem;
+  flex-shrink: 0;
+}
+
+.attachment-chip-remove {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--unik-text-secondary);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.2s ease, color 0.2s ease;
+}
+
+.attachment-chip-remove:hover {
+  background: rgba(239, 68, 68, 0.1);
+  color: #ef4444;
+}
+
+.assistant-upload-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.2);
+  border-radius: var(--unik-radius-sm);
+  color: #ef4444;
+  font-size: var(--unik-text-xs);
+}
+
+.assistant-upload-error button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border: none;
+  background: transparent;
+  color: #ef4444;
+  cursor: pointer;
+  border-radius: 50%;
+}
+
+.assistant-input-attach {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--unik-border);
+  border-radius: 50%;
+  background: var(--unik-surface);
+  color: var(--unik-text-secondary);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+}
+
+.assistant-input-attach:hover:not(:disabled) {
+  border-color: var(--unik-brand);
+  color: var(--unik-brand-text);
+  background: var(--unik-brand-subtle);
+}
+
+.assistant-input-attach:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 

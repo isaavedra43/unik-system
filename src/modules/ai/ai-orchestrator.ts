@@ -1,5 +1,5 @@
 import type { CurrentUser } from '@/modules/auth/authorization';
-import { chatCompletionStream, type ChatMessage, type ToolSpec } from './ai-client';
+import { chatCompletionStream, type ChatMessage, type ToolSpec, type ContentPart } from './ai-client';
 import { AiApiError } from './ai-client';
 import { buildSystemPrompt } from './ai-context-builder';
 import {
@@ -16,6 +16,14 @@ import {
 import { recordAiToolCall } from './ai-audit';
 import { checkRateLimit, recordTokenUsage } from './ai-rate-limit';
 import { validateInput, validateOutput } from './ai-guardrails';
+import { processAttachment, type AttachmentResult } from './ai-attachments-service';
+
+export interface OrchestratorAttachment {
+  id: string;
+  fileName: string;
+  mimeType: string;
+  storagePath: string;
+}
 
 export interface OrchestratorInput {
   conversationId: string;
@@ -24,6 +32,8 @@ export interface OrchestratorInput {
   context?: { page?: string };
   /** Optional model override — user can pick a model in the chat UI. */
   model?: string;
+  /** Optional attachments (images/PDFs uploaded by the user). */
+  attachments?: OrchestratorAttachment[];
 }
 
 export interface OrchestratorEvent {
@@ -107,6 +117,66 @@ export async function* runAssistant(
       };
     }),
   ];
+
+  // 7.5. Process attachments — inject multimodal content into the last user message
+  if (input.attachments && input.attachments.length > 0) {
+    // Find the last user message (the one just added)
+    let lastUserIdx = -1;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].role === 'user') {
+        lastUserIdx = i;
+        break;
+      }
+    }
+
+    if (lastUserIdx >= 0) {
+      const userText = messages[lastUserIdx].content as string;
+      const contentParts: ContentPart[] = [{ type: 'text', text: userText }];
+
+      // Process each attachment
+      for (const att of input.attachments) {
+        try {
+          const attResult: AttachmentResult = {
+            id: att.id,
+            fileName: att.fileName,
+            mimeType: att.mimeType,
+            sizeBytes: 0,
+            storagePath: att.storagePath,
+          };
+          const processed = await processAttachment(attResult);
+
+          if (processed.type === 'image') {
+            // Add image content part for OpenAI Vision
+            contentParts.push({
+              type: 'image_url',
+              image_url: { url: processed.dataUrl },
+            });
+          } else if (processed.type === 'text') {
+            // Add extracted text as a text content part
+            const label = att.mimeType === 'application/pdf'
+              ? `[Contenido del PDF "${att.fileName}"]`
+              : `[Contenido del archivo "${att.fileName}"]`;
+            contentParts.push({
+              type: 'text',
+              text: `${label}:\n${processed.content}`,
+            });
+          }
+        } catch (err) {
+          console.error(`[orchestrator] Error processing attachment ${att.fileName}:`, err);
+          contentParts.push({
+            type: 'text',
+            text: `[Error al procesar el archivo "${att.fileName}"]`,
+          });
+        }
+      }
+
+      // Replace the last user message with multimodal content
+      messages[lastUserIdx] = {
+        role: 'user',
+        content: contentParts,
+      };
+    }
+  }
 
   // 8. Get available tools
   const availableTools = getAvailableTools(input.actor, settings.enabledTools);

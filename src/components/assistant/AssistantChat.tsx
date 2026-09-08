@@ -5,7 +5,7 @@ import { AlertCircle, Bot } from 'lucide-react';
 import { AnimatePresence } from 'framer-motion';
 import type { CurrentUser } from '@/modules/auth/authorization';
 import { AssistantMessage, type AssistantMessageData } from './AssistantMessage';
-import { AssistantInput } from './AssistantInput';
+import { AssistantInput, type AttachmentDraft } from './AssistantInput';
 import { ModelSelector } from './ModelSelector';
 import { ArtifactRenderer, type ArtifactData } from './ArtifactRenderer';
 import {
@@ -49,6 +49,7 @@ export function AssistantChat({
   const abortRef = useRef<AbortController | null>(null);
 
   const canUseVoice = user.permissionKeys.includes('assistant.voice') || user.isSuperAdmin;
+  const canUseUpload = user.permissionKeys.includes('assistant.upload') || user.isSuperAdmin;
 
   useEffect(() => {
     setConversationId(externalId);
@@ -115,7 +116,7 @@ export function AssistantChat({
     container.scrollTop = container.scrollHeight;
   }, [messages, streamingContent, activeToolCalls, artifacts]);
 
-  async function handleSend(text: string) {
+  async function handleSend(text: string, attachments: AttachmentDraft[] = []) {
     setError(null);
     let convId = conversationId;
 
@@ -156,6 +157,7 @@ export function AssistantChat({
           message: text,
           context,
           model: selectedModel ?? undefined,
+          attachments: attachments.length > 0 ? attachments : undefined,
         }),
         signal: controller.signal,
       });
@@ -324,7 +326,13 @@ export function AssistantChat({
             disabled={loadingConv || streaming}
           />
         )}
-        <AssistantInput onSend={handleSend} disabled={loadingConv} streaming={streaming} />
+        <AssistantInput
+          onSend={handleSend}
+          disabled={loadingConv}
+          streaming={streaming}
+          conversationId={conversationId}
+          canUpload={canUseUpload}
+        />
       </div>
       <AnimatePresence>
         {voiceModeOpen && (

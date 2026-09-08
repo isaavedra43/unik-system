@@ -15,6 +15,16 @@ const chatRequestSchema = z.object({
     })
     .optional(),
   model: z.string().optional(),
+  attachments: z
+    .array(
+      z.object({
+        id: z.string(),
+        fileName: z.string(),
+        mimeType: z.string(),
+        storagePath: z.string(),
+      })
+    )
+    .optional(),
 });
 
 export async function POST(request: NextRequest) {
@@ -51,6 +61,7 @@ export async function POST(request: NextRequest) {
           actor: session.user,
           context: parsed.data.context,
           model: parsed.data.model,
+          attachments: parsed.data.attachments,
         })) {
           const data = `data: ${JSON.stringify(event)}\n\n`;
           controller.enqueue(encoder.encode(data));
