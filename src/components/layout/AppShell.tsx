@@ -8,7 +8,8 @@ import { logoutAction } from '@/app/app/actions';
 import { Avatar } from '@/components/ui/primitives';
 import { DropdownMenu } from '@/components/ui/composite';
 import { ChevronDown, Home, LogOut, Menu, Shield, Users } from '@/components/ui/icons';
-import { Bell, ShoppingCart, Plug } from 'lucide-react';
+import { Bell, Bot, ShoppingCart, Plug } from 'lucide-react';
+import { AssistantWidget } from '@/components/assistant/AssistantWidget';
 
 interface AppShellProps {
   user: CurrentUser;
@@ -279,6 +280,15 @@ function buildBreadcrumbs(pathname: string): { label: string; href?: string }[] 
       { label: 'Integraciones' },
     ];
   }
+  if (pathname.startsWith('/app/admin/assistant')) {
+    return [
+      { label: 'Administración', href: '/app/admin/assistant' },
+      { label: 'Asistente IA' },
+    ];
+  }
+  if (pathname.startsWith('/app/assistant')) {
+    return [{ label: 'Asistente IA' }];
+  }
   if (pathname.startsWith('/app/account/security')) {
     return [{ label: 'Cuenta' }, { label: 'Seguridad' }];
   }
@@ -304,7 +314,15 @@ export default function AppShell({ user, children }: AppShellProps) {
   const sections: NavSection[] = [
     {
       title: 'General',
-      items: [{ href: '/app', label: 'Inicio', icon: <Home size={18} />, visible: true }],
+      items: [
+        { href: '/app', label: 'Inicio', icon: <Home size={18} />, visible: true },
+        {
+          href: '/app/assistant',
+          label: 'Asistente IA',
+          icon: <Bot size={18} />,
+          visible: user.permissionKeys.includes('assistant.use') || user.isSuperAdmin,
+        },
+      ],
     },
     {
       title: 'Ventas',
@@ -336,6 +354,13 @@ export default function AppShell({ user, children }: AppShellProps) {
           visible:
             user.permissionKeys.includes('integrations.view') || user.isSuperAdmin,
         },
+        {
+          href: '/app/admin/assistant',
+          label: 'Asistente IA',
+          icon: <Bot size={18} />,
+          visible:
+            user.permissionKeys.includes('assistant.admin') || user.isSuperAdmin,
+        },
       ],
     },
     {
@@ -359,6 +384,9 @@ export default function AppShell({ user, children }: AppShellProps) {
 
   const pathname = usePathname();
   const isWorkspace = pathname.startsWith('/app/sales/orders') && !pathname.includes('/api');
+  const canUseAssistant = user.permissionKeys.includes('assistant.use') || user.isSuperAdmin;
+  const isAssistantPage = pathname.startsWith('/app/assistant');
+  const showWidget = canUseAssistant && !isAssistantPage;
 
   return (
     <div className="app-shell">
@@ -369,6 +397,7 @@ export default function AppShell({ user, children }: AppShellProps) {
           {children}
         </main>
       </div>
+      {showWidget && <AssistantWidget user={user} context={{ page: pathname }} />}
     </div>
   );
 }

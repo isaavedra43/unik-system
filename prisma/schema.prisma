@@ -187,6 +187,7 @@ model User {
   tableViews          TableView[]
   entityWatches       EntityWatch[]
   notifications       Notification[]
+  aiConversations     AiConversation[]
 
   @@index([isActive])
 }
@@ -380,4 +381,122 @@ model Notification {
   @@index([userId, readAt])
   @@index([userId, createdAt])
   @@index([userId, changeEventId])
+}
+
+// =====================================================
+// AI Assistant models (additive migration)
+// =====================================================
+
+/// Una conversación entre un usuario y el asistente IA.
+model AiConversation {
+  id        String       @id @default(cuid())
+  userId    String
+  title     String       @default("Nueva conversación")
+  context   Json?
+  isStarred Boolean      @default(false)
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+  user      User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages  AiMessage[]
+  artifacts AiArtifact[]
+
+  @@index([userId, updatedAt])
+  @@index([isStarred])
+}
+
+/// Un mensaje dentro de una conversación (user, assistant, o tool).
+model AiMessage {
+  id              String         @id @default(cuid())
+  conversationId  String
+  role            String
+  content         String?
+  toolCalls       Json?
+  toolCallId      String?
+  tokensIn        Int            @default(0)
+  tokensOut       Int            @default(0)
+  latencyMs       Int            @default(0)
+  createdAt       DateTime       @default(now())
+  conversation    AiConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  toolCallRecords AiToolCall[]
+
+  @@index([conversationId, createdAt])
+}
+
+/// Registro detallado de cada tool call ejecutado (para auditoría del admin).
+model AiToolCall {
+  id         String    @id @default(cuid())
+  messageId  String
+  toolName   String
+  args       Json
+  result     Json?
+  durationMs Int       @default(0)
+  success    Boolean   @default(true)
+  errorCode  String?
+  createdAt  DateTime  @default(now())
+  message    AiMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@index([messageId])
+  @@index([toolName])
+  @@index([createdAt])
+}
+
+/// Llamada a Azure OpenAI registrada (para monitoreo de consumo del admin).
+model AiApiCall {
+  id               String   @id @default(cuid())
+  userId           String?
+  conversationId   String?
+  deployment       String
+  promptTokens     Int      @default(0)
+  completionTokens Int      @default(0)
+  totalTokens      Int      @default(0)
+  durationMs       Int      @default(0)
+  success          Boolean  @default(true)
+  errorCode        String?
+  finishReason     String?
+  createdAt        DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@index([createdAt])
+  @@index([deployment])
+}
+
+/// Archivo adjunto por el usuario (documento o imagen).
+model AiAttachment {
+  id             String   @id @default(cuid())
+  messageId      String?
+  conversationId String
+  fileName       String
+  mimeType       String
+  sizeBytes      Int
+  storagePath    String
+  uploadedBy     String
+  createdAt      DateTime @default(now())
+
+  @@index([conversationId])
+}
+
+/// Artifact generado por la IA (PDF, CSV, XLSX, imagen, tabla, markdown).
+model AiArtifact {
+  id             String         @id @default(cuid())
+  conversationId String
+  messageId      String?
+  type           String
+  storagePath    String?
+  inlineData     Json?
+  meta           Json?
+  createdAt      DateTime       @default(now())
+  conversation   AiConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId])
+  @@index([type])
+}
+
+/// Configuración persistida del asistente (editable desde el panel de admin).
+model AiConfig {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  isEnabled Boolean  @default(true)
+  settings  Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
