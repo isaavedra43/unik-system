@@ -907,11 +907,6 @@ export function SalesOrdersWorkspace({
     }
   }, [viewName, viewVisibility, query, pref, router]);
 
-  const handleCopyUrl = useCallback(() => {
-    navigator.clipboard.writeText(window.location.href);
-    toast.success('Enlace copiado');
-  }, []);
-
   // Fullscreen escape
   useEffect(() => {
     if (!fullscreen) return;
@@ -1271,10 +1266,6 @@ export function SalesOrdersWorkspace({
                 ) : null}
               </div>
             ) : null}
-            <button className="btn btn-secondary btn-sm" onClick={handleCopyUrl}>
-              <Copy size={14} />
-              Compartir
-            </button>
             <button
               className="btn btn-secondary btn-sm"
               onClick={handleSyncNow}
