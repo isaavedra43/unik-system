@@ -1569,10 +1569,7 @@ export function SalesOrdersWorkspace({
                         <td
                           className="so-td-pinned-left"
                           style={{ width: 40 }}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            toggleRowSelection(item.id);
-                          }}
+                          onClick={(e) => e.stopPropagation()}
                         >
                           <input
                             type="checkbox"

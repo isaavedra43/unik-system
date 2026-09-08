@@ -63,6 +63,7 @@ const mockData = {
       total: '1210.00',
       balance: '0.00',
       saleMadeInWarehouse: true,
+      shippingAddress: null,
       sourceRemoteModifiedAt: '2026-09-01T12:00:00.000Z',
     },
     {
@@ -91,6 +92,7 @@ const mockData = {
       total: '580.00',
       balance: '290.00',
       saleMadeInWarehouse: false,
+      shippingAddress: null,
       sourceRemoteModifiedAt: '2026-09-02T10:00:00.000Z',
     },
   ],

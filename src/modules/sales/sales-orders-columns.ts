@@ -388,6 +388,20 @@ export const SALES_ORDER_COLUMNS: SalesOrderColumnDefinition[] = [
     priority: 24,
     formatter: 'date',
   },
+  {
+    id: 'shippingAddress',
+    label: 'Dirección de envío',
+    field: 'shippingAddress',
+    type: 'text',
+    sortable: false,
+    filterable: false,
+    defaultVisible: false,
+    defaultWidth: 240,
+    minWidth: 120,
+    maxWidth: 400,
+    align: 'left',
+    priority: 25,
+  },
 ];
 
 export const SALES_ORDER_COLUMN_MAP: Record<string, SalesOrderColumnDefinition> =

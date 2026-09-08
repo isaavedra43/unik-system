@@ -36,12 +36,17 @@ export default async function SalesOrdersPage({
   const params = await searchParams;
 
   // Build query state from URL params
-  let sort: { field: string; direction: 'asc' | 'desc' }[] = [];
+  // Default to sales order number descending so the list appears in sequence.
+  const defaultSort: { field: string; direction: 'asc' | 'desc' }[] = [
+    { field: 'salesOrderNumber', direction: 'desc' },
+  ];
+  let sort = defaultSort;
   if (params.sort) {
     try {
-      sort = JSON.parse(params.sort);
+      const parsed = JSON.parse(params.sort);
+      sort = Array.isArray(parsed) && parsed.length > 0 ? parsed : defaultSort;
     } catch {
-      sort = [];
+      sort = defaultSort;
     }
   }
 

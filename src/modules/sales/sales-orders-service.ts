@@ -70,6 +70,8 @@ const LIST_SELECT = {
   balance: true,
   saleMadeInWarehouse: true,
   sourceRemoteModifiedAt: true,
+  shippingAddressLine1: true,
+  shippingAddressLine2: true,
 } satisfies Prisma.SalesOrderSelect;
 
 // ---------------------------------------------------------------------------
@@ -267,7 +269,7 @@ function buildSearchWhere(search: string | undefined): Prisma.SalesOrderWhereInp
 
 function buildSortOrderBy(sort: SalesOrderSort): Prisma.SalesOrderOrderByWithRelationInput[] {
   if (!sort || sort.length === 0) {
-    return [{ orderDate: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }];
+    return [{ salesOrderNumber: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }];
   }
   return sort.map((s) => ({ [s.field]: s.direction }) as Prisma.SalesOrderOrderByWithRelationInput);
 }

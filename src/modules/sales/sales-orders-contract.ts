@@ -35,6 +35,7 @@ export interface SalesOrderListRow {
   balance: string | null;
   saleMadeInWarehouse: boolean | null;
   sourceRemoteModifiedAt: string | null;
+  shippingAddress: string | null;
 }
 
 export interface SalesOrderDetailItem {
@@ -155,6 +156,8 @@ export function toSalesOrderListRow(order: {
   balance: Prisma.Decimal | null;
   saleMadeInWarehouse: boolean | null;
   sourceRemoteModifiedAt: Date;
+  shippingAddressLine1: string | null;
+  shippingAddressLine2: string | null;
 }): SalesOrderListRow {
   return {
     id: order.id,
@@ -183,6 +186,10 @@ export function toSalesOrderListRow(order: {
     balance: decimalToString(order.balance),
     saleMadeInWarehouse: order.saleMadeInWarehouse,
     sourceRemoteModifiedAt: order.sourceRemoteModifiedAt.toISOString(),
+    shippingAddress:
+      [order.shippingAddressLine1, order.shippingAddressLine2]
+        .filter(Boolean)
+        .join(', ') || null,
   };
 }
 
