@@ -26,6 +26,7 @@ export const DATE_SHORTCUTS = [
   'last_month',
   'last_7_days',
   'last_30_days',
+  'custom',
   'all',
 ] as const;
 
@@ -40,10 +41,9 @@ export type DateRangeShortcut = (typeof DATE_SHORTCUTS)[number];
  */
 export const dateRangeSchema = z
   .enum(DATE_SHORTCUTS)
-  .default('today')
   .describe(
-    'Período de tiempo. VALORES: "today" (hoy), "yesterday" (ayer), "this_week" (esta semana), "this_month" (este mes), "last_month" (mes pasado), "last_7_days" (últimos 7 días), "last_30_days" (últimos 30 días), "all" (todo). ' +
-    'Si el usuario pide un mes específico (ej: "agosto", "septiembre"), NO uses este campo. Usa dateFrom y dateTo con formato YYYY-MM-DD.'
+    'Período de tiempo. VALORES: "today" (hoy), "yesterday" (ayer), "this_week" (esta semana), "this_month" (este mes), "last_month" (mes pasado), "last_7_days" (últimos 7 días), "last_30_days" (últimos 30 días), "custom" (fecha específica — requiere dateFrom y dateTo), "all" (todo). ' +
+    'PARA FECHAS ESPECÍFICAS usa "custom" + dateFrom + dateTo. NUNCA uses "today" cuando el usuario pide una fecha específica.'
   );
 
 /**
@@ -139,7 +139,7 @@ export function resolveDateRange(
     };
   }
 
-  if (range === 'all') {
+  if (range === 'all' || range === 'custom') {
     return { from: null, to: null };
   }
 

@@ -275,15 +275,8 @@ export function PageHeader({
   return (
     <div className="page-header">
       {breadcrumbs ? <Breadcrumbs items={breadcrumbs} /> : null}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'flex-start',
-          justifyContent: 'space-between',
-          gap: '1rem',
-        }}
-      >
-        <div>
+      <div className="page-header-row">
+        <div className="page-header-info">
           <h1 className="page-title">{title}</h1>
           {description ? <p className="page-description">{description}</p> : null}
         </div>

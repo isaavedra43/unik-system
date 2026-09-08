@@ -21,6 +21,12 @@ export interface MessageRow {
   tokensOut: number;
   latencyMs: number;
   createdAt: string;
+  attachments?: Array<{
+    id: string;
+    fileName: string;
+    mimeType: string;
+    sizeBytes: number;
+  }>;
   toolCallRecords?: Array<{
     id: string;
     toolName: string;
@@ -59,7 +65,12 @@ function formatMsg(m: Prisma.AiMessageGetPayload<object>): MessageRow {
 }
 
 function formatMsgWithToolCalls(
-  m: Prisma.AiMessageGetPayload<{ include: { toolCallRecords: true } }>
+  m: Prisma.AiMessageGetPayload<{
+    include: {
+      toolCallRecords: true;
+      attachments: { select: { id: true; fileName: true; mimeType: true; sizeBytes: true } };
+    };
+  }>
 ): MessageRow {
   return {
     id: m.id,
@@ -71,6 +82,12 @@ function formatMsgWithToolCalls(
     tokensOut: m.tokensOut,
     latencyMs: m.latencyMs,
     createdAt: m.createdAt.toISOString(),
+    attachments: m.attachments.map((a) => ({
+      id: a.id,
+      fileName: a.fileName,
+      mimeType: a.mimeType,
+      sizeBytes: a.sizeBytes,
+    })),
     toolCallRecords: m.toolCallRecords.map((tc) => ({
       id: tc.id,
       toolName: tc.toolName,
@@ -106,7 +123,17 @@ export async function getConversation(
     where: { conversationId: id },
     orderBy: { createdAt: 'asc' },
     take: 100,
-    include: { toolCallRecords: true },
+    include: {
+      toolCallRecords: true,
+      attachments: {
+        select: {
+          id: true,
+          fileName: true,
+          mimeType: true,
+          sizeBytes: true,
+        },
+      },
+    },
   });
   const convRow = formatConv(conv);
   convRow.messageCount = messages.length;

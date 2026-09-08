@@ -418,6 +418,7 @@ model AiMessage {
   createdAt       DateTime       @default(now())
   conversation    AiConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   toolCallRecords AiToolCall[]
+  attachments     AiAttachment[]
 
   @@index([conversationId, createdAt])
 }
@@ -471,8 +472,10 @@ model AiAttachment {
   storagePath    String
   uploadedBy     String
   createdAt      DateTime @default(now())
+  message        AiMessage? @relation(fields: [messageId], references: [id], onDelete: SetNull)
 
   @@index([conversationId])
+  @@index([messageId])
 }
 
 /// Artifact generado por la IA (PDF, CSV, XLSX, imagen, tabla, markdown).

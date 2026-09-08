@@ -130,15 +130,49 @@ export async function processAttachment(
   }
 
   if (attachment.mimeType === 'application/pdf') {
-    // Extract text from PDF using pdf-parse
+    // Extract text from PDF using pdf-parse first, then unpdf as fallback
+    // NOTE: We import the lib directly to avoid the debug mode bug in pdf-parse's index.js
+    // where `!module.parent` triggers a test file read that doesn't exist
     try {
       const buffer = await fs.readFile(filePath);
-      const pdfParse = (await import('pdf-parse')).default;
-      const data = await pdfParse(buffer);
-      const text = data.text.slice(0, 8000); // Limit to 8000 chars
-      return { type: 'text', content: text };
-    } catch {
-      return { type: 'text', content: '[No se pudo extraer texto del PDF]' };
+
+      // Try pdf-parse first
+      let text = '';
+      try {
+        const pdfParseModule = await import('pdf-parse/lib/pdf-parse.js');
+        const pdfParse = pdfParseModule.default || pdfParseModule;
+        const data = await pdfParse(buffer);
+        text = data.text?.trim() ?? '';
+      } catch (pdfParseErr) {
+        console.error('[attachments] pdf-parse failed, trying unpdf:', pdfParseErr instanceof Error ? pdfParseErr.message : 'unknown');
+      }
+
+      // If pdf-parse returned no text, try unpdf (more robust)
+      if (text.length === 0) {
+        try {
+          const { extractText, getDocumentProxy } = await import('unpdf');
+          const pdf = await getDocumentProxy(new Uint8Array(buffer));
+          const result = await extractText(pdf, { mergePages: true });
+          text = (result.text ?? '').trim();
+        } catch (unpdfErr) {
+          console.error('[attachments] unpdf also failed:', unpdfErr instanceof Error ? unpdfErr.message : 'unknown');
+        }
+      }
+
+      if (text.length === 0) {
+        return {
+          type: 'text',
+          content: '[El PDF no contiene texto extraíble. Posiblemente es un PDF escaneado (imágenes). Sube una imagen en su lugar para que pueda analizarla con visión.]',
+        };
+      }
+      return { type: 'text', content: text.slice(0, 8000) };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Error desconocido';
+      console.error('[attachments] PDF parse error:', msg);
+      return {
+        type: 'text',
+        content: `[Error al leer el PDF: ${msg}. Si es un PDF escaneado, sube una imagen en su lugar.]`,
+      };
     }
   }
 

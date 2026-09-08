@@ -22,18 +22,18 @@ export default async function AppHomePage() {
     <div>
       <PageHeader title={`${greeting()}, ${user.name}`} description="Bienvenido a UNIK System." />
 
-      <div className="card" style={{ marginBottom: '1.5rem' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+      <div className="card home-profile-card">
+        <div className="home-profile-row">
           <Avatar name={user.name} size="lg" />
-          <div>
-            <h2 className="heading-3" style={{ margin: 0 }}>
+          <div className="home-profile-info">
+            <h2 className="heading-3 home-profile-name">
               {user.name}
             </h2>
-            <p className="text-muted" style={{ margin: 0, fontSize: '0.875rem' }}>
+            <p className="text-muted home-profile-meta">
               {user.username}
               {user.email ? ` · ${user.email}` : ''}
             </p>
-            <div style={{ marginTop: '0.5rem' }}>
+            <div className="home-profile-badges">
               {user.roleKeys.length > 0
                 ? user.roleKeys.map((key) => (
                     <Badge key={key} variant="weak">
@@ -46,35 +46,21 @@ export default async function AppHomePage() {
         </div>
       </div>
 
-      <h2 className="heading-3" style={{ marginBottom: '0.75rem' }}>
+      <h2 className="heading-3 home-section-title">
         Accesos rápidos
       </h2>
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))',
-          gap: '1rem',
-          marginBottom: '1.5rem',
-        }}
-      >
+      <div className="home-quick-grid">
         {canAccessAdmin ? (
           <Link
             href="/app/admin/access"
-            className="card card-compact"
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.75rem',
-              textDecoration: 'none',
-              color: 'inherit',
-            }}
+            className="card card-compact home-quick-card"
           >
-            <span style={{ color: 'var(--unik-brand)' }}>
+            <span className="home-quick-icon" style={{ color: 'var(--unik-brand)' }}>
               <Icon name="users" size={24} />
             </span>
-            <div>
+            <div className="home-quick-text">
               <strong className="text-strong">Usuarios y permisos</strong>
-              <p className="text-muted" style={{ fontSize: '0.8125rem', margin: 0 }}>
+              <p className="text-muted home-quick-desc">
                 Administra cuentas y roles
               </p>
             </div>
@@ -83,36 +69,26 @@ export default async function AppHomePage() {
 
         <Link
           href="/app/account/security"
-          className="card card-compact"
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.75rem',
-            textDecoration: 'none',
-            color: 'inherit',
-          }}
+          className="card card-compact home-quick-card"
         >
-          <span style={{ color: 'var(--unik-brand)' }}>
+          <span className="home-quick-icon" style={{ color: 'var(--unik-brand)' }}>
             <Icon name="shield" size={24} />
           </span>
-          <div>
+          <div className="home-quick-text">
             <strong className="text-strong">Seguridad de cuenta</strong>
-            <p className="text-muted" style={{ fontSize: '0.8125rem', margin: 0 }}>
+            <p className="text-muted home-quick-desc">
               Contraseña y sesiones
             </p>
           </div>
         </Link>
       </div>
 
-      <h2 className="heading-3" style={{ marginBottom: '0.75rem' }}>
+      <h2 className="heading-3 home-section-title">
         Sistema operativo
       </h2>
-      <div
-        className="card card-compact"
-        style={{ display: 'inline-flex', alignItems: 'center', gap: '0.75rem' }}
-      >
+      <div className="card card-compact home-status-card">
         <span className="status-dot status-dot-success" aria-hidden="true" />
-        <span style={{ fontSize: '0.875rem', fontWeight: 500 }}>Sistema online</span>
+        <span className="home-status-text">Sistema online</span>
       </div>
     </div>
   );

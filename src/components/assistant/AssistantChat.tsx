@@ -13,7 +13,6 @@ import {
   getSuggestionsForPage,
 } from './AssistantSuggestions';
 import { VoiceMode } from './VoiceMode';
-import { VoiceInput } from './VoiceInput';
 import { createConversationAction } from '@/app/app/assistant/actions';
 
 export interface AssistantChatProps {
@@ -73,6 +72,7 @@ export function AssistantChat({
           content: (m.content as string) ?? null,
           toolCalls: m.toolCalls as AssistantMessageData['toolCalls'],
           toolCallRecords: m.toolCallRecords as AssistantMessageData['toolCallRecords'],
+          attachments: m.attachments as AssistantMessageData['attachments'],
           createdAt: m.createdAt as string,
         }))
       );
@@ -136,6 +136,14 @@ export function AssistantChat({
       id: `temp-${Date.now()}`,
       role: 'user',
       content: text,
+      attachments: attachments.length > 0
+        ? attachments.map((a) => ({
+            id: a.id,
+            fileName: a.fileName,
+            mimeType: a.mimeType,
+            sizeBytes: a.sizeBytes,
+          }))
+        : undefined,
       createdAt: new Date().toISOString(),
     };
     setMessages((prev) => [...prev, userMsg]);
@@ -306,10 +314,19 @@ export function AssistantChat({
       <div className="assistant-input-bar">
         <ModelSelector value={selectedModel} onChange={setSelectedModel} />
         {canUseVoice && (
-          <VoiceInput
-            onTranscribed={(text) => handleSend(text)}
-            disabled={loadingConv || streaming}
-          />
+          <button
+            type="button"
+            className="voice-mode-btn"
+            onClick={() => setVoiceModeOpen(true)}
+            aria-label="Asistente de voz"
+            title="Asistente de voz conversacional"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+              <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+              <line x1="12" y1="19" x2="12" y2="22" />
+            </svg>
+          </button>
         )}
         <AssistantInput
           onSend={handleSend}

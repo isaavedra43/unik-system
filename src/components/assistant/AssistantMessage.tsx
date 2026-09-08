@@ -1,9 +1,16 @@
 'use client';
 
 import React from 'react';
-import { Bot, User as UserIcon } from 'lucide-react';
+import { Bot, User as UserIcon, FileText, Image as ImageIcon } from 'lucide-react';
 import { AssistantMarkdown } from './AssistantMarkdown';
 import { AssistantToolCallCard, type ToolCallData } from './AssistantToolCallCard';
+
+export interface AttachmentDisplay {
+  id: string;
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+}
 
 export interface AssistantMessageData {
   id: string;
@@ -19,7 +26,18 @@ export interface AssistantMessageData {
     success: boolean;
     errorCode: string | null;
   }>;
+  attachments?: AttachmentDisplay[];
   createdAt: string;
+}
+
+function formatSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes}B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)}MB`;
+}
+
+function isImage(mimeType: string): boolean {
+  return mimeType.startsWith('image/');
 }
 
 export function AssistantMessage({ message }: { message: AssistantMessageData }) {
@@ -44,6 +62,24 @@ export function AssistantMessage({ message }: { message: AssistantMessageData })
         {isUser ? <UserIcon size={18} /> : <Bot size={18} />}
       </div>
       <div className={`assistant-msg ${isUser ? 'assistant-msg-user' : 'assistant-msg-assistant'}`}>
+        {/* Render attachments */}
+        {message.attachments && message.attachments.length > 0 && (
+          <div className="assistant-msg-attachments">
+            {message.attachments.map((att) => (
+              <div key={att.id} className="assistant-msg-attachment">
+                {isImage(att.mimeType) ? (
+                  <ImageIcon size={14} className="assistant-msg-attachment-icon" />
+                ) : (
+                  <FileText size={14} className="assistant-msg-attachment-icon" />
+                )}
+                <span className="assistant-msg-attachment-name" title={att.fileName}>
+                  {att.fileName}
+                </span>
+                <span className="assistant-msg-attachment-size">{formatSize(att.sizeBytes)}</span>
+              </div>
+            ))}
+          </div>
+        )}
         {message.content && <AssistantMarkdown content={message.content} />}
         {toolCallData.map((tc, idx) => (
           <AssistantToolCallCard key={idx} data={tc} />

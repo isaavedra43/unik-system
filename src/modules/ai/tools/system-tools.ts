@@ -41,12 +41,37 @@ registerTool({
       label: 'Órdenes de Venta',
       accessible: has('sales_orders.view'),
     });
+    modules.push({
+      key: 'analytics',
+      label: 'Analytics (KPIs, rankings, tendencias, pronósticos)',
+      accessible: has('sales_orders.view'),
+    });
+    modules.push({
+      key: 'customers',
+      label: 'Clientes (top, segmentación, retención)',
+      accessible: has('sales_orders.view'),
+    });
+    modules.push({
+      key: 'finance',
+      label: 'Finanzas (cuentas por cobrar, ingresos, antigüedad)',
+      accessible: has('sales_orders.view'),
+    });
+    modules.push({
+      key: 'inventory',
+      label: 'Inventario (productos, stock, bundles)',
+      accessible: has('sales_orders.view'),
+    });
     modules.push({ key: 'users', label: 'Usuarios', accessible: has('users.view') });
     modules.push({ key: 'roles', label: 'Roles y permisos', accessible: has('roles.view') });
     modules.push({
       key: 'integrations',
-      label: 'Integraciones',
+      label: 'Integraciones (Zoho, sincronización)',
       accessible: has('integrations.view'),
+    });
+    modules.push({
+      key: 'notifications',
+      label: 'Notificaciones (alertas, cambios)',
+      accessible: true,
     });
     return { modules };
   },

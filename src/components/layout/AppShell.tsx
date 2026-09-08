@@ -8,7 +8,7 @@ import { logoutAction } from '@/app/app/actions';
 import { Avatar } from '@/components/ui/primitives';
 import { DropdownMenu } from '@/components/ui/composite';
 import { ChevronDown, Home, LogOut, Menu, Shield, Users } from '@/components/ui/icons';
-import { Bell, Bot, ShoppingCart, Plug } from 'lucide-react';
+import { Bell, Bot, ShoppingCart, Plug, X } from 'lucide-react';
 import { AssistantWidget } from '@/components/assistant/AssistantWidget';
 import { ThemeToggle } from '@/components/layout/ThemeToggle';
 
@@ -53,6 +53,14 @@ function Sidebar({
           <Link href="/app" style={{ color: 'inherit' }}>
             UNIK
           </Link>
+          <button
+            type="button"
+            className="sidebar-close-btn"
+            onClick={onClose}
+            aria-label="Cerrar menú"
+          >
+            <X size={20} />
+          </button>
         </div>
         <nav className="sidebar-nav">
           {sections.map((section) => (
@@ -164,7 +172,7 @@ function Topbar({ user, onToggleSidebar }: { user: CurrentUser; onToggleSidebar:
 
   return (
     <header className="app-topbar">
-      <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', minWidth: 0 }}>
+      <div className="topbar-left">
         <button
           type="button"
           className="sidebar-toggle"
@@ -175,7 +183,7 @@ function Topbar({ user, onToggleSidebar }: { user: CurrentUser; onToggleSidebar:
         </button>
         <Breadcrumbs items={crumbs} />
       </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+      <div className="topbar-right">
         <ThemeToggle />
         <div style={{ position: 'relative' }}>
           <button

@@ -17,6 +17,7 @@ import { recordAiToolCall } from './ai-audit';
 import { checkRateLimit, recordTokenUsage } from './ai-rate-limit';
 import { validateInput, validateOutput } from './ai-guardrails';
 import { processAttachment, type AttachmentResult } from './ai-attachments-service';
+import { prisma } from '@/lib/prisma';
 
 export interface OrchestratorAttachment {
   id: string;
@@ -75,8 +76,20 @@ export async function* runAssistant(
   }
 
   // 4. Persist user message
-  await addMessage(input.conversationId, 'user', input.message, null, 0, 0, 0);
+  const userMessage = await addMessage(input.conversationId, 'user', input.message, null, 0, 0, 0);
   await autoTitleConversation(input.conversationId, input.message);
+
+  // 4.5. Associate attachments with the user message
+  if (input.attachments && input.attachments.length > 0) {
+    try {
+      await prisma.aiAttachment.updateMany({
+        where: { id: { in: input.attachments.map((a) => a.id) } },
+        data: { messageId: userMessage.id },
+      });
+    } catch (err) {
+      console.error('[orchestrator] Error associating attachments:', err);
+    }
+  }
 
   // 5. Load history
   const history = await getMessages(

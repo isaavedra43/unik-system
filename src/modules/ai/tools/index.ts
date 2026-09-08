@@ -27,6 +27,12 @@ import './finance-tools';
 // Analytics tools (comparaciones, rankings, métricas avanzadas)
 import './analytics-tools';
 
+// Advanced analytics (cross-tab, forecast, alerts, retention, bundles, aging)
+import './advanced-analytics-tools';
+
+// Operations tools (order items, notifications, integration status, team performance, dashboard)
+import './operations-tools';
+
 // Artifact tools (PDF, Excel, CSV, tablas, gráficas)
 import './artifact-tools';
 
