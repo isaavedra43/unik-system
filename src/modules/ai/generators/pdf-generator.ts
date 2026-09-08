@@ -203,9 +203,10 @@ export function generatePdfReport(
         }
 
         x = PAGE_MARGIN;
+        const cellY = doc.y; // Save Y position for this row — all cells use the same Y
         const isAlt = rowIdx % 2 === 1;
         if (isAlt) {
-          doc.rect(PAGE_MARGIN, doc.y, CONTENT_WIDTH(doc), rowHeight)
+          doc.rect(PAGE_MARGIN, cellY, CONTENT_WIDTH(doc), rowHeight)
             .fillColor('#f1f5f9')
             .fill();
         }
@@ -216,13 +217,13 @@ export function generatePdfReport(
           doc.fontSize(fontSize)
             .fillColor('#334155')
             .font('Helvetica')
-            .text(value, x + 6, doc.y + 7, {
+            .text(value, x + 6, cellY + 7, {
               width: colWidths[i] - 12,
               align: align === 'right' ? 'right' : align === 'center' ? 'center' : 'left',
             });
           x += colWidths[i];
         });
-        doc.y += rowHeight;
+        doc.y = cellY + rowHeight; // Move to next row
       });
     }
 

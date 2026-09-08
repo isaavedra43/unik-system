@@ -36,8 +36,44 @@ function autoColumns(rows: Record<string, unknown>[]): Array<{
 }> {
   if (rows.length === 0) return [];
   const keys = Object.keys(rows[0]);
-  return keys.map((key) => {
-    // Guess format from key name
+
+  // Preferred column order for sales data
+  const preferredOrder = [
+    'number', 'customer', 'total', 'balance', 'status', 'date',
+    'paymentMethod', 'salesperson', 'location', 'product', 'quantity',
+    'count', 'orders', 'revenue', 'amount',
+  ];
+
+  // Sort keys by preferred order, unknown keys go last
+  const sortedKeys = [...keys].sort((a, b) => {
+    const aIdx = preferredOrder.indexOf(a);
+    const bIdx = preferredOrder.indexOf(b);
+    if (aIdx === -1 && bIdx === -1) return 0;
+    if (aIdx === -1) return 1;
+    if (bIdx === -1) return -1;
+    return aIdx - bIdx;
+  });
+
+  // Human-readable header labels
+  const headerLabels: Record<string, string> = {
+    number: 'Orden',
+    customer: 'Cliente',
+    total: 'Total',
+    balance: 'Saldo',
+    status: 'Estado',
+    date: 'Fecha',
+    paymentMethod: 'Método',
+    salesperson: 'Vendedor',
+    location: 'Sucursal',
+    product: 'Producto',
+    quantity: 'Cantidad',
+    count: 'Cantidad',
+    orders: 'Órdenes',
+    revenue: 'Ingreso',
+    amount: 'Monto',
+  };
+
+  return sortedKeys.map((key) => {
     let format: string | undefined;
     const lower = key.toLowerCase();
     if (lower === 'total' || lower === 'balance' || lower === 'amount' || lower === 'revenue') {
@@ -47,8 +83,7 @@ function autoColumns(rows: Record<string, unknown>[]): Array<{
     } else if (lower === 'count' || lower === 'quantity' || lower === 'orders') {
       format = 'number';
     }
-    // Capitalize header
-    const header = key.charAt(0).toUpperCase() + key.slice(1);
+    const header = headerLabels[key] ?? (key.charAt(0).toUpperCase() + key.slice(1));
     return { header, key, format };
   });
 }
@@ -65,9 +100,27 @@ function formatValue(value: unknown, format?: string): string {
     return `${value}%`;
   }
   if (format === 'date') {
-    return String(value);
+    // Format YYYY-MM-DD to DD/MM/YYYY
+    const s = String(value);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+      const [y, m, d] = s.split('-');
+      return `${d}/${m}/${y}`;
+    }
+    return s;
   }
-  return String(value);
+  // Translate status values to Spanish
+  const s = String(value);
+  const statusMap: Record<string, string> = {
+    confirmed: 'Confirmada',
+    draft: 'Borrador',
+    closed: 'Cerrada',
+    cancelled: 'Cancelada',
+    pending: 'Pendiente',
+  };
+  if (statusMap[s.toLowerCase()]) {
+    return statusMap[s.toLowerCase()];
+  }
+  return s;
 }
 
 /* ------------------------------------------------------------------ */
