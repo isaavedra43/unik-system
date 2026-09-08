@@ -2565,8 +2565,10 @@ textarea.input {
 .assistant-page-main {
   flex: 1;
   min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
   border-left: 1px solid var(--unik-border);
   background: var(--unik-surface);
 }
@@ -3302,6 +3304,7 @@ textarea.input {
   min-height: 0;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 /* =====================================================
@@ -4146,17 +4149,13 @@ textarea.input {
 }
 
 .assistant-welcome {
-  margin: 0 auto;
+  margin: auto;
   max-width: 520px;
   padding: var(--unik-space-12) var(--unik-space-8);
   animation: assistant-welcome-in 0.42s ease-out;
 }
 
-/* Empty state: center the welcome vertically and hide the scroll marker */
-.assistant-chat-empty .assistant-chat-messages {
-  justify-content: center;
-}
-
+/* Empty state: hide the scroll marker so the welcome is the only child */
 .assistant-chat-empty .assistant-messages-end {
   display: none;
 }
@@ -4249,9 +4248,12 @@ textarea.input {
 }
 
 .assistant-suggestions {
+  display: flex;
+  flex-wrap: wrap;
   justify-content: center;
   padding: 0 var(--unik-space-8) var(--unik-space-6);
   gap: var(--unik-space-3);
+  flex-shrink: 0;
 }
 
 .assistant-suggestion-chip {
@@ -4396,6 +4398,7 @@ textarea.input {
   flex-direction: column;
   gap: var(--unik-space-2);
   padding: 0 var(--unik-space-8) var(--unik-space-6);
+  flex-shrink: 0;
 }
 
 .model-selector {
