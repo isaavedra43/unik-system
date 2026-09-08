@@ -386,8 +386,9 @@ export default function AppShell({ user, children }: AppShellProps) {
 
   const pathname = usePathname();
   const isWorkspace = pathname.startsWith('/app/sales/orders') && !pathname.includes('/api');
-  const canUseAssistant = user.permissionKeys.includes('assistant.use') || user.isSuperAdmin;
   const isAssistantPage = pathname.startsWith('/app/assistant');
+  const isFlush = isWorkspace || isAssistantPage;
+  const canUseAssistant = user.permissionKeys.includes('assistant.use') || user.isSuperAdmin;
   const showWidget = canUseAssistant && !isAssistantPage;
 
   return (
@@ -395,7 +396,7 @@ export default function AppShell({ user, children }: AppShellProps) {
       <Sidebar sections={sections} open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
       <div className="app-main">
         <Topbar user={user} onToggleSidebar={() => setSidebarOpen(!sidebarOpen)} />
-        <main className={isWorkspace ? 'app-content app-content-flush' : 'app-content'}>
+        <main className={isFlush ? 'app-content app-content-flush' : 'app-content'}>
           {children}
         </main>
       </div>

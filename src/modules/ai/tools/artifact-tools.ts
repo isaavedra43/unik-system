@@ -25,20 +25,50 @@ function getArtifactPath(id: string, ext: string): string {
   return path.join(ARTIFACTS_DIR, `${id}.${ext}`);
 }
 
-/** Column definition — flat, simple for the IA to construct. */
-const columnSchema = z.object({
-  header: z.string().describe('Título de la columna (ej: "Cliente", "Total", "Fecha")'),
-  key: z.string().describe('Clave del campo en las filas (ej: "customer", "total", "date")'),
-  format: z.enum(['currency', 'number', 'percentage', 'date', 'text']).optional().describe(
-    'Formato: "currency" para dinero, "number" para números, "date" para fechas, "text" para texto'
-  ),
-});
+/**
+ * Auto-generates column definitions from the keys of the first row.
+ * This lets the IA just pass `rows` without having to define columns.
+ */
+function autoColumns(rows: Record<string, unknown>[]): Array<{
+  header: string;
+  key: string;
+  format?: string;
+}> {
+  if (rows.length === 0) return [];
+  const keys = Object.keys(rows[0]);
+  return keys.map((key) => {
+    // Guess format from key name
+    let format: string | undefined;
+    const lower = key.toLowerCase();
+    if (lower === 'total' || lower === 'balance' || lower === 'amount' || lower === 'revenue') {
+      format = 'currency';
+    } else if (lower === 'date' || lower === 'orderdate' || lower === 'createdat') {
+      format = 'date';
+    } else if (lower === 'count' || lower === 'quantity' || lower === 'orders') {
+      format = 'number';
+    }
+    // Capitalize header
+    const header = key.charAt(0).toUpperCase() + key.slice(1);
+    return { header, key, format };
+  });
+}
 
-/** Summary card / KPI — flat. */
-const summaryCardSchema = z.object({
-  label: z.string().describe('Etiqueta del KPI (ej: "Total ventas", "Número de órdenes")'),
-  value: z.string().describe('Valor del KPI (ej: "$73,987.77", "8")'),
-});
+function formatValue(value: unknown, format?: string): string {
+  if (value === null || value === undefined) return '';
+  if (format === 'currency') {
+    return `$${Number(value).toLocaleString('es-MX', { minimumFractionDigits: 2 })}`;
+  }
+  if (format === 'number') {
+    return Number(value).toLocaleString('es-MX');
+  }
+  if (format === 'percentage') {
+    return `${value}%`;
+  }
+  if (format === 'date') {
+    return String(value);
+  }
+  return String(value);
+}
 
 /* ------------------------------------------------------------------ */
 /* Tools                                                              */
@@ -48,58 +78,61 @@ const summaryCardSchema = z.object({
 registerTool({
   name: 'generatePdfReport',
   description:
-    'Genera un reporte PDF profesional con tablas y KPIs. Pasa los datos (rows) que obtuviste de otras tools y las columnas (columns) para mostrarlos. El PDF se descarga desde el chat.',
+    'Genera un PDF con los datos que le pases. SOLO necesitas pasar title y rows. ' +
+    'rows es un array de objetos (los datos de la tool anterior). ' +
+    'EJEMPLO: si getCashSales devolvio {orders: [{number: "OV-1", customer: "Juan", total: "100"}]}, ' +
+    'pasa rows = [{number: "OV-1", customer: "Juan", total: "100"}] y title = "Ventas en Efectivo".',
   category: 'export',
   requiredPermission: 'sales_orders.view',
   enabledByDefault: true,
   parameters: z.object({
     conversationId: z.string().optional().describe('Se inyecta automáticamente, no lo pongas.'),
-    title: z.string().describe('Título del reporte (ej: "Ventas en Efectivo de Ayer")'),
-    subtitle: z.string().optional().describe('Subtítulo del reporte'),
-    columns: z.array(columnSchema).describe('Definición de columnas para la tabla'),
+    title: z.string().default('Reporte UNIK').describe('Título del reporte (ej: "Ventas en Efectivo de Ayer")'),
+    subtitle: z.string().optional().describe('Subtítulo opcional'),
     rows: z.array(z.record(z.unknown())).describe(
-      'Filas de datos. Cada fila es un objeto con las claves de las columnas. Usa los datos que obtuviste de tools anteriores.'
+      'Los datos a mostrar. Pasa el array de la tool anterior. ' +
+      'EJ: si getCashSales devolvió orders, pasa ese array. ' +
+      'EJ: si getTopProducts devolvió topProducts, pasa ese array.'
     ),
-    summaryCards: z.array(summaryCardSchema).optional().describe(
-      'KPIs/tarjetas de resumen (ej: [{label: "Total", value: "$73,987.77"}, {label: "Órdenes", value: "8"}])'
+    columns: z.array(z.object({
+      header: z.string(),
+      key: z.string(),
+      format: z.enum(['currency', 'number', 'percentage', 'date', 'text']).optional(),
+    })).optional().describe(
+      'OPCIONAL. Si no lo pasas, se generan automáticamente de las claves de las rows.'
     ),
-    brandColor: z.string().optional().describe('Color de marca en hex (ej: "#2563eb")'),
-    author: z.string().optional().describe('Autor del reporte'),
+    summaryCards: z.array(z.object({
+      label: z.string(),
+      value: z.string(),
+    })).optional().describe('KPIs de resumen (ej: [{label: "Total", value: "$73,987.77"}, {label: "Órdenes", value: "8"}])'),
+    brandColor: z.string().optional().describe('Color hex (ej: #2563eb)'),
   }),
   execute: async (_actor, rawArgs) => {
     const args = rawArgs as {
       conversationId: string;
       title: string;
       subtitle?: string;
-      columns: Array<{ header: string; key: string; format?: string }>;
       rows: Record<string, unknown>[];
+      columns?: Array<{ header: string; key: string; format?: string }>;
       summaryCards?: Array<{ label: string; value: string }>;
       brandColor?: string;
-      author?: string;
     };
 
     await ensureArtifactsDir();
     const artifactId = `pdf-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const filePath = getArtifactPath(artifactId, 'pdf');
 
-    const pdfColumns: PdfTableColumn[] = args.columns.map((c) => ({
+    const cols = args.columns ?? autoColumns(args.rows);
+
+    const pdfColumns: PdfTableColumn[] = cols.map((c) => ({
       header: c.header,
       key: c.key,
-      format: c.format === 'currency'
-        ? (v) => `$${Number(v ?? 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}`
-        : c.format === 'number'
-        ? (v) => Number(v ?? 0).toLocaleString('es-MX')
-        : c.format === 'percentage'
-        ? (v) => `${v}%`
-        : c.format === 'date'
-        ? (v) => (v ? String(v) : '')
-        : (v) => String(v ?? ''),
+      format: (v: unknown) => formatValue(v, c.format),
     }));
 
     const { sizeBytes, pageCount } = await generatePdfReport(filePath, {
       title: args.title,
       subtitle: args.subtitle,
-      author: args.author,
       brandColor: args.brandColor,
       logoText: 'UNIK',
       columns: pdfColumns,
@@ -118,7 +151,7 @@ registerTool({
         sizeBytes,
         pageCount,
         rowCount: args.rows.length,
-        columns: args.columns.map((c) => c.header),
+        columns: cols.map((c) => c.header),
         brandColor: args.brandColor,
       },
     });
@@ -140,37 +173,41 @@ registerTool({
 registerTool({
   name: 'generateExcelReport',
   description:
-    'Genera un reporte Excel (XLSX) con datos tabulares y formato profesional. Pasa los datos (rows) que obtuviste de otras tools y las columnas (columns).',
+    'Genera un Excel (XLSX) con los datos que le pases. SOLO necesitas pasar title y rows.',
   category: 'export',
   requiredPermission: 'sales_orders.view',
   enabledByDefault: true,
   parameters: z.object({
     conversationId: z.string().optional().describe('Se inyecta automáticamente, no lo pongas.'),
-    title: z.string().describe('Título del reporte'),
+    title: z.string().default('Reporte UNIK').describe('Título del reporte'),
     subtitle: z.string().optional(),
-    columns: z.array(columnSchema).describe('Definición de columnas'),
-    rows: z.array(z.record(z.unknown())).describe('Filas de datos de tools anteriores'),
-    summaryCards: z.array(summaryCardSchema).optional().describe('KPIs de resumen'),
-    brandColor: z.string().optional().describe('Color de marca en hex'),
-    author: z.string().optional(),
+    rows: z.array(z.record(z.unknown())).describe('Los datos a mostrar (array de la tool anterior)'),
+    columns: z.array(z.object({
+      header: z.string(),
+      key: z.string(),
+      format: z.enum(['currency', 'number', 'percentage', 'date', 'text']).optional(),
+    })).optional().describe('OPCIONAL. Se generan automáticamente si no se pasan.'),
+    summaryCards: z.array(z.object({ label: z.string(), value: z.string() })).optional(),
+    brandColor: z.string().optional(),
   }),
   execute: async (_actor, rawArgs) => {
     const args = rawArgs as {
       conversationId: string;
       title: string;
       subtitle?: string;
-      columns: Array<{ header: string; key: string; format?: string }>;
       rows: Record<string, unknown>[];
+      columns?: Array<{ header: string; key: string; format?: string }>;
       summaryCards?: Array<{ label: string; value: string }>;
       brandColor?: string;
-      author?: string;
     };
 
     await ensureArtifactsDir();
     const artifactId = `xlsx-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const filePath = getArtifactPath(artifactId, 'xlsx');
 
-    const excelColumns: ExcelColumn[] = args.columns.map((c) => ({
+    const cols = args.columns ?? autoColumns(args.rows);
+
+    const excelColumns: ExcelColumn[] = cols.map((c) => ({
       header: c.header,
       key: c.key,
       type: c.format === 'currency' ? 'currency' : c.format === 'number' ? 'number' : c.format === 'date' ? 'date' : c.format === 'percentage' ? 'percentage' : 'text',
@@ -179,7 +216,6 @@ registerTool({
     const { sizeBytes } = await generateExcelReport(filePath, {
       title: args.title,
       subtitle: args.subtitle,
-      author: args.author,
       brandColor: args.brandColor ? args.brandColor.replace('#', 'FF').toUpperCase() : undefined,
       columns: excelColumns,
       rows: args.rows,
@@ -196,7 +232,7 @@ registerTool({
         mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         sizeBytes,
         rowCount: args.rows.length,
-        columns: args.columns.map((c) => c.header),
+        columns: cols.map((c) => c.header),
       },
     });
 
@@ -216,65 +252,64 @@ registerTool({
 registerTool({
   name: 'generateCsvExport',
   description:
-    'Genera un archivo CSV con los datos proporcionados. Compatible con Excel. Pasa los datos (rows) de tools anteriores y las columnas (columns).',
+    'Genera un CSV con los datos que le pases. SOLO necesitas pasar title y rows.',
   category: 'export',
   requiredPermission: 'sales_orders.view',
   enabledByDefault: true,
   parameters: z.object({
     conversationId: z.string().optional().describe('Se inyecta automáticamente, no lo pongas.'),
-    title: z.string().optional().describe('Título del reporte'),
-    columns: z.array(columnSchema).describe('Definición de columnas'),
-    rows: z.array(z.record(z.unknown())).describe('Filas de datos de tools anteriores'),
+    title: z.string().default('Export UNIK').describe('Título'),
+    rows: z.array(z.record(z.unknown())).describe('Los datos a exportar (array de la tool anterior)'),
+    columns: z.array(z.object({
+      header: z.string(),
+      key: z.string(),
+      format: z.enum(['currency', 'number', 'percentage', 'date', 'text']).optional(),
+    })).optional().describe('OPCIONAL. Se generan automáticamente si no se pasan.'),
   }),
   execute: async (_actor, rawArgs) => {
     const args = rawArgs as {
       conversationId: string;
-      title?: string;
-      columns: Array<{ header: string; key: string; format?: string }>;
+      title: string;
       rows: Record<string, unknown>[];
+      columns?: Array<{ header: string; key: string; format?: string }>;
     };
 
     await ensureArtifactsDir();
     const artifactId = `csv-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const filePath = getArtifactPath(artifactId, 'csv');
 
+    const cols = args.columns ?? autoColumns(args.rows);
+
     const { sizeBytes } = generateCsvReport(filePath, {
       title: args.title,
-      columns: args.columns.map((c) => ({
+      columns: cols.map((c) => ({
         header: c.header,
         key: c.key,
-        format: c.format === 'currency'
-          ? (v) => `$${Number(v ?? 0).toFixed(2)}`
-          : c.format === 'number'
-          ? (v) => String(v ?? 0)
-          : c.format === 'percentage'
-          ? (v) => `${v}%`
-          : (v) => String(v ?? ''),
+        format: (v: unknown) => formatValue(v, c.format),
       })),
       rows: args.rows,
       includeMetadata: true,
     });
 
-    const title = args.title ?? 'Export CSV';
     const artifact = await createArtifact({
       conversationId: args.conversationId,
       type: 'csv',
       storagePath: filePath,
       meta: {
-        title,
-        filename: `${title.replace(/[^a-zA-Z0-9]/g, '_')}.csv`,
+        title: args.title,
+        filename: `${args.title.replace(/[^a-zA-Z0-9]/g, '_')}.csv`,
         mimeType: 'text/csv',
         sizeBytes,
         rowCount: args.rows.length,
-        columns: args.columns.map((c) => c.header),
+        columns: cols.map((c) => c.header),
       },
     });
 
     return {
       artifactId: artifact.id,
       type: 'csv',
-      title,
-      filename: `${title.replace(/[^a-zA-Z0-9]/g, '_')}.csv`,
+      title: args.title,
+      filename: `${args.title.replace(/[^a-zA-Z0-9]/g, '_')}.csv`,
       sizeBytes,
       rowCount: args.rows.length,
       downloadUrl: `/app/assistant/api/artifacts/${artifact.id}/download`,
@@ -286,7 +321,7 @@ registerTool({
 registerTool({
   name: 'generateChart',
   description:
-    'Genera una gráfica (barras, línea, pie) como imagen SVG que se muestra en el chat. Pasa los labels y values de los datos.',
+    'Genera una gráfica (barras, línea, pie) que se muestra en el chat. Pasa labels y values.',
   category: 'export',
   requiredPermission: 'sales_orders.view',
   enabledByDefault: true,
@@ -295,16 +330,14 @@ registerTool({
     chartType: z.enum(['bar', 'horizontal-bar', 'line', 'pie', 'doughnut']).describe('Tipo de gráfica'),
     title: z.string().describe('Título de la gráfica'),
     subtitle: z.string().optional(),
-    labels: z.array(z.string()).describe('Etiquetas para cada punto/barra (ej: ["Axel", "Andrea", "Laura"])'),
-    series: z.array(
-      z.object({
-        label: z.string().describe('Nombre de la serie (ej: "Ventas")'),
-        values: z.array(z.number()).describe('Valores numéricos (ej: [47052, 27064, 2664])'),
-      })
-    ).describe('Series de datos'),
-    colors: z.array(z.string()).optional().describe('Colores personalizados (hex)'),
-    showValues: z.boolean().optional().describe('Mostrar valores en la gráfica'),
-    showLegend: z.boolean().optional().describe('Mostrar leyenda'),
+    labels: z.array(z.string()).describe('Etiquetas (ej: ["Axel", "Andrea", "Laura"])'),
+    series: z.array(z.object({
+      label: z.string().describe('Nombre de la serie'),
+      values: z.array(z.number()).describe('Valores (ej: [47052, 27064, 2664])'),
+    })).describe('Series de datos'),
+    colors: z.array(z.string()).optional(),
+    showValues: z.boolean().optional(),
+    showLegend: z.boolean().optional(),
     brandColor: z.string().optional(),
   }),
   execute: async (_actor, rawArgs) => {
@@ -360,7 +393,7 @@ registerTool({
 registerTool({
   name: 'generateTable',
   description:
-    'Genera una tabla formateada que se muestra directamente en el chat. Pasa los datos (rows) de tools anteriores y las columnas (columns).',
+    'Genera una tabla que se muestra en el chat. SOLO necesitas pasar title y rows.',
   category: 'export',
   requiredPermission: 'sales_orders.view',
   enabledByDefault: true,
@@ -368,9 +401,13 @@ registerTool({
     conversationId: z.string().optional().describe('Se inyecta automáticamente, no lo pongas.'),
     title: z.string().describe('Título de la tabla'),
     subtitle: z.string().optional(),
-    columns: z.array(columnSchema).describe('Definición de columnas'),
-    rows: z.array(z.record(z.unknown())).describe('Filas de datos de tools anteriores'),
-    summary: z.array(summaryCardSchema).optional().describe('KPIs al pie de la tabla'),
+    rows: z.array(z.record(z.unknown())).describe('Los datos a mostrar (array de la tool anterior)'),
+    columns: z.array(z.object({
+      header: z.string(),
+      key: z.string(),
+      format: z.enum(['currency', 'number', 'percentage', 'date', 'text']).optional(),
+    })).optional().describe('OPCIONAL. Se generan automáticamente si no se pasan.'),
+    summary: z.array(z.object({ label: z.string(), value: z.string() })).optional(),
     brandColor: z.string().optional(),
   }),
   execute: async (_actor, rawArgs) => {
@@ -378,16 +415,18 @@ registerTool({
       conversationId: string;
       title: string;
       subtitle?: string;
-      columns: Array<{ header: string; key: string; format?: string }>;
       rows: Record<string, unknown>[];
+      columns?: Array<{ header: string; key: string; format?: string }>;
       summary?: Array<{ label: string; value: string }>;
       brandColor?: string;
     };
 
+    const cols = args.columns ?? autoColumns(args.rows);
+
     const tableData = generateTableData({
       title: args.title,
       subtitle: args.subtitle,
-      columns: args.columns.map((c) => ({
+      columns: cols.map((c) => ({
         header: c.header,
         key: c.key,
         format: c.format as 'currency' | 'number' | 'percentage' | 'date' | 'text' | undefined,
@@ -404,7 +443,7 @@ registerTool({
       meta: {
         title: args.title,
         rowCount: args.rows.length,
-        columns: args.columns.map((c) => c.header),
+        columns: cols.map((c) => c.header),
         brandColor: args.brandColor,
       },
     });
@@ -421,7 +460,7 @@ registerTool({
 // 6. listArtifacts
 registerTool({
   name: 'listArtifacts',
-  description: 'Lista los artefactos (PDFs, Excels, CSVs, gráficas, tablas) generados en la conversación actual.',
+  description: 'Lista los artefactos generados en la conversación actual.',
   category: 'export',
   requiredPermission: 'sales_orders.view',
   enabledByDefault: true,
@@ -433,12 +472,7 @@ registerTool({
     const artifacts = await prisma.aiArtifact.findMany({
       where: { conversationId: args.conversationId },
       orderBy: { createdAt: 'desc' },
-      select: {
-        id: true,
-        type: true,
-        meta: true,
-        createdAt: true,
-      },
+      select: { id: true, type: true, meta: true, createdAt: true },
     });
     return {
       artifacts: artifacts.map((a) => ({
@@ -457,7 +491,7 @@ registerTool({
 // 7. cleanupArtifacts
 registerTool({
   name: 'cleanupArtifacts',
-  description: 'Elimina artefactos expirados según el TTL configurado. Limpieza automática de PDFs, Excels y CSVs antiguos.',
+  description: 'Elimina artefactos expirados.',
   category: 'system',
   enabledByDefault: true,
   parameters: z.object({}),
