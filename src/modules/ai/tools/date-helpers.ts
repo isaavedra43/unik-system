@@ -23,6 +23,7 @@ export const DATE_SHORTCUTS = [
   'yesterday',
   'this_week',
   'this_month',
+  'last_month',
   'last_7_days',
   'last_30_days',
   'all',
@@ -41,8 +42,8 @@ export const dateRangeSchema = z
   .enum(DATE_SHORTCUTS)
   .default('today')
   .describe(
-    'Período de tiempo a consultar. VALORES: "today" (hoy), "yesterday" (ayer), "this_week" (esta semana), "this_month" (este mes), "last_7_days" (últimos 7 días), "last_30_days" (últimos 30 días), "all" (todo el historial). ' +
-    'REGLA: Si el usuario dice "hoy" → "today". Si dice "ayer" → "yesterday". Si dice "esta semana" → "this_week". Si dice "este mes" → "this_month". Si no menciona fecha → "today".'
+    'Período de tiempo. VALORES: "today" (hoy), "yesterday" (ayer), "this_week" (esta semana), "this_month" (este mes), "last_month" (mes pasado), "last_7_days" (últimos 7 días), "last_30_days" (últimos 30 días), "all" (todo). ' +
+    'Si el usuario pide un mes específico (ej: "agosto", "septiembre"), NO uses este campo. Usa dateFrom y dateTo con formato YYYY-MM-DD.'
   );
 
 /**
@@ -110,6 +111,16 @@ export function resolveDateRange(
     };
   }
 
+  if (range === 'last_month') {
+    // First day of last month to last day of last month
+    const firstOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const lastOfLastMonth = new Date(now.getFullYear(), now.getMonth(), 0); // day 0 of current month = last day of prev
+    return {
+      from: utcDateFromLocal(firstOfLastMonth),
+      to: utcEndOfDayFromLocal(lastOfLastMonth),
+    };
+  }
+
   if (range === 'last_7_days') {
     const sevenDaysAgo = new Date(now);
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 6);
@@ -160,4 +171,34 @@ export function buildOrderDateWhere(
   const { from, to } = resolveDateRange(range);
   if (from === null || to === null) return {};
   return { orderDate: { gte: from, lte: to } };
+}
+
+/**
+ * Builds a Prisma where clause for orderDate from EITHER a dateRange shortcut
+ * OR explicit dateFrom/dateTo strings (YYYY-MM-DD).
+ *
+ * If dateFrom/dateTo are provided, they take priority over dateRange.
+ * This lets the IA query specific months like "agosto" → dateFrom="2026-08-01", dateTo="2026-08-31".
+ */
+export function buildOrderDateWhereFlexible(
+  range: DateRangeShortcut | string | undefined,
+  dateFrom?: string,
+  dateTo?: string
+): Record<string, unknown> {
+  // Explicit dates take priority
+  if (dateFrom && dateTo) {
+    const from = new Date(`${dateFrom}T00:00:00Z`);
+    const to = new Date(`${dateTo}T23:59:59.999Z`);
+    return { orderDate: { gte: from, lte: to } };
+  }
+  if (dateFrom) {
+    const from = new Date(`${dateFrom}T00:00:00Z`);
+    return { orderDate: { gte: from } };
+  }
+  if (dateTo) {
+    const to = new Date(`${dateTo}T23:59:59.999Z`);
+    return { orderDate: { lte: to } };
+  }
+  // Fall back to shortcut
+  return buildOrderDateWhere(range);
 }

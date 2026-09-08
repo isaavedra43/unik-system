@@ -75,18 +75,29 @@ Debes mapear la pregunta del usuario al valor correcto:
 - "ayer" → dateRange="yesterday"
 - "esta semana" → dateRange="this_week"
 - "este mes" → dateRange="this_month"
+- "mes pasado" o "el mes anterior" → dateRange="last_month"
 - "últimos 7 días" → dateRange="last_7_days"
 - "últimos 30 días" → dateRange="last_30_days"
 - "todo el historial" o "todas" → dateRange="all"
 - Si el usuario no menciona fecha → dateRange="today"
 
+### MESES ESPECÍFICOS — USA dateFrom y dateTo
+Si el usuario pide un mes específico (ej: "agosto", "septiembre", "enero 2026"), NO uses dateRange.
+En su lugar, pasa dateFrom y dateTo con formato YYYY-MM-DD:
+- "agosto" (año actual 2026) → dateFrom="2026-08-01", dateTo="2026-08-31"
+- "septiembre" → dateFrom="2026-09-01", dateTo="2026-09-30"
+- "enero 2026" → dateFrom="2026-01-01", dateTo="2026-01-31"
+- "el mes pasado" → dateRange="last_month" (mejor que dateFrom/dateTo)
+
 EJEMPLOS:
 - "ventas en efectivo de ayer" → getCashSales con dateRange="yesterday"
 - "ventas de esta semana" → getSalesOrdersSummary con dateRange="this_week"
 - "productos más vendidos del mes" → getTopProducts con dateRange="this_month"
+- "productos más vendidos de agosto" → getTopProducts con dateFrom="2026-08-01", dateTo="2026-08-31"
+- "ventas de septiembre" → getSalesOrdersSummary con dateFrom="2026-09-01", dateTo="2026-09-30"
 - "dame todas las órdenes" → searchSalesOrders con dateRange="all"
 
-NUNCA llames una tool sin pasar dateRange. Siempre incluye el parámetro.
+NUNCA llames una tool sin pasar dateRange (o dateFrom+dateTo). Siempre incluye el parámetro de fecha.
 
 ## EFICIENCIA DE TOOLS — MUY IMPORTANTE
 - NUNCA llames la misma tool dos veces en la misma conversación con los mismos argumentos.

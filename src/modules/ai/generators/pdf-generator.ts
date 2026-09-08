@@ -1,24 +1,21 @@
 import PDFDocument from 'pdfkit';
 import fs from 'fs';
-import path from 'path';
 
 /**
  * Professional PDF Report Generator
  *
- * Generates branded PDF reports with:
- * - Header with logo area, title, subtitle
- * - Brand color accent line
- * - Data tables with alternating row colors
- - - Summary cards (KPIs)
- * - Footer with page numbers and timestamp
- *
- * All visual elements are customizable via options.
+ * Layout system:
+ * - A4 landscape by default (8 columns need width)
+ * - Header: logo + title + accent line + summary cards
+ * - Table: dynamic row height based on measured text, no overlap
+ * - Pagination: repeats header on each page, never splits a row
+ * - Footer: page number + timestamp
  */
 
 export interface PdfTableColumn {
   header: string;
   key: string;
-  width?: number;
+  width?: number; // absolute points
   align?: 'left' | 'right' | 'center';
   format?: (value: unknown) => string;
 }
@@ -29,19 +26,93 @@ export interface PdfReportOptions {
   author?: string;
   brandColor?: string; // hex like '#2563eb'
   accentColor?: string; // secondary accent
-  logoText?: string; // text-based logo (no image upload needed)
+  logoText?: string; // text-based logo
   columns: PdfTableColumn[];
   rows: Record<string, unknown>[];
   summaryCards?: Array<{ label: string; value: string; color?: string }>;
-  metadata?: Record<string, string>; // extra metadata at bottom
+  metadata?: Record<string, string>;
   fontSize?: number;
   orientation?: 'portrait' | 'landscape';
 }
 
 const DEFAULT_BRAND = '#2563eb';
 const DEFAULT_ACCENT = '#64748b';
-const PAGE_MARGIN = 50;
-const CONTENT_WIDTH = (doc: PDFKit.PDFDocument) => doc.page.width - PAGE_MARGIN * 2;
+const PAGE_MARGIN = 40;
+const FOOTER_HEIGHT = 30;
+const CELL_PAD_X = 6;
+const CELL_PAD_Y = 4;
+const HEADER_HEIGHT = 22;
+const MIN_ROW_HEIGHT = 20;
+const CONTENT_FONT_SIZE = 8;
+const HEADER_FONT_SIZE = 8;
+const LINE_HEIGHT = 10;
+
+function contentWidth(doc: PDFKit.PDFDocument): number {
+  return doc.page.width - PAGE_MARGIN * 2;
+}
+
+function pageBottom(doc: PDFKit.PDFDocument): number {
+  return doc.page.height - PAGE_MARGIN - FOOTER_HEIGHT;
+}
+
+/**
+ * Measures how many lines a text will occupy within a given column width
+ * at a given font size. Uses pdfkit's widthOfString to wrap manually.
+ */
+function measureLines(
+  doc: PDFKit.PDFDocument,
+  text: string,
+  maxWidth: number,
+  fontSize: number
+): number {
+  if (!text || text.length === 0) return 1;
+  doc.fontSize(fontSize).font('Helvetica');
+  const words = text.split(/\s+/);
+  let lines = 1;
+  let currentLine = '';
+  for (const word of words) {
+    const testLine = currentLine ? `${currentLine} ${word}` : word;
+    if (doc.widthOfString(testLine) <= maxWidth) {
+      currentLine = testLine;
+    } else {
+      // Word itself wider than column? Hard-break it.
+      if (!currentLine) {
+        // Break long word char by char
+        let chunk = '';
+        for (const ch of word) {
+          if (doc.widthOfString(chunk + ch) <= maxWidth) {
+            chunk += ch;
+          } else {
+            if (chunk) lines++;
+            chunk = ch;
+          }
+        }
+        currentLine = chunk;
+      } else {
+        lines++;
+        currentLine = word;
+      }
+    }
+  }
+  return lines;
+}
+
+/**
+ * Computes column widths from percentage hints or equal distribution.
+ * Percentages are relative to content width.
+ */
+function computeColumnWidths(
+  cols: PdfTableColumn[],
+  totalWidth: number
+): number[] {
+  // If all columns have explicit widths, use them
+  const explicit = cols.map((c) => c.width);
+  if (explicit.every((w) => w !== undefined)) {
+    return explicit as number[];
+  }
+  // Default distribution: equal
+  return cols.map(() => totalWidth / cols.length);
+}
 
 export function generatePdfReport(
   outputPath: string,
@@ -50,12 +121,18 @@ export function generatePdfReport(
   return new Promise((resolve, reject) => {
     const brand = options.brandColor ?? DEFAULT_BRAND;
     const accent = options.accentColor ?? DEFAULT_ACCENT;
-    const fontSize = options.fontSize ?? 10;
+    const fontSize = options.fontSize ?? CONTENT_FONT_SIZE;
+    const orientation = options.orientation ?? 'landscape';
 
     const doc = new PDFDocument({
       size: 'A4',
-      layout: options.orientation ?? 'portrait',
-      margins: { top: PAGE_MARGIN, bottom: PAGE_MARGIN, left: PAGE_MARGIN, right: PAGE_MARGIN },
+      layout: orientation,
+      margins: {
+        top: PAGE_MARGIN,
+        bottom: PAGE_MARGIN,
+        left: PAGE_MARGIN,
+        right: PAGE_MARGIN,
+      },
       info: {
         Title: options.title,
         Author: options.author ?? 'UNIK Asistente IA',
@@ -68,179 +145,212 @@ export function generatePdfReport(
     doc.pipe(stream);
 
     let pageCount = 0;
-    const drawPage = () => {
+    const drawFooter = () => {
       pageCount++;
-      // Footer
-      doc.fontSize(8)
+      doc.fontSize(7)
         .fillColor(accent)
+        .font('Helvetica')
         .text(
           `Generado por UNIK Asistente IA · ${new Date().toLocaleString('es-MX')} · Página ${pageCount}`,
           PAGE_MARGIN,
-          doc.page.height - 40,
-          { width: CONTENT_WIDTH(doc), align: 'center' }
+          doc.page.height - 25,
+          { width: contentWidth(doc), align: 'center' }
         );
     };
 
     // ===== HEADER =====
-    const headerY = doc.y;
-    // Logo text (left)
+    const headerY = PAGE_MARGIN;
     if (options.logoText) {
-      doc.fontSize(20)
+      doc.fontSize(18)
         .fillColor(brand)
         .font('Helvetica-Bold')
         .text(options.logoText, PAGE_MARGIN, headerY);
     }
-    // Title (center/right)
-    doc.fontSize(22)
+    doc.fontSize(20)
       .fillColor('#1e293b')
       .font('Helvetica-Bold')
-      .text(options.title, PAGE_MARGIN, headerY, { width: CONTENT_WIDTH(doc), align: 'right' });
+      .text(options.title, PAGE_MARGIN, headerY, {
+        width: contentWidth(doc),
+        align: 'right',
+      });
 
-    // Subtitle
+    let cursorY = headerY + 26;
+
     if (options.subtitle) {
-      doc.moveDown(0.3)
-        .fontSize(11)
+      doc.fontSize(10)
         .fillColor(accent)
         .font('Helvetica')
-        .text(options.subtitle, { width: CONTENT_WIDTH(doc), align: 'right' });
+        .text(options.subtitle, PAGE_MARGIN, cursorY, {
+          width: contentWidth(doc),
+          align: 'right',
+        });
+      cursorY += 16;
     }
 
     // Brand accent line
-    doc.moveDown(0.5);
-    const lineY = doc.y;
-    doc.moveTo(PAGE_MARGIN, lineY)
-      .lineTo(doc.page.width - PAGE_MARGIN, lineY)
-      .lineWidth(3)
+    doc.moveTo(PAGE_MARGIN, cursorY)
+      .lineTo(doc.page.width - PAGE_MARGIN, cursorY)
+      .lineWidth(2.5)
       .strokeColor(brand)
       .stroke();
-
-    doc.moveDown(1);
+    cursorY += 8;
 
     // ===== SUMMARY CARDS (KPIs) =====
     if (options.summaryCards && options.summaryCards.length > 0) {
-      const cardWidth = (CONTENT_WIDTH(doc) - (options.summaryCards.length - 1) * 10) / options.summaryCards.length;
-      const cardHeight = 60;
-      const cardY = doc.y;
+      const cardGap = 8;
+      const cardWidth =
+        (contentWidth(doc) - (options.summaryCards.length - 1) * cardGap) /
+        options.summaryCards.length;
+      const cardHeight = 44;
       options.summaryCards.forEach((card, i) => {
-        const x = PAGE_MARGIN + i * (cardWidth + 10);
+        const x = PAGE_MARGIN + i * (cardWidth + cardGap);
         const cardColor = card.color ?? brand;
-        // Card background
-        doc.roundedRect(x, cardY, cardWidth, cardHeight, 8)
+        doc.roundedRect(x, cursorY, cardWidth, cardHeight, 6)
           .fillColor('#f8fafc')
           .fill();
-        // Top accent
-        doc.roundedRect(x, cardY, cardWidth, 4, 2)
+        doc.roundedRect(x, cursorY, cardWidth, 3, 2)
           .fillColor(cardColor)
           .fill();
-        // Label
-        doc.fontSize(8)
+        doc.fontSize(7)
           .fillColor(accent)
           .font('Helvetica')
-          .text(card.label.toUpperCase(), x + 10, cardY + 12, { width: cardWidth - 20 });
-        // Value
-        doc.fontSize(16)
+          .text(card.label.toUpperCase(), x + 8, cursorY + 8, {
+            width: cardWidth - 16,
+          });
+        doc.fontSize(14)
           .fillColor('#1e293b')
           .font('Helvetica-Bold')
-          .text(card.value, x + 10, cardY + 28, { width: cardWidth - 20 });
+          .text(card.value, x + 8, cursorY + 20, {
+            width: cardWidth - 16,
+          });
       });
-      doc.y = cardY + cardHeight + 20;
+      cursorY += cardHeight + 12;
     }
 
     // ===== TABLE =====
     if (options.rows.length > 0) {
       const cols = options.columns;
-      const colWidths = cols.map((c) => c.width ?? CONTENT_WIDTH(doc) / cols.length);
-      const tableY = doc.y;
-      const rowHeight = 24;
-      const headerHeight = 26;
+      const cw = contentWidth(doc);
+      const colWidths = computeColumnWidths(cols, cw);
 
-      // Check if we need a new page
-      const totalTableHeight = headerHeight + options.rows.length * rowHeight;
-      if (tableY + totalTableHeight > doc.page.height - PAGE_MARGIN - 40) {
+      // Inner text width per column (account for horizontal padding)
+      const innerWidths = colWidths.map((w) => w - CELL_PAD_X * 2);
+
+      /**
+       * Draws the table header row at the given Y position.
+       * Returns the Y position after the header.
+       */
+      const drawTableHeader = (y: number): number => {
+        // Background bar
+        doc.rect(PAGE_MARGIN, y, cw, HEADER_HEIGHT)
+          .fillColor(brand)
+          .fill();
+        // Header text — save Y so all columns align
+        let x = PAGE_MARGIN;
+        for (let i = 0; i < cols.length; i++) {
+          const col = cols[i];
+          const align = col.align ?? 'left';
+          doc.fontSize(HEADER_FONT_SIZE)
+            .fillColor('#ffffff')
+            .font('Helvetica-Bold')
+            .text(col.header, x + CELL_PAD_X, y + 6, {
+              width: innerWidths[i],
+              align: align === 'right' ? 'right' : align === 'center' ? 'center' : 'left',
+            });
+          x += colWidths[i];
+        }
+        return y + HEADER_HEIGHT;
+      };
+
+      // Start table immediately after header/summary
+      let tableY = cursorY;
+      const bottomLimit = pageBottom(doc);
+
+      // If header doesn't fit, new page
+      if (tableY + HEADER_HEIGHT > bottomLimit) {
         doc.addPage();
+        tableY = PAGE_MARGIN;
       }
 
-      // Header row
-      let x = PAGE_MARGIN;
-      doc.roundedRect(PAGE_MARGIN, doc.y, CONTENT_WIDTH(doc), headerHeight, 4)
-        .fillColor(brand)
-        .fill();
-      cols.forEach((col, i) => {
-        const align = col.align ?? 'left';
-        doc.fontSize(9)
-          .fillColor('#ffffff')
-          .font('Helvetica-Bold')
-          .text(col.header, x + 6, doc.y + 8, {
-            width: colWidths[i] - 12,
-            align: align === 'right' ? 'right' : align === 'center' ? 'center' : 'left',
-          });
-        x += colWidths[i];
-      });
-      doc.y += headerHeight;
+      tableY = drawTableHeader(tableY);
 
       // Data rows
-      options.rows.forEach((row, rowIdx) => {
-        // Check page break
-        if (doc.y + rowHeight > doc.page.height - PAGE_MARGIN - 40) {
+      for (let rowIdx = 0; rowIdx < options.rows.length; rowIdx++) {
+        const row = options.rows[rowIdx];
+
+        // Pre-compute formatted values and measure lines for each cell
+        const cellData = cols.map((col, i) => {
+          const rawValue = row[col.key];
+          const value = col.format
+            ? col.format(rawValue)
+            : String(rawValue ?? '');
+          const lines = measureLines(doc, value, innerWidths[i], fontSize);
+          return { value, lines };
+        });
+
+        // Row height = max lines * lineHeight + padding
+        const maxLines = Math.max(...cellData.map((c) => c.lines), 1);
+        const rowHeight = Math.max(
+          MIN_ROW_HEIGHT,
+          maxLines * LINE_HEIGHT + CELL_PAD_Y * 2
+        );
+
+        // Page break BEFORE drawing — never split a row
+        if (tableY + rowHeight > bottomLimit) {
           doc.addPage();
-          // Redraw header
-          x = PAGE_MARGIN;
-          doc.roundedRect(PAGE_MARGIN, doc.y, CONTENT_WIDTH(doc), headerHeight, 4)
-            .fillColor(brand)
-            .fill();
-          cols.forEach((col, i) => {
-            const align = col.align ?? 'left';
-            doc.fontSize(9)
-              .fillColor('#ffffff')
-              .font('Helvetica-Bold')
-              .text(col.header, x + 6, doc.y + 8, {
-                width: colWidths[i] - 12,
-                align: align === 'right' ? 'right' : align === 'center' ? 'center' : 'left',
-              });
-            x += colWidths[i];
-          });
-          doc.y += headerHeight;
+          tableY = PAGE_MARGIN;
+          tableY = drawTableHeader(tableY);
         }
 
-        x = PAGE_MARGIN;
-        const cellY = doc.y; // Save Y position for this row — all cells use the same Y
+        // Zebra striping — draw background for full row height
         const isAlt = rowIdx % 2 === 1;
         if (isAlt) {
-          doc.rect(PAGE_MARGIN, cellY, CONTENT_WIDTH(doc), rowHeight)
+          doc.rect(PAGE_MARGIN, tableY, cw, rowHeight)
             .fillColor('#f1f5f9')
             .fill();
         }
-        cols.forEach((col, i) => {
-          const rawValue = row[col.key];
-          const value = col.format ? col.format(rawValue) : String(rawValue ?? '');
+
+        // Draw all cells at the same rowY
+        const rowY = tableY;
+        let x = PAGE_MARGIN;
+        for (let i = 0; i < cols.length; i++) {
+          const col = cols[i];
+          const { value } = cellData[i];
           const align = col.align ?? 'left';
           doc.fontSize(fontSize)
             .fillColor('#334155')
             .font('Helvetica')
-            .text(value, x + 6, cellY + 7, {
-              width: colWidths[i] - 12,
+            .text(value, x + CELL_PAD_X, rowY + CELL_PAD_Y, {
+              width: innerWidths[i],
               align: align === 'right' ? 'right' : align === 'center' ? 'center' : 'left',
             });
           x += colWidths[i];
-        });
-        doc.y = cellY + rowHeight; // Move to next row
-      });
+        }
+
+        // Advance Y by the actual row height
+        tableY += rowHeight;
+      }
+
+      cursorY = tableY;
     }
 
     // ===== METADATA FOOTER =====
     if (options.metadata) {
-      doc.moveDown(1.5);
-      doc.fontSize(8)
+      cursorY += 16;
+      doc.fontSize(7)
         .fillColor(accent)
         .font('Helvetica-Oblique');
       for (const [key, value] of Object.entries(options.metadata)) {
-        doc.text(`${key}: ${value}`, { width: CONTENT_WIDTH(doc) });
+        doc.text(`${key}: ${value}`, PAGE_MARGIN, cursorY, {
+          width: contentWidth(doc),
+        });
+        cursorY += 12;
       }
     }
 
-    // Page numbers on all pages
-    drawPage();
-    doc.on('pageAdded', drawPage);
+    // Draw footer on first page and subsequent pages
+    drawFooter();
+    doc.on('pageAdded', drawFooter);
 
     doc.end();
 

@@ -182,9 +182,34 @@ registerTool({
 
     const cols = args.columns ?? autoColumns(rows);
 
+    // Assign column widths based on content type (percentages of content width)
+    // A4 landscape content width ≈ 770pt
+    const widthMap: Record<string, number> = {
+      number: 70,       // ~9%
+      customer: 150,    // ~19%
+      total: 85,        // ~11%
+      balance: 85,      // ~11%
+      status: 80,       // ~10%
+      date: 80,         // ~10%
+      paymentMethod: 110, // ~14%
+      salesperson: 110,   // ~14%
+      location: 100,
+      quantity: 70,
+      count: 60,
+      orders: 60,
+      name: 150,
+      totalProducts: 70,
+    };
+
     const pdfColumns: PdfTableColumn[] = cols.map((c) => ({
       header: c.header,
       key: c.key,
+      width: widthMap[c.key] ?? 90,
+      align: c.format === 'currency' || c.format === 'number'
+        ? 'right'
+        : c.format === 'date' || c.key === 'status'
+        ? 'center'
+        : 'left',
       format: (v: unknown) => formatValue(v, c.format),
     }));
 
@@ -196,6 +221,7 @@ registerTool({
       columns: pdfColumns,
       rows,
       summaryCards: args.summaryCards,
+      orientation: 'landscape',
     });
 
     const artifact = await createArtifact({

@@ -5,6 +5,7 @@ import {
   resolveDateRange,
   formatDate,
   buildOrderDateWhere,
+  buildOrderDateWhereFlexible,
   dateRangeSchema,
 } from './date-helpers';
 
@@ -44,6 +45,8 @@ registerTool({
   enabledByDefault: true,
   parameters: z.object({
     dateRange: dateRangeSchema,
+    dateFrom: z.string().optional().describe("Fecha inicio YYYY-MM-DD. Para meses especificos (ej: agosto 2026 = 2026-08-01)."),
+    dateTo: z.string().optional().describe("Fecha fin YYYY-MM-DD (ej: 2026-08-31)."),
     paymentMethod: z.string().optional().describe('Filtrar por método de pago (ej: "EFECTIVO").'),
     status: z.string().optional().describe('Filtrar por estado de orden.'),
     salesperson: z.string().optional(),
@@ -52,12 +55,14 @@ registerTool({
   execute: async (_actor, rawArgs) => {
     const args = rawArgs as {
       dateRange: string;
+      dateFrom?: string;
+      dateTo?: string;
       paymentMethod?: string;
       status?: string;
       salesperson?: string;
       location?: string;
     };
-    const dateWhere = buildOrderDateWhere(args.dateRange);
+    const dateWhere = buildOrderDateWhereFlexible(args.dateRange, args.dateFrom, args.dateTo);
 
     const where: Record<string, unknown> = { ...dateWhere };
     if (args.paymentMethod) {
@@ -166,10 +171,12 @@ registerTool({
   enabledByDefault: true,
   parameters: z.object({
     dateRange: dateRangeSchema,
+    dateFrom: z.string().optional().describe("Fecha inicio YYYY-MM-DD. Para meses especificos (ej: agosto 2026 = 2026-08-01)."),
+    dateTo: z.string().optional().describe("Fecha fin YYYY-MM-DD (ej: 2026-08-31)."),
   }),
   execute: async (_actor, rawArgs) => {
-    const args = rawArgs as { dateRange: string };
-    const dateWhere = buildOrderDateWhere(args.dateRange);
+    const args = rawArgs as { dateRange: string; dateFrom?: string; dateTo?: string };
+    const dateWhere = buildOrderDateWhereFlexible(args.dateRange, args.dateFrom, args.dateTo);
 
     const orders = await prisma.salesOrder.findMany({
       where: {
@@ -218,6 +225,8 @@ registerTool({
   enabledByDefault: true,
   parameters: z.object({
     dateRange: dateRangeSchema,
+    dateFrom: z.string().optional().describe("Fecha inicio YYYY-MM-DD. Para meses especificos (ej: agosto 2026 = 2026-08-01)."),
+    dateTo: z.string().optional().describe("Fecha fin YYYY-MM-DD (ej: 2026-08-31)."),
     customer: z.string().optional().describe('Nombre del cliente (búsqueda parcial).'),
     status: z.string().optional(),
     salesperson: z.string().optional(),
@@ -230,6 +239,8 @@ registerTool({
   execute: async (_actor, rawArgs) => {
     const args = rawArgs as {
       dateRange: string;
+      dateFrom?: string;
+      dateTo?: string;
       customer?: string;
       status?: string;
       salesperson?: string;
@@ -240,7 +251,7 @@ registerTool({
       pageSize: number;
     };
 
-    const where: Record<string, unknown> = { ...buildOrderDateWhere(args.dateRange) };
+    const where: Record<string, unknown> = { ...buildOrderDateWhereFlexible(args.dateRange, args.dateFrom, args.dateTo) };
     if (args.customer) {
       where.customerName = { contains: args.customer, mode: 'insensitive' };
     }
@@ -386,11 +397,15 @@ registerTool({
   enabledByDefault: true,
   parameters: z.object({
     dateRange: dateRangeSchema,
+    dateFrom: z.string().optional().describe("Fecha inicio YYYY-MM-DD. Para meses especificos (ej: agosto 2026 = 2026-08-01)."),
+    dateTo: z.string().optional().describe("Fecha fin YYYY-MM-DD (ej: 2026-08-31)."),
     limit: z.number().int().min(1).max(50).default(10),
   }),
   execute: async (_actor, rawArgs) => {
-    const args = rawArgs as { dateRange: string; limit: number };
-    const dateWhere = buildOrderDateWhere(args.dateRange);
+    const args = rawArgs as { dateRange: string;
+      dateFrom?: string;
+      dateTo?: string; limit: number };
+    const dateWhere = buildOrderDateWhereFlexible(args.dateRange, args.dateFrom, args.dateTo);
 
     const items = await prisma.salesOrderItem.findMany({
       where: { salesOrder: dateWhere as never },
@@ -427,10 +442,12 @@ registerTool({
   enabledByDefault: true,
   parameters: z.object({
     dateRange: dateRangeSchema,
+    dateFrom: z.string().optional().describe("Fecha inicio YYYY-MM-DD. Para meses especificos (ej: agosto 2026 = 2026-08-01)."),
+    dateTo: z.string().optional().describe("Fecha fin YYYY-MM-DD (ej: 2026-08-31)."),
   }),
   execute: async (_actor, rawArgs) => {
-    const args = rawArgs as { dateRange: string };
-    const dateWhere = buildOrderDateWhere(args.dateRange);
+    const args = rawArgs as { dateRange: string; dateFrom?: string; dateTo?: string };
+    const dateWhere = buildOrderDateWhereFlexible(args.dateRange, args.dateFrom, args.dateTo);
 
     const rows = await prisma.salesOrder.findMany({
       where: dateWhere as never,
@@ -469,10 +486,12 @@ registerTool({
   enabledByDefault: true,
   parameters: z.object({
     dateRange: dateRangeSchema,
+    dateFrom: z.string().optional().describe("Fecha inicio YYYY-MM-DD. Para meses especificos (ej: agosto 2026 = 2026-08-01)."),
+    dateTo: z.string().optional().describe("Fecha fin YYYY-MM-DD (ej: 2026-08-31)."),
   }),
   execute: async (_actor, rawArgs) => {
-    const args = rawArgs as { dateRange: string };
-    const dateWhere = buildOrderDateWhere(args.dateRange);
+    const args = rawArgs as { dateRange: string; dateFrom?: string; dateTo?: string };
+    const dateWhere = buildOrderDateWhereFlexible(args.dateRange, args.dateFrom, args.dateTo);
 
     const rows = await prisma.salesOrder.findMany({
       where: dateWhere as never,
@@ -506,11 +525,15 @@ registerTool({
   enabledByDefault: true,
   parameters: z.object({
     dateRange: dateRangeSchema,
+    dateFrom: z.string().optional().describe("Fecha inicio YYYY-MM-DD. Para meses especificos (ej: agosto 2026 = 2026-08-01)."),
+    dateTo: z.string().optional().describe("Fecha fin YYYY-MM-DD (ej: 2026-08-31)."),
     granularity: z.enum(['day', 'week', 'month']).default('day'),
   }),
   execute: async (_actor, rawArgs) => {
-    const args = rawArgs as { dateRange: string; granularity: 'day' | 'week' | 'month' };
-    const dateWhere = buildOrderDateWhere(args.dateRange);
+    const args = rawArgs as { dateRange: string;
+      dateFrom?: string;
+      dateTo?: string; granularity: 'day' | 'week' | 'month' };
+    const dateWhere = buildOrderDateWhereFlexible(args.dateRange, args.dateFrom, args.dateTo);
 
     const rows = await prisma.salesOrder.findMany({
       where: dateWhere as never,
@@ -557,10 +580,12 @@ registerTool({
   enabledByDefault: true,
   parameters: z.object({
     dateRange: dateRangeSchema,
+    dateFrom: z.string().optional().describe("Fecha inicio YYYY-MM-DD. Para meses especificos (ej: agosto 2026 = 2026-08-01)."),
+    dateTo: z.string().optional().describe("Fecha fin YYYY-MM-DD (ej: 2026-08-31)."),
   }),
   execute: async (_actor, rawArgs) => {
-    const args = rawArgs as { dateRange: string };
-    const dateWhere = buildOrderDateWhere(args.dateRange);
+    const args = rawArgs as { dateRange: string; dateFrom?: string; dateTo?: string };
+    const dateWhere = buildOrderDateWhereFlexible(args.dateRange, args.dateFrom, args.dateTo);
 
     const rows = await prisma.salesOrder.findMany({
       where: dateWhere as never,
@@ -594,10 +619,12 @@ registerTool({
   enabledByDefault: true,
   parameters: z.object({
     dateRange: dateRangeSchema,
+    dateFrom: z.string().optional().describe("Fecha inicio YYYY-MM-DD. Para meses especificos (ej: agosto 2026 = 2026-08-01)."),
+    dateTo: z.string().optional().describe("Fecha fin YYYY-MM-DD (ej: 2026-08-31)."),
   }),
   execute: async (_actor, rawArgs) => {
-    const args = rawArgs as { dateRange: string };
-    const dateWhere = buildOrderDateWhere(args.dateRange);
+    const args = rawArgs as { dateRange: string; dateFrom?: string; dateTo?: string };
+    const dateWhere = buildOrderDateWhereFlexible(args.dateRange, args.dateFrom, args.dateTo);
 
     const rows = await prisma.salesOrder.findMany({
       where: dateWhere as never,
@@ -631,11 +658,15 @@ registerTool({
   enabledByDefault: true,
   parameters: z.object({
     dateRange: dateRangeSchema,
+    dateFrom: z.string().optional().describe("Fecha inicio YYYY-MM-DD. Para meses especificos (ej: agosto 2026 = 2026-08-01)."),
+    dateTo: z.string().optional().describe("Fecha fin YYYY-MM-DD (ej: 2026-08-31)."),
     limit: z.number().int().min(1).max(100).default(20),
   }),
   execute: async (_actor, rawArgs) => {
-    const args = rawArgs as { dateRange: string; limit: number };
-    const dateWhere = buildOrderDateWhere(args.dateRange);
+    const args = rawArgs as { dateRange: string;
+      dateFrom?: string;
+      dateTo?: string; limit: number };
+    const dateWhere = buildOrderDateWhereFlexible(args.dateRange, args.dateFrom, args.dateTo);
 
     const rows = await prisma.salesOrder.findMany({
       where: { ...dateWhere, balance: { gt: 0 } } as never,
