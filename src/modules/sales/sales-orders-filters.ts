@@ -134,7 +134,7 @@ export const salesOrderQueryStateSchema = z.object({
   filters: salesOrderFilterGroupSchema.default({ logic: 'AND', rules: [] }),
   sort: salesOrderSortSchema.default([]),
   page: z.coerce.number().int().min(1).default(1),
-  page_size: z.coerce.number().int().min(1).max(100).default(50),
+  page_size: z.coerce.number().int().min(1).max(500).default(50),
 });
 
 export type SalesOrderQueryState = z.output<typeof salesOrderQueryStateSchema>;
@@ -152,7 +152,7 @@ export const salesOrderPresentationStateSchema = z.object({
     })
     .default({ left: [], right: [] }),
   density: z.enum(['compact', 'normal', 'comfortable']).default('normal'),
-  pageSize: z.number().int().min(1).max(100).default(50),
+  pageSize: z.number().int().min(1).max(500).default(50),
 });
 
 export type SalesOrderPresentationState = z.output<typeof salesOrderPresentationStateSchema>;
@@ -179,7 +179,7 @@ export const tablePreferenceConfigSchema = z.object({
     })
     .default({ left: [], right: [] }),
   density: z.enum(['compact', 'normal', 'comfortable']).default('normal'),
-  pageSize: z.number().int().min(1).max(100).default(50),
+  pageSize: z.number().int().min(1).max(500).default(50),
 });
 
 export type TablePreferenceConfig = z.output<typeof tablePreferenceConfigSchema>;

@@ -40,6 +40,7 @@ import { CurrentUser } from '@/modules/auth/authorization';
 import {
   SALES_ORDER_COLUMNS,
   SALES_ORDER_COLUMN_MAP,
+  SALES_ORDER_DEFAULT_COLUMN_ORDER,
   SalesOrderColumnDefinition,
 } from '@/modules/sales/sales-orders-columns';
 import {
@@ -108,6 +109,8 @@ interface SortableHeaderProps {
   width: number;
   isPinnedLeft: boolean;
   isPinnedRight: boolean;
+  leftOffset?: number;
+  rightOffset?: number;
   sortDirection: 'asc' | 'desc' | null;
   onSort: (columnId: string, shiftKey: boolean) => void;
   onResize: (columnId: string, width: number) => void;
@@ -118,12 +121,31 @@ interface SortableHeaderProps {
   onAddFilter: (columnId: string) => void;
 }
 
+function normalizeTablePreference(p: TablePreferenceConfig): TablePreferenceConfig {
+  const defaultVisibility = Object.fromEntries(
+    SALES_ORDER_COLUMNS.map((c) => [c.id, c.defaultVisible])
+  );
+  const defaultWidths = Object.fromEntries(
+    SALES_ORDER_COLUMNS.map((c) => [c.id, c.defaultWidth])
+  );
+  const savedOrder = p.columnOrder.length > 0 ? p.columnOrder : SALES_ORDER_DEFAULT_COLUMN_ORDER;
+  const missing = SALES_ORDER_DEFAULT_COLUMN_ORDER.filter((id) => !savedOrder.includes(id));
+  return {
+    ...p,
+    columnOrder: [...savedOrder, ...missing],
+    columnVisibility: { ...defaultVisibility, ...p.columnVisibility },
+    columnWidths: { ...defaultWidths, ...p.columnWidths },
+  };
+}
+
 function SortableHeader({
   columnId,
   column,
   width,
   isPinnedLeft,
   isPinnedRight,
+  leftOffset,
+  rightOffset,
   sortDirection,
   onSort,
   onResize,
@@ -151,6 +173,8 @@ function SortableHeader({
     minWidth: column.minWidth,
     maxWidth: column.maxWidth,
     opacity: isDragging ? 0.5 : 1,
+    ...(isPinnedLeft ? { left: leftOffset } : {}),
+    ...(isPinnedRight ? { right: rightOffset } : {}),
   };
 
   useEffect(() => {
@@ -403,7 +427,7 @@ export function SalesOrdersWorkspace({
   const [data, setData] = useState<SalesOrdersListResult>(initialData);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [pref, setPref] = useState<TablePreferenceConfig>(preference);
+  const [pref, setPref] = useState<TablePreferenceConfig>(() => normalizeTablePreference(preference));
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [previewId, setPreviewId] = useState<string | null>(null);
   const [fullscreen, setFullscreen] = useState(false);
@@ -528,6 +552,29 @@ export function SalesOrdersWorkspace({
       .map((id) => SALES_ORDER_COLUMN_MAP[id])
       .filter(Boolean);
   }, [pref.columnOrder, pref.columnVisibility]);
+
+  const columnOffsets = useMemo(() => {
+    const { left: pinnedLeft, right: pinnedRight } = pref.columnPinning;
+    const offsets: Record<string, { left?: number; right?: number }> = {};
+    let left = 40;
+    for (const col of visibleColumns) {
+      const width = pref.columnWidths[col.id] ?? col.defaultWidth;
+      if (pinnedLeft.includes(col.id)) {
+        offsets[col.id] = { ...offsets[col.id], left };
+      }
+      left += width;
+    }
+    let right = 50;
+    for (let i = visibleColumns.length - 1; i >= 0; i--) {
+      const col = visibleColumns[i];
+      const width = pref.columnWidths[col.id] ?? col.defaultWidth;
+      if (pinnedRight.includes(col.id)) {
+        offsets[col.id] = { ...offsets[col.id], right };
+      }
+      right += width;
+    }
+    return offsets;
+  }, [visibleColumns, pref.columnWidths, pref.columnPinning]);
 
   const handleDragEnd = useCallback(
     (event: DragEndEvent) => {
@@ -693,21 +740,20 @@ export function SalesOrdersWorkspace({
   // Filters
   const addFilter = useCallback((columnId?: string) => {
     setFilterPanelOpen(true);
-    if (columnId) {
-      const column = SALES_ORDER_COLUMN_MAP[columnId];
-      if (column) {
-        const operators = FILTER_OPERATORS_BY_TYPE[column.type] ?? ['contains'];
-        const operator = operators[0] as string;
-        setQuery((prev) => {
-          const newRules = [
-            ...prev.filters.rules,
-            { field: column.field, operator, value: '' } as (typeof prev.filters.rules)[number],
-          ];
-          const next = { ...prev, filters: { ...prev.filters, rules: newRules }, page: 1 };
-          return next;
-        });
-      }
-    }
+    const column = columnId
+      ? SALES_ORDER_COLUMN_MAP[columnId]
+      : SALES_ORDER_COLUMNS.find((c) => c.filterable && c.type === 'text');
+    if (!column || !column.filterable) return;
+    const operators = FILTER_OPERATORS_BY_TYPE[column.type] ?? ['contains'];
+    const operator = operators[0] as string;
+    setQuery((prev) => {
+      const newRules = [
+        ...prev.filters.rules,
+        { field: column.field, operator, value: '' } as (typeof prev.filters.rules)[number],
+      ];
+      const next = { ...prev, filters: { ...prev.filters, rules: newRules }, page: 1 };
+      return next;
+    });
   }, []);
 
   const removeFilter = useCallback(
@@ -1402,22 +1448,6 @@ export function SalesOrdersWorkspace({
               </span>
               <span>órdenes</span>
             </div>
-            {data.aggregates.total_sum ? (
-              <div className="so-summary-item">
-                <span className="so-summary-value">
-                  {formatCurrency(data.aggregates.total_sum)}
-                </span>
-                <span>total</span>
-              </div>
-            ) : null}
-            {data.aggregates.balance_sum ? (
-              <div className="so-summary-item">
-                <span className="so-summary-value">
-                  {formatCurrency(data.aggregates.balance_sum)}
-                </span>
-                <span>saldo</span>
-              </div>
-            ) : null}
           </div>
         </div>
       </div>
@@ -1509,6 +1539,7 @@ export function SalesOrdersWorkspace({
                       const isPinnedRight = pinnedRight.includes(col.id);
                       const sortDir =
                         query.sort.find((s) => s.field === col.field)?.direction ?? null;
+                      const offset = columnOffsets[col.id];
                       return (
                         <SortableHeader
                           key={col.id}
@@ -1517,6 +1548,8 @@ export function SalesOrdersWorkspace({
                           width={pref.columnWidths[col.id] ?? col.defaultWidth}
                           isPinnedLeft={isPinnedLeft}
                           isPinnedRight={isPinnedRight}
+                          leftOffset={offset?.left}
+                          rightOffset={offset?.right}
                           sortDirection={sortDir}
                           onSort={handleSort}
                           onResize={handleResize}
@@ -1577,6 +1610,7 @@ export function SalesOrdersWorkspace({
                         {visibleColumns.map((col) => {
                           const isPinnedLeft = pinnedLeft.includes(col.id);
                           const isPinnedRight = pinnedRight.includes(col.id);
+                          const offset = columnOffsets[col.id];
                           return (
                             <td
                               key={col.id}
@@ -1584,6 +1618,8 @@ export function SalesOrdersWorkspace({
                               style={{
                                 width: pref.columnWidths[col.id] ?? col.defaultWidth,
                                 textAlign: col.align,
+                                ...(offset?.left !== undefined ? { left: offset.left } : {}),
+                                ...(offset?.right !== undefined ? { right: offset.right } : {}),
                               }}
                             >
                               {col.id === 'salesOrderNumber' && isWatched ? (
@@ -1652,6 +1688,8 @@ export function SalesOrdersWorkspace({
             <option value={25}>25</option>
             <option value={50}>50</option>
             <option value={100}>100</option>
+            <option value={200}>200</option>
+            <option value={500}>500</option>
           </select>
           <button
             className="btn btn-secondary btn-sm"
