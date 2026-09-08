@@ -87,6 +87,44 @@
 }
 
 /* =====================================================
+   Dark theme — applied via .dark class on <html>
+   (next-themes, attribute="class")
+   ===================================================== */
+.dark {
+  --unik-bg: #0b0f17;
+  --unik-surface: #111726;
+  --unik-surface-hover: #1a2233;
+  --unik-surface-pressed: #232c40;
+  --unik-border: #243049;
+  --unik-border-subtle: #1b2538;
+  --unik-text: #e6ebf5;
+  --unik-text-secondary: #a4afc4;
+  --unik-text-muted: #6b7689;
+  --unik-text-inverse: #0b0f17;
+
+  --unik-brand: #4f8df9;
+  --unik-brand-hover: #6ba0fb;
+  --unik-brand-pressed: #3d7ce8;
+  --unik-brand-subtle: #1a2540;
+  --unik-brand-text: #82b4fb;
+
+  --unik-success: #4ade80;
+  --unik-success-bg: #0f2a1f;
+  --unik-danger: #f87171;
+  --unik-danger-bg: #2a1414;
+  --unik-danger-hover: #fca5a5;
+  --unik-warning: #fbbf24;
+  --unik-warning-bg: #2a1f08;
+  --unik-info: #60a5fa;
+  --unik-info-bg: #122038;
+
+  --unik-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --unik-shadow-md: 0 4px 12px rgba(0, 0, 0, 0.45);
+  --unik-shadow-lg: 0 12px 40px rgba(0, 0, 0, 0.55);
+  --unik-shadow-focus: 0 0 0 3px rgba(79, 141, 249, 0.35);
+}
+
+/* =====================================================
    Base
    ===================================================== */
 
@@ -357,6 +395,35 @@ button {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* Theme toggle */
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  background: transparent;
+  border: 1px solid var(--unik-border);
+  border-radius: var(--unik-radius-md);
+  color: var(--unik-text-secondary);
+  cursor: pointer;
+  transition:
+    background var(--unik-transition),
+    color var(--unik-transition),
+    border-color var(--unik-transition);
+}
+
+.theme-toggle:hover {
+  background: var(--unik-surface-hover);
+  color: var(--unik-text);
+  border-color: var(--unik-border);
+}
+
+.theme-toggle:focus-visible {
+  border-color: var(--unik-brand);
+  box-shadow: var(--unik-shadow-focus);
 }
 
 .topbar-breadcrumbs {
@@ -661,13 +728,13 @@ textarea.input {
 }
 
 .input:hover {
-  border-color: #d1d5db;
+  border-color: var(--unik-text-muted);
 }
 
 .input:focus {
   outline: none;
   border-color: var(--unik-brand);
-  box-shadow: 0 0 0 3px rgba(30, 58, 95, 0.14);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--unik-brand) 22%, transparent);
 }
 
 .input:disabled,
@@ -856,25 +923,25 @@ textarea.input {
 .alert-error {
   background: var(--unik-danger-bg);
   color: var(--unik-danger);
-  border-color: rgba(179, 38, 30, 0.15);
+  border-color: color-mix(in srgb, var(--unik-danger) 25%, transparent);
 }
 
 .alert-success {
   background: var(--unik-success-bg);
   color: var(--unik-success);
-  border-color: rgba(28, 123, 69, 0.15);
+  border-color: color-mix(in srgb, var(--unik-success) 25%, transparent);
 }
 
 .alert-warning {
   background: var(--unik-warning-bg);
   color: var(--unik-warning);
-  border-color: rgba(156, 112, 8, 0.15);
+  border-color: color-mix(in srgb, var(--unik-warning) 25%, transparent);
 }
 
 .alert-info {
   background: var(--unik-info-bg);
   color: var(--unik-info);
-  border-color: rgba(31, 78, 140, 0.15);
+  border-color: color-mix(in srgb, var(--unik-info) 25%, transparent);
 }
 
 /* =====================================================
@@ -1628,7 +1695,7 @@ textarea.input {
 }
 
 .so-table tbody tr.so-row-selected:hover {
-  background: rgba(30, 58, 95, 0.12);
+  background: color-mix(in srgb, var(--unik-brand) 18%, transparent);
 }
 
 .so-table tbody td.so-td-pinned-left {
@@ -1991,7 +2058,7 @@ textarea.input {
 }
 
 .so-notification-item.unread {
-  background: rgba(30, 58, 95, 0.04);
+  background: color-mix(in srgb, var(--unik-brand) 6%, transparent);
 }
 
 .so-notification-title {

@@ -10,6 +10,7 @@ import { DropdownMenu } from '@/components/ui/composite';
 import { ChevronDown, Home, LogOut, Menu, Shield, Users } from '@/components/ui/icons';
 import { Bell, Bot, ShoppingCart, Plug } from 'lucide-react';
 import { AssistantWidget } from '@/components/assistant/AssistantWidget';
+import { ThemeToggle } from '@/components/layout/ThemeToggle';
 
 interface AppShellProps {
   user: CurrentUser;
@@ -175,6 +176,7 @@ function Topbar({ user, onToggleSidebar }: { user: CurrentUser; onToggleSidebar:
         <Breadcrumbs items={crumbs} />
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+        <ThemeToggle />
         <div style={{ position: 'relative' }}>
           <button
             className="so-notification-bell"

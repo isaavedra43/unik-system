@@ -236,6 +236,25 @@ export const EyeOff = ({ size, className }: IconProps) =>
     className
   );
 
+export const Sun = ({ size, className }: IconProps) =>
+  wrap(
+    <>
+      <circle cx="10" cy="10" r="3.5" />
+      <path d="M10 1.5v2M10 16.5v2M1.5 10h2M16.5 10h2M3.8 3.8l1.4 1.4M14.8 14.8l1.4 1.4M16.2 3.8l-1.4 1.4M5.2 14.8l-1.4 1.4" />
+    </>,
+    size,
+    className
+  );
+
+export const Moon = ({ size, className }: IconProps) =>
+  wrap(
+    <>
+      <path d="M16 12.5A6.5 6.5 0 0 1 7.5 4a6 6 0 1 0 8.5 8.5z" />
+    </>,
+    size,
+    className
+  );
+
 export type IconName =
   | 'home'
   | 'users'
@@ -261,7 +280,9 @@ export type IconName =
   | 'fileText'
   | 'layers'
   | 'eye'
-  | 'eyeOff';
+  | 'eyeOff'
+  | 'sun'
+  | 'moon';
 
 const icons: Record<IconName, (props: IconProps) => React.ReactElement> = {
   home: Home,
@@ -289,6 +310,8 @@ const icons: Record<IconName, (props: IconProps) => React.ReactElement> = {
   layers: Layers,
   eye: Eye,
   eyeOff: EyeOff,
+  sun: Sun,
+  moon: Moon,
 };
 
 export function Icon({ name, size = 20, className }: { name: IconName } & IconProps) {
