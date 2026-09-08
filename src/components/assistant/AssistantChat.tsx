@@ -43,6 +43,7 @@ export function AssistantChat({
   const [loadingConv, setLoadingConv] = useState(false);
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
@@ -84,10 +85,31 @@ export function AssistantChat({
     }
   }, [conversationId, loadConversation]);
 
+  // Auto-scroll to bottom only when user is already near the bottom.
+  // During streaming, use instant scroll to avoid janky repeated smooth animations.
+  const isNearBottomRef = useRef(true);
+
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+    const handleScroll = () => {
+      const threshold = 80;
+      isNearBottomRef.current =
+        container.scrollHeight - container.scrollTop - container.clientHeight < threshold;
+    };
+    container.addEventListener('scroll', handleScroll, { passive: true });
+    return () => container.removeEventListener('scroll', handleScroll);
+  }, []);
+
   useEffect(() => {
     if (messages.length === 0 && !streamingContent) return;
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, streamingContent, activeToolCalls]);
+    const container = scrollContainerRef.current;
+    if (!container) return;
+    // Only auto-scroll if the user is near the bottom
+    if (!isNearBottomRef.current) return;
+    // Use instant scroll during streaming to avoid janky repeated smooth animations
+    container.scrollTop = container.scrollHeight;
+  }, [messages, streamingContent, activeToolCalls, artifacts]);
 
   async function handleSend(text: string) {
     setError(null);
@@ -209,7 +231,7 @@ export function AssistantChat({
 
   return (
     <div className={`assistant-chat ${isEmpty ? 'assistant-chat-empty' : ''}`}>
-      <div className="assistant-chat-messages" role="log" aria-live="polite">
+      <div className="assistant-chat-messages" ref={scrollContainerRef} role="log" aria-live="polite">
         {loadingConv && <div className="assistant-chat-loading">Cargando…</div>}
         {!loadingConv && messages.length === 0 && !streaming && (
           <div className="assistant-welcome">
