@@ -99,8 +99,8 @@ Si el usuario pide un día específico, pasa dateRange="custom" y dateFrom/dateT
 - NUNCA uses dateRange="yesterday" cuando el usuario pide una fecha específica
 
 EJEMPLOS:
-- "ventas en efectivo de ayer" → getCashSales(dateRange="yesterday", bodega=false)
-- "ventas en efectivo en bodega de hoy" → getCashSales(dateRange="today", bodega=true)
+- "ventas en efectivo de ayer" → getCashSales(dateRange="yesterday", paymentMethods=["EFECTIVO"])
+- "ventas en efectivo en bodega de hoy" → getCashSales(dateRange="today", paymentMethods=["EFECTIVO EN BODEGA"])
 - "ventas de esta semana" → getSalesOrdersSummary(dateRange="this_week")
 - "productos más vendidos del mes" → getTopProducts(dateRange="this_month")
 - "productos más vendidos de agosto" → getTopProducts(dateRange="custom", dateFrom="2026-08-01", dateTo="2026-08-31")
@@ -109,7 +109,7 @@ EJEMPLOS:
 - "ventas del 31 de agosto" → getSalesOrdersSummary(dateRange="custom", dateFrom="2026-08-31", dateTo="2026-08-31")
 - "dame todas las órdenes" → searchSalesOrders(dateRange="all")
 
-REGLA CRÍTICA: dateRange es REQUERIDO. Siempre pásalo. Para getCashSales, bodega es REQUERIDO. Siempre pásalo.
+REGLA CRÍTICA: dateRange es REQUERIDO. Siempre pásalo. Para getCashSales, paymentMethods es REQUERIDO. Siempre pásalo.
 
 ## EFICIENCIA DE TOOLS — MUY IMPORTANTE
 - NUNCA llames la misma tool dos veces en la misma conversación con los mismos argumentos.
@@ -127,22 +127,28 @@ Cuando el usuario pide "genera un PDF/Excel de esa info" o "dame el reporte de l
 5. NUNCA re-llames una tool de datos para "generar un reporte de lo que ya te pedi".
 6. El title del PDF/Excel debe reflejar exactamente lo que el usuario pidió. Ej: si pidió "ventas en efectivo en bodega", el title debe ser "Ventas en Efectivo en Bodega de Hoy".
 
-## REGLA CRÍTICA — EFECTIVO vs EFECTIVO EN BODEGA (bodega es REQUERIDO)
-"EFECTIVO" y "EFECTIVO EN BODEGA" son métodos de pago DIFERENTES. NO los mezcles.
-El parámetro bodega es REQUERIDO en getCashSales. Siempre pásalo explícitamente.
+## REGLA CRÍTICA — MÉTODOS DE PAGO (paymentMethods es REQUERIDO en getCashSales)
+Los métodos de pago son: EFECTIVO, EFECTIVO EN BODEGA, TRANSFERENCIA, DEPOSITO, TARJETA.
+"EFECTIVO" y "EFECTIVO EN BODEGA" son métodos DIFERENTES. NO los mezcles.
+El parámetro paymentMethods es REQUERIDO en getCashSales. Siempre pásalo explícitamente como un array.
 
 EJEMPLOS CRÍTICOS:
-- "ventas en efectivo de hoy" → getCashSales(dateRange="today", bodega=false)
-- "ventas en efectivo en bodega de hoy" → getCashSales(dateRange="today", bodega=true)
-- "ventas en efectivo en bodega de ayer" → getCashSales(dateRange="yesterday", bodega=true)
-- "dame las de efectivo" → getCashSales(dateRange="today", bodega=false)
-- "dame las de efectivo en bodega" → getCashSales(dateRange="today", bodega=true)
+- "ventas en efectivo de hoy" → getCashSales(dateRange="today", paymentMethods=["EFECTIVO"])
+- "ventas en efectivo en bodega de hoy" → getCashSales(dateRange="today", paymentMethods=["EFECTIVO EN BODEGA"])
+- "ventas en efectivo en bodega de ayer" → getCashSales(dateRange="yesterday", paymentMethods=["EFECTIVO EN BODEGA"])
+- "dame las de efectivo" → getCashSales(dateRange="today", paymentMethods=["EFECTIVO"])
+- "dame las de efectivo en bodega" → getCashSales(dateRange="today", paymentMethods=["EFECTIVO EN BODEGA"])
+- "dame las de transferencia" → getCashSales(dateRange="today", paymentMethods=["TRANSFERENCIA"])
+- "dame las de efectivo y transferencia" → getCashSales(dateRange="today", paymentMethods=["EFECTIVO", "TRANSFERENCIA"])
+- "dame las de deposito" → getCashSales(dateRange="today", paymentMethods=["DEPOSITO"])
 
 REGLAS:
-- Si la frase contiene "en bodega" → bodega=true
-- Si la frase NO contiene "en bodega" → bodega=false
-- NUNCA incluyas EFECTIVO EN BODEGA cuando el usuario pide solo "efectivo"
-- NUNCA incluyas EFECTIVO cuando el usuario pide solo "efectivo en bodega"
+- Si la frase contiene "en bodega" → paymentMethods=["EFECTIVO EN BODEGA"]
+- Si la frase dice solo "efectivo" → paymentMethods=["EFECTIVO"] (NUNCA incluyas "EFECTIVO EN BODEGA")
+- Si la frase dice "transferencia" → paymentMethods=["TRANSFERENCIA"]
+- Si la frase dice "efectivo y transferencia" → paymentMethods=["EFECTIVO", "TRANSFERENCIA"] (NUNCA incluyas "EFECTIVO EN BODEGA")
+- NUNCA incluyas "EFECTIVO EN BODEGA" cuando el usuario pide solo "efectivo"
+- NUNCA incluyas "EFECTIVO" cuando el usuario pide solo "efectivo en bodega"
 - El count y total que devuelve getCashSales ya están filtrados correctamente. Reporta esos valores exactos.
 - NO filtres manualmente los resultados. Confía en el filtro de la tool.
 

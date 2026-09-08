@@ -380,7 +380,7 @@ export async function* runAssistant(
           }
           if (!argsObj.title && lastToolName) {
             // Build title based on tool name AND its arguments
-            const isBodega = lastToolArgs?.bodega === true;
+            const paymentMethods = lastToolArgs?.paymentMethods as string[] | undefined;
             const dateRange = lastToolArgs?.dateRange as string | undefined;
             const dateLabel = dateRange === 'today' ? ' de Hoy'
               : dateRange === 'yesterday' ? ' de Ayer'
@@ -389,10 +389,23 @@ export async function* runAssistant(
               : dateRange === 'last_month' ? ' del Mes Pasado'
               : '';
 
+            let cashLabel = 'Ventas';
+            if (lastToolName === 'getCashSales' && paymentMethods) {
+              if (paymentMethods.length === 1) {
+                const pm = paymentMethods[0];
+                cashLabel = pm === 'EFECTIVO' ? 'Ventas en Efectivo'
+                  : pm === 'EFECTIVO EN BODEGA' ? 'Ventas en Efectivo en Bodega'
+                  : pm === 'TRANSFERENCIA' ? 'Ventas por Transferencia'
+                  : pm === 'DEPOSITO' ? 'Ventas por Depósito'
+                  : pm === 'TARJETA' ? 'Ventas con Tarjeta'
+                  : `Ventas por ${pm}`;
+              } else {
+                cashLabel = `Ventas por ${paymentMethods.join(' + ')}`;
+              }
+            }
+
             const titleMap: Record<string, string> = {
-              getCashSales: isBodega
-                ? `Ventas en Efectivo en Bodega${dateLabel}`
-                : `Ventas en Efectivo${dateLabel}`,
+              getCashSales: `${cashLabel}${dateLabel}`,
               getSalesOrdersSummary: `Resumen de Ventas${dateLabel}`,
               getTopProducts: 'Productos Más Vendidos',
               getSalesBySalesperson: 'Ventas por Vendedor',
@@ -416,9 +429,22 @@ export async function* runAssistant(
         // Auto-inject chart params for generateChart
         if (tc.name === 'generateChart' && lastToolRows && lastToolRows.length > 0) {
           if (!argsObj.title) {
-            const isBodega = lastToolArgs?.bodega === true;
+            const paymentMethods = lastToolArgs?.paymentMethods as string[] | undefined;
+            let chartLabel = 'Ventas';
+            if (lastToolName === 'getCashSales' && paymentMethods) {
+              if (paymentMethods.length === 1) {
+                const pm = paymentMethods[0];
+                chartLabel = pm === 'EFECTIVO' ? 'Ventas en Efectivo'
+                  : pm === 'EFECTIVO EN BODEGA' ? 'Ventas en Efectivo en Bodega'
+                  : pm === 'TRANSFERENCIA' ? 'Ventas por Transferencia'
+                  : pm === 'DEPOSITO' ? 'Ventas por Depósito'
+                  : `Ventas por ${pm}`;
+              } else {
+                chartLabel = `Ventas por ${paymentMethods.join(' + ')}`;
+              }
+            }
             const titleMap: Record<string, string> = {
-              getCashSales: isBodega ? 'Ventas en Efectivo en Bodega' : 'Ventas en Efectivo',
+              getCashSales: chartLabel,
               getSalesOrdersSummary: 'Resumen de Ventas',
               getTopProducts: 'Productos Más Vendidos',
               getSalesBySalesperson: 'Ventas por Vendedor',

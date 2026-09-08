@@ -164,11 +164,9 @@ registerTool({
 registerTool({
   name: 'getCashSales',
   description:
-    'Ventas en efectivo: conteo, total y lista de órdenes. ' +
-    'Por defecto trae solo EFECTIVO (no incluye EFECTIVO EN BODEGA). ' +
-    'Si el usuario pide "efectivo en bodega", pasa bodega=true. ' +
-    'Si pide "efectivo" sin más, pasa bodega=false (default). ' +
-    'NO son lo mismo: EFECTIVO y EFECTIVO EN BODEGA son métodos de pago diferentes.',
+    'Ventas filtradas por método de pago: conteo, total y lista de órdenes. ' +
+    'Métodos de pago disponibles: EFECTIVO, EFECTIVO EN BODEGA, TRANSFERENCIA, DEPOSITO, TARJETA. ' +
+    'IMPORTANTE: "EFECTIVO" y "EFECTIVO EN BODEGA" son métodos DIFERENTES — no los mezcles.',
   category: 'sales',
   requiredPermission: 'sales_orders.view',
   enabledByDefault: true,
@@ -176,23 +174,26 @@ registerTool({
     dateRange: dateRangeSchema,
     dateFrom: z.string().optional().describe("Fecha inicio YYYY-MM-DD. Para fechas especificas (ej: 19 de agosto 2026 = 2026-08-19) o meses (ej: agosto 2026 = 2026-08-01)."),
     dateTo: z.string().optional().describe("Fecha fin YYYY-MM-DD. Misma fecha que dateFrom para un dia especifico (ej: 2026-08-19) o fin de mes (ej: 2026-08-31)."),
-    bodega: z.boolean().default(false).describe(
-      'false = solo EFECTIVO. true = solo EFECTIVO EN BODEGA. ' +
-      'Si el usuario pide "efectivo en bodega", pasa true. Si pide solo "efectivo", pasa false. ' +
-      'Default: false.'
+    paymentMethods: z.array(
+      z.enum(['EFECTIVO', 'EFECTIVO EN BODEGA', 'TRANSFERENCIA', 'DEPOSITO', 'TARJETA'])
+    ).default(['EFECTIVO']).describe(
+      'Métodos de pago EXACTOS a incluir (en mayúsculas). ' +
+      'Si el usuario pide "efectivo" → ["EFECTIVO"]. ' +
+      'Si pide "efectivo en bodega" → ["EFECTIVO EN BODEGA"]. ' +
+      'Si pide "transferencia" → ["TRANSFERENCIA"]. ' +
+      'Si pide "efectivo y transferencia" → ["EFECTIVO", "TRANSFERENCIA"]. ' +
+      'NUNCA incluyas "EFECTIVO EN BODEGA" si el usuario pide solo "efectivo". ' +
+      'Default: ["EFECTIVO"].'
     ),
   }),
   execute: async (_actor, rawArgs) => {
-    const args = rawArgs as { dateRange: string; dateFrom?: string; dateTo?: string; bodega: boolean };
+    const args = rawArgs as { dateRange: string; dateFrom?: string; dateTo?: string; paymentMethods: string[] };
     const dateWhere = buildOrderDateWhereFlexible(args.dateRange, args.dateFrom, args.dateTo);
-
-    // Exact match: EFECTIVO and EFECTIVO EN BODEGA are DIFFERENT payment methods
-    const paymentMethodValue = args.bodega ? 'EFECTIVO EN BODEGA' : 'EFECTIVO';
 
     const orders = await prisma.salesOrder.findMany({
       where: {
         ...dateWhere,
-        paymentMethod: { equals: paymentMethodValue, mode: 'insensitive' },
+        paymentMethod: { in: args.paymentMethods, mode: 'insensitive' },
       } as never,
       select: {
         salesOrderNumber: true,
@@ -213,6 +214,7 @@ registerTool({
     return {
       count: orders.length,
       total: total.toFixed(2),
+      paymentMethods: args.paymentMethods,
       orders: orders.map((o) => ({
         number: o.salesOrderNumber,
         customer: o.customerName,

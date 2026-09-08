@@ -188,7 +188,7 @@ export const openaiProvider: AiProvider = {
             const existing = accumulatedToolCalls.get(idx);
             const id = tc.id ?? existing?.id ?? '';
             const name = tc.function?.name ?? existing?.name ?? '';
-            const args = (tc.function?.arguments ?? '') + (existing?.arguments ?? '');
+            const args = (existing?.arguments ?? '') + (tc.function?.arguments ?? '');
             accumulatedToolCalls.set(idx, { id, name, arguments: args });
           }
         }

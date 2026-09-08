@@ -53,19 +53,18 @@ export function NotificationsPage({ initialData }: NotificationsPageProps) {
   };
 
   return (
-    <div className="app-content">
-      <div
-        className="page-header"
-        style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}
-      >
-        <div>
+    <div>
+      <div className="page-header page-header-row">
+        <div className="page-header-info">
           <h1 className="page-title">Notificaciones</h1>
           <p className="page-description">{unread > 0 ? `${unread} sin leer` : 'Todo al día'}</p>
         </div>
         {unread > 0 ? (
-          <button className="btn btn-secondary btn-sm" onClick={handleMarkAllRead}>
-            <Check size={14} /> Marcar todo como leído
-          </button>
+          <div className="row-actions">
+            <button className="btn btn-secondary btn-sm" onClick={handleMarkAllRead}>
+              <Check size={14} /> Marcar todo como leído
+            </button>
+          </div>
         ) : null}
       </div>
 

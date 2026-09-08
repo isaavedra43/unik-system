@@ -410,6 +410,8 @@ button {
   justify-content: space-between;
   padding: 0 var(--unik-space-8);
   gap: var(--unik-space-4);
+  min-width: 0;
+  overflow: hidden;
   position: sticky;
   top: 0;
   z-index: 20;
@@ -629,6 +631,9 @@ button {
   text-decoration: none;
   background: var(--unik-brand);
   color: var(--unik-text-inverse);
+  white-space: normal;
+  word-break: break-word;
+  min-height: 40px;
 }
 
 .btn:hover {
@@ -1004,6 +1009,9 @@ textarea.input {
   gap: var(--unik-space-1);
   border-bottom: 1px solid var(--unik-border);
   margin-bottom: var(--unik-space-6);
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
 }
 
 .tab {
@@ -1634,6 +1642,7 @@ textarea.input {
   display: flex;
   flex-direction: column;
   height: calc(100vh - var(--unik-topbar-height));
+  height: calc(100dvh - var(--unik-topbar-height));
   max-width: none;
   margin: 0;
   padding: 0;
@@ -1852,6 +1861,8 @@ textarea.input {
 .so-table-container {
   flex: 1;
   overflow: auto;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
   position: relative;
   background: var(--unik-surface);
 }
@@ -3048,6 +3059,7 @@ textarea.input {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
   padding: var(--unik-space-6) var(--unik-space-6) var(--unik-space-4);
   display: flex;
   flex-direction: column;
@@ -6069,6 +6081,348 @@ textarea.input {
 .assistant-input-attach:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+
+/* ============================================================
+   MOBILE RESPONSIVE FIXES — Phone (≤768px)
+   ============================================================ */
+
+@media (max-width: 768px) {
+  /* ---- Sales Orders Workspace ---- */
+  .so-workspace {
+    height: auto;
+    height: auto;
+    min-height: calc(100dvh - var(--unik-topbar-height));
+  }
+
+  .so-toolbar {
+    padding: var(--unik-space-3) var(--unik-space-3);
+    gap: var(--unik-space-2);
+  }
+
+  .so-toolbar-top {
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--unik-space-2);
+  }
+
+  .so-toolbar-search {
+    max-width: none;
+    width: 100%;
+    min-width: 0;
+  }
+
+  .so-toolbar-actions {
+    width: 100%;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: var(--unik-space-1);
+  }
+
+  .so-toolbar-actions > * {
+    flex-shrink: 0;
+  }
+
+  .so-table-container {
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    min-height: 300px;
+  }
+
+  .so-pagination {
+    flex-wrap: wrap;
+    gap: var(--unik-space-2);
+    padding: var(--unik-space-2) var(--unik-space-3);
+    font-size: var(--unik-text-xs);
+  }
+
+  .so-pagination > * {
+    flex-shrink: 0;
+  }
+
+  /* ---- AI Assistant ---- */
+  .assistant-page {
+    height: auto;
+    min-height: calc(100dvh - var(--unik-topbar-height));
+  }
+
+  .assistant-page-body {
+    overflow: visible;
+  }
+
+  .assistant-page-main {
+    overflow: visible;
+  }
+
+  .assistant-chat {
+    overflow: visible;
+  }
+
+  .assistant-chat-messages {
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    min-height: 300px;
+  }
+
+  .assistant-msg {
+    max-width: 92%;
+  }
+
+  .assistant-msg pre,
+  .assistant-msg table {
+    max-width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    display: block;
+  }
+
+  .assistant-input-bar {
+    padding: 0 var(--unik-space-3) var(--unik-space-3);
+    flex-wrap: nowrap;
+  }
+}
+
+@media (max-width: 640px) {
+  /* ---- Sales Orders ---- */
+  .so-toolbar {
+    padding: var(--unik-space-2) var(--unik-space-2);
+  }
+
+  .so-toolbar-search {
+    width: 100%;
+  }
+
+  .so-toolbar-actions {
+    gap: var(--unik-space-1);
+  }
+
+  .so-table {
+    font-size: var(--unik-text-xs);
+  }
+
+  .so-table thead th,
+  .so-table tbody td {
+    padding: var(--unik-space-1) var(--unik-space-2);
+  }
+
+  .so-pagination {
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+  }
+
+  /* ---- AI Assistant ---- */
+  .assistant-chat-messages {
+    padding: var(--unik-space-3);
+    gap: var(--unik-space-3);
+  }
+
+  .assistant-input-bar {
+    padding: 0 var(--unik-space-2) var(--unik-space-2);
+    gap: var(--unik-space-1);
+  }
+
+  .assistant-msg {
+    max-width: 95%;
+  }
+
+  .assistant-input-textarea {
+    font-size: 16px; /* prevent iOS zoom */
+  }
+}
+
+@media (max-width: 400px) {
+  .so-toolbar-actions {
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--unik-space-1);
+  }
+
+  .so-toolbar-actions > * {
+    width: 100%;
+  }
+
+  .assistant-input-bar {
+    flex-wrap: wrap;
+  }
+}
+
+/* ============================================================
+   MOBILE POLISH — Global fixes for phones (≤640px)
+   ============================================================ */
+
+@media (max-width: 640px) {
+  /* Card padding reduction */
+  .card {
+    padding: var(--unik-space-4);
+  }
+
+  .card + .card {
+    margin-top: var(--unik-space-4);
+  }
+
+  /* Input font-size 16px to prevent iOS zoom on focus */
+  .input,
+  select.input,
+  textarea.input {
+    font-size: 16px;
+  }
+
+  /* Drawer/Modal padding reduction */
+  .drawer-header,
+  .drawer-body,
+  .drawer-footer,
+  .modal-header,
+  .modal-body {
+    padding: var(--unik-space-4);
+  }
+
+  /* Drawer/Modal footers: stack buttons vertically */
+  .drawer-footer,
+  .modal-footer {
+    flex-direction: column-reverse;
+    align-items: stretch;
+    gap: var(--unik-space-2);
+  }
+
+  .drawer-footer .btn,
+  .modal-footer .btn {
+    width: 100%;
+  }
+
+  /* Tabs: horizontal scroll with no scrollbar visible */
+  .tabs {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+
+  .tabs::-webkit-scrollbar {
+    display: none;
+  }
+
+  .tab {
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  /* Auth page: tighter padding on small phones */
+  .auth-form-wrap {
+    padding: var(--unik-space-4);
+  }
+
+  .auth-card {
+    padding: var(--unik-space-6);
+  }
+
+  /* Topbar: tighter gap on phones */
+  .app-topbar {
+    padding: 0 var(--unik-space-3);
+    gap: var(--unik-space-2);
+  }
+
+  /* Page header: tighter on phone */
+  .page-header {
+    padding: var(--unik-space-4) var(--unik-space-4) 0;
+  }
+
+  /* App content: tighter padding on phone */
+  .app-content {
+    padding: var(--unik-space-4) var(--unik-space-3) var(--unik-space-6);
+  }
+
+  /* Table: smaller text + tighter padding */
+  .table {
+    font-size: var(--unik-text-xs);
+  }
+
+  .table th,
+  .table td {
+    padding: var(--unik-space-1) var(--unik-space-2);
+  }
+
+  /* Form fields: tighter spacing */
+  .form-field {
+    margin-bottom: var(--unik-space-4);
+  }
+
+  /* Home quick grid: single column */
+  .home-quick-grid {
+    grid-template-columns: 1fr;
+  }
+
+  /* Home profile card: tighter */
+  .home-profile-card {
+    margin-bottom: var(--unik-space-4);
+  }
+
+  /* Home profile row: center avatar + stack info */
+  .home-profile-row {
+    flex-direction: row;
+    align-items: center;
+    gap: var(--unik-space-3);
+  }
+
+  /* Integrations: single column stats */
+  .integrations-stat-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .integrations-config-form {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ============================================================
+   EXTRA SMALL PHONES (≤400px)
+   ============================================================ */
+
+@media (max-width: 400px) {
+  .app-topbar {
+    padding: 0 var(--unik-space-2);
+  }
+
+  .topbar-right {
+    gap: 0.25rem;
+  }
+
+  .card {
+    padding: var(--unik-space-3);
+  }
+
+  .auth-card {
+    padding: var(--unik-space-4);
+  }
+
+  .auth-form-wrap {
+    padding: var(--unik-space-2);
+  }
+
+  .btn {
+    padding: 0.45rem 0.75rem;
+    font-size: var(--unik-text-xs);
+  }
+
+  .btn-sm {
+    padding: 0.3rem 0.5rem;
+  }
+
+  .home-quick-card {
+    padding: var(--unik-space-3);
+    gap: var(--unik-space-2);
+  }
+
+  .home-quick-icon {
+    flex-shrink: 0;
+  }
+
+  .home-quick-text {
+    min-width: 0;
+  }
+
+  .home-quick-desc {
+    font-size: var(--unik-text-xs);
+  }
 }
 
 
