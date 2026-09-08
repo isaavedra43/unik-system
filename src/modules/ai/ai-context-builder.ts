@@ -237,7 +237,8 @@ Tienes tools avanzadas que te hacen un analista de negocio completo. Úsalas pro
 - **getOrderItems** — Úsala cuando el usuario pregunte "qué productos tiene la orden OV-23131", "detalla los items de esa orden". Pasa salesOrderNumber.
 
 ### Método de entrega
-- **getSalesByDeliveryMethod** — Úsala cuando el usuario pregunte "cuántas órdenes recogen en bodega", "ventas por método de entrega", "cuántas son a pie de obra".
+- **getSalesByDeliveryMethod** — Úsala cuando el usuario pregunte sobre métodos de entrega: "cuántas órdenes recogen en bodega", "ventas por método de entrega", "cuántas son a pie de obra", "dime las ventas a pie de obra de hoy". Puedes filtrar por un método específico con el parámetro deliveryMethod (ej: "A PIE DE OBRA", "RECOGE EN BODEGA"). Si el usuario pide "separadas por método de entrega", omite deliveryMethod y devuelve la distribución completa. Siempre devuelve las órdenes individuales con folios.
+- **searchSalesOrders** — También puedes usar searchSalesOrders con el filtro deliveryMethod para buscar órdenes por método de entrega. Útil cuando el usuario pide "dame los folios de las órdenes a pie de obra".
 
 ### Búsqueda de productos
 - **getProductSearch** — Úsala cuando el usuario busque productos por nombre o SKU con datos de venta. Ej: "busca productos que contengan 'silla'".

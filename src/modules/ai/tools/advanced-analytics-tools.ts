@@ -35,7 +35,11 @@ function decimalToString(value: unknown): string | null {
 registerTool({
   name: 'getSalesByDeliveryMethod',
   description:
-    'Distribución de ventas por método de entrega (deliveryMethod). Ej: "RECOGE EN BODEGA", "A PIE DE OBRA (LIBRE DE MANIOBRAS)", "INSTALACIÓN A DOMICILIO". Devuelve conteo, total y balance por método.',
+    'Ventas por método de entrega (deliveryMethod). ' +
+    'Métodos comunes: "RECOGE EN BODEGA", "A PIE DE OBRA (LIBRE DE MANIOBRAS)", "INSTALACIÓN A DOMICILIO". ' +
+    'Si el usuario pide un método específico (ej: "a pie de obra", "recoge en bodega"), filtra por ese método. ' +
+    'Si pide "por método de entrega" sin especificar, devuelve la distribución de todos los métodos. ' +
+    'Siempre devuelve las órdenes individuales con folios.',
   category: 'sales',
   requiredPermission: 'sales_orders.view',
   enabledByDefault: true,
@@ -43,39 +47,80 @@ registerTool({
     dateRange: dateRangeSchema,
     dateFrom: z.string().optional().describe('Fecha inicio YYYY-MM-DD. Para fechas específicas.'),
     dateTo: z.string().optional().describe('Fecha fin YYYY-MM-DD.'),
+    deliveryMethod: z.string().optional().describe(
+      'Filtrar por un método de entrega específico (búsqueda parcial, case-insensitive). ' +
+      'Ej: "A PIE DE OBRA", "RECOGE EN BODEGA", "INSTALACIÓN". ' +
+      'Si se omite, devuelve todos los métodos agrupados.'
+    ),
+    includeOrders: z.boolean().default(true).describe(
+      'true = incluir la lista de órdenes individuales con folios. false = solo resumen agregado.'
+    ),
   }),
   execute: async (_actor, rawArgs) => {
-    const args = rawArgs as { dateRange: string; dateFrom?: string; dateTo?: string };
+    const args = rawArgs as { dateRange: string; dateFrom?: string; dateTo?: string; deliveryMethod?: string; includeOrders: boolean };
     const dateWhere = buildOrderDateWhereFlexible(args.dateRange, args.dateFrom, args.dateTo);
 
+    const where: Record<string, unknown> = { ...dateWhere };
+    if (args.deliveryMethod) {
+      where.deliveryMethod = { contains: args.deliveryMethod, mode: 'insensitive' };
+    }
+
     const orders = await prisma.salesOrder.findMany({
-      where: dateWhere,
-      select: { deliveryMethod: true, total: true, balance: true },
+      where: where as never,
+      select: {
+        salesOrderNumber: true,
+        customerName: true,
+        total: true,
+        balance: true,
+        status: true,
+        orderDate: true,
+        deliveryMethod: true,
+        paymentMethod: true,
+        salespersonName: true,
+      },
+      orderBy: { orderDate: 'desc' },
+      take: 500,
     });
 
-    const groups = new Map<string, { count: number; total: number; balance: number }>();
+    // Group by delivery method
+    const groups = new Map<string, { count: number; total: number; balance: number; orders: typeof orders }>();
     for (const o of orders) {
       const key = o.deliveryMethod ?? 'SIN MÉTODO';
-      const g = groups.get(key) ?? { count: 0, total: 0, balance: 0 };
+      const g = groups.get(key) ?? { count: 0, total: 0, balance: 0, orders: [] as typeof orders };
       g.count++;
       g.total += toNumber(o.total);
       g.balance += toNumber(o.balance);
+      g.orders.push(o);
       groups.set(key, g);
     }
 
-    const result = [...groups.entries()]
+    const byMethod = [...groups.entries()]
       .map(([method, g]) => ({
         deliveryMethod: method,
         count: g.count,
         total: g.total.toFixed(2),
         balance: g.balance.toFixed(2),
+        ...(args.includeOrders ? {
+          orders: g.orders.map((o) => ({
+            number: o.salesOrderNumber,
+            customer: o.customerName,
+            total: decimalToString(o.total),
+            balance: decimalToString(o.balance),
+            status: o.status,
+            date: formatDate(o.orderDate),
+            deliveryMethod: o.deliveryMethod,
+            paymentMethod: o.paymentMethod,
+            salesperson: o.salespersonName,
+          })),
+        } : {}),
       }))
       .sort((a, b) => Number(b.total) - Number(a.total));
 
     return {
       totalOrders: orders.length,
-      totalRevenue: result.reduce((s, r) => s + Number(r.total), 0).toFixed(2),
-      byDeliveryMethod: result,
+      totalRevenue: orders.reduce((s, o) => s + toNumber(o.total), 0).toFixed(2),
+      methodCount: groups.size,
+      byDeliveryMethod: byMethod,
     };
   },
 });

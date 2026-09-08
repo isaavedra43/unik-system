@@ -232,7 +232,7 @@ registerTool({
 // 3. searchSalesOrders
 registerTool({
   name: 'searchSalesOrders',
-  description: 'Buscar órdenes de venta por filtros simples. Devuelve lista paginada con datos básicos.',
+  description: 'Buscar órdenes de venta por filtros simples. Devuelve lista paginada con datos básicos, incluyendo folios, cliente, método de pago, método de entrega, estado, vendedor, total y balance.',
   category: 'sales',
   requiredPermission: 'sales_orders.view',
   enabledByDefault: true,
@@ -244,6 +244,7 @@ registerTool({
     status: z.string().optional(),
     salesperson: z.string().optional(),
     paymentMethod: z.string().optional(),
+    deliveryMethod: z.string().optional().describe('Filtrar por método de entrega (búsqueda parcial). Ej: "A PIE DE OBRA", "RECOGE EN BODEGA", "INSTALACIÓN".'),
     location: z.string().optional(),
     search: z.string().optional().describe('Búsqueda libre en número, cliente, referencia.'),
     page: z.number().int().min(1).default(1),
@@ -258,6 +259,7 @@ registerTool({
       status?: string;
       salesperson?: string;
       paymentMethod?: string;
+      deliveryMethod?: string;
       location?: string;
       search?: string;
       page: number;
@@ -276,6 +278,9 @@ registerTool({
     }
     if (args.paymentMethod) {
       where.paymentMethod = { equals: args.paymentMethod, mode: "insensitive" };
+    }
+    if (args.deliveryMethod) {
+      where.deliveryMethod = { contains: args.deliveryMethod, mode: 'insensitive' };
     }
     if (args.location) {
       where.locationName = { contains: args.location, mode: 'insensitive' };
@@ -298,6 +303,7 @@ registerTool({
           salespersonName: true,
           status: true,
           paymentMethod: true,
+          deliveryMethod: true,
           locationName: true,
           total: true,
           balance: true,
@@ -320,6 +326,7 @@ registerTool({
         salesperson: o.salespersonName,
         status: o.status,
         paymentMethod: o.paymentMethod,
+        deliveryMethod: o.deliveryMethod,
         location: o.locationName,
         total: decimalToString(o.total),
         balance: decimalToString(o.balance),
