@@ -28,7 +28,7 @@ export type { ChatMessage, ToolSpec, ChatCompletionOptions, ChatCompletionResult
 export async function chatCompletion(
   opts: ChatCompletionOptions
 ): Promise<ChatCompletionResult> {
-  const provider = getActiveProvider();
+  const provider = await getActiveProvider();
   return provider.chatCompletion(opts);
 }
 
@@ -38,7 +38,7 @@ export async function chatCompletion(
 export async function* chatCompletionStream(
   opts: ChatCompletionOptions
 ): AsyncGenerator<StreamChunk> {
-  const provider = getActiveProvider();
+  const provider = await getActiveProvider();
   yield* provider.chatCompletionStream(opts);
 }
 
@@ -55,7 +55,7 @@ export async function testAiConnection(): Promise<{
   error?: string;
   errorCode?: string;
 }> {
-  const provider = getActiveProvider();
+  const provider = await getActiveProvider();
   const result: ConnectionTestResult = await provider.testConnection();
   return {
     success: result.success,

@@ -18,9 +18,9 @@ export function getProvider(id: ProviderId): AiProvider {
   return REGISTRY[id];
 }
 
-/** Returns the currently active provider based on AI_PROVIDER env var. */
-export function getActiveProvider(): AiProvider {
-  const id = getActiveProviderId();
+/** Returns the currently active provider based on DB config (or AI_PROVIDER env fallback). */
+export async function getActiveProvider(): Promise<AiProvider> {
+  const id = await getActiveProviderId();
   return REGISTRY[id];
 }
 

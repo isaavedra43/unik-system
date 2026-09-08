@@ -23,15 +23,15 @@ import { getProviderConfig } from '../ai-config';
  * See https://privacy.claude.com/en/articles/7996868
  *
  * To activate: install `@anthropic-ai/sdk`, implement the conversion logic,
- * and set AI_PROVIDER=anthropic in environment.
+ * and set provider='anthropic' in the admin panel.
  */
 
 export const anthropicProvider: AiProvider = {
   id: 'anthropic',
   label: 'Anthropic (Claude)',
 
-  getStatus(): ProviderStatus {
-    const config = getProviderConfig('anthropic');
+  async getStatus(): Promise<ProviderStatus> {
+    const config = await getProviderConfig('anthropic');
     const missingVars: string[] = [];
     if (!config.apiKey) missingVars.push('ANTHROPIC_API_KEY');
     if (!config.model) missingVars.push('ANTHROPIC_MODEL');
@@ -49,21 +49,21 @@ export const anthropicProvider: AiProvider = {
 
   async chatCompletion(_opts: ChatCompletionOptions): Promise<ChatCompletionResult> {
     throw new AiApiError(
-      'Anthropic provider no está implementado aún. Usa AI_PROVIDER=openai por ahora.',
+      'Anthropic provider no está implementado aún. Usa provider=openai por ahora.',
       'unknown'
     );
   },
 
   async *chatCompletionStream(_opts: ChatCompletionOptions): AsyncGenerator<StreamChunk> {
     throw new AiApiError(
-      'Anthropic provider no está implementado aún. Usa AI_PROVIDER=openai por ahora.',
+      'Anthropic provider no está implementado aún. Usa provider=openai por ahora.',
       'unknown'
     );
     yield {}; // unreachable, satisfies generator type
   },
 
   async testConnection(): Promise<ConnectionTestResult> {
-    const config = getProviderConfig('anthropic');
+    const config = await getProviderConfig('anthropic');
     return {
       success: false,
       model: config.model ?? 'claude-sonnet-4-5',

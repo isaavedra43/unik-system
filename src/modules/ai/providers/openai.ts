@@ -19,22 +19,32 @@ import { getProviderConfig } from '../ai-config';
  * Uses the official `openai` npm package against https://api.openai.com.
  * Supports GPT-4o, GPT-4o-mini, GPT-4.1, o1, o3-mini, etc.
  *
+ * Config is read from DB (admin panel) with env var fallback.
+ * The client is cached but recreated if the API key or endpoint changes.
+ *
  * Data privacy: OpenAI does NOT train on API data by default since March 2023.
  * See https://openai.com/business-data/
  */
 
 let client: OpenAI | null = null;
+let cachedKey: string | null = null;
+let cachedEndpoint: string | null = null;
 
-function getClient(): OpenAI {
-  if (client) return client;
-  const config = getProviderConfig('openai');
+async function getClient(): Promise<OpenAI> {
+  const config = await getProviderConfig('openai');
   if (!config.apiKey) {
-    throw new AiApiError('OPENAI_API_KEY is not configured', 'auth');
+    throw new AiApiError('OPENAI_API_KEY no está configurada. Configúrala en el panel admin o en variables de entorno.', 'auth');
+  }
+  // Recreate client if key or endpoint changed (e.g. admin updated config)
+  if (client && cachedKey === config.apiKey && cachedEndpoint === config.endpoint) {
+    return client;
   }
   client = new OpenAI({
     apiKey: config.apiKey,
     ...(config.endpoint ? { baseURL: config.endpoint } : {}),
   });
+  cachedKey = config.apiKey;
+  cachedEndpoint = config.endpoint;
   return client;
 }
 
@@ -62,8 +72,8 @@ export const openaiProvider: AiProvider = {
   id: 'openai',
   label: 'OpenAI (ChatGPT API)',
 
-  getStatus(): ProviderStatus {
-    const config = getProviderConfig('openai');
+  async getStatus(): Promise<ProviderStatus> {
+    const config = await getProviderConfig('openai');
     const missingVars: string[] = [];
     if (!config.apiKey) missingVars.push('OPENAI_API_KEY');
     if (!config.model) missingVars.push('OPENAI_MODEL');
@@ -80,9 +90,9 @@ export const openaiProvider: AiProvider = {
   },
 
   async chatCompletion(opts: ChatCompletionOptions): Promise<ChatCompletionResult> {
-    const config = getProviderConfig('openai');
+    const config = await getProviderConfig('openai');
     const model = opts.model ?? config.model ?? 'gpt-4o';
-    const c = getClient();
+    const c = await getClient();
     const start = Date.now();
 
     try {
@@ -144,9 +154,9 @@ export const openaiProvider: AiProvider = {
   },
 
   async *chatCompletionStream(opts: ChatCompletionOptions): AsyncGenerator<StreamChunk> {
-    const config = getProviderConfig('openai');
+    const config = await getProviderConfig('openai');
     const model = opts.model ?? config.model ?? 'gpt-4o';
-    const c = getClient();
+    const c = await getClient();
     const start = Date.now();
 
     try {
@@ -228,7 +238,7 @@ export const openaiProvider: AiProvider = {
   },
 
   async testConnection(): Promise<ConnectionTestResult> {
-    const config = getProviderConfig('openai');
+    const config = await getProviderConfig('openai');
     const model = config.model ?? 'gpt-4o';
     const start = Date.now();
     try {

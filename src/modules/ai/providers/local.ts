@@ -20,16 +20,16 @@ import { getProviderConfig } from '../ai-config';
  *
  * Data privacy: 100% local — no data ever leaves your machine.
  *
- * To activate: set AI_PROVIDER=local, OLLAMA_ENDPOINT=http://localhost:11434/v1,
- * OLLAMA_MODEL=llama3.1, and OLLAMA_API_KEY=ollama (any non-empty string).
+ * To activate: set provider='local' in admin panel, endpoint=http://localhost:11434/v1,
+ * model=llama3.1, and any non-empty API key.
  */
 
 export const localProvider: AiProvider = {
   id: 'local',
   label: 'Local (Ollama / LM Studio)',
 
-  getStatus(): ProviderStatus {
-    const config = getProviderConfig('local');
+  async getStatus(): Promise<ProviderStatus> {
+    const config = await getProviderConfig('local');
     const missingVars: string[] = [];
     if (!config.endpoint) missingVars.push('OLLAMA_ENDPOINT');
     if (!config.model) missingVars.push('OLLAMA_MODEL');
@@ -47,21 +47,21 @@ export const localProvider: AiProvider = {
 
   async chatCompletion(_opts: ChatCompletionOptions): Promise<ChatCompletionResult> {
     throw new AiApiError(
-      'Local provider no está implementado aún. Usa AI_PROVIDER=openai por ahora.',
+      'Local provider no está implementado aún. Usa provider=openai por ahora.',
       'unknown'
     );
   },
 
   async *chatCompletionStream(_opts: ChatCompletionOptions): AsyncGenerator<StreamChunk> {
     throw new AiApiError(
-      'Local provider no está implementado aún. Usa AI_PROVIDER=openai por ahora.',
+      'Local provider no está implementado aún. Usa provider=openai por ahora.',
       'unknown'
     );
     yield {}; // unreachable, satisfies generator type
   },
 
   async testConnection(): Promise<ConnectionTestResult> {
-    const config = getProviderConfig('local');
+    const config = await getProviderConfig('local');
     return {
       success: false,
       model: config.model ?? 'llama3.1',

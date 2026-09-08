@@ -19,15 +19,15 @@ import { getProviderConfig } from '../ai-config';
  * See https://ai.google.dev/gemini-api/data
  *
  * To activate: install `@google/generative-ai`, implement the conversion logic,
- * and set AI_PROVIDER=gemini in environment.
+ * and set provider='gemini' in the admin panel.
  */
 
 export const geminiProvider: AiProvider = {
   id: 'gemini',
   label: 'Google (Gemini)',
 
-  getStatus(): ProviderStatus {
-    const config = getProviderConfig('gemini');
+  async getStatus(): Promise<ProviderStatus> {
+    const config = await getProviderConfig('gemini');
     const missingVars: string[] = [];
     if (!config.apiKey) missingVars.push('GEMINI_API_KEY');
     if (!config.model) missingVars.push('GEMINI_MODEL');
@@ -45,21 +45,21 @@ export const geminiProvider: AiProvider = {
 
   async chatCompletion(_opts: ChatCompletionOptions): Promise<ChatCompletionResult> {
     throw new AiApiError(
-      'Gemini provider no está implementado aún. Usa AI_PROVIDER=openai por ahora.',
+      'Gemini provider no está implementado aún. Usa provider=openai por ahora.',
       'unknown'
     );
   },
 
   async *chatCompletionStream(_opts: ChatCompletionOptions): AsyncGenerator<StreamChunk> {
     throw new AiApiError(
-      'Gemini provider no está implementado aún. Usa AI_PROVIDER=openai por ahora.',
+      'Gemini provider no está implementado aún. Usa provider=openai por ahora.',
       'unknown'
     );
     yield {}; // unreachable, satisfies generator type
   },
 
   async testConnection(): Promise<ConnectionTestResult> {
-    const config = getProviderConfig('gemini');
+    const config = await getProviderConfig('gemini');
     return {
       success: false,
       model: config.model ?? 'gemini-2.0-flash',

@@ -103,7 +103,7 @@ export interface AiProvider {
   readonly label: string;
 
   /** Non-secret status for the admin health panel. */
-  getStatus(): ProviderStatus;
+  getStatus(): Promise<ProviderStatus>;
 
   /** One-shot completion (used by the admin connection test). */
   chatCompletion(opts: ChatCompletionOptions): Promise<ChatCompletionResult>;

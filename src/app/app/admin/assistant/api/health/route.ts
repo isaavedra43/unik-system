@@ -18,7 +18,7 @@ export async function GET() {
     return NextResponse.json({ error: 'Sin permiso' }, { status: 403 });
   }
 
-  const status = getAiConfigStatus();
+  const status = await getAiConfigStatus();
   const enabled = await isAiEnabled();
   const recentErrors = await getRecentErrors(20);
 

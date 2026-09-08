@@ -4049,6 +4049,64 @@ textarea.input {
   color: var(--unik-text-muted);
 }
 
+.assistant-admin-config-section {
+  margin-bottom: 1.5rem;
+  padding-bottom: 1.5rem;
+  border-bottom: 1px solid var(--unik-border);
+}
+
+.assistant-admin-config-section:last-of-type {
+  border-bottom: none;
+}
+
+.assistant-admin-config-section .assistant-admin-section-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.assistant-admin-select {
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--unik-border);
+  border-radius: var(--unik-radius-md);
+  background: var(--unik-surface);
+  color: var(--unik-text);
+  font-size: var(--unik-text-sm);
+  cursor: pointer;
+}
+
+.assistant-admin-select:focus {
+  outline: none;
+  border-color: var(--unik-brand);
+}
+
+.assistant-admin-select:disabled {
+  background: var(--unik-surface-hover);
+  color: var(--unik-text-muted);
+  cursor: not-allowed;
+}
+
+.assistant-admin-config-field input[type='password'] {
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--unik-border);
+  border-radius: var(--unik-radius-md);
+  background: var(--unik-surface);
+  color: var(--unik-text);
+  font-size: var(--unik-text-sm);
+}
+
+.assistant-admin-config-field input[type='password']:focus {
+  outline: none;
+  border-color: var(--unik-brand);
+}
+
+.assistant-admin-config-field input[type='password']:disabled {
+  background: var(--unik-surface-hover);
+  color: var(--unik-text-muted);
+  cursor: not-allowed;
+}
+
 .assistant-admin-save-btn {
   display: inline-flex;
   align-items: center;

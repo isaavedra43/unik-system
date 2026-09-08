@@ -10,6 +10,11 @@ import { recordAiAuditEvent } from '@/modules/ai/ai-audit';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
+/**
+ * GET returns the AI config for the admin UI.
+ * The API key is NEVER returned to the client — only a `hasApiKey` boolean.
+ * If the client sends an empty apiKey in PATCH, the existing key is preserved.
+ */
 export async function GET() {
   const session = await getCurrentSession();
   if (!session) {
@@ -20,7 +25,21 @@ export async function GET() {
   }
 
   const config = await listAiConfig();
-  return NextResponse.json(config);
+  const settings = (config.settings as Record<string, unknown>) ?? {};
+
+  // Strip the API key — never send it to the client
+  const safeSettings = { ...settings };
+  const hasApiKey = Boolean(safeSettings.apiKey);
+  delete safeSettings.apiKey;
+
+  return NextResponse.json({
+    id: config.id,
+    key: config.key,
+    isEnabled: config.isEnabled,
+    settings: { ...safeSettings, hasApiKey },
+    createdAt: config.createdAt.toISOString(),
+    updatedAt: config.updatedAt.toISOString(),
+  });
 }
 
 const patchSchema = z.object({
@@ -49,6 +68,18 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: 'Datos inválidos' }, { status: 400 });
   }
 
+  // If the client sends an empty apiKey, preserve the existing one
+  if (parsed.data.settings && parsed.data.settings.apiKey === '') {
+    const current = await listAiConfig();
+    const currentSettings = (current.settings as Record<string, unknown>) ?? {};
+    parsed.data.settings.apiKey = currentSettings.apiKey ?? '';
+  }
+
+  // Strip hasApiKey — it's a read-only computed field, not stored
+  if (parsed.data.settings) {
+    delete parsed.data.settings.hasApiKey;
+  }
+
   try {
     await updateAiConfig(parsed.data);
     await recordAiAuditEvent({
@@ -56,7 +87,10 @@ export async function PATCH(req: NextRequest) {
       action: 'assistant.config_changed',
       targetType: 'ai_config',
       targetId: 'global',
-      metadata: { isEnabled: parsed.data.isEnabled, changedKeys: parsed.data.settings ? Object.keys(parsed.data.settings) : [] },
+      metadata: {
+        isEnabled: parsed.data.isEnabled,
+        changedKeys: parsed.data.settings ? Object.keys(parsed.data.settings) : [],
+      },
     });
     return NextResponse.json({ ok: true });
   } catch (e) {

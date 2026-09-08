@@ -16,6 +16,10 @@ const AI_CONFIG_KEY = 'global' as const;
 export interface AiSettings {
   // Global enable/disable
   isEnabled: boolean;
+  // Provider config (editable from admin panel, falls back to env vars)
+  provider: string; // 'openai' | 'anthropic' | 'gemini' | 'local'
+  apiKey: string; // stored in DB, NEVER sent to client
+  endpoint: string; // custom endpoint, empty = provider default
   // Modelo
   deployment: string;
   fallbackDeployment: string;
@@ -53,6 +57,9 @@ export interface AiSettings {
 
 export const DEFAULT_AI_SETTINGS: AiSettings = {
   isEnabled: true,
+  provider: 'openai',
+  apiKey: '', // empty = fall back to env var
+  endpoint: '', // empty = use provider default endpoint
   deployment: 'gpt-4o',
   fallbackDeployment: 'gpt-4o-mini',
   temperature: 0.3,
