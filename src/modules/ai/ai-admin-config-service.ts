@@ -85,8 +85,9 @@ export const DEFAULT_AI_SETTINGS: AiSettings = {
   maxToolIterations: 10,
   systemPromptOverride: '',
   enabledTools: [
-    // Sales — Universal tool (primary)
+    // Sales — Universal tools (primary)
     'querySalesOrders',
+    'universalSearch',
     // Sales — Specialized tools (for backward compat / simple queries)
     'getCashSales',
     'getSalesOrdersSummary',

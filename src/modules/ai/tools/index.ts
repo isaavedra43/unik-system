@@ -12,6 +12,9 @@
 // Sales tools (ventas, productos, vendedores, sucursales, tendencias)
 import './sales-tools';
 
+// Universal search (busca en toda la base de datos)
+import './search-tools';
+
 // System tools (usuario actual, módulos, hora del sistema)
 import './system-tools';
 
