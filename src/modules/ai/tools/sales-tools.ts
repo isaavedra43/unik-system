@@ -90,9 +90,9 @@ registerTool({
       'NO uses este filtro para "pendiente de entrega" o "no pagada" — usa subStatus o paidStatus.'
     ),
     subStatus: z.string().optional().describe(
-      'Filtrar por sub-estado de ENTREGA (búsqueda parcial). ' +
-      'Valores típicos: "Pendiente" (pendiente de entregar), "Enviado" (ya enviado). ' +
-      'Úsalo cuando el usuario pregunte por "pendientes de entrega", "no entregados", "por entregar", "faltan por enviar".'
+      'Filtrar por sub-estado (búsqueda parcial). ' +
+      'Valores típicos: "confirmed", "closed", "draft", "void". ' +
+      'NO uses este filtro para "pendiente de entrega" — usa shippedStatus.'
     ),
     paidStatus: z.string().optional().describe(
       'Filtrar por estado de PAGO (búsqueda parcial). ' +
@@ -102,6 +102,11 @@ registerTool({
     invoicedStatus: z.string().optional().describe(
       'Filtrar por estado de FACTURACIÓN (búsqueda parcial). ' +
       'Valores típicos: "Facturada", "Pendiente".'
+    ),
+    shippedStatus: z.string().optional().describe(
+      'Filtrar por estado de ENVÍO/ENTREGA (búsqueda parcial). ' +
+      'Valores típicos: "Pendiente" (pendiente de enviar), "Enviado" (ya enviado). ' +
+      'Úsalo cuando el usuario pregunte por "pendientes de entrega", "no enviados", "por enviar", "no entregados", "faltan por enviar".'
     ),
     location: z.string().optional().describe('Filtrar por sucursal (búsqueda parcial). Ej: "Patio Unik".'),
     product: z.string().optional().describe(
@@ -150,6 +155,7 @@ registerTool({
       subStatus?: string;
       paidStatus?: string;
       invoicedStatus?: string;
+      shippedStatus?: string;
       location?: string;
       product?: string;
       search?: string;
@@ -177,6 +183,7 @@ registerTool({
         subStatus: true,
         paidStatus: true,
         invoicedStatus: true,
+        shippedStatus: true,
         paymentMethod: true,
         deliveryMethod: true,
         locationName: true,
@@ -276,6 +283,14 @@ registerTool({
       );
     }
 
+    // ShippedStatus filter (partial match — for "pendiente de envío", "no enviados", etc.)
+    if (args.shippedStatus) {
+      const s = args.shippedStatus.toLowerCase();
+      filtered = filtered.filter((o) =>
+        (o.shippedStatus?.toLowerCase() ?? '').includes(s)
+      );
+    }
+
     // Location filter (partial match)
     if (args.location) {
       const l = args.location.toLowerCase();
@@ -306,7 +321,7 @@ registerTool({
     // AUTO-DIAGNÓSTICO: Si hay 0 resultados Y se usó algún filtro de estado,
     // hacer una consulta sin ese filtro para mostrar qué valores existen realmente.
     // Esto evita que la IA afirme "no hay datos" cuando el filtro estaba mal.
-    const usedStatusFilter = !!(args.status || args.subStatus || args.paidStatus || args.invoicedStatus);
+    const usedStatusFilter = !!(args.status || args.subStatus || args.paidStatus || args.invoicedStatus || args.shippedStatus);
     let diagnostic: Record<string, unknown> | null = null;
     if (filtered.length === 0 && usedStatusFilter) {
       // Consultar sin filtros de estado para ver qué valores existen
@@ -315,20 +330,23 @@ registerTool({
       const uniqueSubStatuses = new Map<string, number>();
       const uniquePaidStatuses = new Map<string, number>();
       const uniqueInvoicedStatuses = new Map<string, number>();
+      const uniqueShippedStatuses = new Map<string, number>();
       for (const o of ordersForDiagnosis) {
         if (o.status) uniqueStatuses.set(o.status, (uniqueStatuses.get(o.status) ?? 0) + 1);
         if (o.subStatus) uniqueSubStatuses.set(o.subStatus, (uniqueSubStatuses.get(o.subStatus) ?? 0) + 1);
         if (o.paidStatus) uniquePaidStatuses.set(o.paidStatus, (uniquePaidStatuses.get(o.paidStatus) ?? 0) + 1);
         if (o.invoicedStatus) uniqueInvoicedStatuses.set(o.invoicedStatus, (uniqueInvoicedStatuses.get(o.invoicedStatus) ?? 0) + 1);
+        if (o.shippedStatus) uniqueShippedStatuses.set(o.shippedStatus, (uniqueShippedStatuses.get(o.shippedStatus) ?? 0) + 1);
       }
       diagnostic = {
-        message: 'La consulta con los filtros de estado actuales devolvió 0 resultados. Revisa los valores disponibles:',
+        message: 'La consulta con los filtros actuales devolvió 0 resultados. Aquí están los valores disponibles en el rango de fechas:',
         totalOrdersInDateRange: ordersForDiagnosis.length,
         availableStatuses: [...uniqueStatuses.entries()].map(([v, c]) => ({ value: v, count: c })),
         availableSubStatuses: [...uniqueSubStatuses.entries()].map(([v, c]) => ({ value: v, count: c })),
         availablePaidStatuses: [...uniquePaidStatuses.entries()].map(([v, c]) => ({ value: v, count: c })),
         availableInvoicedStatuses: [...uniqueInvoicedStatuses.entries()].map(([v, c]) => ({ value: v, count: c })),
-        hint: 'Si el filtro no coincide con ningún valor disponible, reintenta con un valor que SÍ exista. NO digas "no hay datos" — reintenta con el valor correcto.',
+        availableShippedStatuses: [...uniqueShippedStatuses.entries()].map(([v, c]) => ({ value: v, count: c })),
+        hint: 'Reintenta con un valor que SÍ exista en la lista anterior. NO digas "no hay datos" — reintenta con el valor correcto.',
       };
     }
 
@@ -367,6 +385,7 @@ registerTool({
           subStatus: args.subStatus ?? null,
           paidStatus: args.paidStatus ?? null,
           invoicedStatus: args.invoicedStatus ?? null,
+          shippedStatus: args.shippedStatus ?? null,
           location: args.location ?? null,
           product: args.product ?? null,
           search: args.search ?? null,
@@ -501,6 +520,7 @@ function formatOrder(
     subStatus: o.subStatus,
     paidStatus: o.paidStatus,
     invoicedStatus: o.invoicedStatus,
+    shippedStatus: o.shippedStatus,
     paymentMethod: o.paymentMethod,
     deliveryMethod: o.deliveryMethod,
     location: o.locationName,
@@ -812,6 +832,7 @@ registerTool({
         subStatus: true,
         paidStatus: true,
         invoicedStatus: true,
+        shippedStatus: true,
         paymentMethod: true,
         deliveryMethod: true,
         locationName: true,

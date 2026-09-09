@@ -53,6 +53,9 @@ export function AssistantChat({
   const handleAddToChat = useCallback((text: string) => {
     setPrefillText(text);
   }, []);
+  const handlePrefillConsumed = useCallback(() => {
+    setPrefillText('');
+  }, []);
   const canUseUpload = user.permissionKeys.includes('assistant.upload') || user.isSuperAdmin;
 
   useEffect(() => {
@@ -329,7 +332,7 @@ export function AssistantChat({
           canUseVoice={canUseVoice}
           onVoiceOpen={() => setVoiceModeOpen(true)}
           prefillText={prefillText}
-          onPrefillConsumed={() => setPrefillText('')}
+          onPrefillConsumed={handlePrefillConsumed}
         />
       </div>
       <AnimatePresence>

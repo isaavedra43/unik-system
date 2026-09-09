@@ -70,28 +70,30 @@ ${availableTools.map((t) => `- ${t.name}: ${t.description}`).join('\n')}
 
 ### querySalesOrders — TU TOOL PRINCIPAL DE VENTAS
 Úsalo para CUALQUIER consulta de ventas con filtros. Soporta cualquier combinación.
-- Filtros: dateRange, paymentMethods, deliveryMethod, customer, salesperson, status, subStatus, paidStatus, invoicedStatus, location, product, search
+- Filtros: dateRange, paymentMethods, deliveryMethod, customer, salesperson, status, subStatus, paidStatus, invoicedStatus, shippedStatus, location, product, search
 - Agrupación: groupBy = "none" | "paymentMethod" | "deliveryMethod" | "status" | "subStatus" | "paidStatus" | "salesperson" | "location" | "customer" | "date" | "product"
 - **includeItems: true** cuando el usuario pida productos, cantidades, m², items, detalle de productos
 - **includeShippingAddress: true** cuando el usuario pida direcciones, dónde se entregó, dirección de envío
 
 ### ESTADOS DE UNA ORDEN — CRÍTICO
-Cada orden tiene 4 campos de estado DIFERENTES:
+Cada orden tiene 5 campos de estado DIFERENTES:
 - **status**: Estado general. Valores: "Confirmada", "Cerrada". NO usar para "pendiente de entrega".
-- **subStatus**: Estado de ENTREGA. Valores: "Pendiente" (por entregar), "Enviado" (ya enviado). Úsalo para "pendientes de entrega", "no entregados", "por enviar".
-- **paidStatus**: Estado de PAGO. Valores: "Pagada", "Parcial", "Pendiente". Úsalo para "no pagadas", "con saldo", "pendientes de pago".
+- **subStatus**: Sub-estado interno. Valores: "confirmed", "closed", "draft", "void". NO usar para entrega.
+- **paidStatus**: Estado de PAGO. Valores: "Pagada", "Parcial", "Pendiente". Úsalo para "no pagadas", "con saldo".
 - **invoicedStatus**: Estado de FACTURACIÓN. Valores: "Facturada", "Pendiente".
+- **shippedStatus**: Estado de ENVÍO/ENTREGA. Valores: "Pendiente" (pendiente de enviar), "Enviado" (ya enviado). Úsalo para "pendientes de entrega", "no enviados", "por enviar", "no entregados", "faltan por enviar".
 
 REGLAS CRÍTICAS:
-- "pendientes de entrega" → subStatus="Pendiente" (NO status="pending")
-- "no entregadas" → subStatus="Pendiente" (NO status="pending")
-- "por enviar" → subStatus="Pendiente"
-- "ya enviadas" → subStatus="Enviado"
+- "pendientes de entrega" → shippedStatus="Pendiente" (NO status="pending", NO subStatus="Pendiente")
+- "no entregados" → shippedStatus="Pendiente"
+- "por enviar" → shippedStatus="Pendiente"
+- "ya enviados" → shippedStatus="Enviado"
 - "no pagadas" → paidStatus="Pendiente"
 - "parcialmente pagadas" → paidStatus="Parcial"
 - "con saldo" → paidStatus="Pendiente" o paidStatus="Parcial"
 - "no facturadas" → invoicedStatus="Pendiente"
 - NUNCA uses status="pending" para "pendiente de entrega" — status es el estado GENERAL, no el de entrega
+- NUNCA uses subStatus para entregas — subStatus tiene valores internos (confirmed, closed, draft, void)
 
 ### universalSearch — BÚSQUEDA EN TODA LA BD
 Úsalo cuando el usuario busque algo sin saber exactamente dónde está.
@@ -149,8 +151,8 @@ Si una tool devuelve 0 resultados (orders: [], total: 0), NO afirmes inmediatame
 ### Ejemplo crítico:
 - Usuario: "qué ventas no he entregado de la semana"
 - Si usas status="pending" y devuelve 0 → NO digas "no hay"
-- El diagnostic te mostrará que subStatus tiene valores "Pendiente" y "Enviado"
-- Reintenta con subStatus="Pendiente" → ahora sí tendrás resultados
+- El diagnostic te mostrará que shippedStatus tiene valores "Pendiente" y "Enviado"
+- Reintenta con shippedStatus="Pendiente" → ahora sí tendrás resultados
 - Responde con los datos reales
 
 ### NUNCA hagas esto:

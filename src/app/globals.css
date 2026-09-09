@@ -6932,29 +6932,28 @@ textarea.input {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 4px 10px;
+  padding: 5px 12px;
   background: var(--unik-primary, #2563eb);
   color: #fff;
   border: none;
-  border-radius: 14px;
-  font-size: 11px;
+  border-radius: 16px;
+  font-size: 12px;
   font-weight: 600;
   cursor: pointer;
   white-space: nowrap;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
-  z-index: 10;
-  transition: background 0.15s ease, transform 0.1s ease;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  transition: background 0.15s ease;
   pointer-events: auto;
   user-select: none;
+  -webkit-user-select: none;
 }
 
 .assistant-add-to-chat-btn:hover {
   background: var(--unik-primary-hover, #1d4ed8);
-  transform: translate(-50%, -100%) scale(1.05);
 }
 
 .assistant-add-to-chat-btn:active {
-  transform: translate(-50%, -100%) scale(0.95);
+  background: var(--unik-primary-hover, #1d4ed8);
 }
 
 .assistant-add-to-chat-btn svg {

@@ -56,18 +56,19 @@ export function AssistantInput({
         }
         return prefillText.slice(0, maxLength);
       });
-      onPrefillConsumed?.();
       // Focus the textarea after prefilling
       setTimeout(() => {
-        textareaRef.current?.focus();
-        // Move cursor to end
         const ta = textareaRef.current;
         if (ta) {
+          ta.focus();
           ta.setSelectionRange(ta.value.length, ta.value.length);
         }
       }, 0);
+      // Clear the prefill text so it can be set again
+      onPrefillConsumed?.();
     }
-  }, [prefillText, onPrefillConsumed, maxLength]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefillText]);
 
   // Auto-resize textarea
   useEffect(() => {

@@ -501,6 +501,7 @@ registerTool({
       subStatusCounts,
       paidStatusCounts,
       invoicedStatusCounts,
+      shippedStatusCounts,
       paymentMethodCounts,
       deliveryMethodCounts,
       recentOrders,
@@ -549,6 +550,11 @@ registerTool({
         _sum: { total: true },
       }),
       prisma.salesOrder.groupBy({
+        by: ['shippedStatus'],
+        _count: { id: true },
+        _sum: { total: true },
+      }),
+      prisma.salesOrder.groupBy({
         by: ['paymentMethod'],
         _count: { id: true },
         _sum: { total: true },
@@ -569,6 +575,7 @@ registerTool({
           status: true,
           subStatus: true,
           paidStatus: true,
+          shippedStatus: true,
         },
       }),
     ]);
@@ -624,6 +631,13 @@ registerTool({
           total: decimalToString(i._sum.total),
         }))
         .sort((a, b) => b.count - a.count),
+      shippedStatuses: shippedStatusCounts
+        .map((s) => ({
+          shippedStatus: s.shippedStatus ?? 'Sin estado de envío',
+          count: s._count.id,
+          total: decimalToString(s._sum.total),
+        }))
+        .sort((a, b) => b.count - a.count),
       paymentMethods: paymentMethodCounts
         .map((p) => ({
           method: p.paymentMethod ?? 'Sin método',
@@ -646,6 +660,7 @@ registerTool({
         status: o.status,
         subStatus: o.subStatus,
         paidStatus: o.paidStatus,
+        shippedStatus: o.shippedStatus,
       })),
     };
   },
