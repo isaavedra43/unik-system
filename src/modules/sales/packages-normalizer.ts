@@ -95,6 +95,12 @@ function log(payload: Record<string, unknown>) {
   console.info(JSON.stringify(payload));
 }
 
+function parseZohoDate(value: unknown): Date | null {
+  if (typeof value !== 'string' || value.length === 0) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
 function parseZohoCommercialDate(value: unknown): Date | null {
   if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
   const date = new Date(`${value}T00:00:00.000Z`);

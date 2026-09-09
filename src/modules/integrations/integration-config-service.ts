@@ -71,27 +71,6 @@ export interface ZohoSettings {
   staleRunThresholdMs: number;
   /** Whether the internal scheduler is enabled. */
   schedulerEnabled: boolean;
-  /** Per-entity sync toggles and intervals. */
-  packagesSyncEnabled: boolean;
-  invoicesSyncEnabled: boolean;
-  vendorsSyncEnabled: boolean;
-  itemsSyncEnabled: boolean;
-  /** Scheduler: minimum time between package sync runs, in ms. */
-  packagesSyncIntervalMs: number;
-  /** Scheduler: minimum time between invoice sync runs, in ms. */
-  invoicesSyncIntervalMs: number;
-  /** Scheduler: minimum time between vendor sync runs, in ms. */
-  vendorsSyncIntervalMs: number;
-  /** Scheduler: minimum time between product catalog sync runs, in ms. */
-  itemsSyncIntervalMs: number;
-  /** Detail downloads per scheduled package sync run. */
-  packagesMaxDetailFetches: number;
-  /** Detail downloads per scheduled invoice sync run. */
-  invoicesMaxDetailFetches: number;
-  /** Detail downloads per scheduled vendor sync run. */
-  vendorsMaxDetailFetches: number;
-  /** Detail downloads per scheduled product catalog sync run. */
-  itemsMaxDetailFetches: number;
 }
 
 export type IntegrationSettings = ZohoSettings;
@@ -116,18 +95,6 @@ export const DEFAULT_SETTINGS: Record<IntegrationSourceKey, IntegrationSettings>
     fullSyncTimeoutMs: 15 * 60 * 1000,
     staleRunThresholdMs: 10 * 60 * 1000,
     schedulerEnabled: false,
-    packagesSyncEnabled: false,
-    invoicesSyncEnabled: false,
-    vendorsSyncEnabled: false,
-    itemsSyncEnabled: false,
-    packagesSyncIntervalMs: 60 * 60 * 1000,
-    invoicesSyncIntervalMs: 60 * 60 * 1000,
-    vendorsSyncIntervalMs: 6 * 60 * 60 * 1000,
-    itemsSyncIntervalMs: 6 * 60 * 60 * 1000,
-    packagesMaxDetailFetches: 50,
-    invoicesMaxDetailFetches: 50,
-    vendorsMaxDetailFetches: 50,
-    itemsMaxDetailFetches: 50,
   },
 };
 

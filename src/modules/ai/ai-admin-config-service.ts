@@ -127,16 +127,6 @@ export const DEFAULT_AI_SETTINGS: AiSettings = {
     // Operations
     'getNotifications',
     'getIntegrationStatus',
-    // Zoho Inventory
-    'getOrderPackages',
-    'getInvoiceDetails',
-    'getOrderInvoices',
-    'getOrderPayments',
-    'getVendorList',
-    'getVendorDetails',
-    'getProductCatalogFull',
-    'getProductStock',
-    'createEstimate',
     // Artifacts
     'generatePdfReport',
     'generateExcelReport',

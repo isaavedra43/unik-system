@@ -34,10 +34,4 @@ export const SALES_ORDERS_PERMISSIONS: PermissionDefinition[] = [
     label: 'Compartir vistas de órdenes',
     description: 'Permite compartir vistas guardadas con otros usuarios de UNIK',
   },
-  {
-    key: 'estimates.create',
-    group: 'Cotizaciones',
-    label: 'Crear cotizaciones',
-    description: 'Permite al asistente IA crear cotizaciones (estimates) en Zoho Inventory',
-  },
 ];
