@@ -188,6 +188,11 @@ model User {
   entityWatches       EntityWatch[]
   notifications       Notification[]
   aiConversations     AiConversation[]
+  chatMemberships     ChatMember[]
+  chatMessages        ChatMessage[]
+  chatReactions       ChatReaction[]
+  chatReadReceipts    ChatReadReceipt[]
+  chatPresence        ChatPresence?
 
   @@index([isActive])
 }
@@ -463,7 +468,7 @@ model AiApiCall {
 
 /// Archivo adjunto por el usuario (documento o imagen).
 model AiAttachment {
-  id             String   @id @default(cuid())
+  id             String     @id @default(cuid())
   messageId      String?
   conversationId String
   fileName       String
@@ -471,7 +476,7 @@ model AiAttachment {
   sizeBytes      Int
   storagePath    String
   uploadedBy     String
-  createdAt      DateTime @default(now())
+  createdAt      DateTime   @default(now())
   message        AiMessage? @relation(fields: [messageId], references: [id], onDelete: SetNull)
 
   @@index([conversationId])
@@ -502,4 +507,123 @@ model AiConfig {
   settings  Json
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+// =====================================================
+// Internal Chat models (additive migration)
+// =====================================================
+
+/// Canal de chat: mensaje directo (type='dm') o grupo (type='group').
+model ChatChannel {
+  id            String        @id @default(cuid())
+  type          String
+  name          String?
+  avatarPath    String?
+  createdBy     String
+  lastMessageAt DateTime      @default(now())
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  members       ChatMember[]
+  messages      ChatMessage[]
+
+  @@index([type])
+  @@index([lastMessageAt])
+}
+
+/// Membresía de un usuario en un canal de chat.
+model ChatMember {
+  id         String      @id @default(cuid())
+  channelId  String
+  userId     String
+  role       String      @default("member")
+  joinedAt   DateTime    @default(now())
+  lastReadAt DateTime    @default(now())
+  mutedUntil DateTime?
+  leftAt     DateTime?
+  channel    ChatChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([channelId, userId])
+  @@index([userId])
+  @@index([channelId, leftAt])
+}
+
+/// Mensaje dentro de un canal de chat.
+model ChatMessage {
+  id              String            @id @default(cuid())
+  channelId       String
+  senderId        String
+  content         String?
+  replyToId       String?
+  forwardedFromId String?
+  forwardedBy     String?
+  editedAt        DateTime?
+  deletedAt       DateTime?
+  createdAt       DateTime          @default(now())
+  channel         ChatChannel       @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  sender          User              @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  replyTo         ChatMessage?      @relation("ChatMessageReply", fields: [replyToId], references: [id], onDelete: SetNull)
+  forwardedFrom   ChatMessage?      @relation("ChatMessageForward", fields: [forwardedFromId], references: [id], onDelete: SetNull)
+  replies         ChatMessage[]     @relation("ChatMessageReply")
+  forwards        ChatMessage[]     @relation("ChatMessageForward")
+  attachments     ChatAttachment[]
+  reactions       ChatReaction[]
+  readReceipts    ChatReadReceipt[]
+
+  @@index([channelId, createdAt])
+  @@index([senderId])
+  @@index([replyToId])
+}
+
+/// Archivo adjunto a un mensaje (foto, video, audio, documento).
+model ChatAttachment {
+  id            String      @id @default(cuid())
+  messageId     String
+  fileName      String
+  mimeType      String
+  sizeBytes     Int
+  storagePath   String
+  width         Int?
+  height        Int?
+  durationMs    Int?
+  thumbnailPath String?
+  createdAt     DateTime    @default(now())
+  message       ChatMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@index([messageId])
+}
+
+/// Reacción emoji a un mensaje.
+model ChatReaction {
+  id        String      @id @default(cuid())
+  messageId String
+  userId    String
+  emoji     String
+  createdAt DateTime    @default(now())
+  message   ChatMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId, emoji])
+  @@index([messageId])
+}
+
+/// Confirmación de lectura de un mensaje por un usuario.
+model ChatReadReceipt {
+  id        String      @id @default(cuid())
+  messageId String
+  userId    String
+  readAt    DateTime    @default(now())
+  message   ChatMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId])
+  @@index([messageId])
+}
+
+/// Presencia de un usuario en el chat (1 fila por usuario).
+model ChatPresence {
+  userId     String   @id
+  status     String   @default("offline")
+  lastSeenAt DateTime @default(now())
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }

@@ -8,7 +8,7 @@ import { logoutAction } from '@/app/app/actions';
 import { Avatar } from '@/components/ui/primitives';
 import { DropdownMenu } from '@/components/ui/composite';
 import { ChevronDown, Home, LogOut, Menu, Shield, Users } from '@/components/ui/icons';
-import { Bell, Bot, ShoppingCart, Plug, X } from 'lucide-react';
+import { Bell, Bot, ShoppingCart, Plug, MessageCircle, X } from 'lucide-react';
 import { AssistantWidget } from '@/components/assistant/AssistantWidget';
 import { ThemeToggle } from '@/components/layout/ThemeToggle';
 
@@ -299,6 +299,9 @@ function buildBreadcrumbs(pathname: string): { label: string; href?: string }[] 
   if (pathname.startsWith('/app/assistant')) {
     return [{ label: 'Asistente IA' }];
   }
+  if (pathname.startsWith('/app/chat')) {
+    return [{ label: 'Chat' }];
+  }
   if (pathname.startsWith('/app/account/security')) {
     return [{ label: 'Cuenta' }, { label: 'Seguridad' }];
   }
@@ -326,6 +329,12 @@ export default function AppShell({ user, children }: AppShellProps) {
       title: 'General',
       items: [
         { href: '/app', label: 'Inicio', icon: <Home size={18} />, visible: true },
+        {
+          href: '/app/chat',
+          label: 'Chat',
+          icon: <MessageCircle size={18} />,
+          visible: user.permissionKeys.includes('chat.use') || user.isSuperAdmin,
+        },
         {
           href: '/app/assistant',
           label: 'Asistente IA',
@@ -395,7 +404,8 @@ export default function AppShell({ user, children }: AppShellProps) {
   const pathname = usePathname();
   const isWorkspace = pathname.startsWith('/app/sales/orders') && !pathname.includes('/api');
   const isAssistantPage = pathname.startsWith('/app/assistant');
-  const isFlush = isWorkspace || isAssistantPage;
+  const isChatPage = pathname.startsWith('/app/chat');
+  const isFlush = isWorkspace || isAssistantPage || isChatPage;
   const canUseAssistant = user.permissionKeys.includes('assistant.use') || user.isSuperAdmin;
   const showWidget = canUseAssistant && !isAssistantPage;
 
