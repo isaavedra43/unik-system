@@ -124,7 +124,7 @@ export async function createDmChannel(
   }
 
   // Try to find an existing DM with both users
-  const existing = await prisma.chatChannel.findFirst({
+  const existing = await prisma.internalChatChannel.findFirst({
     where: {
       type: 'dm',
       members: {
@@ -143,7 +143,7 @@ export async function createDmChannel(
     return { id: existing.id, isNew: false };
   }
 
-  const channel = await prisma.chatChannel.create({
+  const channel = await prisma.internalChatChannel.create({
     data: {
       type: 'dm',
       createdBy: actor.id,
@@ -183,7 +183,7 @@ export async function createGroupChannel(
 
   const allMemberIds = Array.from(new Set([actor.id, ...memberIds]));
 
-  const channel = await prisma.chatChannel.create({
+  const channel = await prisma.internalChatChannel.create({
     data: {
       type: 'group',
       name: trimmedName,
@@ -209,7 +209,7 @@ export async function createGroupChannel(
 }
 
 export async function listUserChannels(userId: string): Promise<ChatChannelDTO[]> {
-  const memberships = await prisma.chatMember.findMany({
+  const memberships = await prisma.internalChatMember.findMany({
     where: { userId, leftAt: null },
     include: {
       channel: {
@@ -241,7 +241,7 @@ export async function listUserChannels(userId: string): Promise<ChatChannelDTO[]
   for (const m of memberships) {
     const channel = m.channel;
     const lastMsg = channel.messages[0];
-    const unreadCount = await prisma.chatMessage.count({
+    const unreadCount = await prisma.internalChatMessage.count({
       where: {
         channelId: channel.id,
         createdAt: { gt: m.lastReadAt },
@@ -281,7 +281,7 @@ export async function getChannel(
   channelId: string,
   userId: string
 ): Promise<ChatChannelDTO | null> {
-  const membership = await prisma.chatMember.findFirst({
+  const membership = await prisma.internalChatMember.findFirst({
     where: { channelId, userId, leftAt: null },
     include: {
       channel: {
@@ -326,7 +326,7 @@ export async function getChannel(
 }
 
 export async function assertChannelMember(channelId: string, userId: string): Promise<void> {
-  const membership = await prisma.chatMember.findFirst({
+  const membership = await prisma.internalChatMember.findFirst({
     where: { channelId, userId, leftAt: null },
   });
   if (!membership) {
@@ -335,7 +335,7 @@ export async function assertChannelMember(channelId: string, userId: string): Pr
 }
 
 export async function assertChannelAdmin(channelId: string, userId: string): Promise<void> {
-  const membership = await prisma.chatMember.findFirst({
+  const membership = await prisma.internalChatMember.findFirst({
     where: { channelId, userId, leftAt: null },
   });
   if (!membership) {
@@ -373,7 +373,7 @@ export async function sendMessage(
     throw new ChatError('El mensaje es demasiado largo (máx 10,000 caracteres)');
   }
 
-  const message = await prisma.chatMessage.create({
+  const message = await prisma.internalChatMessage.create({
     data: {
       channelId: input.channelId,
       senderId: actor.id,
@@ -393,20 +393,20 @@ export async function sendMessage(
 
   // Link pre-saved attachments if any
   if (input.attachmentIds && input.attachmentIds.length > 0) {
-    await prisma.chatAttachment.updateMany({
+    await prisma.internalChatAttachment.updateMany({
       where: { id: { in: input.attachmentIds } },
       data: { messageId: message.id },
     });
   }
 
   // Update channel's lastMessageAt
-  await prisma.chatChannel.update({
+  await prisma.internalChatChannel.update({
     where: { id: input.channelId },
     data: { lastMessageAt: message.createdAt },
   });
 
   // Re-fetch with attachments linked
-  const fullMessage = await prisma.chatMessage.findUnique({
+  const fullMessage = await prisma.internalChatMessage.findUnique({
     where: { id: message.id },
     include: {
       sender: true,
@@ -430,7 +430,7 @@ export async function listMessages(
   await assertChannelMember(channelId, userId);
   const limit = Math.min(options.limit ?? 50, 100);
 
-  const messages = await prisma.chatMessage.findMany({
+  const messages = await prisma.internalChatMessage.findMany({
     where: {
       channelId,
       ...(options.cursor ? { createdAt: { lt: new Date(options.cursor) } } : {}),
@@ -460,7 +460,7 @@ export async function getMessagesSince(
 ): Promise<ChatMessageDTO[]> {
   await assertChannelMember(channelId, userId);
 
-  const messages = await prisma.chatMessage.findMany({
+  const messages = await prisma.internalChatMessage.findMany({
     where: { channelId, createdAt: { gt: since } },
     orderBy: { createdAt: 'asc' },
     include: {
@@ -480,7 +480,7 @@ export async function editMessage(
   messageId: string,
   content: string
 ): Promise<{ messageId: string; content: string; editedAt: string }> {
-  const msg = await prisma.chatMessage.findUnique({ where: { id: messageId } });
+  const msg = await prisma.internalChatMessage.findUnique({ where: { id: messageId } });
   if (!msg) throw new ChatError('Mensaje no encontrado');
   if (msg.senderId !== actor.id)
     throw new AuthorizationError('Solo puedes editar tus propios mensajes');
@@ -499,7 +499,7 @@ export async function editMessage(
     throw new ChatError('Contenido inválido');
   }
 
-  const updated = await prisma.chatMessage.update({
+  const updated = await prisma.internalChatMessage.update({
     where: { id: messageId },
     data: { content: trimmed, editedAt: new Date() },
   });
@@ -512,7 +512,7 @@ export async function editMessage(
 }
 
 export async function deleteMessage(actor: CurrentUser, messageId: string): Promise<void> {
-  const msg = await prisma.chatMessage.findUnique({
+  const msg = await prisma.internalChatMessage.findUnique({
     where: { id: messageId },
     include: { channel: { include: { members: { where: { userId: actor.id } } } } },
   });
@@ -528,7 +528,7 @@ export async function deleteMessage(actor: CurrentUser, messageId: string): Prom
     throw new AuthorizationError('Solo puedes eliminar tus propios mensajes');
   }
 
-  await prisma.chatMessage.update({
+  await prisma.internalChatMessage.update({
     where: { id: messageId },
     data: { deletedAt: new Date(), content: null },
   });
@@ -543,7 +543,7 @@ export async function forwardMessage(
     throw new ChatError('Debes seleccionar al menos un canal');
   }
 
-  const original = await prisma.chatMessage.findUnique({
+  const original = await prisma.internalChatMessage.findUnique({
     where: { id: messageId },
     include: { attachments: true },
   });
@@ -554,7 +554,7 @@ export async function forwardMessage(
   for (const targetId of targetChannelIds) {
     await assertChannelMember(targetId, actor.id);
 
-    const newMsg = await prisma.chatMessage.create({
+    const newMsg = await prisma.internalChatMessage.create({
       data: {
         channelId: targetId,
         senderId: actor.id,
@@ -573,7 +573,7 @@ export async function forwardMessage(
 
     // Copy attachments
     if (original.attachments.length > 0) {
-      await prisma.chatAttachment.createMany({
+      await prisma.internalChatAttachment.createMany({
         data: original.attachments.map((a) => ({
           messageId: newMsg.id,
           fileName: a.fileName,
@@ -588,12 +588,12 @@ export async function forwardMessage(
       });
     }
 
-    await prisma.chatChannel.update({
+    await prisma.internalChatChannel.update({
       where: { id: targetId },
       data: { lastMessageAt: newMsg.createdAt },
     });
 
-    const fullMsg = await prisma.chatMessage.findUnique({
+    const fullMsg = await prisma.internalChatMessage.findUnique({
       where: { id: newMsg.id },
       include: {
         sender: true,
@@ -620,7 +620,7 @@ export async function markAsRead(actor: CurrentUser, channelId: string): Promise
   await assertChannelMember(channelId, actor.id);
   const now = new Date();
 
-  await prisma.chatMember.update({
+  await prisma.internalChatMember.update({
     where: { channelId_userId: { channelId, userId: actor.id } },
     data: { lastReadAt: now },
   });
@@ -664,7 +664,7 @@ export async function addReaction(
     throw new ChatError('Emoji no permitido');
   }
 
-  const msg = await prisma.chatMessage.findUnique({
+  const msg = await prisma.internalChatMessage.findUnique({
     where: { id: messageId },
     include: { channel: { include: { members: { where: { userId: actor.id, leftAt: null } } } } },
   });
@@ -673,7 +673,7 @@ export async function addReaction(
   if (!msg.channel.members.length) throw new AuthorizationError('No eres miembro de este canal');
 
   try {
-    await prisma.chatReaction.create({
+    await prisma.internalChatReaction.create({
       data: { messageId, userId: actor.id, emoji },
     });
   } catch (err) {
@@ -689,14 +689,14 @@ export async function removeReaction(
   messageId: string,
   emoji: string
 ): Promise<{ messageId: string; userId: string; emoji: string }> {
-  await prisma.chatReaction.deleteMany({
+  await prisma.internalChatReaction.deleteMany({
     where: { messageId, userId: actor.id, emoji },
   });
   return { messageId, userId: actor.id, emoji };
 }
 
 export async function getMessageReactions(messageId: string): Promise<ChatReactionDTO[]> {
-  const reactions = await prisma.chatReaction.findMany({
+  const reactions = await prisma.internalChatReaction.findMany({
     where: { messageId },
     include: { user: true },
   });
@@ -720,7 +720,7 @@ export async function updateGroup(
     if (trimmed.length < 1 || trimmed.length > 100) {
       throw new ChatError('Nombre inválido');
     }
-    await prisma.chatChannel.update({ where: { id: channelId }, data: { name: trimmed } });
+    await prisma.internalChatChannel.update({ where: { id: channelId }, data: { name: trimmed } });
   }
 }
 
@@ -732,7 +732,7 @@ export async function addMembers(
   await assertChannelAdmin(channelId, actor.id);
   if (userIds.length === 0) throw new ChatError('No hay usuarios para agregar');
 
-  const channel = await prisma.chatChannel.findUnique({ where: { id: channelId } });
+  const channel = await prisma.internalChatChannel.findUnique({ where: { id: channelId } });
   if (!channel || channel.type !== 'group') {
     throw new ChatError('Solo se pueden agregar miembros a grupos');
   }
@@ -747,7 +747,7 @@ export async function addMembers(
 
   // Upsert memberships (re-join if previously left)
   for (const userId of userIds) {
-    await prisma.chatMember.upsert({
+    await prisma.internalChatMember.upsert({
       where: { channelId_userId: { channelId, userId } },
       create: { channelId, userId, role: 'member' },
       update: { leftAt: null, role: 'member' },
@@ -760,12 +760,12 @@ export async function removeMember(
   channelId: string,
   userId: string
 ): Promise<void> {
-  const channel = await prisma.chatChannel.findUnique({ where: { id: channelId } });
+  const channel = await prisma.internalChatChannel.findUnique({ where: { id: channelId } });
   if (!channel) throw new ChatError('Canal no encontrado');
 
   // Self-leave is always allowed
   if (actor.id === userId) {
-    await prisma.chatMember.update({
+    await prisma.internalChatMember.update({
       where: { channelId_userId: { channelId, userId } },
       data: { leftAt: new Date() },
     });
@@ -778,18 +778,18 @@ export async function removeMember(
     throw new ChatError('Solo se pueden remover miembros de grupos');
   }
 
-  await prisma.chatMember.update({
+  await prisma.internalChatMember.update({
     where: { channelId_userId: { channelId, userId } },
     data: { leftAt: new Date() },
   });
 }
 
 export async function deleteGroup(actor: CurrentUser, channelId: string): Promise<void> {
-  const channel = await prisma.chatChannel.findUnique({ where: { id: channelId } });
+  const channel = await prisma.internalChatChannel.findUnique({ where: { id: channelId } });
   if (!channel) throw new ChatError('Canal no encontrado');
   if (channel.type !== 'group') throw new ChatError('Solo se pueden eliminar grupos');
 
-  const membership = await prisma.chatMember.findFirst({
+  const membership = await prisma.internalChatMember.findFirst({
     where: { channelId, userId: actor.id, leftAt: null },
   });
   if (!membership) throw new AuthorizationError('No eres miembro de este canal');
@@ -797,7 +797,7 @@ export async function deleteGroup(actor: CurrentUser, channelId: string): Promis
     throw new AuthorizationError('Solo el creador puede eliminar el grupo');
   }
 
-  await prisma.chatChannel.delete({ where: { id: channelId } });
+  await prisma.internalChatChannel.delete({ where: { id: channelId } });
 
   await recordAuditEvent({
     actorUserId: actor.id,
@@ -848,7 +848,7 @@ export async function searchUsers(
 // =====================================================
 
 export async function getInbox(userId: string): Promise<ChatInboxItem[]> {
-  const memberships = await prisma.chatMember.findMany({
+  const memberships = await prisma.internalChatMember.findMany({
     where: { userId, leftAt: null },
     include: {
       channel: {
@@ -880,7 +880,7 @@ export async function getInbox(userId: string): Promise<ChatInboxItem[]> {
   for (const m of memberships) {
     const channel = m.channel;
     const lastMsg = channel.messages[0];
-    const unreadCount = await prisma.chatMessage.count({
+    const unreadCount = await prisma.internalChatMessage.count({
       where: {
         channelId: channel.id,
         createdAt: { gt: m.lastReadAt },

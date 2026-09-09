@@ -172,7 +172,7 @@ async function getUserName(userId: string): Promise<string> {
 
 async function getChannelMemberIds(channelId: string): Promise<string[]> {
   const { prisma } = await import('@/lib/prisma');
-  const members = await prisma.chatMember.findMany({
+  const members = await prisma.internalChatMember.findMany({
     where: { channelId, leftAt: null },
     select: { userId: true },
   });

@@ -14,7 +14,7 @@ const OFFLINE_TIMEOUT_MS = 2 * 60 * 1000; // 2 minutes after last heartbeat
 export type PresenceStatus = 'online' | 'away' | 'offline';
 
 export async function heartbeat(userId: string): Promise<void> {
-  await prisma.chatPresence.upsert({
+  await prisma.internalChatPresence.upsert({
     where: { userId },
     create: { userId, status: 'online', lastSeenAt: new Date() },
     update: { status: 'online', lastSeenAt: new Date() },
@@ -22,7 +22,7 @@ export async function heartbeat(userId: string): Promise<void> {
 }
 
 export async function setAway(userId: string): Promise<void> {
-  await prisma.chatPresence.upsert({
+  await prisma.internalChatPresence.upsert({
     where: { userId },
     create: { userId, status: 'away', lastSeenAt: new Date() },
     update: { status: 'away', lastSeenAt: new Date() },
@@ -30,7 +30,7 @@ export async function setAway(userId: string): Promise<void> {
 }
 
 export async function setOffline(userId: string): Promise<void> {
-  await prisma.chatPresence.upsert({
+  await prisma.internalChatPresence.upsert({
     where: { userId },
     create: { userId, status: 'offline', lastSeenAt: new Date() },
     update: { status: 'offline', lastSeenAt: new Date() },
@@ -39,7 +39,7 @@ export async function setOffline(userId: string): Promise<void> {
 
 export async function getPresence(userIds: string[]): Promise<Map<string, PresenceStatus>> {
   if (userIds.length === 0) return new Map();
-  const records = await prisma.chatPresence.findMany({
+  const records = await prisma.internalChatPresence.findMany({
     where: { userId: { in: userIds } },
   });
   const now = Date.now();
@@ -75,14 +75,14 @@ export async function getPresenceStatus(userId: string): Promise<PresenceStatus>
  * and was not sent by the user themselves.
  */
 export async function getUnreadCounts(userId: string): Promise<Map<string, number>> {
-  const memberships = await prisma.chatMember.findMany({
+  const memberships = await prisma.internalChatMember.findMany({
     where: { userId, leftAt: null },
     select: { channelId: true, lastReadAt: true },
   });
 
   const result = new Map<string, number>();
   for (const m of memberships) {
-    const count = await prisma.chatMessage.count({
+    const count = await prisma.internalChatMessage.count({
       where: {
         channelId: m.channelId,
         createdAt: { gt: m.lastReadAt },

@@ -188,11 +188,11 @@ model User {
   entityWatches       EntityWatch[]
   notifications       Notification[]
   aiConversations     AiConversation[]
-  chatMemberships     ChatMember[]
-  chatMessages        ChatMessage[]
-  chatReactions       ChatReaction[]
-  chatReadReceipts    ChatReadReceipt[]
-  chatPresence        ChatPresence?
+  chatMemberships     InternalChatMember[]
+  chatMessages        InternalChatMessage[]
+  chatReactions       InternalChatReaction[]
+  chatReadReceipts    InternalChatReadReceipt[]
+  chatPresence        InternalChatPresence?
 
   @@index([isActive])
 }
@@ -514,43 +514,45 @@ model AiConfig {
 // =====================================================
 
 /// Canal de chat: mensaje directo (type='dm') o grupo (type='group').
-model ChatChannel {
-  id            String        @id @default(cuid())
+model InternalChatChannel {
+  id            String                @id @default(cuid())
   type          String
   name          String?
   avatarPath    String?
   createdBy     String
-  lastMessageAt DateTime      @default(now())
-  createdAt     DateTime      @default(now())
-  updatedAt     DateTime      @updatedAt
-  members       ChatMember[]
-  messages      ChatMessage[]
+  lastMessageAt DateTime              @default(now())
+  createdAt     DateTime              @default(now())
+  updatedAt     DateTime              @updatedAt
+  members       InternalChatMember[]
+  messages      InternalChatMessage[]
 
   @@index([type])
   @@index([lastMessageAt])
+  @@map("internal_chat_channel")
 }
 
 /// Membresía de un usuario en un canal de chat.
-model ChatMember {
-  id         String      @id @default(cuid())
+model InternalChatMember {
+  id         String                @id @default(cuid())
   channelId  String
   userId     String
-  role       String      @default("member")
-  joinedAt   DateTime    @default(now())
-  lastReadAt DateTime    @default(now())
+  role       String                @default("member")
+  joinedAt   DateTime              @default(now())
+  lastReadAt DateTime              @default(now())
   mutedUntil DateTime?
   leftAt     DateTime?
-  channel    ChatChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
-  user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  channel    InternalChatChannel   @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  user       User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([channelId, userId])
   @@index([userId])
   @@index([channelId, leftAt])
+  @@map("internal_chat_member")
 }
 
 /// Mensaje dentro de un canal de chat.
-model ChatMessage {
-  id              String            @id @default(cuid())
+model InternalChatMessage {
+  id              String                  @id @default(cuid())
   channelId       String
   senderId        String
   content         String?
@@ -559,25 +561,26 @@ model ChatMessage {
   forwardedBy     String?
   editedAt        DateTime?
   deletedAt       DateTime?
-  createdAt       DateTime          @default(now())
-  channel         ChatChannel       @relation(fields: [channelId], references: [id], onDelete: Cascade)
-  sender          User              @relation(fields: [senderId], references: [id], onDelete: Cascade)
-  replyTo         ChatMessage?      @relation("ChatMessageReply", fields: [replyToId], references: [id], onDelete: SetNull)
-  forwardedFrom   ChatMessage?      @relation("ChatMessageForward", fields: [forwardedFromId], references: [id], onDelete: SetNull)
-  replies         ChatMessage[]     @relation("ChatMessageReply")
-  forwards        ChatMessage[]     @relation("ChatMessageForward")
-  attachments     ChatAttachment[]
-  reactions       ChatReaction[]
-  readReceipts    ChatReadReceipt[]
+  createdAt       DateTime                @default(now())
+  channel         InternalChatChannel     @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  sender          User                    @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  replyTo         InternalChatMessage?    @relation("InternalChatMessageReply", fields: [replyToId], references: [id], onDelete: SetNull)
+  forwardedFrom   InternalChatMessage?    @relation("InternalChatMessageForward", fields: [forwardedFromId], references: [id], onDelete: SetNull)
+  replies         InternalChatMessage[]   @relation("InternalChatMessageReply")
+  forwards        InternalChatMessage[]   @relation("InternalChatMessageForward")
+  attachments     InternalChatAttachment[]
+  reactions       InternalChatReaction[]
+  readReceipts    InternalChatReadReceipt[]
 
   @@index([channelId, createdAt])
   @@index([senderId])
   @@index([replyToId])
+  @@map("internal_chat_message")
 }
 
 /// Archivo adjunto a un mensaje (foto, video, audio, documento).
-model ChatAttachment {
-  id            String      @id @default(cuid())
+model InternalChatAttachment {
+  id            String              @id @default(cuid())
   messageId     String
   fileName      String
   mimeType      String
@@ -587,43 +590,48 @@ model ChatAttachment {
   height        Int?
   durationMs    Int?
   thumbnailPath String?
-  createdAt     DateTime    @default(now())
-  message       ChatMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  createdAt     DateTime            @default(now())
+  message       InternalChatMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
 
   @@index([messageId])
+  @@map("internal_chat_attachment")
 }
 
 /// Reacción emoji a un mensaje.
-model ChatReaction {
-  id        String      @id @default(cuid())
+model InternalChatReaction {
+  id        String              @id @default(cuid())
   messageId String
   userId    String
   emoji     String
-  createdAt DateTime    @default(now())
-  message   ChatMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
-  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime            @default(now())
+  message   InternalChatMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user      User                @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([messageId, userId, emoji])
   @@index([messageId])
+  @@map("internal_chat_reaction")
 }
 
 /// Confirmación de lectura de un mensaje por un usuario.
-model ChatReadReceipt {
-  id        String      @id @default(cuid())
+model InternalChatReadReceipt {
+  id        String              @id @default(cuid())
   messageId String
   userId    String
-  readAt    DateTime    @default(now())
-  message   ChatMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
-  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  readAt    DateTime            @default(now())
+  message   InternalChatMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user      User                @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([messageId, userId])
   @@index([messageId])
+  @@map("internal_chat_read_receipt")
 }
 
 /// Presencia de un usuario en el chat (1 fila por usuario).
-model ChatPresence {
+model InternalChatPresence {
   userId     String   @id
   status     String   @default("offline")
   lastSeenAt DateTime @default(now())
   user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("internal_chat_presence")
 }

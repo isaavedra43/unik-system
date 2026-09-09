@@ -61,7 +61,7 @@ export async function POST(request: NextRequest) {
     const storagePath = await chatStorage.save(buffer, key, ext);
 
     // Create a placeholder message (sender only, no content) to link the attachment
-    const message = await prisma.chatMessage.create({
+    const message = await prisma.internalChatMessage.create({
       data: {
         channelId,
         senderId: session.user.id,
@@ -69,7 +69,7 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    const attachment = await prisma.chatAttachment.create({
+    const attachment = await prisma.internalChatAttachment.create({
       data: {
         messageId: message.id,
         fileName: file.name,
@@ -80,7 +80,7 @@ export async function POST(request: NextRequest) {
     });
 
     // Update channel lastMessageAt
-    await prisma.chatChannel.update({
+    await prisma.internalChatChannel.update({
       where: { id: channelId },
       data: { lastMessageAt: message.createdAt },
     });

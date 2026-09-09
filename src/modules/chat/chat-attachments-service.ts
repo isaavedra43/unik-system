@@ -94,7 +94,7 @@ export async function saveAttachment(input: SaveAttachmentInput): Promise<Attach
   const key = `chat-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
   const storagePath = await chatStorage.save(input.buffer, key, ext);
 
-  const attachment = await prisma.chatAttachment.create({
+  const attachment = await prisma.internalChatAttachment.create({
     data: {
       messageId: input.messageId,
       fileName: input.fileName,
@@ -121,7 +121,7 @@ export async function getAttachmentForUser(
   attachmentId: string,
   userId: string
 ): Promise<{ buffer: Buffer; fileName: string; mimeType: string; sizeBytes: number } | null> {
-  const attachment = await prisma.chatAttachment.findUnique({
+  const attachment = await prisma.internalChatAttachment.findUnique({
     where: { id: attachmentId },
     include: {
       message: {
@@ -135,7 +135,7 @@ export async function getAttachmentForUser(
   if (!attachment) return null;
 
   // Verify the user is a member of the channel
-  const membership = await prisma.chatMember.findFirst({
+  const membership = await prisma.internalChatMember.findFirst({
     where: { channelId: attachment.message.channelId, userId, leftAt: null },
   });
 
@@ -151,10 +151,10 @@ export async function getAttachmentForUser(
 }
 
 export async function deleteAttachment(attachmentId: string): Promise<void> {
-  const attachment = await prisma.chatAttachment.findUnique({
+  const attachment = await prisma.internalChatAttachment.findUnique({
     where: { id: attachmentId },
   });
   if (!attachment) return;
   await chatStorage.delete(attachment.storagePath);
-  await prisma.chatAttachment.delete({ where: { id: attachmentId } });
+  await prisma.internalChatAttachment.delete({ where: { id: attachmentId } });
 }
