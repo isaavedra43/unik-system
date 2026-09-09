@@ -109,9 +109,33 @@ export function PackageDetailPage({
           <DetailCard label="Tipo de envío" value={pkg.shipmentType ?? '—'} />
           <DetailCard label="Método de entrega" value={pkg.deliveryMethod ?? '—'} />
           <DetailCard label="Costo de envío" value={formatCurrency(pkg.shippingCharge)} />
+          {pkg.shipmentDate && <DetailCard label="Fecha de envío" value={formatDateOnly(pkg.shipmentDate)} />}
+          {pkg.shipmentStatus && <DetailCard label="Estado de envío" value={pkg.shipmentStatus} />}
+          {pkg.salesChannel && <DetailCard label="Canal de venta" value={pkg.salesChannel} />}
+          {pkg.quantity && <DetailCard label="Cantidad total" value={pkg.quantity} />}
+          {pkg.isCarrierShipment !== null && <DetailCard label="Envío por paquetería" value={pkg.isCarrierShipment ? 'Sí' : 'No'} />}
+          {pkg.isTrackingEnabled !== null && <DetailCard label="Rastreo habilitado" value={pkg.isTrackingEnabled ? 'Sí' : 'No'} />}
+          {pkg.labelFormat && <DetailCard label="Formato de etiqueta" value={pkg.labelFormat} />}
           {pkg.zohoSalesOrderId && <DetailCard label="Orden de venta Zoho" value={pkg.zohoSalesOrderId} />}
+          {pkg.salesorderNumber && <DetailCard label="Folio OV" value={pkg.salesorderNumber} />}
           {pkg.zohoCustomerId && <DetailCard label="Cliente Zoho" value={pkg.zohoCustomerId} />}
         </div>
+
+        {/* Shipping address */}
+        {(pkg.shippingAddress || pkg.shippingCity || pkg.shippingState || pkg.shippingCountry) ? (
+          <div className="rounded-lg border bg-card p-6 space-y-3">
+            <h2 className="text-lg font-semibold">Dirección de envío</h2>
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {pkg.shippingAttention && <DetailCard label="Atención" value={pkg.shippingAttention} />}
+              <DetailCard label="Calle" value={pkg.shippingAddress ?? '—'} />
+              <DetailCard label="Ciudad" value={pkg.shippingCity ?? '—'} />
+              <DetailCard label="Estado" value={pkg.shippingState ?? '—'} />
+              <DetailCard label="C.P." value={pkg.shippingZip ?? '—'} />
+              <DetailCard label="País" value={pkg.shippingCountry ?? '—'} />
+              <DetailCard label="Teléfono" value={pkg.shippingPhone ?? '—'} />
+            </div>
+          </div>
+        ) : null}
 
         {pkg.items.length > 0 && (
           <div className="rounded-lg border bg-card p-6 space-y-3">

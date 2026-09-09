@@ -11,6 +11,7 @@ import { ChevronDown, Home, LogOut, Menu, Shield, Users } from '@/components/ui/
 import {
   Bell, Bot, ShoppingCart, Plug, MessageCircle, MessageSquare, X,
   Package, FileText, Boxes, Users as UsersIcon, UserCog, Truck,
+  CreditCard, Receipt, Wallet,
 } from 'lucide-react';
 import { AssistantWidget } from '@/components/assistant/AssistantWidget';
 import { ThemeToggle } from '@/components/layout/ThemeToggle';
@@ -374,6 +375,46 @@ function buildBreadcrumbs(pathname: string): { label: string; href?: string }[] 
       { label: 'Detalle' },
     ];
   }
+  if (pathname === '/app/payments') {
+    return [{ label: 'Facturación' }, { label: 'Pagos' }];
+  }
+  if (pathname.startsWith('/app/payments/')) {
+    return [
+      { label: 'Facturación' },
+      { label: 'Pagos', href: '/app/payments' },
+      { label: 'Detalle' },
+    ];
+  }
+  if (pathname === '/app/purchase-orders') {
+    return [{ label: 'Compras' }, { label: 'Órdenes de Compra' }];
+  }
+  if (pathname.startsWith('/app/purchase-orders/')) {
+    return [
+      { label: 'Compras' },
+      { label: 'Órdenes de Compra', href: '/app/purchase-orders' },
+      { label: 'Detalle' },
+    ];
+  }
+  if (pathname === '/app/bills') {
+    return [{ label: 'Compras' }, { label: 'Bills' }];
+  }
+  if (pathname.startsWith('/app/bills/')) {
+    return [
+      { label: 'Compras' },
+      { label: 'Bills', href: '/app/bills' },
+      { label: 'Detalle' },
+    ];
+  }
+  if (pathname === '/app/vendor-credits') {
+    return [{ label: 'Compras' }, { label: 'Créditos de Proveedor' }];
+  }
+  if (pathname.startsWith('/app/vendor-credits/')) {
+    return [
+      { label: 'Compras' },
+      { label: 'Créditos de Proveedor', href: '/app/vendor-credits' },
+      { label: 'Detalle' },
+    ];
+  }
   if (pathname === '/app/notifications') {
     return [{ label: 'Notificaciones' }];
   }
@@ -456,6 +497,35 @@ export default function AppShell({ user, children }: AppShellProps) {
           icon: <FileText size={18} />,
           visible: user.permissionKeys.includes('invoices.view') || user.isSuperAdmin,
         },
+        {
+          href: '/app/payments',
+          label: 'Pagos',
+          icon: <CreditCard size={18} />,
+          visible: user.permissionKeys.includes('payments.view') || user.isSuperAdmin,
+        },
+      ],
+    },
+    {
+      title: 'Compras',
+      items: [
+        {
+          href: '/app/purchase-orders',
+          label: 'Órdenes de compra',
+          icon: <ShoppingCart size={18} />,
+          visible: user.permissionKeys.includes('purchase_orders.view') || user.isSuperAdmin,
+        },
+        {
+          href: '/app/bills',
+          label: 'Bills',
+          icon: <Receipt size={18} />,
+          visible: user.permissionKeys.includes('bills.view') || user.isSuperAdmin,
+        },
+        {
+          href: '/app/vendor-credits',
+          label: 'Créditos de proveedor',
+          icon: <Wallet size={18} />,
+          visible: user.permissionKeys.includes('vendor_credits.view') || user.isSuperAdmin,
+        },
       ],
     },
     {
@@ -519,7 +589,11 @@ export default function AppShell({ user, children }: AppShellProps) {
       pathname.startsWith('/app/contacts/vendors') ||
       pathname.startsWith('/app/products') ||
       pathname.startsWith('/app/packages') ||
-      pathname.startsWith('/app/invoices')) &&
+      pathname.startsWith('/app/invoices') ||
+      pathname.startsWith('/app/payments') ||
+      pathname.startsWith('/app/purchase-orders') ||
+      pathname.startsWith('/app/bills') ||
+      pathname.startsWith('/app/vendor-credits')) &&
     !pathname.includes('/api');
   const isAssistantPage = pathname.startsWith('/app/assistant');
   const isChatPage = pathname.startsWith('/app/chat');

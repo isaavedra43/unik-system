@@ -23,6 +23,16 @@ export interface InvoiceDetail {
   cfdiUuid: string | null; cfdiVersion: string | null; usoCfdi: string | null;
   metodoPago: string | null; formaPago: string | null; regimenFiscal: string | null;
   cfdiExportacion: string | null;
+  // Address fields
+  billingAddress: string | null; billingCity: string | null; billingState: string | null;
+  billingZip: string | null; billingCountry: string | null;
+  shippingAddress: string | null; shippingCity: string | null; shippingState: string | null;
+  shippingZip: string | null; shippingCountry: string | null;
+  // Additional fields
+  notes: string | null; terms: string | null; referenceNumber: string | null;
+  exchangeRate: string | null; discount: string | null; discountType: string | null;
+  isDiscountBeforeTax: boolean | null;
+  zohoCreatedTime: string | null; zohoLastModifiedTime: string | null;
   sourceRemoteModifiedAt: string; sourceSnapshotId: string;
   normalizedAt: string; createdAt: string; updatedAt: string;
   items: InvoiceItemListRow[];
@@ -58,6 +68,14 @@ export function toInvoiceDetail(inv: {
   cfdiUuid: string | null; cfdiVersion: string | null; usoCfdi: string | null;
   metodoPago: string | null; formaPago: string | null; regimenFiscal: string | null;
   cfdiExportacion: string | null;
+  billingAddress: string | null; billingCity: string | null; billingState: string | null;
+  billingZip: string | null; billingCountry: string | null;
+  shippingAddress: string | null; shippingCity: string | null; shippingState: string | null;
+  shippingZip: string | null; shippingCountry: string | null;
+  notes: string | null; terms: string | null; referenceNumber: string | null;
+  exchangeRate: Prisma.Decimal | null; discount: Prisma.Decimal | null; discountType: string | null;
+  isDiscountBeforeTax: boolean | null;
+  zohoCreatedTime: Date | null; zohoLastModifiedTime: Date | null;
   sourceRemoteModifiedAt: Date; sourceSnapshotId: string;
   normalizedAt: Date; createdAt: Date; updatedAt: Date;
   items?: { id: string; name: string | null; description: string | null; quantity: Prisma.Decimal | null; rate: Prisma.Decimal | null; unit: string | null; lineTotal: Prisma.Decimal | null; zohoSalesOrderId: string | null }[];
@@ -72,6 +90,15 @@ export function toInvoiceDetail(inv: {
     cfdiUuid: inv.cfdiUuid, cfdiVersion: inv.cfdiVersion, usoCfdi: inv.usoCfdi,
     metodoPago: inv.metodoPago, formaPago: inv.formaPago, regimenFiscal: inv.regimenFiscal,
     cfdiExportacion: inv.cfdiExportacion,
+    billingAddress: inv.billingAddress, billingCity: inv.billingCity, billingState: inv.billingState,
+    billingZip: inv.billingZip, billingCountry: inv.billingCountry,
+    shippingAddress: inv.shippingAddress, shippingCity: inv.shippingCity, shippingState: inv.shippingState,
+    shippingZip: inv.shippingZip, shippingCountry: inv.shippingCountry,
+    notes: inv.notes, terms: inv.terms, referenceNumber: inv.referenceNumber,
+    exchangeRate: dec(inv.exchangeRate), discount: dec(inv.discount), discountType: inv.discountType,
+    isDiscountBeforeTax: inv.isDiscountBeforeTax,
+    zohoCreatedTime: inv.zohoCreatedTime?.toISOString() ?? null,
+    zohoLastModifiedTime: inv.zohoLastModifiedTime?.toISOString() ?? null,
     sourceRemoteModifiedAt: inv.sourceRemoteModifiedAt.toISOString(),
     sourceSnapshotId: inv.sourceSnapshotId,
     normalizedAt: inv.normalizedAt.toISOString(), createdAt: inv.createdAt.toISOString(),

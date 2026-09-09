@@ -45,6 +45,34 @@ export interface ContactDetail {
   taxRegime: string | null;
   legalName: string | null;
   isTdsRegistered: boolean | null;
+  // Address fields
+  billingAddress: string | null;
+  billingCity: string | null;
+  billingState: string | null;
+  billingZip: string | null;
+  billingCountry: string | null;
+  billingFax: string | null;
+  shippingAddress: string | null;
+  shippingCity: string | null;
+  shippingState: string | null;
+  shippingZip: string | null;
+  shippingCountry: string | null;
+  shippingFax: string | null;
+  // Contact person fields
+  firstName: string | null;
+  lastName: string | null;
+  mobile: string | null;
+  designation: string | null;
+  department: string | null;
+  // Additional Zoho fields
+  customerSubType: string | null;
+  portalStatus: string | null;
+  ownerName: string | null;
+  source: string | null;
+  photoUrl: string | null;
+  primaryContactId: string | null;
+  creditLimitExceededAmount: string | null;
+  notes: string | null;
   // Sync tracking
   sourceRemoteModifiedAt: string;
   sourceSnapshotId: string;
@@ -113,6 +141,31 @@ export function toContactDetail(contact: {
   taxRegime: string | null;
   legalName: string | null;
   isTdsRegistered: boolean | null;
+  billingAddress: string | null;
+  billingCity: string | null;
+  billingState: string | null;
+  billingZip: string | null;
+  billingCountry: string | null;
+  billingFax: string | null;
+  shippingAddress: string | null;
+  shippingCity: string | null;
+  shippingState: string | null;
+  shippingZip: string | null;
+  shippingCountry: string | null;
+  shippingFax: string | null;
+  firstName: string | null;
+  lastName: string | null;
+  mobile: string | null;
+  designation: string | null;
+  department: string | null;
+  customerSubType: string | null;
+  portalStatus: string | null;
+  ownerName: string | null;
+  source: string | null;
+  photoUrl: string | null;
+  primaryContactId: string | null;
+  creditLimitExceededAmount: Prisma.Decimal | null;
+  notes: string | null;
   sourceRemoteModifiedAt: Date;
   sourceSnapshotId: string;
   normalizedAt: Date;
@@ -142,6 +195,31 @@ export function toContactDetail(contact: {
     taxRegime: contact.taxRegime,
     legalName: contact.legalName,
     isTdsRegistered: contact.isTdsRegistered,
+    billingAddress: contact.billingAddress,
+    billingCity: contact.billingCity,
+    billingState: contact.billingState,
+    billingZip: contact.billingZip,
+    billingCountry: contact.billingCountry,
+    billingFax: contact.billingFax,
+    shippingAddress: contact.shippingAddress,
+    shippingCity: contact.shippingCity,
+    shippingState: contact.shippingState,
+    shippingZip: contact.shippingZip,
+    shippingCountry: contact.shippingCountry,
+    shippingFax: contact.shippingFax,
+    firstName: contact.firstName,
+    lastName: contact.lastName,
+    mobile: contact.mobile,
+    designation: contact.designation,
+    department: contact.department,
+    customerSubType: contact.customerSubType,
+    portalStatus: contact.portalStatus,
+    ownerName: contact.ownerName,
+    source: contact.source,
+    photoUrl: contact.photoUrl,
+    primaryContactId: contact.primaryContactId,
+    creditLimitExceededAmount: decimalToString(contact.creditLimitExceededAmount),
+    notes: contact.notes,
     sourceRemoteModifiedAt: contact.sourceRemoteModifiedAt.toISOString(),
     sourceSnapshotId: contact.sourceSnapshotId,
     normalizedAt: contact.normalizedAt.toISOString(),

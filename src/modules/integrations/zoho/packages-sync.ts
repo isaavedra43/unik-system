@@ -89,7 +89,7 @@ export const packagesAdapter: ZohoEntityAdapter = {
     await normalizePendingPackageSnapshots({ limit });
   },
 
-  currentNormalizerVersion: 1,
+  currentNormalizerVersion: 2,
 };
 
 // ---------------------------------------------------------------------------

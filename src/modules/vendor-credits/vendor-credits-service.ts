@@ -1,0 +1,60 @@
+import { prisma } from '@/lib/prisma';
+import { toVendorCreditListRow, toVendorCreditDetail } from './vendor-credits-contract';
+import type { VendorCreditListRow, VendorCreditDetail } from './vendor-credits-contract';
+
+export type { VendorCreditListRow, VendorCreditDetail };
+
+const MIN_PAGE = 1;
+const DEFAULT_PAGE_SIZE = 50;
+const MAX_PAGE_SIZE = 200;
+
+export interface VendorCreditsListResult {
+  rows: VendorCreditListRow[];
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+}
+
+export async function getVendorCreditsWorkspace(options: {
+  page?: number;
+  pageSize?: number;
+  search?: string;
+}): Promise<VendorCreditsListResult> {
+  const page = Math.max(MIN_PAGE, options.page ?? 1);
+  const pageSize = Math.min(MAX_PAGE_SIZE, Math.max(1, options.pageSize ?? DEFAULT_PAGE_SIZE));
+  const search = options.search?.trim();
+
+  const where = search
+    ? {
+        OR: [
+          { vendorCreditNumber: { contains: search, mode: 'insensitive' as const } },
+          { vendorName: { contains: search, mode: 'insensitive' as const } },
+        ],
+      }
+    : {};
+
+  const [rows, total] = await Promise.all([
+    prisma.vendorCredit.findMany({
+      where,
+      orderBy: { date: 'desc' },
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+    }),
+    prisma.vendorCredit.count({ where }),
+  ]);
+
+  return {
+    rows: rows.map(toVendorCreditListRow),
+    total,
+    page,
+    pageSize,
+    totalPages: Math.ceil(total / pageSize),
+  };
+}
+
+export async function getVendorCreditById(id: string): Promise<VendorCreditDetail | null> {
+  const vendorCredit = await prisma.vendorCredit.findUnique({ where: { id } });
+  if (!vendorCredit) return null;
+  return toVendorCreditDetail(vendorCredit);
+}

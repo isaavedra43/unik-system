@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { SOURCE, PACKAGES_ENTITY_TYPE } from '@/modules/integrations/zoho/packages-sync';
 
-export const CURRENT_PACKAGE_NORMALIZER_VERSION = 1;
+export const CURRENT_PACKAGE_NORMALIZER_VERSION = 2;
 
 export const NORMALIZATION_ERROR_CODE = {
   SNAPSHOT_SHAPE_INVALID: 'SNAPSHOT_SHAPE_INVALID',
@@ -75,6 +75,23 @@ const packagePayloadSchema = z
     customer_id: z.string().nullish(),
     customer_name: z.string().nullish(),
     last_modified_time: z.string().nullish(),
+    // Additional fields
+    shipment_date: z.string().nullish(),
+    shipment_status: z.string().nullish(),
+    is_carrier_shipment: z.boolean().nullish(),
+    is_tracking_enabled: z.boolean().nullish(),
+    label_format: z.string().nullish(),
+    sales_channel: z.string().nullish(),
+    salesorder_number: z.string().nullish(),
+    quantity: z.union([z.string(), z.number()]).nullish(),
+    // Shipping address
+    shipping_attention: z.string().nullish(),
+    shipping_address: z.string().nullish(),
+    shipping_city: z.string().nullish(),
+    shipping_state: z.string().nullish(),
+    shipping_zip: z.string().nullish(),
+    shipping_country: z.string().nullish(),
+    shipping_phone: z.string().nullish(),
     package_items: z
       .array(
         z.object({
@@ -104,6 +121,12 @@ function toDecimal(value: unknown): Prisma.Decimal | null {
   }
 }
 
+function safeDate(value: string | null | undefined): Date | null {
+  if (!value) return null;
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
 function buildPackageData(
   snapshotId: string,
   remoteModifiedAt: Date,
@@ -122,6 +145,23 @@ function buildPackageData(
     zohoSalesOrderId: payload.salesorder_id ?? null,
     zohoCustomerId: payload.customer_id ?? null,
     customerName: payload.customer_name ?? null,
+    // Additional fields
+    shipmentDate: payload.shipment_date ? safeDate(payload.shipment_date) : null,
+    shipmentStatus: payload.shipment_status ?? null,
+    isCarrierShipment: payload.is_carrier_shipment ?? null,
+    isTrackingEnabled: payload.is_tracking_enabled ?? null,
+    labelFormat: payload.label_format ?? null,
+    salesChannel: payload.sales_channel ?? null,
+    salesorderNumber: payload.salesorder_number ?? null,
+    quantity: toDecimal(payload.quantity),
+    // Shipping address
+    shippingAttention: payload.shipping_attention ?? null,
+    shippingAddress: payload.shipping_address ?? null,
+    shippingCity: payload.shipping_city ?? null,
+    shippingState: payload.shipping_state ?? null,
+    shippingZip: payload.shipping_zip ?? null,
+    shippingCountry: payload.shipping_country ?? null,
+    shippingPhone: payload.shipping_phone ?? null,
     sourceRemoteModifiedAt: remoteModifiedAt,
     sourceSnapshotId: snapshotId,
     normalizedAt: new Date(),

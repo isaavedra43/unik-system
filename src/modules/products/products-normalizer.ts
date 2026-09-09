@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { SOURCE, PRODUCTS_ENTITY_TYPE } from '@/modules/integrations/zoho/products-sync';
 
-export const CURRENT_PRODUCT_NORMALIZER_VERSION = 1;
+export const CURRENT_PRODUCT_NORMALIZER_VERSION = 2;
 
 export const NORMALIZATION_ERROR_CODE = {
   SNAPSHOT_SHAPE_INVALID: 'SNAPSHOT_SHAPE_INVALID',
@@ -90,6 +90,16 @@ const productPayloadSchema = z
     cf_clave_de_producto_sat: z.string().nullish(),
     cf_sat_unit_code: z.string().nullish(),
     cf_clave_de_unidad_sat: z.string().nullish(),
+    // Additional Zoho fields
+    item_type: z.string().nullish(),
+    source: z.string().nullish(),
+    tax_preference: z.string().nullish(),
+    purchase_tax_name: z.string().nullish(),
+    purchase_account_name: z.string().nullish(),
+    sales_account_name: z.string().nullish(),
+    inventory_account_name: z.string().nullish(),
+    inventory_valuation_method: z.string().nullish(),
+    created_time: z.string().nullish(),
   })
   .passthrough();
 
@@ -105,6 +115,12 @@ function toDecimal(value: unknown): Prisma.Decimal | null {
   } catch {
     return null;
   }
+}
+
+function safeDate(value: string | null | undefined): Date | null {
+  if (!value) return null;
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? null : d;
 }
 
 function buildProductData(
@@ -138,6 +154,17 @@ function buildProductData(
     // Mexico SAT fields
     satProductCode: payload.cf_sat_product_code ?? payload.cf_clave_de_producto_sat ?? null,
     satUnitCode: payload.cf_sat_unit_code ?? payload.cf_clave_de_unidad_sat ?? null,
+    // Additional Zoho fields
+    itemType: payload.item_type ?? null,
+    source: payload.source ?? null,
+    taxPreference: payload.tax_preference ?? null,
+    purchaseTaxName: payload.purchase_tax_name ?? null,
+    purchaseAccountName: payload.purchase_account_name ?? null,
+    salesAccountName: payload.sales_account_name ?? null,
+    inventoryAccountName: payload.inventory_account_name ?? null,
+    inventoryValuationMethod: payload.inventory_valuation_method ?? null,
+    zohoCreatedTime: payload.created_time ? safeDate(payload.created_time) : null,
+    zohoLastModifiedTime: payload.last_modified_time ? safeDate(payload.last_modified_time) : null,
     sourceRemoteModifiedAt: remoteModifiedAt,
     sourceSnapshotId: snapshotId,
     normalizedAt: new Date(),

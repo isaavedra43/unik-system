@@ -4,7 +4,12 @@ import { getContactById } from '@/modules/contacts/contacts-service';
 import { isEntityWatched } from '@/modules/sales/entity-watch-service';
 import { CONTACT_ENTITY_TYPE_VENDOR } from '@/modules/contacts/permissions';
 import { ContactDetailPage } from '@/components/contacts/ContactDetailPage';
-import { getPackagesByContactZohoId, getInvoicesByContactZohoId } from '@/modules/cross-module/relationships-service';
+import {
+  getPurchaseOrdersByVendorZohoId,
+  getBillsByVendorZohoId,
+  getVendorCreditsByVendorZohoId,
+  getProductsByVendorZohoId,
+} from '@/modules/cross-module/relationships-service';
 import { watchAction, unwatchAction } from '../actions';
 
 export const runtime = 'nodejs';
@@ -28,9 +33,11 @@ export default async function VendorDetailPage({
   const isWatched = await isEntityWatched(session!.user.id, CONTACT_ENTITY_TYPE_VENDOR, id);
   const canWatch = session!.user.isSuperAdmin || session!.user.permissionKeys.includes('vendors.watch');
 
-  const [relatedPackages, relatedInvoices] = await Promise.all([
-    getPackagesByContactZohoId(contact!.zohoContactId),
-    getInvoicesByContactZohoId(contact!.zohoContactId),
+  const [relatedPurchaseOrders, relatedBills, relatedVendorCredits, relatedProducts] = await Promise.all([
+    getPurchaseOrdersByVendorZohoId(contact!.zohoContactId),
+    getBillsByVendorZohoId(contact!.zohoContactId),
+    getVendorCreditsByVendorZohoId(contact!.zohoContactId),
+    getProductsByVendorZohoId(contact!.zohoContactId),
   ]);
 
   return (
@@ -43,8 +50,10 @@ export default async function VendorDetailPage({
       canWatch={canWatch}
       watchAction={watchAction}
       unwatchAction={unwatchAction}
-      relatedPackages={relatedPackages}
-      relatedInvoices={relatedInvoices}
+      relatedPurchaseOrders={relatedPurchaseOrders}
+      relatedBills={relatedBills}
+      relatedVendorCredits={relatedVendorCredits}
+      relatedProducts={relatedProducts}
     />
   );
 }

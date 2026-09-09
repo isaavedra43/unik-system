@@ -104,6 +104,10 @@ import { CONTACTS_PERMISSIONS } from '@/modules/contacts/permissions';
 import { PRODUCTS_PERMISSIONS } from '@/modules/products/permissions';
 import { PACKAGES_PERMISSIONS } from '@/modules/packages/permissions';
 import { INVOICES_PERMISSIONS } from '@/modules/invoices/permissions';
+import { PAYMENTS_PERMISSIONS } from '@/modules/payments/permissions';
+import { PURCHASE_ORDERS_PERMISSIONS } from '@/modules/purchase-orders/permissions';
+import { BILLS_PERMISSIONS } from '@/modules/bills/permissions';
+import { VENDOR_CREDITS_PERMISSIONS } from '@/modules/vendor-credits/permissions';
 
 /** Every known permission. Future modules spread their definitions here. */
 export const PERMISSION_REGISTRY: PermissionDefinition[] = [
@@ -114,6 +118,10 @@ export const PERMISSION_REGISTRY: PermissionDefinition[] = [
   ...PRODUCTS_PERMISSIONS,
   ...PACKAGES_PERMISSIONS,
   ...INVOICES_PERMISSIONS,
+  ...PAYMENTS_PERMISSIONS,
+  ...PURCHASE_ORDERS_PERMISSIONS,
+  ...BILLS_PERMISSIONS,
+  ...VENDOR_CREDITS_PERMISSIONS,
   ...INTEGRATIONS_PERMISSIONS,
   ...AI_PERMISSIONS,
   ...CHAT_PERMISSIONS,

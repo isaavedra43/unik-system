@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { SOURCE, INVOICES_ENTITY_TYPE } from '@/modules/integrations/zoho/invoices-sync';
 
-export const CURRENT_INVOICE_NORMALIZER_VERSION = 1;
+export const CURRENT_INVOICE_NORMALIZER_VERSION = 2;
 
 export const NORMALIZATION_ERROR_CODE = {
   SNAPSHOT_SHAPE_INVALID: 'SNAPSHOT_SHAPE_INVALID',
@@ -86,6 +86,26 @@ const invoicePayloadSchema = z
     cf_forma_pago: z.string().nullish(),
     cf_regimen_fiscal: z.string().nullish(),
     cf_exportacion: z.string().nullish(),
+    // Address fields
+    billing_address: z.string().nullish(),
+    billing_city: z.string().nullish(),
+    billing_state: z.string().nullish(),
+    billing_zip: z.string().nullish(),
+    billing_country: z.string().nullish(),
+    shipping_address: z.string().nullish(),
+    shipping_city: z.string().nullish(),
+    shipping_state: z.string().nullish(),
+    shipping_zip: z.string().nullish(),
+    shipping_country: z.string().nullish(),
+    // Additional fields
+    notes: z.string().nullish(),
+    terms: z.string().nullish(),
+    reference_number: z.string().nullish(),
+    exchange_rate: z.union([z.string(), z.number()]).nullish(),
+    discount: z.union([z.string(), z.number()]).nullish(),
+    discount_type: z.string().nullish(),
+    is_discount_before_tax: z.boolean().nullish(),
+    created_time: z.string().nullish(),
     // Line items
     line_items: z
       .array(
@@ -119,6 +139,12 @@ function toDecimal(value: unknown): Prisma.Decimal | null {
   try { return new Prisma.Decimal(cleaned); } catch { return null; }
 }
 
+function safeDate(value: string | null | undefined): Date | null {
+  if (!value) return null;
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
 function buildInvoiceData(
   snapshotId: string,
   remoteModifiedAt: Date,
@@ -148,6 +174,27 @@ function buildInvoiceData(
     formaPago: payload.cf_forma_pago ?? null,
     regimenFiscal: payload.cf_regimen_fiscal ?? null,
     cfdiExportacion: payload.cf_exportacion ?? null,
+    // Address fields
+    billingAddress: payload.billing_address ?? null,
+    billingCity: payload.billing_city ?? null,
+    billingState: payload.billing_state ?? null,
+    billingZip: payload.billing_zip ?? null,
+    billingCountry: payload.billing_country ?? null,
+    shippingAddress: payload.shipping_address ?? null,
+    shippingCity: payload.shipping_city ?? null,
+    shippingState: payload.shipping_state ?? null,
+    shippingZip: payload.shipping_zip ?? null,
+    shippingCountry: payload.shipping_country ?? null,
+    // Additional fields
+    notes: payload.notes ?? null,
+    terms: payload.terms ?? null,
+    referenceNumber: payload.reference_number ?? null,
+    exchangeRate: toDecimal(payload.exchange_rate),
+    discount: toDecimal(payload.discount),
+    discountType: payload.discount_type ?? null,
+    isDiscountBeforeTax: payload.is_discount_before_tax ?? null,
+    zohoCreatedTime: payload.created_time ? safeDate(payload.created_time) : null,
+    zohoLastModifiedTime: payload.last_modified_time ? safeDate(payload.last_modified_time) : null,
     sourceRemoteModifiedAt: remoteModifiedAt,
     sourceSnapshotId: snapshotId,
     normalizedAt: new Date(),

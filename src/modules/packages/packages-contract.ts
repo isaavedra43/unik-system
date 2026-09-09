@@ -34,6 +34,23 @@ export interface PackageDetail {
   zohoSalesOrderId: string | null;
   zohoCustomerId: string | null;
   customerName: string | null;
+  // Additional fields
+  shipmentDate: string | null;
+  shipmentStatus: string | null;
+  isCarrierShipment: boolean | null;
+  isTrackingEnabled: boolean | null;
+  labelFormat: string | null;
+  salesChannel: string | null;
+  salesorderNumber: string | null;
+  quantity: string | null;
+  // Shipping address
+  shippingAttention: string | null;
+  shippingAddress: string | null;
+  shippingCity: string | null;
+  shippingState: string | null;
+  shippingZip: string | null;
+  shippingCountry: string | null;
+  shippingPhone: string | null;
   sourceRemoteModifiedAt: string;
   sourceSnapshotId: string;
   normalizedAt: string;
@@ -85,6 +102,21 @@ export function toPackageDetail(pkg: {
   zohoSalesOrderId: string | null;
   zohoCustomerId: string | null;
   customerName: string | null;
+  shipmentDate: Date | null;
+  shipmentStatus: string | null;
+  isCarrierShipment: boolean | null;
+  isTrackingEnabled: boolean | null;
+  labelFormat: string | null;
+  salesChannel: string | null;
+  salesorderNumber: string | null;
+  quantity: Prisma.Decimal | null;
+  shippingAttention: string | null;
+  shippingAddress: string | null;
+  shippingCity: string | null;
+  shippingState: string | null;
+  shippingZip: string | null;
+  shippingCountry: string | null;
+  shippingPhone: string | null;
   sourceRemoteModifiedAt: Date;
   sourceSnapshotId: string;
   normalizedAt: Date;
@@ -106,6 +138,21 @@ export function toPackageDetail(pkg: {
     zohoSalesOrderId: pkg.zohoSalesOrderId,
     zohoCustomerId: pkg.zohoCustomerId,
     customerName: pkg.customerName,
+    shipmentDate: pkg.shipmentDate?.toISOString() ?? null,
+    shipmentStatus: pkg.shipmentStatus,
+    isCarrierShipment: pkg.isCarrierShipment,
+    isTrackingEnabled: pkg.isTrackingEnabled,
+    labelFormat: pkg.labelFormat,
+    salesChannel: pkg.salesChannel,
+    salesorderNumber: pkg.salesorderNumber,
+    quantity: decimalToString(pkg.quantity),
+    shippingAttention: pkg.shippingAttention,
+    shippingAddress: pkg.shippingAddress,
+    shippingCity: pkg.shippingCity,
+    shippingState: pkg.shippingState,
+    shippingZip: pkg.shippingZip,
+    shippingCountry: pkg.shippingCountry,
+    shippingPhone: pkg.shippingPhone,
     sourceRemoteModifiedAt: pkg.sourceRemoteModifiedAt.toISOString(),
     sourceSnapshotId: pkg.sourceSnapshotId,
     normalizedAt: pkg.normalizedAt.toISOString(),

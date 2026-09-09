@@ -89,7 +89,7 @@ export const contactsAdapter: ZohoEntityAdapter = {
     await normalizePendingContactSnapshots({ limit });
   },
 
-  currentNormalizerVersion: 1,
+  currentNormalizerVersion: 2,
 };
 
 // ---------------------------------------------------------------------------

@@ -43,6 +43,17 @@ export interface ProductDetail {
   vendorName: string | null;
   satProductCode: string | null;
   satUnitCode: string | null;
+  // Additional Zoho fields
+  itemType: string | null;
+  source: string | null;
+  taxPreference: string | null;
+  purchaseTaxName: string | null;
+  purchaseAccountName: string | null;
+  salesAccountName: string | null;
+  inventoryAccountName: string | null;
+  inventoryValuationMethod: string | null;
+  zohoCreatedTime: string | null;
+  zohoLastModifiedTime: string | null;
   sourceRemoteModifiedAt: string;
   sourceSnapshotId: string;
   normalizedAt: string;
@@ -115,6 +126,16 @@ export function toProductDetail(product: {
   vendorName: string | null;
   satProductCode: string | null;
   satUnitCode: string | null;
+  itemType: string | null;
+  source: string | null;
+  taxPreference: string | null;
+  purchaseTaxName: string | null;
+  purchaseAccountName: string | null;
+  salesAccountName: string | null;
+  inventoryAccountName: string | null;
+  inventoryValuationMethod: string | null;
+  zohoCreatedTime: Date | null;
+  zohoLastModifiedTime: Date | null;
   sourceRemoteModifiedAt: Date;
   sourceSnapshotId: string;
   normalizedAt: Date;
@@ -147,6 +168,16 @@ export function toProductDetail(product: {
     vendorName: product.vendorName,
     satProductCode: product.satProductCode,
     satUnitCode: product.satUnitCode,
+    itemType: product.itemType,
+    source: product.source,
+    taxPreference: product.taxPreference,
+    purchaseTaxName: product.purchaseTaxName,
+    purchaseAccountName: product.purchaseAccountName,
+    salesAccountName: product.salesAccountName,
+    inventoryAccountName: product.inventoryAccountName,
+    inventoryValuationMethod: product.inventoryValuationMethod,
+    zohoCreatedTime: product.zohoCreatedTime?.toISOString() ?? null,
+    zohoLastModifiedTime: product.zohoLastModifiedTime?.toISOString() ?? null,
     sourceRemoteModifiedAt: product.sourceRemoteModifiedAt.toISOString(),
     sourceSnapshotId: product.sourceSnapshotId,
     normalizedAt: product.normalizedAt.toISOString(),

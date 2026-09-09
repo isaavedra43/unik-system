@@ -132,7 +132,7 @@ export const productsAdapter: ZohoEntityAdapter = {
     await normalizePendingProductSnapshots({ limit });
   },
 
-  currentNormalizerVersion: 1,
+  currentNormalizerVersion: 2,
 };
 
 // ---------------------------------------------------------------------------

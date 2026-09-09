@@ -168,41 +168,41 @@ model SalesOrder {
 /// Application user account. Users are never hard-deleted from the UI;
 /// they are activated/deactivated to preserve history and relations.
 model User {
-  id                  String                    @id @default(cuid())
-  username            String                    @unique
-  email               String?                   @unique
-  name                String
-  passwordHash        String
-  isActive            Boolean                   @default(true)
-  mustChangePassword  Boolean                   @default(true)
-  failedLoginAttempts Int                       @default(0)
-  lockedUntil         DateTime?
-  lastLoginAt         DateTime?
-  passwordChangedAt   DateTime?
-  createdAt           DateTime                  @default(now())
-  updatedAt           DateTime                  @updatedAt
-  roles               UserRole[]
-  sessions            AuthSession[]
-  tablePreferences    UserTablePreference[]
-  tableViews          TableView[]
-  entityWatches       EntityWatch[]
-  notifications       Notification[]
-  aiConversations     AiConversation[]
-  chatMemberships     InternalChatMember[]
-  chatMessages        InternalChatMessage[]
-  chatReactions       InternalChatReaction[]
-  chatReadReceipts    InternalChatReadReceipt[]
-  chatPresence        InternalChatPresence?
-  chatMentions        InternalChatMention[]
-  chatPollVotes       InternalChatPollVote[]
-  chatEventRsvps      InternalChatEventRsvp[]
-  chatPins            InternalChatPinnedMessage[]
-  chatBookmarks       InternalChatBookmark[]
-  chatSnippets        InternalChatSnippet[]
-  chatScheduledMsgs   InternalChatScheduledMessage[]
-  chatNotifPrefs      InternalChatNotificationPreference[]
+  id                   String                               @id @default(cuid())
+  username             String                               @unique
+  email                String?                              @unique
+  name                 String
+  passwordHash         String
+  isActive             Boolean                              @default(true)
+  mustChangePassword   Boolean                              @default(true)
+  failedLoginAttempts  Int                                  @default(0)
+  lockedUntil          DateTime?
+  lastLoginAt          DateTime?
+  passwordChangedAt    DateTime?
+  createdAt            DateTime                             @default(now())
+  updatedAt            DateTime                             @updatedAt
+  roles                UserRole[]
+  sessions             AuthSession[]
+  tablePreferences     UserTablePreference[]
+  tableViews           TableView[]
+  entityWatches        EntityWatch[]
+  notifications        Notification[]
+  aiConversations      AiConversation[]
+  chatMemberships      InternalChatMember[]
+  chatMessages         InternalChatMessage[]
+  chatReactions        InternalChatReaction[]
+  chatReadReceipts     InternalChatReadReceipt[]
+  chatPresence         InternalChatPresence?
+  chatMentions         InternalChatMention[]
+  chatPollVotes        InternalChatPollVote[]
+  chatEventRsvps       InternalChatEventRsvp[]
+  chatPins             InternalChatPinnedMessage[]
+  chatBookmarks        InternalChatBookmark[]
+  chatSnippets         InternalChatSnippet[]
+  chatScheduledMsgs    InternalChatScheduledMessage[]
+  chatNotifPrefs       InternalChatNotificationPreference[]
   chatCallParticipants InternalChatCallParticipant[]
-  chatCallsInitiated  InternalChatCall[]
+  chatCallsInitiated   InternalChatCall[]
 
   @@index([isActive])
 }
@@ -309,8 +309,8 @@ model SalesOrderItem {
 /// A single Zoho /contacts resource with contact_type=customer|vendor.
 /// One Prisma model, one sync pipeline, two UI modules that filter by contactType.
 model Contact {
-  id                        String    @id @default(cuid())
-  zohoContactId             String    @unique
+  id                        String   @id @default(cuid())
+  zohoContactId             String   @unique
   contactType               String?
   contactName               String?
   companyName               String?
@@ -318,10 +318,10 @@ model Contact {
   paymentTerms              Int?
   paymentTermsLabel         String?
   status                    String?
-  outstandingReceivable     Decimal?  @db.Decimal(18, 4)
-  outstandingPayable        Decimal?  @db.Decimal(18, 4)
-  unusedCreditsReceivable   Decimal?  @db.Decimal(18, 4)
-  unusedCreditsPayable      Decimal?  @db.Decimal(18, 4)
+  outstandingReceivable     Decimal? @db.Decimal(18, 4)
+  outstandingPayable        Decimal? @db.Decimal(18, 4)
+  unusedCreditsReceivable   Decimal? @db.Decimal(18, 4)
+  unusedCreditsPayable      Decimal? @db.Decimal(18, 4)
   primaryEmail              String?
   primaryPhone              String?
   website                   String?
@@ -332,12 +332,40 @@ model Contact {
   taxRegime                 String?
   legalName                 String?
   isTdsRegistered           Boolean?
+  // Address fields (from Zoho LIST payload)
+  billingAddress            String?
+  billingCity               String?
+  billingState              String?
+  billingZip                String?
+  billingCountry            String?
+  billingFax                String?
+  shippingAddress           String?
+  shippingCity              String?
+  shippingState             String?
+  shippingZip               String?
+  shippingCountry           String?
+  shippingFax               String?
+  // Contact person fields
+  firstName                 String?
+  lastName                  String?
+  mobile                    String?
+  designation               String?
+  department                String?
+  // Additional Zoho fields
+  customerSubType           String?
+  portalStatus              String?
+  ownerName                 String?
+  source                    String?
+  photoUrl                  String?
+  primaryContactId          String?
+  creditLimitExceededAmount Decimal? @db.Decimal(18, 4)
+  notes                     String?
   // Sync tracking
   sourceRemoteModifiedAt    DateTime
   sourceSnapshotId          String
-  normalizedAt              DateTime  @default(now())
-  createdAt                 DateTime  @default(now())
-  updatedAt                 DateTime  @updatedAt
+  normalizedAt              DateTime @default(now())
+  createdAt                 DateTime @default(now())
+  updatedAt                 DateTime @updatedAt
 
   @@index([contactType])
   @@index([contactName])
@@ -349,38 +377,49 @@ model Contact {
 /// Business-normalized view of a Zoho Inventory item (product).
 /// Hydrated via bulk /itemdetails for efficiency.
 model Product {
-  id                     String    @id @default(cuid())
-  zohoItemId             String    @unique
-  name                   String?
-  sku                    String?
-  status                 String?
-  productType            String?
-  description            String?
-  rate                   Decimal?  @db.Decimal(18, 4)
-  unit                   String?
-  currencyCode           String?
-  taxName                String?
-  taxPercentage          Decimal?  @db.Decimal(18, 4)
-  isTaxable              Boolean?
-  stockOnHand            Decimal?  @db.Decimal(18, 4)
-  availableStock         Decimal?  @db.Decimal(18, 4)
-  reorderLevel           Decimal?  @db.Decimal(18, 4)
-  purchaseRate           Decimal?  @db.Decimal(18, 4)
-  categoryName           String?
-  categoryId             String?
-  manufacturer           String?
-  brand                  String?
-  zohoVendorId           String?
-  vendorName             String?
+  id                       String    @id @default(cuid())
+  zohoItemId               String    @unique
+  name                     String?
+  sku                      String?
+  status                   String?
+  productType              String?
+  description              String?
+  rate                     Decimal?  @db.Decimal(18, 4)
+  unit                     String?
+  currencyCode             String?
+  taxName                  String?
+  taxPercentage            Decimal?  @db.Decimal(18, 4)
+  isTaxable                Boolean?
+  stockOnHand              Decimal?  @db.Decimal(18, 4)
+  availableStock           Decimal?  @db.Decimal(18, 4)
+  reorderLevel             Decimal?  @db.Decimal(18, 4)
+  purchaseRate             Decimal?  @db.Decimal(18, 4)
+  categoryName             String?
+  categoryId               String?
+  manufacturer             String?
+  brand                    String?
+  zohoVendorId             String?
+  vendorName               String?
   // Mexico fiscal / SAT fields (normalized when present in payload)
-  satProductCode         String?
-  satUnitCode            String?
+  satProductCode           String?
+  satUnitCode              String?
+  // Additional Zoho fields (already in snapshot via passthrough)
+  itemType                 String?
+  source                   String?
+  taxPreference            String?
+  purchaseTaxName          String?
+  purchaseAccountName      String?
+  salesAccountName         String?
+  inventoryAccountName     String?
+  inventoryValuationMethod String?
+  zohoCreatedTime          DateTime?
+  zohoLastModifiedTime     DateTime?
   // Sync tracking
-  sourceRemoteModifiedAt DateTime
-  sourceSnapshotId       String
-  normalizedAt           DateTime  @default(now())
-  createdAt              DateTime  @default(now())
-  updatedAt              DateTime  @updatedAt
+  sourceRemoteModifiedAt   DateTime
+  sourceSnapshotId         String
+  normalizedAt             DateTime  @default(now())
+  createdAt                DateTime  @default(now())
+  updatedAt                DateTime  @updatedAt
 
   @@index([name])
   @@index([sku])
@@ -392,8 +431,8 @@ model Product {
 /// Business-normalized view of a Zoho Inventory package (shipment).
 /// Preserves source traceability through raw snapshots.
 model Package {
-  id                     String    @id @default(cuid())
-  zohoPackageId          String    @unique
+  id                     String        @id @default(cuid())
+  zohoPackageId          String        @unique
   packageNumber          String?
   status                 String?
   date                   DateTime?
@@ -401,16 +440,35 @@ model Package {
   carrier                String?
   trackingNumber         String?
   deliveryMethod         String?
-  shippingCharge         Decimal?  @db.Decimal(18, 4)
+  shippingCharge         Decimal?      @db.Decimal(18, 4)
   zohoSalesOrderId       String?
   zohoCustomerId         String?
   customerName           String?
+  // Shipping address (from DETAIL fetch - lazy)
+  shippingAttention      String?
+  shippingAddress        String?
+  shippingCity           String?
+  shippingState          String?
+  shippingZip            String?
+  shippingCountry        String?
+  shippingPhone          String?
+  // Additional fields
+  shipmentDate           DateTime?
+  shipmentStatus         String?
+  isCarrierShipment      Boolean?
+  isTrackingEnabled      Boolean?
+  labelFormat            String?
+  salesChannel           String?
+  salesorderNumber       String?
+  quantity               Decimal?      @db.Decimal(18, 4)
+  // Detail fetch tracking
+  lastDetailFetchedAt    DateTime?
   // Sync tracking
   sourceRemoteModifiedAt DateTime
   sourceSnapshotId       String
-  normalizedAt           DateTime  @default(now())
-  createdAt              DateTime  @default(now())
-  updatedAt              DateTime  @updatedAt
+  normalizedAt           DateTime      @default(now())
+  createdAt              DateTime      @default(now())
+  updatedAt              DateTime      @updatedAt
   items                  PackageItem[]
 
   @@index([status])
@@ -421,16 +479,16 @@ model Package {
 
 /// Business-normalized line items of a Zoho package.
 model PackageItem {
-  id             String   @id @default(cuid())
-  packageId      String
-  zohoItemId     String?
-  name           String?
-  sku            String?
-  description    String?
-  quantity       Decimal? @db.Decimal(18, 4)
-  unit           String?
-  sortOrder      Int      @default(0)
-  package        Package  @relation(fields: [packageId], references: [id], onDelete: Cascade)
+  id          String   @id @default(cuid())
+  packageId   String
+  zohoItemId  String?
+  name        String?
+  sku         String?
+  description String?
+  quantity    Decimal? @db.Decimal(18, 4)
+  unit        String?
+  sortOrder   Int      @default(0)
+  package     Package  @relation(fields: [packageId], references: [id], onDelete: Cascade)
 
   @@index([packageId])
   @@index([zohoItemId])
@@ -440,8 +498,8 @@ model PackageItem {
 /// Includes Mexican CFDI fields. Does NOT use sort_column=last_modified_time.
 /// Invoice payments are invoice-scoped and lazy (not stored in V1).
 model Invoice {
-  id                     String    @id @default(cuid())
-  zohoInvoiceId          String    @unique
+  id                     String        @id @default(cuid())
+  zohoInvoiceId          String        @unique
   invoiceNumber          String?
   status                 String?
   date                   DateTime?
@@ -449,12 +507,12 @@ model Invoice {
   zohoCustomerId         String?
   customerName           String?
   currencyCode           String?
-  subTotal               Decimal?  @db.Decimal(18, 4)
-  taxTotal               Decimal?  @db.Decimal(18, 4)
-  discountTotal          Decimal?  @db.Decimal(18, 4)
-  shippingCharge         Decimal?  @db.Decimal(18, 4)
-  total                  Decimal?  @db.Decimal(18, 4)
-  balance                Decimal?  @db.Decimal(18, 4)
+  subTotal               Decimal?      @db.Decimal(18, 4)
+  taxTotal               Decimal?      @db.Decimal(18, 4)
+  discountTotal          Decimal?      @db.Decimal(18, 4)
+  shippingCharge         Decimal?      @db.Decimal(18, 4)
+  total                  Decimal?      @db.Decimal(18, 4)
+  balance                Decimal?      @db.Decimal(18, 4)
   salespersonName        String?
   // Mexico CFDI fields (normalized when present in payload)
   cfdiUuid               String?
@@ -464,12 +522,33 @@ model Invoice {
   formaPago              String?
   regimenFiscal          String?
   cfdiExportacion        String?
+  // Address fields (from LIST payload)
+  billingAddress         String?
+  billingCity            String?
+  billingState           String?
+  billingZip             String?
+  billingCountry         String?
+  shippingAddress        String?
+  shippingCity           String?
+  shippingState          String?
+  shippingZip            String?
+  shippingCountry        String?
+  // Additional fields
+  notes                  String?
+  terms                  String?
+  referenceNumber        String?
+  exchangeRate           Decimal?      @db.Decimal(18, 6)
+  discount               Decimal?      @db.Decimal(18, 4)
+  discountType           String?
+  isDiscountBeforeTax    Boolean?
+  zohoCreatedTime        DateTime?
+  zohoLastModifiedTime   DateTime?
   // Sync tracking
   sourceRemoteModifiedAt DateTime
   sourceSnapshotId       String
-  normalizedAt           DateTime  @default(now())
-  createdAt              DateTime  @default(now())
-  updatedAt              DateTime  @updatedAt
+  normalizedAt           DateTime      @default(now())
+  createdAt              DateTime      @default(now())
+  updatedAt              DateTime      @updatedAt
   items                  InvoiceItem[]
 
   @@index([status])
@@ -481,27 +560,172 @@ model Invoice {
 /// Business-normalized line items of a Zoho invoice.
 /// Links to Sales Orders via salesorder_item_id / salesorder_id.
 model InvoiceItem {
-  id                  String   @id @default(cuid())
-  invoiceId           String
-  zohoItemId          String?
-  name                String?
-  description         String?
-  quantity            Decimal? @db.Decimal(18, 4)
-  rate                Decimal? @db.Decimal(18, 4)
-  unit                String?
-  lineTotal           Decimal? @db.Decimal(18, 4)
-  taxName             String?
-  taxPercentage       Decimal? @db.Decimal(18, 4)
-  taxAmount           Decimal? @db.Decimal(18, 4)
-  discountAmount      Decimal? @db.Decimal(18, 4)
-  zohoSalesOrderId    String?
+  id                   String   @id @default(cuid())
+  invoiceId            String
+  zohoItemId           String?
+  name                 String?
+  description          String?
+  quantity             Decimal? @db.Decimal(18, 4)
+  rate                 Decimal? @db.Decimal(18, 4)
+  unit                 String?
+  lineTotal            Decimal? @db.Decimal(18, 4)
+  taxName              String?
+  taxPercentage        Decimal? @db.Decimal(18, 4)
+  taxAmount            Decimal? @db.Decimal(18, 4)
+  discountAmount       Decimal? @db.Decimal(18, 4)
+  zohoSalesOrderId     String?
   zohoSalesOrderItemId String?
-  sortOrder           Int      @default(0)
-  invoice             Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  sortOrder            Int      @default(0)
+  invoice              Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
 
   @@index([invoiceId])
   @@index([zohoItemId])
   @@index([zohoSalesOrderId])
+}
+
+/// Business-normalized view of a Zoho customer payment.
+/// Synced via /customerpayments with useListAsSnapshot.
+model CustomerPayment {
+  id                     String    @id @default(cuid())
+  zohoPaymentId          String    @unique
+  paymentNumber          String?
+  paymentMode            String?
+  status                 String?
+  date                   DateTime?
+  amount                 Decimal?  @db.Decimal(18, 4)
+  balance                Decimal?  @db.Decimal(18, 4)
+  zohoCustomerId         String?
+  customerName           String?
+  currencyCode           String?
+  referenceNumber        String?
+  description            String?
+  exchangeRate           Decimal?  @db.Decimal(18, 6)
+  bankCharges            Decimal?  @db.Decimal(18, 4)
+  // Sync tracking
+  sourceRemoteModifiedAt DateTime
+  sourceSnapshotId       String
+  normalizedAt           DateTime  @default(now())
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+
+  @@index([zohoCustomerId])
+  @@index([date])
+  @@index([status])
+  @@index([sourceSnapshotId])
+}
+
+/// Business-normalized view of a Zoho purchase order.
+model PurchaseOrder {
+  id                     String              @id @default(cuid())
+  zohoPurchaseOrderId    String              @unique
+  purchaseOrderNumber    String?
+  status                 String?
+  date                   DateTime?
+  dueDate                DateTime?
+  deliveryDate           DateTime?
+  zohoVendorId           String?
+  vendorName             String?
+  currencyCode           String?
+  subTotal               Decimal?            @db.Decimal(18, 4)
+  taxTotal               Decimal?            @db.Decimal(18, 4)
+  discountTotal          Decimal?            @db.Decimal(18, 4)
+  shippingCharge         Decimal?            @db.Decimal(18, 4)
+  total                  Decimal?            @db.Decimal(18, 4)
+  balance                Decimal?            @db.Decimal(18, 4)
+  salespersonName        String?
+  notes                  String?
+  referenceNumber        String?
+  // Sync tracking
+  sourceRemoteModifiedAt DateTime
+  sourceSnapshotId       String
+  normalizedAt           DateTime            @default(now())
+  createdAt              DateTime            @default(now())
+  updatedAt              DateTime            @updatedAt
+  items                  PurchaseOrderItem[]
+
+  @@index([status])
+  @@index([zohoVendorId])
+  @@index([date])
+  @@index([sourceSnapshotId])
+}
+
+/// Business-normalized line items of a Zoho purchase order.
+model PurchaseOrderItem {
+  id              String        @id @default(cuid())
+  purchaseOrderId String
+  zohoItemId      String?
+  name            String?
+  description     String?
+  quantity        Decimal?      @db.Decimal(18, 4)
+  rate            Decimal?      @db.Decimal(18, 4)
+  unit            String?
+  lineTotal       Decimal?      @db.Decimal(18, 4)
+  taxName         String?
+  taxPercentage   Decimal?      @db.Decimal(18, 4)
+  taxAmount       Decimal?      @db.Decimal(18, 4)
+  sortOrder       Int           @default(0)
+  purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+
+  @@index([purchaseOrderId])
+  @@index([zohoItemId])
+}
+
+/// Business-normalized view of a Zoho bill (vendor invoice).
+model Bill {
+  id                     String    @id @default(cuid())
+  zohoBillId             String    @unique
+  billNumber             String?
+  status                 String?
+  date                   DateTime?
+  dueDate                DateTime?
+  zohoVendorId           String?
+  vendorName             String?
+  zohoPurchaseOrderId    String?
+  currencyCode           String?
+  subTotal               Decimal?  @db.Decimal(18, 4)
+  taxTotal               Decimal?  @db.Decimal(18, 4)
+  total                  Decimal?  @db.Decimal(18, 4)
+  balance                Decimal?  @db.Decimal(18, 4)
+  vendorCreditsApplied   Decimal?  @db.Decimal(18, 4)
+  notes                  String?
+  // Sync tracking
+  sourceRemoteModifiedAt DateTime
+  sourceSnapshotId       String
+  normalizedAt           DateTime  @default(now())
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+
+  @@index([status])
+  @@index([zohoVendorId])
+  @@index([zohoPurchaseOrderId])
+  @@index([date])
+  @@index([sourceSnapshotId])
+}
+
+/// Business-normalized view of a Zoho vendor credit.
+model VendorCredit {
+  id                     String    @id @default(cuid())
+  zohoVendorCreditId     String    @unique
+  vendorCreditNumber     String?
+  status                 String?
+  date                   DateTime?
+  zohoVendorId           String?
+  vendorName             String?
+  currencyCode           String?
+  total                  Decimal?  @db.Decimal(18, 4)
+  balance                Decimal?  @db.Decimal(18, 4)
+  notes                  String?
+  // Sync tracking
+  sourceRemoteModifiedAt DateTime
+  sourceSnapshotId       String
+  normalizedAt           DateTime  @default(now())
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+
+  @@index([status])
+  @@index([zohoVendorId])
+  @@index([date])
+  @@index([sourceSnapshotId])
 }
 
 /// Generic per-user table layout preferences (column order, visibility, widths,
@@ -724,14 +948,14 @@ model AiConfig {
 
 /// Canal de chat: mensaje directo (type='dm') o grupo (type='group').
 model InternalChatChannel {
-  id            String                @id @default(cuid())
+  id            String                   @id @default(cuid())
   type          String
   name          String?
   avatarPath    String?
   createdBy     String
-  lastMessageAt DateTime              @default(now())
-  createdAt     DateTime              @default(now())
-  updatedAt     DateTime              @updatedAt
+  lastMessageAt DateTime                 @default(now())
+  createdAt     DateTime                 @default(now())
+  updatedAt     DateTime                 @updatedAt
   members       InternalChatMember[]
   messages      InternalChatMessage[]
   events        InternalChatEvent[]
@@ -765,7 +989,7 @@ model InternalChatMember {
 
 /// Mensaje dentro de un canal de chat.
 model InternalChatMessage {
-  id              String                    @id @default(cuid())
+  id              String                      @id @default(cuid())
   channelId       String
   senderId        String
   content         String?
@@ -774,17 +998,17 @@ model InternalChatMessage {
   forwardedBy     String?
   editedAt        DateTime?
   deletedAt       DateTime?
-  priority        String                    @default("normal") // "normal" | "urgent"
+  priority        String                      @default("normal") // "normal" | "urgent"
   threadId        String?
-  createdAt       DateTime                  @default(now())
-  channel         InternalChatChannel       @relation(fields: [channelId], references: [id], onDelete: Cascade)
-  sender          User                      @relation(fields: [senderId], references: [id], onDelete: Cascade)
-  replyTo         InternalChatMessage?      @relation("InternalChatMessageReply", fields: [replyToId], references: [id], onDelete: SetNull)
-  forwardedFrom   InternalChatMessage?      @relation("InternalChatMessageForward", fields: [forwardedFromId], references: [id], onDelete: SetNull)
-  replies         InternalChatMessage[]     @relation("InternalChatMessageReply")
-  forwards        InternalChatMessage[]     @relation("InternalChatMessageForward")
-  thread          InternalChatThread?      @relation("InternalChatThreadMessages", fields: [threadId], references: [id], onDelete: SetNull)
-  threadRoot      InternalChatThread?      @relation("InternalChatThreadRoot")
+  createdAt       DateTime                    @default(now())
+  channel         InternalChatChannel         @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  sender          User                        @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  replyTo         InternalChatMessage?        @relation("InternalChatMessageReply", fields: [replyToId], references: [id], onDelete: SetNull)
+  forwardedFrom   InternalChatMessage?        @relation("InternalChatMessageForward", fields: [forwardedFromId], references: [id], onDelete: SetNull)
+  replies         InternalChatMessage[]       @relation("InternalChatMessageReply")
+  forwards        InternalChatMessage[]       @relation("InternalChatMessageForward")
+  thread          InternalChatThread?         @relation("InternalChatThreadMessages", fields: [threadId], references: [id], onDelete: SetNull)
+  threadRoot      InternalChatThread?         @relation("InternalChatThreadRoot")
   attachments     InternalChatAttachment[]
   reactions       InternalChatReaction[]
   readReceipts    InternalChatReadReceipt[]
@@ -903,10 +1127,10 @@ model InternalChatPoll {
 
 /// Opción de una encuesta de chat.
 model InternalChatPollOption {
-  id     String                   @id @default(cuid())
+  id     String                 @id @default(cuid())
   pollId String
   text   String
-  poll   InternalChatPoll         @relation(fields: [pollId], references: [id], onDelete: Cascade)
+  poll   InternalChatPoll       @relation(fields: [pollId], references: [id], onDelete: Cascade)
   votes  InternalChatPollVote[]
 
   @@index([pollId])
@@ -928,8 +1152,8 @@ model InternalChatPollVote {
 
 /// Evento de calendario creado desde el chat.
 model InternalChatEvent {
-  id          String                @id @default(cuid())
-  messageId   String                @unique
+  id          String                  @id @default(cuid())
+  messageId   String                  @unique
   channelId   String
   title       String
   description String?
@@ -937,9 +1161,9 @@ model InternalChatEvent {
   endsAt      DateTime?
   location    String?
   createdBy   String
-  createdAt    DateTime              @default(now())
-  message     InternalChatMessage   @relation(fields: [messageId], references: [id], onDelete: Cascade)
-  channel     InternalChatChannel   @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  createdAt   DateTime                @default(now())
+  message     InternalChatMessage     @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  channel     InternalChatChannel     @relation(fields: [channelId], references: [id], onDelete: Cascade)
   rsvps       InternalChatEventRsvp[]
 
   @@index([channelId, startsAt])
@@ -949,12 +1173,12 @@ model InternalChatEvent {
 
 /// Respuesta RSVP de un usuario a un evento de chat.
 model InternalChatEventRsvp {
-  id      String             @id @default(cuid())
+  id      String            @id @default(cuid())
   eventId String
   userId  String
   status  String // "yes" | "no" | "maybe"
-  event   InternalChatEvent  @relation(fields: [eventId], references: [id], onDelete: Cascade)
-  user    User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  event   InternalChatEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  user    User              @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([eventId, userId])
   @@index([eventId])
@@ -1015,7 +1239,7 @@ model InternalChatTag {
 
 /// Relación many-to-many entre canal y tag.
 model InternalChatChannelTag {
-  channelId String             @id @default(cuid())
+  channelId String              @id @default(cuid())
   tagId     String
   channel   InternalChatChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
   tag       InternalChatTag     @relation(fields: [tagId], references: [id], onDelete: Cascade)
@@ -1083,18 +1307,18 @@ model InternalChatBookmark {
 
 /// Llamada de voz/video WebRTC dentro de un canal de chat.
 model InternalChatCall {
-  id          String                       @id @default(cuid())
-  channelId   String
-  callerId    String
-  type        String // "audio" | "video"
-  status      String                       @default("ringing") // "ringing" | "active" | "ended" | "missed" | "declined"
-  startedAt   DateTime?
-  endedAt     DateTime?
-  createdAt   DateTime                     @default(now())
-  channel     InternalChatChannel           @relation(fields: [channelId], references: [id], onDelete: Cascade)
-  caller      User                         @relation(fields: [callerId], references: [id], onDelete: Cascade)
+  id           String                        @id @default(cuid())
+  channelId    String
+  callerId     String
+  type         String // "audio" | "video"
+  status       String                        @default("ringing") // "ringing" | "active" | "ended" | "missed" | "declined"
+  startedAt    DateTime?
+  endedAt      DateTime?
+  createdAt    DateTime                      @default(now())
+  channel      InternalChatChannel           @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  caller       User                          @relation(fields: [callerId], references: [id], onDelete: Cascade)
   participants InternalChatCallParticipant[]
-  signals     InternalChatCallSignal[]
+  signals      InternalChatCallSignal[]
 
   @@index([channelId, status])
   @@index([createdAt])
@@ -1104,13 +1328,13 @@ model InternalChatCall {
 
 /// Participante de una llamada de chat.
 model InternalChatCallParticipant {
-  id         String            @id @default(cuid())
+  id         String           @id @default(cuid())
   callId     String
   userId     String
   acceptedAt DateTime?
   declinedAt DateTime?
-  call       InternalChatCall  @relation(fields: [callId], references: [id], onDelete: Cascade)
-  user       User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  call       InternalChatCall @relation(fields: [callId], references: [id], onDelete: Cascade)
+  user       User             @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([callId, userId])
   @@index([callId])
@@ -1127,7 +1351,7 @@ model InternalChatCallSignal {
   signal      String // JSON stringified SDP/ICE candidate
   createdAt   DateTime         @default(now())
   deliveredAt DateTime?
-  call        InternalChatCall  @relation(fields: [callId], references: [id], onDelete: Cascade)
+  call        InternalChatCall @relation(fields: [callId], references: [id], onDelete: Cascade)
 
   @@index([toUserId, deliveredAt])
   @@index([callId])

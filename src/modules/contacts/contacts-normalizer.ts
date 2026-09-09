@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { SOURCE, CONTACTS_ENTITY_TYPE } from '@/modules/integrations/zoho/contacts-sync';
 
-export const CURRENT_CONTACT_NORMALIZER_VERSION = 1;
+export const CURRENT_CONTACT_NORMALIZER_VERSION = 2;
 
 export const NORMALIZATION_ERROR_CODE = {
   SNAPSHOT_SHAPE_INVALID: 'SNAPSHOT_SHAPE_INVALID',
@@ -93,6 +93,34 @@ const contactPayloadSchema = z
     gst_treatment: z.string().nullish(),
     place_of_supply: z.string().nullish(),
     shipping_legal_name: z.string().nullish(),
+    // Address fields
+    billing_address: z.string().nullish(),
+    billing_city: z.string().nullish(),
+    billing_state: z.string().nullish(),
+    billing_zip: z.string().nullish(),
+    billing_country: z.string().nullish(),
+    billing_fax: z.string().nullish(),
+    shipping_address: z.string().nullish(),
+    shipping_city: z.string().nullish(),
+    shipping_state: z.string().nullish(),
+    shipping_zip: z.string().nullish(),
+    shipping_country: z.string().nullish(),
+    shipping_fax: z.string().nullish(),
+    // Contact person fields
+    first_name: z.string().nullish(),
+    last_name: z.string().nullish(),
+    mobile: z.string().nullish(),
+    designation: z.string().nullish(),
+    department: z.string().nullish(),
+    // Additional Zoho fields
+    customer_sub_type: z.string().nullish(),
+    portal_status: z.string().nullish(),
+    owner_name: z.string().nullish(),
+    source: z.string().nullish(),
+    photo_url: z.string().nullish(),
+    primary_contact_id: z.string().nullish(),
+    credit_limit_exceeded_amount: z.union([z.string(), z.number()]).nullish(),
+    notes: z.string().nullish(),
   })
   .passthrough();
 
@@ -138,6 +166,34 @@ function buildContactData(
     taxRegime: payload.tax_regime ?? null,
     legalName: payload.legal_name ?? null,
     isTdsRegistered: payload.is_tds_registered ?? null,
+    // Address fields
+    billingAddress: payload.billing_address ?? null,
+    billingCity: payload.billing_city ?? null,
+    billingState: payload.billing_state ?? null,
+    billingZip: payload.billing_zip ?? null,
+    billingCountry: payload.billing_country ?? null,
+    billingFax: payload.billing_fax ?? null,
+    shippingAddress: payload.shipping_address ?? null,
+    shippingCity: payload.shipping_city ?? null,
+    shippingState: payload.shipping_state ?? null,
+    shippingZip: payload.shipping_zip ?? null,
+    shippingCountry: payload.shipping_country ?? null,
+    shippingFax: payload.shipping_fax ?? null,
+    // Contact person fields
+    firstName: payload.first_name ?? null,
+    lastName: payload.last_name ?? null,
+    mobile: payload.mobile ?? null,
+    designation: payload.designation ?? null,
+    department: payload.department ?? null,
+    // Additional Zoho fields
+    customerSubType: payload.customer_sub_type ?? null,
+    portalStatus: payload.portal_status ?? null,
+    ownerName: payload.owner_name ?? null,
+    source: payload.source ?? null,
+    photoUrl: payload.photo_url ?? null,
+    primaryContactId: payload.primary_contact_id ?? null,
+    creditLimitExceededAmount: toDecimal(payload.credit_limit_exceeded_amount),
+    notes: payload.notes ?? null,
     // Sync tracking
     sourceRemoteModifiedAt: remoteModifiedAt,
     sourceSnapshotId: snapshotId,

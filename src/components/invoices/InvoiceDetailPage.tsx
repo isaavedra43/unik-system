@@ -124,7 +124,59 @@ export function InvoiceDetailPage({
           <DetailCard label="Impuestos" value={formatCurrency(invoice.taxTotal, invoice.currencyCode)} />
           <DetailCard label="Descuento" value={formatCurrency(invoice.discountTotal, invoice.currencyCode)} />
           <DetailCard label="Envío" value={formatCurrency(invoice.shippingCharge, invoice.currencyCode)} />
+          {invoice.referenceNumber && <DetailCard label="Referencia" value={invoice.referenceNumber} />}
+          {invoice.exchangeRate && <DetailCard label="Tipo de cambio" value={invoice.exchangeRate} />}
+          {invoice.discount && <DetailCard label="Descuento (monto)" value={formatCurrency(invoice.discount, invoice.currencyCode)} />}
+          {invoice.discountType && <DetailCard label="Tipo de descuento" value={invoice.discountType} />}
+          {invoice.isDiscountBeforeTax !== null && <DetailCard label="Descuento antes de impuestos" value={invoice.isDiscountBeforeTax ? 'Sí' : 'No'} />}
         </div>
+
+        {/* Billing address */}
+        {(invoice.billingAddress || invoice.billingCity || invoice.billingState || invoice.billingCountry) ? (
+          <div className="rounded-lg border bg-card p-6 space-y-3">
+            <h2 className="text-lg font-semibold">Dirección de facturación</h2>
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              <DetailCard label="Calle" value={invoice.billingAddress ?? '—'} />
+              <DetailCard label="Ciudad" value={invoice.billingCity ?? '—'} />
+              <DetailCard label="Estado" value={invoice.billingState ?? '—'} />
+              <DetailCard label="C.P." value={invoice.billingZip ?? '—'} />
+              <DetailCard label="País" value={invoice.billingCountry ?? '—'} />
+            </div>
+          </div>
+        ) : null}
+
+        {/* Shipping address */}
+        {(invoice.shippingAddress || invoice.shippingCity || invoice.shippingState || invoice.shippingCountry) ? (
+          <div className="rounded-lg border bg-card p-6 space-y-3">
+            <h2 className="text-lg font-semibold">Dirección de envío</h2>
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              <DetailCard label="Calle" value={invoice.shippingAddress ?? '—'} />
+              <DetailCard label="Ciudad" value={invoice.shippingCity ?? '—'} />
+              <DetailCard label="Estado" value={invoice.shippingState ?? '—'} />
+              <DetailCard label="C.P." value={invoice.shippingZip ?? '—'} />
+              <DetailCard label="País" value={invoice.shippingCountry ?? '—'} />
+            </div>
+          </div>
+        ) : null}
+
+        {/* Notes and terms */}
+        {(invoice.notes || invoice.terms) ? (
+          <div className="rounded-lg border bg-card p-6 space-y-3">
+            <h2 className="text-lg font-semibold">Notas y términos</h2>
+            {invoice.notes && (
+              <div className="space-y-1">
+                <p className="text-xs text-muted-foreground uppercase tracking-wide">Notas</p>
+                <p className="text-sm text-muted-foreground whitespace-pre-wrap">{invoice.notes}</p>
+              </div>
+            )}
+            {invoice.terms && (
+              <div className="space-y-1">
+                <p className="text-xs text-muted-foreground uppercase tracking-wide">Términos</p>
+                <p className="text-sm text-muted-foreground whitespace-pre-wrap">{invoice.terms}</p>
+              </div>
+            )}
+          </div>
+        ) : null}
 
         {hasCfdi && (
           <div className="rounded-lg border bg-card p-6 space-y-3">
