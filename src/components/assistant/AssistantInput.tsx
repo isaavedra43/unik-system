@@ -2,6 +2,7 @@
 
 import React, { useRef, useState, useEffect } from 'react';
 import { Send, Paperclip, X, FileText, Image as ImageIcon } from 'lucide-react';
+import { ToolsButton } from './ToolsButton';
 
 export interface AttachmentDraft {
   id: string;
@@ -228,6 +229,14 @@ export function AssistantInput({
                 </button>
               </>
             )}
+            <ToolsButton
+              disabled={disabled || streaming}
+              onSelect={(name, desc) => {
+                const prompt = `Usa el tool "${name}" para: ${desc.split('.')[0].toLowerCase()}`;
+                setValue(prompt);
+                textareaRef.current?.focus();
+              }}
+            />
           </div>
           <button
             type="button"

@@ -6101,6 +6101,319 @@ textarea.input {
 }
 
 /* ============================================================
+   TOOLS POPOVER — Shows all available AI tools
+   ============================================================ */
+
+.tools-popover-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(2px);
+}
+
+@media (min-width: 769px) {
+  .tools-popover-overlay {
+    align-items: center;
+  }
+}
+
+.tools-popover {
+  background: var(--unik-bg-card, #fff);
+  border-radius: 16px 16px 0 0;
+  width: 100%;
+  max-width: 900px;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.2);
+}
+
+@media (min-width: 769px) {
+  .tools-popover {
+    border-radius: 16px;
+    max-height: 80vh;
+  }
+}
+
+.tools-popover-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid var(--unik-border-subtle, #e5e7eb);
+  flex-shrink: 0;
+}
+
+.tools-popover-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--unik-text-primary, #111827);
+  margin: 0;
+}
+
+.tools-popover-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  border: none;
+  background: transparent;
+  color: var(--unik-text-secondary, #6b7280);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.tools-popover-close:hover {
+  background: var(--unik-bg-hover, #f3f4f6);
+}
+
+.tools-popover-body {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.tools-popover-loading,
+.tools-popover-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 2rem;
+  color: var(--unik-text-secondary, #6b7280);
+  font-size: 0.875rem;
+}
+
+.tools-popover-grid {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+@media (min-width: 769px) {
+  .tools-popover-grid {
+    flex-direction: row;
+  }
+}
+
+.tools-popover-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0.5rem;
+  border-right: 1px solid var(--unik-border-subtle, #e5e7eb);
+  min-width: 0;
+}
+
+@media (max-width: 768px) {
+  .tools-popover-list {
+    border-right: none;
+    border-bottom: 1px solid var(--unik-border-subtle, #e5e7eb);
+    max-height: 40vh;
+  }
+}
+
+.tools-category {
+  margin-bottom: 0.75rem;
+}
+
+.tools-category-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--unik-text-secondary, #6b7280);
+}
+
+.tools-category-count {
+  background: var(--unik-bg-hover, #f3f4f6);
+  border-radius: 10px;
+  padding: 0.1rem 0.5rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--unik-text-secondary, #6b7280);
+}
+
+.tool-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  border: none;
+  background: transparent;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.12s;
+  text-align: left;
+  color: var(--unik-text-primary, #111827);
+  font-size: 0.85rem;
+}
+
+.tool-item:hover,
+.tool-item-active {
+  background: var(--unik-brand-subtle, #eff6ff);
+}
+
+.tool-item-name {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tool-item-chevron {
+  color: var(--unik-text-tertiary, #9ca3af);
+  flex-shrink: 0;
+}
+
+.tools-popover-detail {
+  flex: 1.2;
+  overflow-y: auto;
+  padding: 1rem;
+  min-width: 0;
+}
+
+@media (max-width: 768px) {
+  .tools-popover-detail {
+    max-height: 35vh;
+  }
+}
+
+.tools-detail-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  text-align: center;
+  color: var(--unik-text-tertiary, #9ca3af);
+  font-size: 0.85rem;
+  padding: 1rem;
+}
+
+.tools-detail-content {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.tools-detail-name {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--unik-brand, #2563eb);
+}
+
+.tools-detail-description {
+  font-size: 0.85rem;
+  line-height: 1.5;
+  color: var(--unik-text-secondary, #4b5563);
+}
+
+.tools-detail-params {
+  border-top: 1px solid var(--unik-border-subtle, #e5e7eb);
+  padding-top: 0.75rem;
+}
+
+.tools-detail-params-title {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--unik-text-secondary, #6b7280);
+  margin-bottom: 0.5rem;
+}
+
+.tools-detail-param {
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--unik-border-subtle, #f3f4f6);
+}
+
+.tools-detail-param:last-child {
+  border-bottom: none;
+}
+
+.tools-detail-param-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.25rem;
+}
+
+.tools-detail-param-name {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--unik-text-primary, #111827);
+}
+
+.tools-detail-param-required {
+  font-size: 0.65rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: #dc2626;
+  background: #fef2f2;
+  border-radius: 4px;
+  padding: 0.1rem 0.3rem;
+}
+
+.tools-detail-param-default {
+  font-size: 0.65rem;
+  font-weight: 600;
+  color: #059669;
+  background: #ecfdf5;
+  border-radius: 4px;
+  padding: 0.1rem 0.3rem;
+}
+
+.tools-detail-param-type {
+  font-size: 0.65rem;
+  font-weight: 600;
+  color: var(--unik-text-tertiary, #9ca3af);
+  background: var(--unik-bg-hover, #f3f4f6);
+  border-radius: 4px;
+  padding: 0.1rem 0.3rem;
+}
+
+.tools-detail-param-desc {
+  font-size: 0.78rem;
+  color: var(--unik-text-secondary, #6b7280);
+  line-height: 1.4;
+}
+
+.tools-detail-param-enum {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin-top: 0.25rem;
+}
+
+.tools-detail-enum-value {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.7rem;
+  background: var(--unik-brand-subtle, #eff6ff);
+  color: var(--unik-brand, #2563eb);
+  border-radius: 4px;
+  padding: 0.1rem 0.35rem;
+}
+
+/* ============================================================
    MOBILE RESPONSIVE FIXES — Phone (≤768px)
    ============================================================ */
 

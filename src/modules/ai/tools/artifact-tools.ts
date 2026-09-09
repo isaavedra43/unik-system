@@ -108,6 +108,20 @@ function formatValue(value: unknown, format?: string): string {
     }
     return s;
   }
+  // Handle arrays — join items with comma
+  if (Array.isArray(value)) {
+    return value.map((v) => formatValue(v)).join(', ');
+  }
+  // Handle objects — stringify to key: value pairs
+  if (typeof value === 'object') {
+    const obj = value as Record<string, unknown>;
+    const parts: string[] = [];
+    for (const [k, v] of Object.entries(obj)) {
+      const formatted = formatValue(v);
+      if (formatted) parts.push(`${k}: ${formatted}`);
+    }
+    return parts.join('; ');
+  }
   // Translate status values to Spanish
   const s = String(value);
   const statusMap: Record<string, string> = {
@@ -121,6 +135,33 @@ function formatValue(value: unknown, format?: string): string {
     return statusMap[s.toLowerCase()];
   }
   return s;
+}
+
+/**
+ * Flattens a row object so that nested objects/arrays are expanded into
+ * separate columns or stringified. This prevents [object Object] in PDFs/Excel.
+ *
+ * Example: { customer: "Juan", items: [{name: "Silla", qty: 2}] }
+ * becomes: { customer: "Juan", items: "name: Silla, qty: 2; name: ..." }
+ */
+function flattenRow(row: Record<string, unknown>): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(row)) {
+    if (value === null || value === undefined) {
+      result[key] = value;
+    } else if (Array.isArray(value)) {
+      // Arrays of objects: stringify each item and join
+      result[key] = value.map((v) =>
+        typeof v === 'object' && v !== null ? formatValue(v) : String(v)
+      ).join('\n');
+    } else if (typeof value === 'object') {
+      // Nested object: stringify to key: value pairs
+      result[key] = formatValue(value);
+    } else {
+      result[key] = value;
+    }
+  }
+  return result;
 }
 
 /* ------------------------------------------------------------------ */
@@ -171,7 +212,7 @@ registerTool({
       brandColor?: string;
     };
 
-    const rows = args.rows ?? [];
+    const rows = (args.rows ?? []).map((r) => flattenRow(r));
     if (rows.length === 0) {
       return { error: 'No hay datos para generar el PDF. Llama primero una tool de datos (ej: getCashSales, getTopProducts).' };
     }
@@ -285,7 +326,7 @@ registerTool({
       brandColor?: string;
     };
 
-    const rows = args.rows ?? [];
+    const rows = (args.rows ?? []).map((r) => flattenRow(r));
     if (rows.length === 0) {
       return { error: 'No hay datos para generar el Excel. Llama primero una tool de datos.' };
     }
@@ -363,7 +404,7 @@ registerTool({
       columns?: Array<{ header: string; key: string; format?: string }>;
     };
 
-    const rows = args.rows ?? [];
+    const rows = (args.rows ?? []).map((r) => flattenRow(r));
     if (rows.length === 0) {
       return { error: 'No hay datos para generar el CSV. Llama primero una tool de datos.' };
     }
@@ -519,7 +560,7 @@ registerTool({
       brandColor?: string;
     };
 
-    const rows = args.rows ?? [];
+    const rows = (args.rows ?? []).map((r) => flattenRow(r));
     if (rows.length === 0) {
       return { error: 'No hay datos para generar la tabla. Llama primero una tool de datos.' };
     }
