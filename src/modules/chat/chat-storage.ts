@@ -77,6 +77,7 @@ export function getExtensionFromMime(mimeType: string): string {
     'audio/x-wav': 'wav',
     'audio/mp4': 'm4a',
     'audio/aac': 'aac',
+    'audio/webm': 'webm',
     'application/pdf': 'pdf',
     'text/plain': 'txt',
     'text/csv': 'csv',

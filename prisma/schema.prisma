@@ -193,6 +193,14 @@ model User {
   chatReactions       InternalChatReaction[]
   chatReadReceipts    InternalChatReadReceipt[]
   chatPresence        InternalChatPresence?
+  chatMentions        InternalChatMention[]
+  chatPollVotes       InternalChatPollVote[]
+  chatEventRsvps      InternalChatEventRsvp[]
+  chatPins            InternalChatPinnedMessage[]
+  chatBookmarks       InternalChatBookmark[]
+  chatSnippets        InternalChatSnippet[]
+  chatScheduledMsgs   InternalChatScheduledMessage[]
+  chatNotifPrefs      InternalChatNotificationPreference[]
 
   @@index([isActive])
 }
@@ -724,6 +732,8 @@ model InternalChatChannel {
   updatedAt     DateTime              @updatedAt
   members       InternalChatMember[]
   messages      InternalChatMessage[]
+  events        InternalChatEvent[]
+  tags          InternalChatChannelTag[]
 
   @@index([type])
   @@index([lastMessageAt])
@@ -770,6 +780,12 @@ model InternalChatMessage {
   attachments     InternalChatAttachment[]
   reactions       InternalChatReaction[]
   readReceipts    InternalChatReadReceipt[]
+  mentions        InternalChatMention[]
+  location        InternalChatLocation?
+  poll            InternalChatPoll?
+  event           InternalChatEvent?
+  pins            InternalChatPinnedMessage[]
+  bookmarks       InternalChatBookmark[]
 
   @@index([channelId, createdAt])
   @@index([senderId])
@@ -833,4 +849,224 @@ model InternalChatPresence {
   user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("internal_chat_presence")
+}
+
+/// Mención de un usuario en un mensaje de chat.
+model InternalChatMention {
+  id        String              @id @default(cuid())
+  messageId String
+  userId    String
+  readAt    DateTime?
+  message   InternalChatMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user      User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId])
+  @@index([userId, readAt])
+  @@map("internal_chat_mention")
+}
+
+/// Ubicación geográfica adjunta a un mensaje.
+model InternalChatLocation {
+  id        String              @id @default(cuid())
+  messageId String              @unique
+  latitude  Float
+  longitude Float
+  label     String?
+  message   InternalChatMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@map("internal_chat_location")
+}
+
+/// Encuesta adjunta a un mensaje.
+model InternalChatPoll {
+  id          String                   @id @default(cuid())
+  messageId   String                   @unique
+  question    String
+  isMulti     Boolean                  @default(false)
+  isAnonymous Boolean                  @default(true)
+  closesAt    DateTime?
+  message     InternalChatMessage      @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  options     InternalChatPollOption[]
+
+  @@map("internal_chat_poll")
+}
+
+/// Opción de una encuesta de chat.
+model InternalChatPollOption {
+  id     String                   @id @default(cuid())
+  pollId String
+  text   String
+  poll   InternalChatPoll         @relation(fields: [pollId], references: [id], onDelete: Cascade)
+  votes  InternalChatPollVote[]
+
+  @@index([pollId])
+  @@map("internal_chat_poll_option")
+}
+
+/// Voto de un usuario en una opción de encuesta.
+model InternalChatPollVote {
+  id       String                 @id @default(cuid())
+  optionId String
+  userId   String
+  option   InternalChatPollOption @relation(fields: [optionId], references: [id], onDelete: Cascade)
+  user     User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([optionId, userId])
+  @@index([optionId])
+  @@map("internal_chat_poll_vote")
+}
+
+/// Evento de calendario creado desde el chat.
+model InternalChatEvent {
+  id          String                @id @default(cuid())
+  messageId   String                @unique
+  channelId   String
+  title       String
+  description String?
+  startsAt    DateTime
+  endsAt      DateTime?
+  location    String?
+  createdBy   String
+  createdAt    DateTime              @default(now())
+  message     InternalChatMessage   @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  channel     InternalChatChannel   @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  rsvps       InternalChatEventRsvp[]
+
+  @@index([channelId, startsAt])
+  @@index([startsAt])
+  @@map("internal_chat_event")
+}
+
+/// Respuesta RSVP de un usuario a un evento de chat.
+model InternalChatEventRsvp {
+  id      String             @id @default(cuid())
+  eventId String
+  userId  String
+  status  String // "yes" | "no" | "maybe"
+  event   InternalChatEvent  @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  user    User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([eventId, userId])
+  @@index([eventId])
+  @@map("internal_chat_event_rsvp")
+}
+
+/// Alerta automática de seguridad/anti-fraude del chat.
+model InternalChatAlert {
+  id         String    @id @default(cuid())
+  type       String // "bulk_download" | "off_hours" | "keyword" | "volume_spike" | "external_share"
+  severity   String // "low" | "medium" | "high"
+  userId     String?
+  channelId  String?
+  messageId  String?
+  metadata   Json?
+  resolvedAt DateTime?
+  resolvedBy String?
+  createdAt  DateTime  @default(now())
+
+  @@index([type, severity, resolvedAt])
+  @@index([createdAt])
+  @@map("internal_chat_alert")
+}
+
+/// Configuración global del chat (key-value singleton).
+model InternalChatConfig {
+  id    String @id @default("singleton")
+  key   String @unique
+  value String
+
+  @@map("internal_chat_config")
+}
+
+/// Mensaje fijado (pinned) en un canal.
+model InternalChatPinnedMessage {
+  id        String              @id @default(cuid())
+  channelId String
+  messageId String
+  pinnedBy  String
+  pinnedAt  DateTime            @default(now())
+  message   InternalChatMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user      User                @relation(fields: [pinnedBy], references: [id], onDelete: Cascade)
+
+  @@unique([channelId, messageId])
+  @@index([channelId])
+  @@map("internal_chat_pinned_message")
+}
+
+/// Etiqueta/tag para categorizar canales de chat.
+model InternalChatTag {
+  id       String                   @id @default(cuid())
+  name     String                   @unique
+  color    String                   @default("#6b7280")
+  channels InternalChatChannelTag[]
+
+  @@map("internal_chat_tag")
+}
+
+/// Relación many-to-many entre canal y tag.
+model InternalChatChannelTag {
+  channelId String             @id @default(cuid())
+  tagId     String
+  channel   InternalChatChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  tag       InternalChatTag     @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@unique([channelId, tagId])
+  @@index([tagId])
+  @@map("internal_chat_channel_tag")
+}
+
+/// Preferencia de notificaciones de un usuario para un canal.
+model InternalChatNotificationPreference {
+  id        String @id @default(cuid())
+  userId    String
+  channelId String
+  level     String // "all" | "mentions" | "none"
+  user      User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, channelId])
+  @@index([channelId])
+  @@map("internal_chat_notification_preference")
+}
+
+/// Plantilla/snippet de mensaje guardado por un usuario.
+model InternalChatSnippet {
+  id        String   @id @default(cuid())
+  userId    String
+  title     String
+  content   String
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("internal_chat_snippet")
+}
+
+/// Mensaje programado para enviarse después.
+model InternalChatScheduledMessage {
+  id        String    @id @default(cuid())
+  channelId String
+  senderId  String
+  content   String?
+  sendAt    DateTime
+  sentAt    DateTime?
+  createdAt DateTime  @default(now())
+  sender    User      @relation(fields: [senderId], references: [id], onDelete: Cascade)
+
+  @@index([sendAt, sentAt])
+  @@index([channelId])
+  @@map("internal_chat_scheduled_message")
+}
+
+/// Bookmark/marcador personal de un mensaje.
+model InternalChatBookmark {
+  id        String              @id @default(cuid())
+  userId    String
+  messageId String
+  createdAt DateTime            @default(now())
+  message   InternalChatMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user      User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, messageId])
+  @@index([userId])
+  @@map("internal_chat_bookmark")
 }

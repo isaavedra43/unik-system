@@ -18,6 +18,13 @@ export interface ChatMessageListProps {
   onEdit: (messageId: string, content: string) => void;
   onDelete: (messageId: string) => void;
   onForward: (messageId: string, targetChannelIds: string[]) => void;
+  onBookmark: (messageId: string) => void;
+  onUnbookmark: (messageId: string) => void;
+  onPin: (messageId: string) => void;
+  onUnpin: (messageId: string) => void;
+  onTranslate: (messageId: string) => void;
+  onVotePoll: (pollId: string, optionIds: string[]) => void;
+  onRsvpEvent: (eventId: string, status: 'yes' | 'no' | 'maybe') => void;
   channelId: string;
 }
 
@@ -53,6 +60,13 @@ export function ChatMessageList({
   onEdit,
   onDelete,
   onForward,
+  onBookmark,
+  onUnbookmark,
+  onPin,
+  onUnpin,
+  onTranslate,
+  onVotePoll,
+  onRsvpEvent,
   channelId,
 }: ChatMessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -161,6 +175,13 @@ export function ChatMessageList({
                 onEdit={onEdit}
                 onDelete={onDelete}
                 onForward={onForward}
+                onBookmark={onBookmark}
+                onUnbookmark={onUnbookmark}
+                onPin={onPin}
+                onUnpin={onUnpin}
+                onTranslate={onTranslate}
+                onVotePoll={onVotePoll}
+                onRsvpEvent={onRsvpEvent}
                 channelId={channelId}
                 currentUserId={currentUserId}
               />

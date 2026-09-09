@@ -32,6 +32,8 @@ const ALLOWED_MIME_TYPES = new Set([
   'audio/x-wav',
   'audio/mp4',
   'audio/aac',
+  'audio/webm',
+  'audio/webm;codecs=opus',
   // documents
   'application/pdf',
   'text/plain',

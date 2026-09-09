@@ -213,7 +213,26 @@ export function ChatConversation({ channelId, user, onRefresh, onBack }: ChatCon
 
   // Send message
   const handleSend = useCallback(
-    async (content: string, attachmentIds?: string[]) => {
+    async (
+      content: string,
+      attachmentIds?: string[],
+      extra?: {
+        location?: { latitude: number; longitude: number; label?: string };
+        poll?: {
+          question: string;
+          options: string[];
+          isMulti: boolean;
+          isAnonymous: boolean;
+        };
+        event?: {
+          title: string;
+          description?: string;
+          startsAt: string;
+          endsAt?: string;
+          location?: string;
+        };
+      }
+    ) => {
       try {
         const res = await fetch(`/app/chat/api/channels/${channelId}/messages`, {
           method: 'POST',
@@ -222,6 +241,9 @@ export function ChatConversation({ channelId, user, onRefresh, onBack }: ChatCon
             content: content || null,
             replyToId: replyTo?.id ?? null,
             attachmentIds,
+            location: extra?.location ?? null,
+            poll: extra?.poll ?? null,
+            event: extra?.event ?? null,
           }),
         });
         if (res.ok) {
@@ -319,6 +341,108 @@ export function ChatConversation({ channelId, user, onRefresh, onBack }: ChatCon
     [onRefresh]
   );
 
+  // Bookmark
+  const handleBookmark = useCallback(async (messageId: string) => {
+    try {
+      await fetch('/app/chat/api/bookmarks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messageId }),
+      });
+    } catch {
+      // silent
+    }
+  }, []);
+
+  const handleUnbookmark = useCallback(async (messageId: string) => {
+    try {
+      await fetch(`/app/chat/api/bookmarks?messageId=${encodeURIComponent(messageId)}`, {
+        method: 'DELETE',
+      });
+    } catch {
+      // silent
+    }
+  }, []);
+
+  // Pin
+  const handlePin = useCallback(
+    async (messageId: string) => {
+      try {
+        await fetch(`/app/chat/api/channels/${channelId}/pin`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ messageId }),
+        });
+      } catch {
+        // silent
+      }
+    },
+    [channelId]
+  );
+
+  const handleUnpin = useCallback(
+    async (messageId: string) => {
+      try {
+        await fetch(
+          `/app/chat/api/channels/${channelId}/pin?messageId=${encodeURIComponent(messageId)}`,
+          { method: 'DELETE' }
+        );
+      } catch {
+        // silent
+      }
+    },
+    [channelId]
+  );
+
+  // Translate
+  const handleTranslate = useCallback(async (messageId: string) => {
+    try {
+      const res = await fetch('/app/chat/api/ai/translate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messageId, targetLang: 'es' }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.translation) {
+          // Show translation in an alert or update message — for now, use alert
+          alert(`Traducción:\n${data.translation}`);
+        }
+      } else {
+        const data = await res.json();
+        alert(data.error || 'No se pudo traducir el mensaje');
+      }
+    } catch {
+      // silent
+    }
+  }, []);
+
+  // Vote poll
+  const handleVotePoll = useCallback(async (pollId: string, optionIds: string[]) => {
+    try {
+      await fetch(`/app/chat/api/polls/${pollId}/vote`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ optionIds }),
+      });
+    } catch {
+      // silent
+    }
+  }, []);
+
+  // RSVP event
+  const handleRsvpEvent = useCallback(async (eventId: string, status: 'yes' | 'no' | 'maybe') => {
+    try {
+      await fetch(`/app/chat/api/events/${eventId}/rsvp`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status }),
+      });
+    } catch {
+      // silent
+    }
+  }, []);
+
   // Channel display info
   const getChannelName = () => {
     if (!channel) return '';
@@ -402,6 +526,13 @@ export function ChatConversation({ channelId, user, onRefresh, onBack }: ChatCon
         onEdit={handleEdit}
         onDelete={handleDelete}
         onForward={handleForward}
+        onBookmark={handleBookmark}
+        onUnbookmark={handleUnbookmark}
+        onPin={handlePin}
+        onUnpin={handleUnpin}
+        onTranslate={handleTranslate}
+        onVotePoll={handleVotePoll}
+        onRsvpEvent={handleRsvpEvent}
         channelId={channelId}
       />
 
@@ -413,6 +544,7 @@ export function ChatConversation({ channelId, user, onRefresh, onBack }: ChatCon
         onCancelReply={() => setReplyTo(null)}
         channelId={channelId}
         user={user}
+        members={channel?.members}
       />
 
       {/* Settings drawer */}

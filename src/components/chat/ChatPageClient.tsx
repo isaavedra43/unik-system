@@ -1,11 +1,15 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { Menu, X } from 'lucide-react';
+import { Menu, X, Search, Bookmark, Pin, Calendar } from 'lucide-react';
 import type { CurrentUser } from '@/modules/auth/authorization';
 import { ChatSidebar } from './ChatSidebar';
 import { ChatConversation } from './ChatConversation';
 import { ChatEmptyState } from './ChatEmptyState';
+import { ChatSearchDialog } from './ChatSearchDialog';
+import { ChatBookmarksPanel } from './ChatBookmarksPanel';
+import { ChatPinnedPanel } from './ChatPinnedPanel';
+import { ChatCalendarView } from './ChatCalendarView';
 import type { ChatInboxItem } from '@/modules/chat/chat-events';
 
 export interface ChatPageClientProps {
@@ -18,6 +22,10 @@ export function ChatPageClient({ user }: ChatPageClientProps) {
   const [inbox, setInbox] = useState<ChatInboxItem[]>([]);
   const [totalUnread, setTotalUnread] = useState(0);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [showSearch, setShowSearch] = useState(false);
+  const [showBookmarks, setShowBookmarks] = useState(false);
+  const [showPinned, setShowPinned] = useState(false);
+  const [showCalendar, setShowCalendar] = useState(false);
 
   const refreshInbox = useCallback(async () => {
     try {
@@ -107,20 +115,59 @@ export function ChatPageClient({ user }: ChatPageClientProps) {
   return (
     <div className="chat-page">
       {/* Mobile sidebar toggle (outside body so it sits on top) */}
-      <button
-        type="button"
-        className="chat-sidebar-toggle"
-        onClick={() => setSidebarOpen(true)}
-        aria-label="Ver conversaciones"
-      >
-        <Menu size={18} />
-        <span>Conversaciones</span>
-        {totalUnread > 0 && (
-          <span className="chat-sidebar-toggle-badge">
-            {totalUnread > 99 ? '99+' : totalUnread}
-          </span>
-        )}
-      </button>
+      <div className="chat-topbar">
+        <button
+          type="button"
+          className="chat-sidebar-toggle"
+          onClick={() => setSidebarOpen(true)}
+          aria-label="Ver conversaciones"
+        >
+          <Menu size={18} />
+          <span>Conversaciones</span>
+          {totalUnread > 0 && (
+            <span className="chat-sidebar-toggle-badge">
+              {totalUnread > 99 ? '99+' : totalUnread}
+            </span>
+          )}
+        </button>
+
+        <div className="chat-topbar-actions">
+          <button
+            type="button"
+            className="chat-topbar-btn"
+            onClick={() => setShowSearch(true)}
+            aria-label="Buscar mensajes"
+          >
+            <Search size={18} />
+          </button>
+          <button
+            type="button"
+            className="chat-topbar-btn"
+            onClick={() => setShowBookmarks(true)}
+            aria-label="Favoritos"
+          >
+            <Bookmark size={18} />
+          </button>
+          {activeChannelId && (
+            <button
+              type="button"
+              className="chat-topbar-btn"
+              onClick={() => setShowPinned(true)}
+              aria-label="Mensajes fijados"
+            >
+              <Pin size={18} />
+            </button>
+          )}
+          <button
+            type="button"
+            className="chat-topbar-btn"
+            onClick={() => setShowCalendar(true)}
+            aria-label="Calendario"
+          >
+            <Calendar size={18} />
+          </button>
+        </div>
+      </div>
 
       <div className="chat-page-body">
         {/* Mobile backdrop */}
@@ -162,6 +209,29 @@ export function ChatPageClient({ user }: ChatPageClientProps) {
           )}
         </div>
       </div>
+
+      {/* Search dialog */}
+      {showSearch && (
+        <ChatSearchDialog
+          open={showSearch}
+          onClose={() => setShowSearch(false)}
+          onSelectChannel={(id) => {
+            handleSelectChannel(id);
+            setShowSearch(false);
+          }}
+        />
+      )}
+
+      {/* Bookmarks panel */}
+      {showBookmarks && <ChatBookmarksPanel onClose={() => setShowBookmarks(false)} />}
+
+      {/* Pinned messages panel */}
+      {showPinned && activeChannelId && (
+        <ChatPinnedPanel channelId={activeChannelId} onClose={() => setShowPinned(false)} />
+      )}
+
+      {/* Calendar view */}
+      {showCalendar && <ChatCalendarView onClose={() => setShowCalendar(false)} />}
     </div>
   );
 }

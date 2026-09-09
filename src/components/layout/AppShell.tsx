@@ -8,7 +8,10 @@ import { logoutAction } from '@/app/app/actions';
 import { Avatar } from '@/components/ui/primitives';
 import { DropdownMenu } from '@/components/ui/composite';
 import { ChevronDown, Home, LogOut, Menu, Shield, Users } from '@/components/ui/icons';
-import { Bell, Bot, ShoppingCart, Plug, MessageCircle, X } from 'lucide-react';
+import {
+  Bell, Bot, ShoppingCart, Plug, MessageCircle, MessageSquare, X,
+  Package, FileText, Boxes, Users as UsersIcon, UserCog, Truck,
+} from 'lucide-react';
 import { AssistantWidget } from '@/components/assistant/AssistantWidget';
 import { ThemeToggle } from '@/components/layout/ThemeToggle';
 
@@ -296,6 +299,12 @@ function buildBreadcrumbs(pathname: string): { label: string; href?: string }[] 
       { label: 'Asistente IA' },
     ];
   }
+  if (pathname.startsWith('/app/admin/chat')) {
+    return [
+      { label: 'Administración', href: '/app/admin/chat' },
+      { label: 'Chat' },
+    ];
+  }
   if (pathname.startsWith('/app/assistant')) {
     return [{ label: 'Asistente IA' }];
   }
@@ -312,6 +321,56 @@ function buildBreadcrumbs(pathname: string): { label: string; href?: string }[] 
     return [
       { label: 'Ventas' },
       { label: 'Órdenes de venta', href: '/app/sales/orders' },
+      { label: 'Detalle' },
+    ];
+  }
+  if (pathname === '/app/contacts/customers') {
+    return [{ label: 'Inventario' }, { label: 'Clientes' }];
+  }
+  if (pathname.startsWith('/app/contacts/customers/')) {
+    return [
+      { label: 'Inventario' },
+      { label: 'Clientes', href: '/app/contacts/customers' },
+      { label: 'Detalle' },
+    ];
+  }
+  if (pathname === '/app/contacts/vendors') {
+    return [{ label: 'Inventario' }, { label: 'Proveedores' }];
+  }
+  if (pathname.startsWith('/app/contacts/vendors/')) {
+    return [
+      { label: 'Inventario' },
+      { label: 'Proveedores', href: '/app/contacts/vendors' },
+      { label: 'Detalle' },
+    ];
+  }
+  if (pathname === '/app/products') {
+    return [{ label: 'Inventario' }, { label: 'Productos' }];
+  }
+  if (pathname.startsWith('/app/products/')) {
+    return [
+      { label: 'Inventario' },
+      { label: 'Productos', href: '/app/products' },
+      { label: 'Detalle' },
+    ];
+  }
+  if (pathname === '/app/packages') {
+    return [{ label: 'Envíos' }, { label: 'Paquetes' }];
+  }
+  if (pathname.startsWith('/app/packages/')) {
+    return [
+      { label: 'Envíos' },
+      { label: 'Paquetes', href: '/app/packages' },
+      { label: 'Detalle' },
+    ];
+  }
+  if (pathname === '/app/invoices') {
+    return [{ label: 'Facturación' }, { label: 'Facturas' }];
+  }
+  if (pathname.startsWith('/app/invoices/')) {
+    return [
+      { label: 'Facturación' },
+      { label: 'Facturas', href: '/app/invoices' },
       { label: 'Detalle' },
     ];
   }
@@ -355,6 +414,51 @@ export default function AppShell({ user, children }: AppShellProps) {
       ],
     },
     {
+      title: 'Inventario',
+      items: [
+        {
+          href: '/app/contacts/customers',
+          label: 'Clientes',
+          icon: <UsersIcon size={18} />,
+          visible: user.permissionKeys.includes('customers.view') || user.isSuperAdmin,
+        },
+        {
+          href: '/app/contacts/vendors',
+          label: 'Proveedores',
+          icon: <UserCog size={18} />,
+          visible: user.permissionKeys.includes('vendors.view') || user.isSuperAdmin,
+        },
+        {
+          href: '/app/products',
+          label: 'Productos',
+          icon: <Boxes size={18} />,
+          visible: user.permissionKeys.includes('products.view') || user.isSuperAdmin,
+        },
+      ],
+    },
+    {
+      title: 'Envíos',
+      items: [
+        {
+          href: '/app/packages',
+          label: 'Paquetes',
+          icon: <Truck size={18} />,
+          visible: user.permissionKeys.includes('packages.view') || user.isSuperAdmin,
+        },
+      ],
+    },
+    {
+      title: 'Facturación',
+      items: [
+        {
+          href: '/app/invoices',
+          label: 'Facturas',
+          icon: <FileText size={18} />,
+          visible: user.permissionKeys.includes('invoices.view') || user.isSuperAdmin,
+        },
+      ],
+    },
+    {
       title: 'Administración',
       items: [
         {
@@ -380,6 +484,13 @@ export default function AppShell({ user, children }: AppShellProps) {
           visible:
             user.permissionKeys.includes('assistant.admin') || user.isSuperAdmin,
         },
+        {
+          href: '/app/admin/chat',
+          label: 'Chat',
+          icon: <MessageSquare size={18} />,
+          visible:
+            user.permissionKeys.includes('chat.admin') || user.isSuperAdmin,
+        },
       ],
     },
     {
@@ -402,7 +513,14 @@ export default function AppShell({ user, children }: AppShellProps) {
   ];
 
   const pathname = usePathname();
-  const isWorkspace = pathname.startsWith('/app/sales/orders') && !pathname.includes('/api');
+  const isWorkspace =
+    (pathname.startsWith('/app/sales/orders') ||
+      pathname.startsWith('/app/contacts/customers') ||
+      pathname.startsWith('/app/contacts/vendors') ||
+      pathname.startsWith('/app/products') ||
+      pathname.startsWith('/app/packages') ||
+      pathname.startsWith('/app/invoices')) &&
+    !pathname.includes('/api');
   const isAssistantPage = pathname.startsWith('/app/assistant');
   const isChatPage = pathname.startsWith('/app/chat');
   const isFlush = isWorkspace || isAssistantPage || isChatPage;

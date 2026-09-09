@@ -30,6 +30,42 @@ export interface ChatReactionDTO {
   userName: string;
 }
 
+export interface ChatLocationDTO {
+  latitude: number;
+  longitude: number;
+  label: string | null;
+}
+
+export interface ChatPollOptionDTO {
+  id: string;
+  text: string;
+  voteCount: number;
+  hasVoted: boolean;
+}
+
+export interface ChatPollDTO {
+  id: string;
+  question: string;
+  isMulti: boolean;
+  isAnonymous: boolean;
+  closesAt: string | null;
+  totalVotes: number;
+  options: ChatPollOptionDTO[];
+  userVotedOptionIds: string[];
+}
+
+export interface ChatEventDTO {
+  id: string;
+  title: string;
+  description: string | null;
+  startsAt: string;
+  endsAt: string | null;
+  location: string | null;
+  createdBy: string;
+  rsvpCounts: { yes: number; no: number; maybe: number };
+  userRsvp: string | null;
+}
+
 export interface ChatMessageDTO {
   id: string;
   channelId: string;
@@ -47,6 +83,12 @@ export interface ChatMessageDTO {
   attachments: ChatAttachmentDTO[];
   reactions: ChatReactionDTO[];
   readBy: string[];
+  mentions: string[];
+  location: ChatLocationDTO | null;
+  poll: ChatPollDTO | null;
+  event: ChatEventDTO | null;
+  isPinned: boolean;
+  isBookmarked: boolean;
 }
 
 export interface ChatChannelDTO {
@@ -92,6 +134,10 @@ export type ChatStreamEvent =
       type: 'typing';
       data: { channelId: string; userId: string; userName: string; isTyping: boolean };
     }
+  | { type: 'mention'; data: { messageId: string; channelId: string; userId: string } }
+  | { type: 'poll_vote'; data: { pollId: string; optionId: string; userId: string } }
+  | { type: 'event_rsvp'; data: { eventId: string; userId: string; status: string } }
+  | { type: 'pin'; data: { channelId: string; messageId: string; action: 'pin' | 'unpin' } }
   | { type: 'heartbeat'; data: { t: number } }
   | { type: 'error'; data: { message: string } };
 

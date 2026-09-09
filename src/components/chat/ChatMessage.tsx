@@ -11,9 +11,15 @@ import {
   Check,
   CheckCheck,
   CornerUpRight,
+  Bookmark,
+  Pin,
+  Languages,
 } from 'lucide-react';
 import type { ChatMessageDTO } from '@/modules/chat/chat-events';
 import { ChatAttachmentPreview } from './ChatAttachmentPreview';
+import { ChatLocationMap } from './ChatLocationMap';
+import { ChatPollMessage } from './ChatPollMessage';
+import { ChatEventMessage } from './ChatEventMessage';
 
 export interface ChatMessageProps {
   message: ChatMessageDTO;
@@ -26,6 +32,13 @@ export interface ChatMessageProps {
   onEdit: (messageId: string, content: string) => void;
   onDelete: (messageId: string) => void;
   onForward: (messageId: string, targetChannelIds: string[]) => void;
+  onBookmark: (messageId: string) => void;
+  onUnbookmark: (messageId: string) => void;
+  onPin: (messageId: string) => void;
+  onUnpin: (messageId: string) => void;
+  onTranslate: (messageId: string) => void;
+  onVotePoll: (pollId: string, optionIds: string[]) => void;
+  onRsvpEvent: (eventId: string, status: 'yes' | 'no' | 'maybe') => void;
   channelId: string;
   currentUserId: string;
 }
@@ -56,6 +69,21 @@ function formatTime(iso: string): string {
   return new Date(iso).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' });
 }
 
+function renderContentWithMentions(content: string): React.ReactNode {
+  // Split by @username patterns and render as chips
+  const parts = content.split(/(@\w+)/g);
+  return parts.map((part, i) => {
+    if (part.startsWith('@') && part.length > 1) {
+      return (
+        <span key={i} className="chat-mention-chip">
+          {part}
+        </span>
+      );
+    }
+    return part;
+  });
+}
+
 export function ChatMessage({
   message,
   isOwn,
@@ -67,6 +95,13 @@ export function ChatMessage({
   onEdit,
   onDelete,
   onForward,
+  onBookmark,
+  onUnbookmark,
+  onPin,
+  onUnpin,
+  onTranslate,
+  onVotePoll,
+  onRsvpEvent,
   channelId,
   currentUserId,
 }: ChatMessageProps) {
@@ -202,13 +237,34 @@ export function ChatMessage({
           </div>
         ) : (
           <div className={`chat-msg-bubble ${isOwn ? 'own' : 'other'}`}>
-            {message.content && <div className="chat-msg-text">{message.content}</div>}
+            {message.content && (
+              <div className="chat-msg-text">{renderContentWithMentions(message.content)}</div>
+            )}
             {message.attachments.length > 0 && (
               <div className="chat-msg-attachments">
                 {message.attachments.map((att) => (
                   <ChatAttachmentPreview key={att.id} attachment={att} />
                 ))}
               </div>
+            )}
+            {message.location && (
+              <ChatLocationMap
+                latitude={message.location.latitude}
+                longitude={message.location.longitude}
+                label={message.location.label}
+              />
+            )}
+            {message.poll && (
+              <ChatPollMessage
+                poll={message.poll}
+                onVote={(optionIds) => onVotePoll(message.poll!.id, optionIds)}
+              />
+            )}
+            {message.event && (
+              <ChatEventMessage
+                event={message.event}
+                onRsvp={(status) => onRsvpEvent(message.event!.id, status)}
+              />
             )}
           </div>
         )}
@@ -262,6 +318,9 @@ export function ChatMessage({
           <button type="button" onClick={() => setShowForwardDialog(true)} aria-label="Reenviar">
             <Forward size={16} />
           </button>
+          <button type="button" onClick={() => onTranslate(message.id)} aria-label="Traducir">
+            <Languages size={16} />
+          </button>
           <div className="chat-msg-actions-more" ref={moreRef}>
             <button
               type="button"
@@ -295,6 +354,27 @@ export function ChatMessage({
                     <Trash2 size={14} /> Eliminar
                   </button>
                 )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (message.isBookmarked) onUnbookmark(message.id);
+                    else onBookmark(message.id);
+                    setShowMoreActions(false);
+                  }}
+                >
+                  <Bookmark size={14} />{' '}
+                  {message.isBookmarked ? 'Quitar de favoritos' : 'Guardar en favoritos'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (message.isPinned) onUnpin(message.id);
+                    else onPin(message.id);
+                    setShowMoreActions(false);
+                  }}
+                >
+                  <Pin size={14} /> {message.isPinned ? 'Desfijar' : 'Fijar'}
+                </button>
               </div>
             )}
           </div>

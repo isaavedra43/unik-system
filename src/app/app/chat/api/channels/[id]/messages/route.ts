@@ -33,6 +33,34 @@ const sendSchema = z.object({
   replyToId: z.string().optional().nullable(),
   forwardedFromId: z.string().optional().nullable(),
   attachmentIds: z.array(z.string()).optional(),
+  location: z
+    .object({
+      latitude: z.number(),
+      longitude: z.number(),
+      label: z.string().max(200).optional(),
+    })
+    .optional()
+    .nullable(),
+  poll: z
+    .object({
+      question: z.string().min(1).max(200),
+      options: z.array(z.string().min(1).max(100)).min(2).max(10),
+      isMulti: z.boolean().optional(),
+      isAnonymous: z.boolean().optional(),
+      closesAt: z.string().optional().nullable(),
+    })
+    .optional()
+    .nullable(),
+  event: z
+    .object({
+      title: z.string().min(1).max(200),
+      description: z.string().max(2000).optional(),
+      startsAt: z.string(),
+      endsAt: z.string().optional().nullable(),
+      location: z.string().max(200).optional().nullable(),
+    })
+    .optional()
+    .nullable(),
 });
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -59,6 +87,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       replyToId: parsed.data.replyToId ?? undefined,
       forwardedFromId: parsed.data.forwardedFromId ?? undefined,
       attachmentIds: parsed.data.attachmentIds,
+      location: parsed.data.location,
+      poll: parsed.data.poll,
+      event: parsed.data.event,
     });
     return NextResponse.json(message);
   } catch (err) {

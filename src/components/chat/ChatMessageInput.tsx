@@ -1,18 +1,55 @@
 'use client';
 
 import React, { useState, useRef, useCallback, useEffect } from 'react';
-import { Paperclip, Send, Smile, X, CornerUpRight } from 'lucide-react';
+import {
+  Paperclip,
+  Send,
+  Smile,
+  X,
+  CornerUpRight,
+  Mic,
+  MapPin,
+  BarChart3,
+  Calendar,
+  FileText,
+} from 'lucide-react';
 import type { CurrentUser } from '@/modules/auth/authorization';
-import type { ChatMessageDTO } from '@/modules/chat/chat-events';
+import type { ChatMessageDTO, ChatChannelMemberDTO } from '@/modules/chat/chat-events';
 import { ChatPendingAttachment } from './ChatAttachmentPreview';
+import { ChatVoiceRecorder } from './ChatVoiceRecorder';
+import { ChatMentionPicker } from './ChatMentionPicker';
+import { ChatLocationPicker } from './ChatLocationPicker';
+import { ChatPollCreator } from './ChatPollCreator';
+import { ChatEventCreator } from './ChatEventCreator';
+import { ChatSnippetPicker } from './ChatSnippetPicker';
 
 export interface ChatMessageInputProps {
-  onSend: (content: string, attachmentIds?: string[]) => void;
+  onSend: (
+    content: string,
+    attachmentIds?: string[],
+    extra?: {
+      location?: { latitude: number; longitude: number; label?: string };
+      poll?: {
+        question: string;
+        options: string[];
+        isMulti: boolean;
+        isAnonymous: boolean;
+      };
+      event?: {
+        title: string;
+        description?: string;
+        startsAt: string;
+        endsAt?: string;
+        location?: string;
+      };
+    }
+  ) => void;
   onTyping: (isTyping: boolean) => void;
   replyTo: ChatMessageDTO | null;
   onCancelReply: () => void;
   channelId: string;
   user: CurrentUser;
+  members?: ChatChannelMemberDTO[];
 }
 
 interface PendingUpload {
@@ -51,12 +88,19 @@ export function ChatMessageInput({
   replyTo,
   onCancelReply,
   channelId,
+  members,
 }: ChatMessageInputProps) {
   const [text, setText] = useState('');
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [pendingUploads, setPendingUploads] = useState<PendingUpload[]>([]);
   const [completedAttachmentIds, setCompletedAttachmentIds] = useState<string[]>([]);
   const [isDragging, setIsDragging] = useState(false);
+  const [showLocationPicker, setShowLocationPicker] = useState(false);
+  const [showPollCreator, setShowPollCreator] = useState(false);
+  const [showEventCreator, setShowEventCreator] = useState(false);
+  const [showSnippetPicker, setShowSnippetPicker] = useState(false);
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null);
+  const [mentionIndex, setMentionIndex] = useState(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const emojiRef = useRef<HTMLDivElement>(null);
@@ -93,14 +137,41 @@ export function ChatMessageInput({
   );
 
   const handleTextChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    setText(e.target.value);
-    if (e.target.value.length > 0) {
+    const value = e.target.value;
+    setText(value);
+
+    // Detect @mention
+    const cursorPos = e.target.selectionStart;
+    const beforeCursor = value.slice(0, cursorPos);
+    const atMatch = beforeCursor.match(/@(\w*)$/);
+    if (atMatch && members && members.length > 0) {
+      setMentionQuery(atMatch[1]);
+      setMentionIndex(0);
+    } else {
+      setMentionQuery(null);
+    }
+
+    if (value.length > 0) {
       sendTyping(true);
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
       typingTimeoutRef.current = setTimeout(() => sendTyping(false), 3000);
     } else {
       sendTyping(false);
     }
+  };
+
+  const handleMentionSelect = (username: string) => {
+    const cursorPos = textareaRef.current?.selectionStart ?? text.length;
+    const beforeCursor = text.slice(0, cursorPos);
+    const afterCursor = text.slice(cursorPos);
+    const newText = beforeCursor.replace(/@(\w*)$/, `@${username} `) + afterCursor;
+    setText(newText);
+    setMentionQuery(null);
+    setTimeout(() => {
+      textareaRef.current?.focus();
+      const newPos = beforeCursor.replace(/@(\w*)$/, `@${username} `).length;
+      textareaRef.current?.setSelectionRange(newPos, newPos);
+    }, 0);
   };
 
   const handleSend = () => {
@@ -116,6 +187,24 @@ export function ChatMessageInput({
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // Mention navigation
+    if (mentionQuery !== null) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setMentionIndex((prev) => prev + 1);
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setMentionIndex((prev) => Math.max(0, prev - 1));
+        return;
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setMentionQuery(null);
+        return;
+      }
+    }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSend();
@@ -153,7 +242,6 @@ export function ChatMessageInput({
             setPendingUploads((prev) =>
               prev.map((u) => (u.id === uploadId ? { ...u, progress: 100 } : u))
             );
-            // Remove from pending after a short delay
             setTimeout(() => {
               setPendingUploads((prev) => prev.filter((u) => u.id !== uploadId));
             }, 500);
@@ -170,6 +258,56 @@ export function ChatMessageInput({
             prev.map((u) => (u.id === uploadId ? { ...u, error: 'Error de red' } : u))
           );
         }
+      }
+    },
+    [channelId]
+  );
+
+  const handleVoiceComplete = useCallback(
+    async (blob: Blob, durationMs: number) => {
+      const uploadId = `voice-${Date.now()}`;
+      setPendingUploads((prev) => [
+        ...prev,
+        {
+          id: uploadId,
+          fileName: 'mensaje-de-voz.webm',
+          mimeType: 'audio/webm',
+          sizeBytes: blob.size,
+          progress: 0,
+        },
+      ]);
+
+      try {
+        const formData = new FormData();
+        formData.append('file', blob, 'mensaje-de-voz.webm');
+        formData.append('channelId', channelId);
+
+        const res = await fetch('/app/chat/api/upload', {
+          method: 'POST',
+          body: formData,
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          setCompletedAttachmentIds((prev) => [...prev, data.id]);
+          setPendingUploads((prev) =>
+            prev.map((u) => (u.id === uploadId ? { ...u, progress: 100 } : u))
+          );
+          setTimeout(() => {
+            setPendingUploads((prev) => prev.filter((u) => u.id !== uploadId));
+          }, 500);
+        } else {
+          const err = await res.json();
+          setPendingUploads((prev) =>
+            prev.map((u) =>
+              u.id === uploadId ? { ...u, error: err.error || 'Error al subir audio' } : u
+            )
+          );
+        }
+      } catch {
+        setPendingUploads((prev) =>
+          prev.map((u) => (u.id === uploadId ? { ...u, error: 'Error de red' } : u))
+        );
       }
     },
     [channelId]
@@ -210,6 +348,50 @@ export function ChatMessageInput({
   const removeAttachment = (id: string) => {
     setCompletedAttachmentIds((prev) => prev.filter((a) => a !== id));
   };
+
+  const handleLocationSend = (location: {
+    latitude: number;
+    longitude: number;
+    label?: string;
+  }) => {
+    onSend('', undefined, { location });
+    setShowLocationPicker(false);
+  };
+
+  const handlePollCreate = (poll: {
+    question: string;
+    options: string[];
+    isMulti: boolean;
+    isAnonymous: boolean;
+  }) => {
+    onSend('', undefined, { poll });
+    setShowPollCreator(false);
+  };
+
+  const handleEventCreate = (event: {
+    title: string;
+    description?: string;
+    startsAt: string;
+    endsAt?: string;
+    location?: string;
+  }) => {
+    onSend('', undefined, { event });
+    setShowEventCreator(false);
+  };
+
+  const handleSnippetSelect = (content: string) => {
+    setText((prev) => (prev ? `${prev} ${content}` : content));
+    setShowSnippetPicker(false);
+    setTimeout(() => textareaRef.current?.focus(), 0);
+  };
+
+  // Filtered members for mention picker
+  const filteredMembers = (members ?? [])
+    .filter((m) => {
+      const q = (mentionQuery ?? '').toLowerCase();
+      return q === '' || m.name.toLowerCase().includes(q) || m.username.toLowerCase().includes(q);
+    })
+    .slice(0, 8);
 
   return (
     <div
@@ -271,6 +453,35 @@ export function ChatMessageInput({
         </div>
       )}
 
+      {/* Location picker */}
+      {showLocationPicker && (
+        <ChatLocationPicker
+          onSend={handleLocationSend}
+          onCancel={() => setShowLocationPicker(false)}
+        />
+      )}
+
+      {/* Poll creator */}
+      {showPollCreator && (
+        <ChatPollCreator onCreate={handlePollCreate} onCancel={() => setShowPollCreator(false)} />
+      )}
+
+      {/* Event creator */}
+      {showEventCreator && (
+        <ChatEventCreator
+          onCreate={handleEventCreate}
+          onCancel={() => setShowEventCreator(false)}
+        />
+      )}
+
+      {/* Snippet picker */}
+      {showSnippetPicker && (
+        <ChatSnippetPicker
+          onSelect={handleSnippetSelect}
+          onClose={() => setShowSnippetPicker(false)}
+        />
+      )}
+
       <div className="chat-input-row">
         {/* Attach button */}
         <button
@@ -290,18 +501,71 @@ export function ChatMessageInput({
           accept="image/*,video/*,audio/*,.pdf,.txt,.csv,.xlsx,.docx,.zip"
         />
 
-        {/* Textarea */}
-        <textarea
-          ref={textareaRef}
-          className="chat-input-textarea"
-          placeholder="Escribe un mensaje..."
-          value={text}
-          onChange={handleTextChange}
-          onKeyDown={handleKeyDown}
-          onPaste={handlePaste}
-          rows={1}
-          aria-label="Mensaje"
-        />
+        {/* Voice recorder */}
+        <ChatVoiceRecorder onComplete={handleVoiceComplete} channelId={channelId} />
+
+        {/* Location button */}
+        <button
+          type="button"
+          className="chat-input-btn"
+          onClick={() => setShowLocationPicker(!showLocationPicker)}
+          aria-label="Enviar ubicación"
+        >
+          <MapPin size={20} />
+        </button>
+
+        {/* Poll button */}
+        <button
+          type="button"
+          className="chat-input-btn"
+          onClick={() => setShowPollCreator(!showPollCreator)}
+          aria-label="Crear encuesta"
+        >
+          <BarChart3 size={20} />
+        </button>
+
+        {/* Event button */}
+        <button
+          type="button"
+          className="chat-input-btn"
+          onClick={() => setShowEventCreator(!showEventCreator)}
+          aria-label="Crear evento"
+        >
+          <Calendar size={20} />
+        </button>
+
+        {/* Snippet button */}
+        <button
+          type="button"
+          className="chat-input-btn"
+          onClick={() => setShowSnippetPicker(!showSnippetPicker)}
+          aria-label="Plantillas"
+        >
+          <FileText size={20} />
+        </button>
+
+        {/* Textarea with mention picker */}
+        <div className="chat-input-text-wrapper">
+          <textarea
+            ref={textareaRef}
+            className="chat-input-textarea"
+            placeholder="Escribe un mensaje..."
+            value={text}
+            onChange={handleTextChange}
+            onKeyDown={handleKeyDown}
+            onPaste={handlePaste}
+            rows={1}
+            aria-label="Mensaje"
+          />
+          {mentionQuery !== null && filteredMembers.length > 0 && (
+            <ChatMentionPicker
+              members={filteredMembers}
+              onSelect={handleMentionSelect}
+              query={mentionQuery ?? ''}
+              activeIndex={mentionIndex}
+            />
+          )}
+        </div>
 
         {/* Emoji button */}
         <div className="chat-input-emoji-wrapper" ref={emojiRef}>
