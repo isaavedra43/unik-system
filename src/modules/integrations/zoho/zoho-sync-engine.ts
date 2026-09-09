@@ -160,8 +160,15 @@ export interface ZohoEntityAdapter {
   /**
    * Optional: normalize pending snapshots into business models.
    * Called after HYDRATE/SYNC/QUICK completes, before marking the run COMPLETED.
+   * The engine loops this in batches until ALL pending snapshots are processed.
    */
   normalizePendingSnapshots?(opts: { limit: number }): Promise<void>;
+
+  /**
+   * The current normalizer version for this entity. Used by the engine to
+   * count pending snapshots. Defaults to 1 if omitted.
+   */
+  currentNormalizerVersion?: number;
 
   /**
    * Wall-clock timeout overrides per mode. If omitted, engine defaults are used.
@@ -1054,22 +1061,58 @@ export async function runSync(
     );
 
     // Normalize snapshots → business models BEFORE marking COMPLETED.
+    // Loop in batches until ALL pending snapshots are processed.
     if (adapter.normalizePendingSnapshots) {
-      try {
-        await withTimeout(
-          Promise.resolve(adapter.normalizePendingSnapshots({ limit: 100 })),
-          30_000
-        );
-      } catch (error) {
-        console.error(
-          JSON.stringify({
-            event: 'zoho.sync.normalization_failed',
-            entityType: adapter.entityType,
-            runId: run.id,
-            error: error instanceof Error ? error.message : 'unknown',
+      const BATCH_SIZE = 500;
+      const MAX_NORMALIZATION_LOOPS = 200; // safety valve: 200 * 500 = 100k records
+      let normalizationLoops = 0;
+      let totalNormalized = 0;
+
+      while (normalizationLoops < MAX_NORMALIZATION_LOOPS) {
+        normalizationLoops += 1;
+
+        const pendingCount = await withTimeout(
+          prisma.integrationSnapshot.count({
+            where: {
+              source: SOURCE,
+              entityType: adapter.entityType,
+              normalizationVersion: { lt: adapter.currentNormalizerVersion ?? 1 },
+            },
           })
         );
+
+        if (pendingCount === 0) break;
+
+        try {
+          await withTimeout(
+            Promise.resolve(adapter.normalizePendingSnapshots({ limit: BATCH_SIZE })),
+            120_000
+          );
+          totalNormalized += BATCH_SIZE;
+        } catch (error) {
+          console.error(
+            JSON.stringify({
+              event: 'zoho.sync.normalization_batch_failed',
+              entityType: adapter.entityType,
+              runId: run.id,
+              loop: normalizationLoops,
+              pendingCount,
+              error: error instanceof Error ? error.message : 'unknown',
+            })
+          );
+          break;
+        }
       }
+
+      console.info(
+        JSON.stringify({
+          event: 'zoho.sync.normalization_complete',
+          entityType: adapter.entityType,
+          runId: run.id,
+          loops: normalizationLoops,
+          totalNormalized,
+        })
+      );
     }
 
     const result: SyncResult = {

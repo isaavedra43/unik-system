@@ -2,6 +2,7 @@
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Phone, PhoneOff, Video, VideoOff, Mic, MicOff, X, User } from 'lucide-react';
+import type { ChatCallDTO } from '@/modules/chat/chat-events';
 
 export interface ChatCallDialogProps {
   channelId: string;
@@ -9,6 +10,10 @@ export interface ChatCallDialogProps {
   participants: { userId: string; name: string }[];
   currentUserId: string;
   onClose: () => void;
+  /** 'caller' inicia la llamada, 'callee' la recibe */
+  role?: 'caller' | 'callee';
+  /** Datos de la llamada existente (modo callee) */
+  callData?: ChatCallDTO | null;
 }
 
 interface CallState {
@@ -17,16 +22,23 @@ interface CallState {
   error: string | null;
 }
 
+const ICE_SERVERS: RTCIceServer[] = [
+  { urls: 'stun:stun.l.google.com:19302' },
+  { urls: 'stun:stun1.l.google.com:19302' },
+  { urls: 'stun:stun2.l.google.com:19302' },
+];
+
 export function ChatCallDialog({
   channelId,
   type,
   participants,
-  currentUserId,
   onClose,
+  role = 'caller',
+  callData = null,
 }: ChatCallDialogProps) {
   const [callState, setCallState] = useState<CallState>({
-    status: 'initiating',
-    callId: null,
+    status: role === 'callee' ? 'connecting' : 'initiating',
+    callId: callData?.id ?? null,
     error: null,
   });
   const [muted, setMuted] = useState(false);
@@ -40,10 +52,19 @@ export function ChatCallDialog({
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
   const durationTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const signalPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const calleeUserIdRef = useRef<string | null>(null);
+  const callerUserIdRef = useRef<string | null>(null);
+  const remoteDescriptionSetRef = useRef(false);
 
   const cleanup = useCallback(() => {
-    if (durationTimerRef.current) clearInterval(durationTimerRef.current);
-    if (signalPollRef.current) clearInterval(signalPollRef.current);
+    if (durationTimerRef.current) {
+      clearInterval(durationTimerRef.current);
+      durationTimerRef.current = null;
+    }
+    if (signalPollRef.current) {
+      clearInterval(signalPollRef.current);
+      signalPollRef.current = null;
+    }
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach((t) => t.stop());
       localStreamRef.current = null;
@@ -58,6 +79,29 @@ export function ChatCallDialog({
     return () => cleanup();
   }, [cleanup]);
 
+  // =====================================================
+  // Signal helpers
+  // =====================================================
+
+  const sendSignal = useCallback(
+    async (callId: string, toUserId: string, signalType: string, signal: unknown) => {
+      try {
+        await fetch(`/app/chat/api/calls/${callId}/signal`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            toUserId,
+            signalType,
+            signal: JSON.stringify(signal),
+          }),
+        });
+      } catch {
+        // silent
+      }
+    },
+    []
+  );
+
   const pollSignals = useCallback(async (callId: string) => {
     try {
       const res = await fetch(`/app/chat/api/calls/${callId}/signal`);
@@ -70,10 +114,37 @@ export function ChatCallDialog({
         if (!pcRef.current) continue;
         try {
           const signalData = JSON.parse(sig.signal);
-          if (sig.signalType === 'answer') {
-            await pcRef.current.setRemoteDescription(new RTCSessionDescription(signalData));
+
+          if (sig.signalType === 'offer' && role === 'callee') {
+            // Callee receives offer
+            if (!remoteDescriptionSetRef.current && pcRef.current.signalingState === 'stable') {
+              await pcRef.current.setRemoteDescription(new RTCSessionDescription(signalData));
+              remoteDescriptionSetRef.current = true;
+
+              // Create and send answer
+              const answer = await pcRef.current.createAnswer();
+              await pcRef.current.setLocalDescription(answer);
+
+              const callerId = callerUserIdRef.current;
+              if (callerId) {
+                await sendSignal(callId, callerId, 'answer', answer);
+              }
+            }
+          } else if (sig.signalType === 'answer' && role === 'caller') {
+            // Caller receives answer
+            if (!remoteDescriptionSetRef.current && pcRef.current.signalingState === 'have-local-offer') {
+              await pcRef.current.setRemoteDescription(new RTCSessionDescription(signalData));
+              remoteDescriptionSetRef.current = true;
+            }
           } else if (sig.signalType === 'ice' && signalData) {
-            await pcRef.current.addIceCandidate(new RTCIceCandidate(signalData));
+            // Both sides receive ICE candidates
+            if (remoteDescriptionSetRef.current) {
+              try {
+                await pcRef.current.addIceCandidate(new RTCIceCandidate(signalData));
+              } catch {
+                // ignore duplicate/invalid candidates
+              }
+            }
           }
         } catch {
           // ignore parse errors
@@ -82,9 +153,92 @@ export function ChatCallDialog({
     } catch {
       // silent
     }
-  }, []);
+  }, [role, sendSignal]);
 
-  const startCall = useCallback(async () => {
+  // =====================================================
+  // Create RTCPeerConnection and setup handlers
+  // =====================================================
+
+  const createPeerConnection = useCallback(
+    (callId: string, localStream: MediaStream) => {
+      const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+      pcRef.current = pc;
+
+      // Add local tracks
+      localStream.getTracks().forEach((track) => {
+        pc.addTrack(track, localStream);
+      });
+
+      // Handle remote tracks
+      const remoteStream = new MediaStream();
+      remoteStreamRef.current = remoteStream;
+      if (remoteVideoRef.current) {
+        remoteVideoRef.current.srcObject = remoteStream;
+      }
+      pc.ontrack = (event) => {
+        event.streams[0]?.getTracks().forEach((track) => {
+          remoteStream.addTrack(track);
+        });
+        if (remoteVideoRef.current) {
+          remoteVideoRef.current.srcObject = remoteStream;
+        }
+        setCallState((prev) => ({
+          ...prev,
+          status: prev.status === 'active' ? 'active' : 'connecting',
+        }));
+      };
+
+      // Send ICE candidates to the other party
+      pc.onicecandidate = async (event) => {
+        if (event.candidate) {
+          const targetId = role === 'caller' ? calleeUserIdRef.current : callerUserIdRef.current;
+          if (targetId) {
+            await sendSignal(callId, targetId, 'ice', event.candidate);
+          }
+        }
+      };
+
+      // Connection state changes
+      pc.onconnectionstatechange = () => {
+        if (pc.connectionState === 'connected') {
+          setCallState((prev) => ({ ...prev, status: 'active' }));
+          if (!durationTimerRef.current) {
+            durationTimerRef.current = setInterval(() => {
+              setDuration((d) => d + 1);
+            }, 1000);
+          }
+        } else if (pc.connectionState === 'disconnected') {
+          setCallState((prev) => ({ ...prev, status: 'connecting' }));
+        } else if (pc.connectionState === 'failed') {
+          setCallState((prev) => ({
+            ...prev,
+            status: 'failed',
+            error: 'Conexión WebRTC fallida',
+          }));
+        }
+      };
+
+      pc.oniceconnectionstatechange = () => {
+        if (pc.iceConnectionState === 'connected') {
+          setCallState((prev) => ({ ...prev, status: 'active' }));
+          if (!durationTimerRef.current) {
+            durationTimerRef.current = setInterval(() => {
+              setDuration((d) => d + 1);
+            }, 1000);
+          }
+        }
+      };
+
+      return pc;
+    },
+    [role, sendSignal]
+  );
+
+  // =====================================================
+  // CALLER: start call
+  // =====================================================
+
+  const startCallAsCaller = useCallback(async () => {
     try {
       // Get local media
       const constraints: MediaStreamConstraints = {
@@ -115,79 +269,28 @@ export function ChatCallDialog({
 
       const data = await res.json();
       const callId: string = data.data.id;
+      const calleeUserId = participants[0]?.userId;
+      calleeUserIdRef.current = calleeUserId ?? null;
+
       setCallState({ status: 'ringing', callId, error: null });
 
       // Create RTCPeerConnection
-      const pc = new RTCPeerConnection({
-        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
-      });
-      pcRef.current = pc;
-
-      // Add local tracks
-      localStream.getTracks().forEach((track) => {
-        pc.addTrack(track, localStream);
-      });
-
-      // Handle remote tracks
-      const remoteStream = new MediaStream();
-      remoteStreamRef.current = remoteStream;
-      if (remoteVideoRef.current) {
-        remoteVideoRef.current.srcObject = remoteStream;
-      }
-      pc.ontrack = (event) => {
-        event.streams[0].getTracks().forEach((track) => {
-          remoteStream.addTrack(track);
-        });
-        setCallState((prev) => ({ ...prev, status: 'active' }));
-      };
+      const pc = createPeerConnection(callId, localStream);
 
       // Create offer
-      const offer = await pc.createOffer();
+      const offer = await pc.createOffer({
+        offerToReceiveAudio: true,
+        offerToReceiveVideo: type === 'video',
+      });
       await pc.setLocalDescription(offer);
 
-      // Send offer to first participant
-      const targetUserId = participants[0]?.userId;
-      if (targetUserId) {
-        await fetch(`/app/chat/api/calls/${callId}/signal`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            toUserId: targetUserId,
-            signalType: 'offer',
-            signal: JSON.stringify(offer),
-          }),
-        });
+      // Send offer to callee
+      if (calleeUserId) {
+        await sendSignal(callId, calleeUserId, 'offer', offer);
       }
 
-      // Send ICE candidates
-      pc.onicecandidate = async (event) => {
-        if (event.candidate && targetUserId) {
-          await fetch(`/app/chat/api/calls/${callId}/signal`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              toUserId: targetUserId,
-              signalType: 'ice',
-              signal: JSON.stringify(event.candidate),
-            }),
-          }).catch(() => {});
-        }
-      };
-
-      // Start polling for signals
+      // Start polling for signals (answer + ice from callee)
       signalPollRef.current = setInterval(() => pollSignals(callId), 500);
-
-      // Start duration timer when active
-      pc.onconnectionstatechange = () => {
-        if (pc.connectionState === 'connected') {
-          setCallState((prev) => ({ ...prev, status: 'active' }));
-          if (!durationTimerRef.current) {
-            durationTimerRef.current = setInterval(() => {
-              setDuration((d) => d + 1);
-            }, 1000);
-          }
-        }
-      };
     } catch (err) {
       setCallState((prev) => ({
         ...prev,
@@ -195,11 +298,65 @@ export function ChatCallDialog({
         error: err instanceof Error ? err.message : 'Error desconocido',
       }));
     }
-  }, [channelId, type, participants, pollSignals]);
+  }, [channelId, type, participants, createPeerConnection, sendSignal, pollSignals]);
+
+  // =====================================================
+  // CALLEE: join existing call
+  // =====================================================
+
+  const joinCallAsCallee = useCallback(async () => {
+    if (!callData) return;
+
+    const callId = callData.id;
+    const callerId = callData.callerId;
+    callerUserIdRef.current = callerId;
+
+    try {
+      // Accept call via API
+      await fetch(`/app/chat/api/calls/${callId}/accept`, {
+        method: 'POST',
+      }).catch(() => {});
+
+      // Get local media
+      const constraints: MediaStreamConstraints = {
+        audio: true,
+        video: callData.type === 'video',
+      };
+      const localStream = await navigator.mediaDevices.getUserMedia(constraints);
+      localStreamRef.current = localStream;
+      if (localVideoRef.current && callData.type === 'video') {
+        localVideoRef.current.srcObject = localStream;
+      }
+
+      setCallState({ status: 'connecting', callId, error: null });
+
+      // Create RTCPeerConnection
+      createPeerConnection(callId, localStream);
+
+      // Start polling for signals (offer + ice from caller)
+      // The offer should arrive shortly from the caller
+      signalPollRef.current = setInterval(() => pollSignals(callId), 500);
+    } catch (err) {
+      setCallState((prev) => ({
+        ...prev,
+        status: 'failed',
+        error: err instanceof Error ? err.message : 'Error desconocido',
+      }));
+    }
+  }, [callData, createPeerConnection, pollSignals]);
+
+  // =====================================================
+  // Start call on mount
+  // =====================================================
 
   useEffect(() => {
-    startCall();
-  }, [startCall]);
+    if (role === 'caller') {
+      startCallAsCaller();
+    } else {
+      joinCallAsCallee();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleHangUp = useCallback(async () => {
     if (callState.callId) {
@@ -209,7 +366,7 @@ export function ChatCallDialog({
     }
     cleanup();
     setCallState((prev) => ({ ...prev, status: 'ended' }));
-    setTimeout(onClose, 1000);
+    setTimeout(onClose, 800);
   }, [callState.callId, cleanup, onClose]);
 
   const toggleMute = useCallback(() => {
@@ -247,6 +404,8 @@ export function ChatCallDialog({
   }[callState.status];
 
   const isActive = callState.status === 'active';
+  const callType = role === 'callee' ? callData?.type ?? type : type;
+  const remoteName = role === 'callee' ? callData?.callerName : participants[0]?.name;
 
   return (
     <div className="chat-call-dialog-overlay">
@@ -267,7 +426,7 @@ export function ChatCallDialog({
         </div>
 
         <div className="chat-call-body">
-          {type === 'video' ? (
+          {callType === 'video' ? (
             <div className="chat-call-video-grid">
               <div className="chat-call-video-local">
                 <video ref={localVideoRef} autoPlay muted playsInline />
@@ -292,7 +451,7 @@ export function ChatCallDialog({
               <div className="chat-call-audio-avatar">
                 <Phone size={56} />
               </div>
-              <div className="chat-call-audio-name">{participants[0]?.name ?? 'Usuario'}</div>
+              <div className="chat-call-audio-name">{remoteName ?? 'Usuario'}</div>
               <div className="chat-call-audio-status">{statusText}</div>
             </div>
           )}
@@ -307,7 +466,7 @@ export function ChatCallDialog({
           >
             {muted ? <MicOff size={22} /> : <Mic size={22} />}
           </button>
-          {type === 'video' && (
+          {callType === 'video' && (
             <button
               type="button"
               className={`chat-call-control-btn ${videoOff ? 'active' : ''}`}

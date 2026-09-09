@@ -8,7 +8,10 @@ import { ChatMessageList } from './ChatMessageList';
 import { ChatMessageInput } from './ChatMessageInput';
 import { ChatGroupSettings } from './ChatGroupSettings';
 import { ChatCallButton } from './ChatCallButton';
+import { ChatCallDialog } from './ChatCallDialog';
+import { ChatIncomingCallDialog } from './ChatIncomingCallDialog';
 import { ChatThreadPanel } from './ChatThreadPanel';
+import type { ChatCallDTO } from '@/modules/chat/chat-events';
 
 export interface ChatConversationProps {
   channelId: string;
@@ -32,6 +35,11 @@ export function ChatConversation({ channelId, user, onRefresh, onBack }: ChatCon
   const [activeThread, setActiveThread] = useState<{
     threadId: string;
     rootMessage: ChatMessageDTO;
+  } | null>(null);
+  const [incomingCall, setIncomingCall] = useState<ChatCallDTO | null>(null);
+  const [activeCall, setActiveCall] = useState<{
+    callData: ChatCallDTO;
+    role: 'caller' | 'callee';
   } | null>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
   const oldestMessageDate = useRef<string | null>(null);
@@ -169,10 +177,17 @@ export function ChatConversation({ channelId, user, onRefresh, onBack }: ChatCon
             });
             break;
           case 'call_invite':
-            // Call invite received — UI handled by ChatCallButton if active
+            // Call invite received — show incoming call dialog if we're a participant
+            if (evt.data.participants.some((p) => p.userId === user.id) && !activeCall) {
+              setIncomingCall(evt.data);
+            }
             break;
           case 'call_end':
-            // Call ended — UI cleanup if needed
+            // Call ended — close dialogs
+            setIncomingCall(null);
+            if (activeCall) {
+              setActiveCall(null);
+            }
             break;
           case 'webrtc_signal':
             // WebRTC signal — handled by ChatCallDialog polling
@@ -341,6 +356,30 @@ export function ChatConversation({ channelId, user, onRefresh, onBack }: ChatCon
     } catch {
       // silent
     }
+  }, []);
+
+  // Incoming call handlers
+  const handleAcceptCall = useCallback(async () => {
+    if (!incomingCall) return;
+    const callData = incomingCall;
+    setIncomingCall(null);
+    setActiveCall({ callData, role: 'callee' });
+  }, [incomingCall]);
+
+  const handleDeclineCall = useCallback(async () => {
+    if (!incomingCall) return;
+    try {
+      await fetch(`/app/chat/api/calls/${incomingCall.id}/decline`, {
+        method: 'POST',
+      });
+    } catch {
+      // silent
+    }
+    setIncomingCall(null);
+  }, [incomingCall]);
+
+  const handleCloseCall = useCallback(() => {
+    setActiveCall(null);
   }, []);
 
   // Forward
@@ -615,6 +654,31 @@ export function ChatConversation({ channelId, user, onRefresh, onBack }: ChatCon
               .catch(() => {});
             onRefresh();
           }}
+        />
+      )}
+
+      {/* Incoming call notification */}
+      {incomingCall && (
+        <ChatIncomingCallDialog
+          call={incomingCall}
+          onAccept={handleAcceptCall}
+          onDecline={handleDeclineCall}
+        />
+      )}
+
+      {/* Active call dialog (callee mode) */}
+      {activeCall && activeCall.role === 'callee' && (
+        <ChatCallDialog
+          channelId={channelId}
+          type={activeCall.callData.type}
+          participants={activeCall.callData.participants.map((p) => ({
+            userId: p.userId,
+            name: p.name,
+          }))}
+          currentUserId={user.id}
+          onClose={handleCloseCall}
+          role="callee"
+          callData={activeCall.callData}
         />
       )}
     </div>

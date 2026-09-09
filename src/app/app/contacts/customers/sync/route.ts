@@ -12,7 +12,7 @@ export const runtime = 'nodejs';
 
 /** Max time we keep the HTTP request open before responding. The actual
  *  sync work is handed to `after` so it continues even if the client drops. */
-const SYNC_ROUTE_TIMEOUT_MS = 25_000;
+const SYNC_ROUTE_TIMEOUT_MS = 120_000;
 
 export async function POST() {
   const session = await getCurrentSession();
@@ -29,7 +29,7 @@ export async function POST() {
       return NextResponse.json({ already_running: true, run_id: activeRun.runId }, { status: 409 });
     }
 
-    const syncPromise = syncContacts({ mode: 'sync', maxDetailFetches: 50 });
+    const syncPromise = syncContacts({ mode: 'sync' });
 
     after(async () => {
       try {

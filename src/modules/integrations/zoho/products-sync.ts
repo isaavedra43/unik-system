@@ -131,6 +131,8 @@ export const productsAdapter: ZohoEntityAdapter = {
     );
     await normalizePendingProductSnapshots({ limit });
   },
+
+  currentNormalizerVersion: 1,
 };
 
 // ---------------------------------------------------------------------------

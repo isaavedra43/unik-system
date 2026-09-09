@@ -7,13 +7,11 @@ import {
   Smile,
   X,
   CornerUpRight,
-  Mic,
   MapPin,
   BarChart3,
   Calendar,
   FileText,
   AlertCircle,
-  Video,
 } from 'lucide-react';
 import type { CurrentUser } from '@/modules/auth/authorization';
 import type { ChatMessageDTO, ChatChannelMemberDTO } from '@/modules/chat/chat-events';

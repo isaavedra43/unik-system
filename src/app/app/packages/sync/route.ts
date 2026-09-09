@@ -10,7 +10,7 @@ import {
 
 export const runtime = 'nodejs';
 
-const SYNC_ROUTE_TIMEOUT_MS = 25_000;
+const SYNC_ROUTE_TIMEOUT_MS = 120_000;
 
 export async function POST() {
   const session = await getCurrentSession();
@@ -23,7 +23,7 @@ export async function POST() {
     if (activeRun)
       return NextResponse.json({ already_running: true, run_id: activeRun.runId }, { status: 409 });
 
-    const syncPromise = syncPackages({ mode: 'sync', maxDetailFetches: 50 });
+    const syncPromise = syncPackages({ mode: 'sync' });
 
     after(async () => {
       try {

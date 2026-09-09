@@ -86,6 +86,8 @@ export const invoicesAdapter: ZohoEntityAdapter = {
     );
     await normalizePendingInvoiceSnapshots({ limit });
   },
+
+  currentNormalizerVersion: 1,
 };
 
 // ---------------------------------------------------------------------------

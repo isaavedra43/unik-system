@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Video, X, Send, VideoOff } from 'lucide-react';
+import { Video, X, Send } from 'lucide-react';
 
 export interface ChatVideoRecorderProps {
   onComplete: (blob: Blob, durationMs: number) => void;
@@ -31,7 +31,6 @@ export function ChatVideoRecorder({ onComplete }: ChatVideoRecorderProps) {
   const [isRecording, setIsRecording] = useState(false);
   const [elapsedMs, setElapsedMs] = useState(0);
   const [error, setError] = useState<string | null>(null);
-  const [videoUrl, setVideoUrl] = useState<string | null>(null);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -73,7 +72,6 @@ export function ChatVideoRecorder({ onComplete }: ChatVideoRecorderProps) {
   const resetState = useCallback(() => {
     setIsRecording(false);
     setElapsedMs(0);
-    setVideoUrl(null);
     mediaRecorderRef.current = null;
     chunksRef.current = [];
   }, []);
