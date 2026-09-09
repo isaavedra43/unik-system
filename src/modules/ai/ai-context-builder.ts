@@ -67,6 +67,16 @@ ${availableTools.map((t) => `- ${t.name}: ${t.description}`).join('\n')}
 9. Para fechas, usa formato dd MMM yyyy (ej: 01 sep 2026).
 10. Si los datos devueltos por un tool están vacíos, dilo claramente ("No hay ventas en efectivo hoy").
 
+## REGLA CRÍTICA — SELECCIÓN DEL TOOL CORRECTO
+NUNCA uses getSalesByLocation para consultas sobre método de entrega. getSalesByLocation agrupa por SUCURSAL (locationName), NO por método de entrega.
+
+- Si el usuario pregunta por "método de entrega", "a pie de obra", "recoge en bodega", "instalación a domicilio" → USA getSalesByDeliveryMethod
+- Si el usuario pregunta por "sucursal", "ubicación", "Patio Unik" → USA getSalesByLocation
+- Si el usuario pregunta por "método de pago", "efectivo", "transferencia", "depósito" → USA getCashSales (para un método específico) o getSalesByPaymentMethod (para distribución)
+- Si el usuario pregunta por "vendedor" → USA getSalesBySalesperson
+- Si el usuario pregunta por "estado" → USA getSalesByStatus
+- Si el usuario pide "dame los folios" o "dime las órdenes" con filtros → USA searchSalesOrders
+
 ## REGLA CRÍTICA — Parámetro dateRange
 TODAS las tools de ventas, inventario, clientes, finanzas y analytics requieren el parámetro dateRange. Es OBLIGATORIO. NUNCA lo omitas.
 

@@ -6161,16 +6161,36 @@ textarea.input {
     display: none;
   }
 
+  /* Stack vertically: toggle on top, chat below at 100% width */
   .assistant-page-body {
     overflow: hidden;
+    flex-direction: column;
+  }
+
+  .assistant-sidebar-toggle {
+    width: 100%;
+    margin: 0;
+    border-radius: 0;
+    border-left: none;
+    border-right: none;
+    border-top: none;
+    justify-content: flex-start;
+    padding: 0.6rem 1rem;
   }
 
   .assistant-page-main {
     overflow: hidden;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    border-left: none;
   }
 
   .assistant-chat {
     overflow: hidden;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
   }
 
   .assistant-chat-messages {
@@ -6180,10 +6200,13 @@ textarea.input {
     flex: 1;
     padding: var(--unik-space-3) var(--unik-space-3) var(--unik-space-4);
     gap: var(--unik-space-3);
+    width: 100%;
+    max-width: 100%;
   }
 
   .assistant-msg {
     max-width: 92%;
+    min-width: 0;
   }
 
   .assistant-msg pre,
@@ -6196,11 +6219,66 @@ textarea.input {
 
   .assistant-welcome {
     padding: var(--unik-space-6) var(--unik-space-4);
+    max-width: 100%;
   }
 
+  /* Input bar: full width, wrap on small screens */
   .assistant-input-bar {
     padding: 0 var(--unik-space-3) var(--unik-space-3);
-    flex-wrap: nowrap;
+    flex-wrap: wrap;
+    width: 100%;
+    max-width: 100%;
+    gap: var(--unik-space-1);
+  }
+
+  .assistant-input-bar > .model-selector {
+    flex-shrink: 1;
+    min-width: 0;
+  }
+
+  .assistant-input-bar > .model-selector-trigger {
+    font-size: var(--unik-text-xs);
+    padding: 0.3rem 0.5rem;
+  }
+
+  .assistant-input-bar > .model-selector-dropdown {
+    min-width: 200px;
+    max-width: calc(100vw - 2rem);
+  }
+
+  /* Input container: full width */
+  .assistant-input {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    padding: var(--unik-space-2) var(--unik-space-3) var(--unik-space-3);
+  }
+
+  .assistant-input-container {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  .assistant-input-textarea {
+    font-size: 16px;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  /* Suggestions: wrap properly */
+  .assistant-suggestions {
+    flex-wrap: wrap;
+    padding: 0 var(--unik-space-3) var(--unik-space-3);
+    gap: var(--unik-space-2);
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .assistant-suggestion-chip {
+    white-space: nowrap;
+    flex-shrink: 0;
   }
 }
 
