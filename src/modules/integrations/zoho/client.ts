@@ -20,16 +20,6 @@ interface ZohoEnvelope {
   message?: string;
 }
 
-/**
- * Performs a GET request against the Zoho Inventory API.
- * Automatically resolves the access token, appends organization_id and
- * parses the JSON response. Only GET is supported in this phase.
- *
- * Every call is logged to IntegrationApiCall for the monitoring dashboard.
- *
- * @param path  Logical Inventory path, e.g. "/salesorders"
- * @param query Optional extra query parameters
- */
 /** Max time to wait for a single Zoho API call before aborting. */
 const ZOHO_REQUEST_TIMEOUT_MS = 30_000;
 
@@ -43,9 +33,28 @@ function truncatePreview(json: unknown): string {
   }
 }
 
-export async function zohoGet<T = unknown>(
+interface LogZohoCallInput {
+  method: string;
+  path: string;
+  httpStatus?: number;
+  durationMs: number;
+  success: boolean;
+  errorCode?: string;
+  responsePreview?: string;
+}
+
+function logZohoCall(input: LogZohoCallInput): void {
+  logIntegrationApiCall({
+    source: INTEGRATION_SOURCE_ZOHO,
+    ...input,
+  });
+}
+
+async function fetchZoho<T = unknown>(
+  method: 'GET' | 'POST' | 'PUT' | 'DELETE',
   path: string,
-  query?: Record<string, string>
+  query?: Record<string, string>,
+  body?: Record<string, unknown>
 ): Promise<T> {
   const config = getZohoConfig();
   const accessToken = await getZohoAccessToken();
@@ -59,21 +68,32 @@ export async function zohoGet<T = unknown>(
     }
   }
 
+  const headers: Record<string, string> = {
+    Authorization: `Zoho-oauthtoken ${accessToken}`,
+  };
+  let fetchBody: BodyInit | undefined;
+
+  if (method === 'POST' || method === 'PUT') {
+    headers['Content-Type'] = 'application/x-www-form-urlencoded;charset=UTF-8';
+    const payload = body ? JSON.stringify(body) : '{}';
+    fetchBody = new URLSearchParams({ JSONString: payload });
+  }
+
   const startedAt = Date.now();
   let response: Response;
 
   try {
     response = await fetch(url, {
-      method: 'GET',
-      headers: { Authorization: `Zoho-oauthtoken ${accessToken}` },
+      method,
+      headers,
+      body: fetchBody,
       signal: AbortSignal.timeout(ZOHO_REQUEST_TIMEOUT_MS),
     });
   } catch (error) {
     const durationMs = Date.now() - startedAt;
     const isTimeout = error instanceof DOMException && error.name === 'TimeoutError';
-    logIntegrationApiCall({
-      source: INTEGRATION_SOURCE_ZOHO,
-      method: 'GET',
+    logZohoCall({
+      method,
       path,
       durationMs,
       success: false,
@@ -88,9 +108,8 @@ export async function zohoGet<T = unknown>(
     json = await response.json();
   } catch {
     const durationMs = Date.now() - startedAt;
-    logIntegrationApiCall({
-      source: INTEGRATION_SOURCE_ZOHO,
-      method: 'GET',
+    logZohoCall({
+      method,
       path,
       httpStatus: response.status,
       durationMs,
@@ -99,17 +118,16 @@ export async function zohoGet<T = unknown>(
       responsePreview: `[HTTP ${response.status}] non-JSON body`,
     });
     throw new ZohoApiError(
-      `Zoho GET ${path} returned a non-JSON response`,
-      `GET ${path}`,
+      `Zoho ${method} ${path} returned a non-JSON response`,
+      `${method} ${path}`,
       response.status
     );
   }
 
   if (!response.ok) {
     const durationMs = Date.now() - startedAt;
-    logIntegrationApiCall({
-      source: INTEGRATION_SOURCE_ZOHO,
-      method: 'GET',
+    logZohoCall({
+      method,
       path,
       httpStatus: response.status,
       durationMs,
@@ -118,8 +136,8 @@ export async function zohoGet<T = unknown>(
       responsePreview: truncatePreview(json),
     });
     throw new ZohoApiError(
-      `Zoho GET ${path} failed with HTTP status ${response.status}`,
-      `GET ${path}`,
+      `Zoho ${method} ${path} failed with HTTP status ${response.status}`,
+      `${method} ${path}`,
       response.status
     );
   }
@@ -127,9 +145,8 @@ export async function zohoGet<T = unknown>(
   const envelope = json as ZohoEnvelope;
   if (typeof envelope.code === 'number' && envelope.code !== 0) {
     const durationMs = Date.now() - startedAt;
-    logIntegrationApiCall({
-      source: INTEGRATION_SOURCE_ZOHO,
-      method: 'GET',
+    logZohoCall({
+      method,
       path,
       httpStatus: response.status,
       durationMs,
@@ -138,17 +155,16 @@ export async function zohoGet<T = unknown>(
       responsePreview: truncatePreview(json),
     });
     throw new ZohoApiError(
-      `Zoho GET ${path} returned error code ${envelope.code}`,
-      `GET ${path}`,
+      `Zoho ${method} ${path} returned error code ${envelope.code}`,
+      `${method} ${path}`,
       response.status,
       envelope.code
     );
   }
 
   const durationMs = Date.now() - startedAt;
-  logIntegrationApiCall({
-    source: INTEGRATION_SOURCE_ZOHO,
-    method: 'GET',
+  logZohoCall({
+    method,
     path,
     httpStatus: response.status,
     durationMs,
@@ -157,4 +173,56 @@ export async function zohoGet<T = unknown>(
   });
 
   return json as T;
+}
+
+/**
+ * Performs a GET request against the Zoho Inventory API.
+ * Automatically resolves the access token, appends organization_id and
+ * parses the JSON response.
+ *
+ * @param path  Logical Inventory path, e.g. "/salesorders"
+ * @param query Optional extra query parameters
+ */
+export async function zohoGet<T = unknown>(
+  path: string,
+  query?: Record<string, string>
+): Promise<T> {
+  return fetchZoho<T>('GET', path, query);
+}
+
+/**
+ * Performs a POST request against the Zoho Inventory API.
+ * The body is sent as `JSONString=...` with `Content-Type: application/x-www-form-urlencoded`
+ * as required by Zoho Inventory v1.
+ *
+ * @param path Logical Inventory path, e.g. "/estimates"
+ * @param body JSON-serializable request body
+ */
+export async function zohoPost<T = unknown>(
+  path: string,
+  body: Record<string, unknown>
+): Promise<T> {
+  return fetchZoho<T>('POST', path, undefined, body);
+}
+
+/**
+ * Performs a PUT request against the Zoho Inventory API.
+ * Future helper; currently unused.
+ */
+export async function zohoPut<T = unknown>(
+  path: string,
+  body: Record<string, unknown>
+): Promise<T> {
+  return fetchZoho<T>('PUT', path, undefined, body);
+}
+
+/**
+ * Performs a DELETE request against the Zoho Inventory API.
+ * Future helper; currently unused.
+ */
+export async function zohoDelete<T = unknown>(
+  path: string,
+  query?: Record<string, string>
+): Promise<T> {
+  return fetchZoho<T>('DELETE', path, query);
 }

@@ -290,6 +290,224 @@ model SalesOrderItem {
   @@index([salesOrderId])
 }
 
+/// Business-normalized view of a Zoho package (shipping/package).
+model SalesOrderPackage {
+  id                     String                  @id @default(cuid())
+  zohoPackageId          String                  @unique
+  zohoSalesOrderId       String?
+  salesOrderNumber       String?
+  packageNumber          String?
+  packageDate            DateTime?               @db.Date
+  shipmentDate           DateTime?               @db.Date
+  trackingNumber         String?
+  deliveryMethod         String?
+  status                 String? // NotShipped | Shipped | Delivered
+  zohoCustomerId         String?
+  customerName           String?
+  totalQuantity          Decimal?                @db.Decimal(18, 4)
+  sourceRemoteModifiedAt DateTime
+  sourceSnapshotId       String
+  normalizedAt           DateTime                @default(now())
+  createdAt              DateTime                @default(now())
+  updatedAt              DateTime                @updatedAt
+  items                  SalesOrderPackageItem[]
+
+  @@index([zohoSalesOrderId])
+  @@index([status])
+  @@index([packageNumber])
+}
+
+/// Line items inside a package.
+model SalesOrderPackageItem {
+  id             String            @id @default(cuid())
+  packageId      String
+  zohoLineItemId String?
+  soLineItemId   String?
+  zohoItemId     String?
+  sku            String?
+  name           String?
+  description    String?
+  quantity       Decimal?          @db.Decimal(18, 4)
+  unit           String?
+  isInvoiced     Boolean?
+  isComboProduct Boolean?
+  comboType      String?
+  sortOrder      Int               @default(0)
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+  package        SalesOrderPackage @relation(fields: [packageId], references: [id], onDelete: Cascade)
+
+  @@index([packageId])
+}
+
+/// Business-normalized view of a Zoho invoice.
+model Invoice {
+  id                     String           @id @default(cuid())
+  zohoInvoiceId          String           @unique
+  invoiceNumber          String?
+  zohoSalesOrderId       String?
+  salesOrderNumber       String?
+  invoiceDate            DateTime?        @db.Date
+  dueDate                DateTime?        @db.Date
+  status                 String?
+  paymentStatus          String?
+  zohoCustomerId         String?
+  customerName           String?
+  customerEmail          String?
+  customerPhone          String?
+  zohoSalespersonId      String?
+  salespersonName        String?
+  currencyCode           String?
+  subtotal               Decimal?         @db.Decimal(18, 4)
+  discountTotal          Decimal?         @db.Decimal(18, 4)
+  taxTotal               Decimal?         @db.Decimal(18, 4)
+  shippingCharge         Decimal?         @db.Decimal(18, 4)
+  adjustment             Decimal?         @db.Decimal(18, 4)
+  total                  Decimal?         @db.Decimal(18, 4)
+  balance                Decimal?         @db.Decimal(18, 4)
+  amountPaid             Decimal?         @db.Decimal(18, 4)
+  sourceRemoteModifiedAt DateTime
+  sourceSnapshotId       String
+  normalizedAt           DateTime         @default(now())
+  createdAt              DateTime         @default(now())
+  updatedAt              DateTime         @updatedAt
+  items                  InvoiceItem[]
+  payments               InvoicePayment[]
+
+  @@index([zohoSalesOrderId])
+  @@index([invoiceNumber])
+  @@index([status])
+  @@index([zohoCustomerId])
+  @@index([invoiceDate])
+}
+
+/// Line items inside an invoice.
+model InvoiceItem {
+  id             String   @id @default(cuid())
+  invoiceId      String
+  zohoLineItemId String?
+  zohoItemId     String?
+  sku            String?
+  name           String?
+  description    String?
+  quantity       Decimal? @db.Decimal(18, 4)
+  unit           String?
+  rate           Decimal? @db.Decimal(18, 4)
+  discountAmount Decimal? @db.Decimal(18, 4)
+  taxName        String?
+  taxPercentage  Decimal? @db.Decimal(18, 4)
+  taxAmount      Decimal? @db.Decimal(18, 4)
+  lineTotal      Decimal? @db.Decimal(18, 4)
+  sortOrder      Int      @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  invoice        Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceId])
+}
+
+/// Payment applied to an invoice (captures partial payments).
+model InvoicePayment {
+  id                     String    @id @default(cuid())
+  invoiceId              String
+  zohoPaymentId          String?
+  paymentNumber          String?
+  paymentDate            DateTime? @db.Date
+  paymentMode            String?
+  referenceNumber        String?
+  amount                 Decimal?  @db.Decimal(18, 4)
+  customerName           String?
+  zohoCustomerId         String?
+  sourceRemoteModifiedAt DateTime
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+  invoice                Invoice   @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceId])
+  @@index([zohoPaymentId])
+  @@index([paymentDate])
+}
+
+/// Business-normalized view of a Zoho contact of type vendor.
+model Vendor {
+  id                     String   @id @default(cuid())
+  zohoContactId          String   @unique
+  companyName            String?
+  contactType            String?
+  status                 String?
+  paymentTerms           Int?
+  paymentTermsLabel      String?
+  currencyCode           String?
+  website                String?
+  phone                  String?
+  mobile                 String?
+  email                  String?
+  primaryContactId       String?
+  billingAddress         Json?
+  shippingAddress        Json?
+  sourceRemoteModifiedAt DateTime
+  sourceSnapshotId       String
+  normalizedAt           DateTime @default(now())
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  @@index([companyName])
+  @@index([status])
+  @@index([email])
+}
+
+/// Product master catalog from Zoho items.
+model Product {
+  id                     String             @id @default(cuid())
+  zohoItemId             String             @unique
+  name                   String?
+  sku                    String?
+  description            String?
+  rate                   Decimal?           @db.Decimal(18, 4)
+  unit                   String?
+  productType            String?
+  isComboProduct         Boolean?
+  comboType              String?
+  status                 String?
+  stockOnHand            Decimal?           @db.Decimal(18, 4)
+  reorderLevel           Decimal?           @db.Decimal(18, 4)
+  currencyCode           String?
+  taxName                String?
+  taxPercentage          Decimal?           @db.Decimal(18, 4)
+  categoryName           String?
+  brandName              String?
+  manufacturer           String?
+  imageUrl               String?
+  sourceRemoteModifiedAt DateTime
+  sourceSnapshotId       String
+  normalizedAt           DateTime           @default(now())
+  createdAt              DateTime           @default(now())
+  updatedAt              DateTime           @updatedAt
+  components             ProductComponent[]
+
+  @@index([sku])
+  @@index([name])
+  @@index([status])
+  @@index([productType])
+}
+
+/// Components of a bundle/assembly product.
+model ProductComponent {
+  id          String   @id @default(cuid())
+  parentId    String
+  childItemId String?
+  childName   String?
+  childSku    String?
+  quantity    Decimal? @db.Decimal(18, 4)
+  unit        String?
+  rate        Decimal? @db.Decimal(18, 4)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  parent      Product  @relation(fields: [parentId], references: [id], onDelete: Cascade)
+
+  @@index([parentId])
+}
+
 /// Generic per-user table layout preferences (column order, visibility, widths,
 /// pinning, density, page size). Reusable across modules via `tableKey`.
 /// Source of persistence is PostgreSQL; localStorage may be used as UX cache.
@@ -463,7 +681,7 @@ model AiApiCall {
 
 /// Archivo adjunto por el usuario (documento o imagen).
 model AiAttachment {
-  id             String   @id @default(cuid())
+  id             String     @id @default(cuid())
   messageId      String?
   conversationId String
   fileName       String
@@ -471,7 +689,7 @@ model AiAttachment {
   sizeBytes      Int
   storagePath    String
   uploadedBy     String
-  createdAt      DateTime @default(now())
+  createdAt      DateTime   @default(now())
   message        AiMessage? @relation(fields: [messageId], references: [id], onDelete: SetNull)
 
   @@index([conversationId])

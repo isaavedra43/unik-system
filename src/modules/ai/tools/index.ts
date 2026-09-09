@@ -36,6 +36,12 @@ import './advanced-analytics-tools';
 // Operations tools (order items, notifications, integration status, team performance, dashboard)
 import './operations-tools';
 
+// Zoho Inventory integration tools (packages, invoices, payments, vendors, products)
+import './zoho-inventory-tools';
+
+// Estimate creation tool
+import './estimate-tools';
+
 // Artifact tools (PDF, Excel, CSV, tablas, gráficas)
 import './artifact-tools';
 

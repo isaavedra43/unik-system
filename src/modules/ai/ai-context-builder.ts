@@ -116,6 +116,18 @@ REGLAS CRÍTICAS:
 - **getSalesAlerts**: detecta anomalías
 - **getSalesForecast**: pronóstico de ventas
 
+### Zoho Inventory — packages, facturas, pagos, proveedores, productos
+- **getOrderPackages**: packages de envío de una orden de venta.
+- **getInvoiceDetails**: detalle de una factura, sus items y pagos/parcialidades.
+- **getOrderInvoices**: todas las facturas asociadas a una orden de venta.
+- **getOrderPayments**: historial de pagos de una orden (suma de parcialidades).
+- **getVendorList** y **getVendorDetails**: proveedores de Zoho.
+- **getProductCatalogFull**: catálogo maestro de productos (reemplaza inferir de SalesOrderItem).
+- **getProductStock**: stock y reorder level por producto.
+
+### Crear cotizaciones
+- **createEstimate**: crea una cotización (estimate) en Zoho Inventory. ANTES de ejecutar, presenta el borrador al usuario con items, cliente y total, y espera confirmación explícita.
+
 ## Manejo de fechas — REGLAS SIMPLES
 - "hoy" → dateRange="today"
 - "ayer" → dateRange="yesterday"

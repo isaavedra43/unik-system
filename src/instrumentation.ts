@@ -9,6 +9,18 @@ export async function register() {
 
   const { startSalesOrdersScheduler } =
     await import('@/modules/integrations/zoho/sales-orders-scheduler');
+  const { startPackagesScheduler } =
+    await import('@/modules/integrations/zoho/packages-scheduler');
+  const { startInvoicesScheduler } =
+    await import('@/modules/integrations/zoho/invoices-scheduler');
+  const { startVendorsScheduler } =
+    await import('@/modules/integrations/zoho/vendors-scheduler');
+  const { startItemsScheduler } =
+    await import('@/modules/integrations/zoho/items-scheduler');
 
   void startSalesOrdersScheduler();
+  void startPackagesScheduler();
+  void startInvoicesScheduler();
+  void startVendorsScheduler();
+  void startItemsScheduler();
 }
