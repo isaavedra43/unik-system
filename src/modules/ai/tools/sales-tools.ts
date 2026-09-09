@@ -38,18 +38,19 @@ function toNumber(value: unknown): number {
 /* Handles ANY combination of filters + grouping + item details       */
 /* ------------------------------------------------------------------ */
 const GROUP_BY_DIMENSIONS = [
-  'none', 'paymentMethod', 'deliveryMethod', 'status', 'salesperson',
-  'location', 'customer', 'date', 'product',
+  'none', 'paymentMethod', 'deliveryMethod', 'status', 'subStatus', 'paidStatus',
+  'salesperson', 'location', 'customer', 'date', 'product',
 ] as const;
 
 registerTool({
   name: 'querySalesOrders',
   description:
     'TOOL UNIVERSAL de ventas. Úsalo para CUALQUIER consulta de ventas, sola o combinada. ' +
-    'Soporta filtrar por fecha, método de pago, método de entrega, cliente, vendedor, estado, sucursal, y producto. ' +
-    'Puede agrupar por cualquier dimensión (paymentMethod, deliveryMethod, salesperson, location, customer, date, product). ' +
-    'Puede incluir los items (productos) de cada orden. ' +
-    'Este tool REEMPLAZA a getCashSales, getSalesByDeliveryMethod, getSalesByLocation, getSalesByStatus, getSalesBySalesperson, getSalesByPaymentMethod cuando se necesitan combinaciones de filtros. ' +
+    'Soporta filtrar por fecha, método de pago, método de entrega, cliente, vendedor, estado general (status), sub-estado de entrega (subStatus), estado de pago (paidStatus), estado de facturación (invoicedStatus), sucursal, y producto. ' +
+    'Puede agrupar por cualquier dimensión. Puede incluir los items (productos) y direcciones de entrega. ' +
+    'ESTADOS: status="Confirmada", subStatus="Pendiente"/"Enviado", paidStatus="Pagada"/"Parcial"/"Pendiente". ' +
+    '"Pendiente de entrega" = subStatus="Pendiente", NO status="pending". ' +
+    '"No pagadas" = paidStatus="Pendiente" o paidStatus="Parcial". ' +
     'EJEMPLOS: ' +
     '"ventas de hoy en efectivo" → querySalesOrders(dateRange="today", paymentMethods=["EFECTIVO"]). ' +
     '"ventas a pie de obra de hoy" → querySalesOrders(dateRange="today", deliveryMethod="A PIE DE OBRA"). ' +
@@ -58,7 +59,12 @@ registerTool({
     '"ventas por vendedor de este mes" → querySalesOrders(dateRange="this_month", groupBy="salesperson"). ' +
     '"ventas del producto silla de hoy" → querySalesOrders(dateRange="today", product="silla"). ' +
     '"ventas de hoy con detalle de productos" → querySalesOrders(dateRange="today", includeItems=true). ' +
-    '"ventas de hoy en efectivo a pie de obra" → querySalesOrders(dateRange="today", paymentMethods=["EFECTIVO"], deliveryMethod="A PIE DE OBRA").',
+    '"ventas de hoy en efectivo a pie de obra" → querySalesOrders(dateRange="today", paymentMethods=["EFECTIVO"], deliveryMethod="A PIE DE OBRA"). ' +
+    '"pendientes de entrega de hoy" → querySalesOrders(dateRange="today", subStatus="Pendiente"). ' +
+    '"no pagadas de hoy" → querySalesOrders(dateRange="today", paidStatus="Pendiente"). ' +
+    '"parcialmente pagadas de hoy" → querySalesOrders(dateRange="today", paidStatus="Parcial"). ' +
+    '"ventas por enviar de la semana" → querySalesOrders(dateRange="this_week", subStatus="Pendiente"). ' +
+    '"ventas no entregadas de ayer" → querySalesOrders(dateRange="yesterday", subStatus="Pendiente").',
   category: 'sales',
   requiredPermission: 'sales_orders.view',
   enabledByDefault: true,
@@ -78,7 +84,25 @@ registerTool({
     // Other filters
     customer: z.string().optional().describe('Filtrar por nombre del cliente (búsqueda parcial).'),
     salesperson: z.string().optional().describe('Filtrar por vendedor (búsqueda parcial).'),
-    status: z.string().optional().describe('Filtrar por estado (búsqueda parcial). Ej: "Confirmada", "Cerrada".'),
+    status: z.string().optional().describe(
+      'Filtrar por estado GENERAL de la orden (búsqueda parcial). ' +
+      'Valores típicos: "Confirmada", "Cerrada". ' +
+      'NO uses este filtro para "pendiente de entrega" o "no pagada" — usa subStatus o paidStatus.'
+    ),
+    subStatus: z.string().optional().describe(
+      'Filtrar por sub-estado de ENTREGA (búsqueda parcial). ' +
+      'Valores típicos: "Pendiente" (pendiente de entregar), "Enviado" (ya enviado). ' +
+      'Úsalo cuando el usuario pregunte por "pendientes de entrega", "no entregados", "por entregar", "faltan por enviar".'
+    ),
+    paidStatus: z.string().optional().describe(
+      'Filtrar por estado de PAGO (búsqueda parcial). ' +
+      'Valores típicos: "Pagada", "Parcial", "Pendiente". ' +
+      'Úsalo cuando el usuario pregunte por "no pagadas", "con saldo", "pendientes de pago", "a crédito".'
+    ),
+    invoicedStatus: z.string().optional().describe(
+      'Filtrar por estado de FACTURACIÓN (búsqueda parcial). ' +
+      'Valores típicos: "Facturada", "Pendiente".'
+    ),
     location: z.string().optional().describe('Filtrar por sucursal (búsqueda parcial). Ej: "Patio Unik".'),
     product: z.string().optional().describe(
       'Filtrar por nombre de producto (búsqueda parcial en los items de la orden). ' +
@@ -94,7 +118,9 @@ registerTool({
       '"salesperson" = agrupar por vendedor. ' +
       '"location" = agrupar por sucursal. ' +
       '"customer" = agrupar por cliente. ' +
-      '"status" = agrupar por estado. ' +
+      '"status" = agrupar por estado general. ' +
+      '"subStatus" = agrupar por sub-estado de entrega. ' +
+      '"paidStatus" = agrupar por estado de pago. ' +
       '"date" = agrupar por fecha. ' +
       '"product" = agrupar por producto (requiere includeItems o product filter).'
     ),
@@ -121,6 +147,9 @@ registerTool({
       customer?: string;
       salesperson?: string;
       status?: string;
+      subStatus?: string;
+      paidStatus?: string;
+      invoicedStatus?: string;
       location?: string;
       product?: string;
       search?: string;
@@ -145,6 +174,9 @@ registerTool({
         customerName: true,
         salespersonName: true,
         status: true,
+        subStatus: true,
+        paidStatus: true,
+        invoicedStatus: true,
         paymentMethod: true,
         deliveryMethod: true,
         locationName: true,
@@ -212,11 +244,35 @@ registerTool({
       );
     }
 
-    // Status filter (partial match)
+    // Status filter (partial match on status field)
     if (args.status) {
       const s = args.status.toLowerCase();
       filtered = filtered.filter((o) =>
         (o.status?.toLowerCase() ?? '').includes(s)
+      );
+    }
+
+    // SubStatus filter (partial match — for "pendiente de entrega", "enviado", etc.)
+    if (args.subStatus) {
+      const s = args.subStatus.toLowerCase();
+      filtered = filtered.filter((o) =>
+        (o.subStatus?.toLowerCase() ?? '').includes(s)
+      );
+    }
+
+    // PaidStatus filter (partial match — for "no pagadas", "con saldo", etc.)
+    if (args.paidStatus) {
+      const s = args.paidStatus.toLowerCase();
+      filtered = filtered.filter((o) =>
+        (o.paidStatus?.toLowerCase() ?? '').includes(s)
+      );
+    }
+
+    // InvoicedStatus filter (partial match — for "facturadas", "no facturadas", etc.)
+    if (args.invoicedStatus) {
+      const s = args.invoicedStatus.toLowerCase();
+      filtered = filtered.filter((o) =>
+        (o.invoicedStatus?.toLowerCase() ?? '').includes(s)
       );
     }
 
@@ -279,6 +335,9 @@ registerTool({
           customer: args.customer ?? null,
           salesperson: args.salesperson ?? null,
           status: args.status ?? null,
+          subStatus: args.subStatus ?? null,
+          paidStatus: args.paidStatus ?? null,
+          invoicedStatus: args.invoicedStatus ?? null,
           location: args.location ?? null,
           product: args.product ?? null,
           search: args.search ?? null,
@@ -303,6 +362,8 @@ registerTool({
       if (args.groupBy === 'paymentMethod') key = o.paymentMethod ?? 'SIN MÉTODO DE PAGO';
       else if (args.groupBy === 'deliveryMethod') key = o.deliveryMethod ?? 'SIN MÉTODO DE ENTREGA';
       else if (args.groupBy === 'status') key = o.status ?? 'SIN ESTADO';
+      else if (args.groupBy === 'subStatus') key = o.subStatus ?? 'SIN SUB-ESTADO';
+      else if (args.groupBy === 'paidStatus') key = o.paidStatus ?? 'SIN ESTADO DE PAGO';
       else if (args.groupBy === 'salesperson') key = o.salespersonName ?? 'SIN VENDEDOR';
       else if (args.groupBy === 'location') key = o.locationName ?? 'SIN SUCURSAL';
       else if (args.groupBy === 'customer') key = o.customerName ?? 'SIN CLIENTE';
@@ -383,6 +444,9 @@ registerTool({
         customer: args.customer ?? null,
         salesperson: args.salesperson ?? null,
         status: args.status ?? null,
+        subStatus: args.subStatus ?? null,
+        paidStatus: args.paidStatus ?? null,
+        invoicedStatus: args.invoicedStatus ?? null,
         location: args.location ?? null,
         product: args.product ?? null,
         search: args.search ?? null,
@@ -403,6 +467,9 @@ function formatOrder(
     customer: o.customerName,
     salesperson: o.salespersonName,
     status: o.status,
+    subStatus: o.subStatus,
+    paidStatus: o.paidStatus,
+    invoicedStatus: o.invoicedStatus,
     paymentMethod: o.paymentMethod,
     deliveryMethod: o.deliveryMethod,
     location: o.locationName,
@@ -711,6 +778,9 @@ registerTool({
         customerName: true,
         salespersonName: true,
         status: true,
+        subStatus: true,
+        paidStatus: true,
+        invoicedStatus: true,
         paymentMethod: true,
         deliveryMethod: true,
         locationName: true,
