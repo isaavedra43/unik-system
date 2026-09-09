@@ -79,6 +79,9 @@ export interface ChatMessageDTO {
   forwardedBy: string | null;
   editedAt: string | null;
   deletedAt: string | null;
+  priority: 'normal' | 'urgent';
+  threadId: string | null;
+  threadRootMessageId: string | null;
   createdAt: string;
   attachments: ChatAttachmentDTO[];
   reactions: ChatReactionDTO[];
@@ -114,6 +117,24 @@ export interface ChatChannelMemberDTO {
   lastSeenAt: string;
 }
 
+export interface ChatCallDTO {
+  id: string;
+  channelId: string;
+  callerId: string;
+  callerName: string;
+  type: 'audio' | 'video';
+  status: 'ringing' | 'active' | 'ended' | 'missed' | 'declined';
+  startedAt: string | null;
+  endedAt: string | null;
+  createdAt: string;
+  participants: {
+    userId: string;
+    name: string;
+    acceptedAt: string | null;
+    declinedAt: string | null;
+  }[];
+}
+
 export type ChatStreamEvent =
   | { type: 'message'; data: ChatMessageDTO }
   | { type: 'edit'; data: { messageId: string; content: string; editedAt: string } }
@@ -132,12 +153,26 @@ export type ChatStreamEvent =
   | { type: 'presence'; data: { userId: string; status: string; lastSeenAt: string } }
   | {
       type: 'typing';
-      data: { channelId: string; userId: string; userName: string; isTyping: boolean };
+      data: {
+        channelId: string;
+        userId: string;
+        userName: string;
+        isTyping: boolean;
+        preview?: string;
+      };
     }
   | { type: 'mention'; data: { messageId: string; channelId: string; userId: string } }
   | { type: 'poll_vote'; data: { pollId: string; optionId: string; userId: string } }
   | { type: 'event_rsvp'; data: { eventId: string; userId: string; status: string } }
   | { type: 'pin'; data: { channelId: string; messageId: string; action: 'pin' | 'unpin' } }
+  | { type: 'call_invite'; data: ChatCallDTO }
+  | { type: 'call_accept'; data: { callId: string; userId: string } }
+  | { type: 'call_decline'; data: { callId: string; userId: string } }
+  | { type: 'call_end'; data: { callId: string; status: string } }
+  | {
+      type: 'webrtc_signal';
+      data: { callId: string; fromUserId: string; signalType: string; signal: string };
+    }
   | { type: 'heartbeat'; data: { t: number } }
   | { type: 'error'; data: { message: string } };
 

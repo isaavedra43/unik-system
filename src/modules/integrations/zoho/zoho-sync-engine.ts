@@ -122,6 +122,15 @@ export interface ZohoEntityAdapter {
   supportsModifiedTimeSort: boolean;
 
   /**
+   * If true, the engine saves each LIST record directly as a snapshot
+   * during SCAN and skips HYDRATE entirely. This is far more efficient
+   * for entities where the LIST response already contains all the
+   * fields needed for normalization (contacts, items, packages, invoices).
+   * Default: false (backwards-compatible with Sales Orders).
+   */
+  useListAsSnapshot?: boolean;
+
+  /**
    * Extracts the external ID and last_modified_time from a LIST record.
    * The returned `modifiedAt` is the CANONICAL remoteModifiedAt — it is
    * propagated to the snapshot and never re-extracted from DETAIL.
@@ -416,11 +425,16 @@ async function scanAllPages(
     recordApiCall(budgetConfig);
     apiCalls += 1;
 
-    const summaries = extractSummaries(adapter, rawPage);
+    const { summaries, rawRecords } = extractSummariesWithRaw(adapter, rawPage);
     pagesScanned += 1;
 
-    for (const summary of summaries) {
-      await recordSummary(adapter, summary.id, summary.modifiedAt);
+    for (let i = 0; i < summaries.length; i++) {
+      const summary = summaries[i];
+      if (adapter.useListAsSnapshot && rawRecords[i]) {
+        await recordSummaryWithSnapshot(adapter, summary.id, summary.modifiedAt, rawRecords[i]);
+      } else {
+        await recordSummary(adapter, summary.id, summary.modifiedAt);
+      }
       recordsSeen += 1;
     }
 
@@ -453,10 +467,15 @@ async function scanRecentPages(
       apiCalls += 1;
       pagesScanned += 1;
 
-      const summaries = extractSummaries(adapter, rawPage);
+      const { summaries, rawRecords } = extractSummariesWithRaw(adapter, rawPage);
       let newest: Date | null = null;
-      for (const summary of summaries) {
-        await recordSummary(adapter, summary.id, summary.modifiedAt);
+      for (let i = 0; i < summaries.length; i++) {
+        const summary = summaries[i];
+        if (adapter.useListAsSnapshot && rawRecords[i]) {
+          await recordSummaryWithSnapshot(adapter, summary.id, summary.modifiedAt, rawRecords[i]);
+        } else {
+          await recordSummary(adapter, summary.id, summary.modifiedAt);
+        }
         recordsSeen += 1;
         if (!newest || summary.modifiedAt.getTime() > newest.getTime()) {
           newest = summary.modifiedAt;
@@ -532,9 +551,13 @@ async function scanRecentPages(
 }
 
 function extractSummaries(adapter: ZohoEntityAdapter, rawPage: unknown): EntitySummary[] {
-  // The raw page is the full Zoho response. We need to find the array of records.
-  // Each entity type has a different key (salesorders, contacts, items, packages, invoices).
-  // The adapter's extractSummary handles individual records; we need to find the array.
+  return extractSummariesWithRaw(adapter, rawPage).summaries;
+}
+
+function extractSummariesWithRaw(
+  adapter: ZohoEntityAdapter,
+  rawPage: unknown
+): { summaries: EntitySummary[]; rawRecords: unknown[] } {
   const pageObj = rawPage as Record<string, unknown>;
   const arrayKey = findRecordArrayKey(pageObj);
   if (!arrayKey) {
@@ -544,13 +567,12 @@ function extractSummaries(adapter: ZohoEntityAdapter, rawPage: unknown): EntityS
   if (!Array.isArray(records)) {
     throw new SyncInvalidListError();
   }
-  // Tolerate individual record failures — skip bad records instead of
-  // aborting the entire sync. This matches the user's requirement: bring
-  // ALL data, even if some records have missing fields.
   const summaries: EntitySummary[] = [];
+  const rawRecords: unknown[] = [];
   for (const record of records) {
     try {
       summaries.push(adapter.extractSummary(record));
+      rawRecords.push(record);
     } catch (error) {
       console.warn(
         JSON.stringify({
@@ -561,7 +583,7 @@ function extractSummaries(adapter: ZohoEntityAdapter, rawPage: unknown): EntityS
       );
     }
   }
-  return summaries;
+  return { summaries, rawRecords };
 }
 
 /**
@@ -634,6 +656,85 @@ async function recordSummary(
         ? { remoteModifiedAt, needsSync: true, lastSeenAt: now }
         : { lastSeenAt: now },
     })
+  );
+}
+
+/**
+ * Records a summary AND saves the LIST record as a snapshot in one step.
+ * Used when adapter.useListAsSnapshot is true — eliminates the need for
+ * individual HYDRATE calls. The LIST response already contains all the
+ * fields needed for normalization.
+ */
+async function recordSummaryWithSnapshot(
+  adapter: ZohoEntityAdapter,
+  externalId: string,
+  remoteModifiedAt: Date,
+  rawRecord: unknown
+): Promise<void> {
+  const now = new Date();
+  const fetchedAt = now;
+
+  const existing = await withTimeout(
+    prisma.integrationEntityState.findUnique({
+      where: {
+        source_entityType_externalId: {
+          source: SOURCE,
+          entityType: adapter.entityType,
+          externalId,
+        },
+      },
+    })
+  );
+
+  const hasChanged = !existing || existing.remoteModifiedAt.getTime() !== remoteModifiedAt.getTime();
+
+  await withTimeout(
+    prisma.$transaction([
+      prisma.integrationSnapshot.upsert({
+        where: {
+          source_entityType_externalId_remoteModifiedAt: {
+            source: SOURCE,
+            entityType: adapter.entityType,
+            externalId,
+            remoteModifiedAt,
+          },
+        },
+        create: {
+          source: SOURCE,
+          entityType: adapter.entityType,
+          externalId,
+          remoteModifiedAt,
+          payload: rawRecord as Prisma.InputJsonValue,
+          fetchedAt,
+        },
+        update: {},
+      }),
+      !existing
+        ? prisma.integrationEntityState.create({
+            data: {
+              source: SOURCE,
+              entityType: adapter.entityType,
+              externalId,
+              remoteModifiedAt,
+              needsSync: false,
+              lastSyncedRemoteModifiedAt: remoteModifiedAt,
+              lastSeenAt: now,
+              lastDetailFetchedAt: fetchedAt,
+            },
+          })
+        : prisma.integrationEntityState.update({
+            where: { id: existing.id },
+            data: hasChanged
+              ? {
+                  remoteModifiedAt,
+                  needsSync: false,
+                  lastSyncedRemoteModifiedAt: remoteModifiedAt,
+                  lastSeenAt: now,
+                  lastDetailFetchedAt: fetchedAt,
+                }
+              : { lastSeenAt: now },
+          }),
+    ])
   );
 }
 
@@ -931,9 +1032,12 @@ export async function runSync(
           : await scanAllPages(adapter, params, budgetConfig);
     }
 
-    // HYDRATE phase (skip for scan-only mode).
+    // HYDRATE phase (skip for scan-only mode, or when LIST already saved snapshots).
     let details: HydrateOutcome = { detailsFetched: 0, detailsFailed: 0, apiCalls: 0 };
-    if (effectiveMode === 'hydrate' || effectiveMode === 'sync' || effectiveMode === 'quick') {
+    if (
+      !adapter.useListAsSnapshot &&
+      (effectiveMode === 'hydrate' || effectiveMode === 'sync' || effectiveMode === 'quick')
+    ) {
       details = await hydratePendingDetails(
         adapter,
         params,

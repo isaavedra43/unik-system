@@ -14,12 +14,15 @@ import {
   Bookmark,
   Pin,
   Languages,
+  AlertCircle,
+  MessageSquareText,
 } from 'lucide-react';
 import type { ChatMessageDTO } from '@/modules/chat/chat-events';
 import { ChatAttachmentPreview } from './ChatAttachmentPreview';
 import { ChatLocationMap } from './ChatLocationMap';
 import { ChatPollMessage } from './ChatPollMessage';
 import { ChatEventMessage } from './ChatEventMessage';
+import { ChatReadReceiptsDialog } from './ChatReadReceiptsDialog';
 
 export interface ChatMessageProps {
   message: ChatMessageDTO;
@@ -39,6 +42,7 @@ export interface ChatMessageProps {
   onTranslate: (messageId: string) => void;
   onVotePoll: (pollId: string, optionIds: string[]) => void;
   onRsvpEvent: (eventId: string, status: 'yes' | 'no' | 'maybe') => void;
+  onOpenThread?: (threadId: string, rootMessage: ChatMessageDTO) => void;
   channelId: string;
   currentUserId: string;
 }
@@ -102,6 +106,7 @@ export function ChatMessage({
   onTranslate,
   onVotePoll,
   onRsvpEvent,
+  onOpenThread,
   channelId,
   currentUserId,
 }: ChatMessageProps) {
@@ -111,6 +116,7 @@ export function ChatMessage({
   const [editing, setEditing] = useState(false);
   const [editContent, setEditContent] = useState(message.content ?? '');
   const [showForwardDialog, setShowForwardDialog] = useState(false);
+  const [showReaders, setShowReaders] = useState(false);
   const actionsRef = useRef<HTMLDivElement>(null);
   const emojiRef = useRef<HTMLDivElement>(null);
   const moreRef = useRef<HTMLDivElement>(null);
@@ -236,7 +242,14 @@ export function ChatMessage({
             </div>
           </div>
         ) : (
-          <div className={`chat-msg-bubble ${isOwn ? 'own' : 'other'}`}>
+          <div
+            className={`chat-msg-bubble ${isOwn ? 'own' : 'other'} ${message.priority === 'urgent' ? 'urgent' : ''}`}
+          >
+            {message.priority === 'urgent' && (
+              <div className="chat-msg-urgent-badge">
+                <AlertCircle size={12} /> URGENTE
+              </div>
+            )}
             {message.content && (
               <div className="chat-msg-text">{renderContentWithMentions(message.content)}</div>
             )}
@@ -294,10 +307,27 @@ export function ChatMessage({
         <div className="chat-msg-meta">
           <span className="chat-msg-time">{formatTime(message.createdAt)}</span>
           {message.editedAt && <span className="chat-msg-edited">editado</span>}
+          {message.threadId && onOpenThread && (
+            <button
+              type="button"
+              className="chat-msg-thread-btn"
+              onClick={() => onOpenThread(message.threadId!, message)}
+              aria-label="Ver hilo"
+              title="Ver hilo"
+            >
+              <MessageSquareText size={12} /> Hilo
+            </button>
+          )}
           {isOwn && !isDeleted && (
-            <span className="chat-msg-read">
+            <button
+              type="button"
+              className="chat-msg-read"
+              onClick={() => setShowReaders(true)}
+              aria-label="Ver lecturas"
+              title="Visto por"
+            >
               {message.readBy.length > 0 ? <CheckCheck size={14} /> : <Check size={14} />}
-            </span>
+            </button>
           )}
         </div>
       </div>
@@ -416,6 +446,11 @@ export function ChatMessage({
           onClose={() => setShowForwardDialog(false)}
           onForward={onForward}
         />
+      )}
+
+      {/* Read receipts dialog */}
+      {showReaders && (
+        <ChatReadReceiptsDialog messageId={message.id} onClose={() => setShowReaders(false)} />
       )}
     </div>
   );

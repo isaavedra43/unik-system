@@ -43,6 +43,10 @@ export const contactsAdapter: ZohoEntityAdapter = {
 
   supportsModifiedTimeSort: true,
 
+  /** Contacts LIST response already contains all fields needed for normalization.
+   *  No need to call /contacts/{id} per record — saves thousands of API calls. */
+  useListAsSnapshot: true,
+
   async listPage({ page, perPage, sorted }) {
     const opts: Parameters<typeof listContacts>[0] = { page, perPage };
     if (sorted) {

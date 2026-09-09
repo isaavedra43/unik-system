@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentSession, hasPermission } from '@/modules/auth/authorization';
 import { getMessagesSince, assertChannelMember, getTypingUsers } from '@/modules/chat/chat-service';
 import { getPresence } from '@/modules/chat/chat-presence-service';
+import { getActiveCall, getPendingSignals } from '@/modules/chat/chat-calls-service';
 import type { ChatStreamEvent } from '@/modules/chat/chat-events';
 
 export const runtime = 'nodejs';
@@ -9,6 +10,7 @@ export const dynamic = 'force-dynamic';
 
 const POLL_INTERVAL_MS = 2000;
 const HEARTBEAT_INTERVAL_MS = 15000;
+const CALL_POLL_INTERVAL_MS = 500; // faster polling when a call is active
 
 /**
  * SSE endpoint for real-time chat updates.
@@ -17,6 +19,9 @@ const HEARTBEAT_INTERVAL_MS = 15000;
  * deletes, and presence changes in the channel. Emits SSE events to the
  * client. This approach works without Redis and across multiple Railway
  * instances (with up to 2s latency).
+ *
+ * Also polls for WebRTC call events (call invites, accepts, ends, signals)
+ * with a faster interval when a call is active.
  */
 export async function GET(_request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await getCurrentSession();
@@ -39,10 +44,12 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
   let lastPoll = new Date();
   let lastTypingCheck = Date.now();
   let lastPresenceCheck = Date.now();
-  const knownTyping = new Set<string>();
+  let lastCallCheck = Date.now();
+  let lastSignalCheck = Date.now();
+  const knownTyping = new Map<string, string | undefined>(); // userId -> preview
   let lastPresenceStatuses = new Map<string, string>();
+  let knownCallId: string | null = null;
 
-  // Get initial member IDs for presence tracking
   const stream = new ReadableStream({
     async start(controller) {
       let closed = false;
@@ -78,24 +85,28 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
           if (Date.now() - lastTypingCheck > 1000) {
             lastTypingCheck = Date.now();
             const typing = getTypingUsers(channelId);
-            const currentTyping = new Set(
-              typing.map((t) => t.userId).filter((uid) => uid !== session.user.id)
-            );
+            const currentTyping = new Map<string, string | undefined>();
+            for (const t of typing) {
+              if (t.userId !== session.user.id) {
+                currentTyping.set(t.userId, t.preview);
+              }
+            }
 
-            // New typing
-            for (const uid of currentTyping) {
-              if (!knownTyping.has(uid)) {
-                knownTyping.add(uid);
+            // New typing or preview changed
+            for (const [uid, preview] of currentTyping) {
+              const knownPreview = knownTyping.get(uid);
+              if (!knownTyping.has(uid) || knownPreview !== preview) {
+                knownTyping.set(uid, preview);
                 const user = await getUserName(uid);
                 sendEvent({
                   type: 'typing',
-                  data: { channelId, userId: uid, userName: user, isTyping: true },
+                  data: { channelId, userId: uid, userName: user, isTyping: true, preview },
                 });
               }
             }
 
             // Stopped typing
-            for (const uid of knownTyping) {
+            for (const [uid] of knownTyping) {
               if (!currentTyping.has(uid)) {
                 knownTyping.delete(uid);
                 const user = await getUserName(uid);
@@ -122,6 +133,44 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
               }
             }
             lastPresenceStatuses = presenceMap;
+          }
+
+          // Check for active calls (every 2 seconds)
+          if (Date.now() - lastCallCheck > 2000) {
+            lastCallCheck = Date.now();
+            const activeCall = await getActiveCall(channelId);
+            const currentCallId = activeCall?.id ?? null;
+
+            if (currentCallId !== knownCallId) {
+              if (activeCall) {
+                // New or changed call
+                sendEvent({ type: 'call_invite', data: activeCall });
+              } else if (knownCallId) {
+                // Call ended
+                sendEvent({
+                  type: 'call_end',
+                  data: { callId: knownCallId, status: 'ended' },
+                });
+              }
+              knownCallId = currentCallId;
+            }
+          }
+
+          // Poll for WebRTC signals (every 500ms when a call is active)
+          if (knownCallId && Date.now() - lastSignalCheck > 500) {
+            lastSignalCheck = Date.now();
+            const signals = await getPendingSignals(session.user.id, knownCallId);
+            for (const sig of signals) {
+              sendEvent({
+                type: 'webrtc_signal',
+                data: {
+                  callId: sig.callId,
+                  fromUserId: sig.fromUserId,
+                  signalType: sig.signalType,
+                  signal: sig.signal,
+                },
+              });
+            }
           }
         } catch {
           // ignore poll errors, keep going

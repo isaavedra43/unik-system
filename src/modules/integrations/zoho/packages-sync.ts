@@ -43,6 +43,10 @@ export const packagesAdapter: ZohoEntityAdapter = {
 
   supportsModifiedTimeSort: true,
 
+  /** Packages LIST response already contains all fields needed for normalization.
+   *  No need to call /packages/{id} per record — saves thousands of API calls. */
+  useListAsSnapshot: true,
+
   async listPage({ page, perPage, sorted }) {
     const opts: Parameters<typeof listPackages>[0] = { page, perPage };
     if (sorted) {

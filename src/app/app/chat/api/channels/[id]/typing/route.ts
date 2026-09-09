@@ -8,6 +8,7 @@ export const dynamic = 'force-dynamic';
 
 const typingSchema = z.object({
   isTyping: z.boolean(),
+  preview: z.string().max(20).optional(),
 });
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -28,7 +29,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   if (!parsed.success) return NextResponse.json({ error: 'Datos inválidos' }, { status: 400 });
 
   if (parsed.data.isTyping) {
-    setTyping(session.user.id, id);
+    setTyping(session.user.id, id, parsed.data.preview);
   } else {
     clearTyping(session.user.id, id);
   }

@@ -12,16 +12,20 @@ import {
   BarChart3,
   Calendar,
   FileText,
+  AlertCircle,
+  Video,
 } from 'lucide-react';
 import type { CurrentUser } from '@/modules/auth/authorization';
 import type { ChatMessageDTO, ChatChannelMemberDTO } from '@/modules/chat/chat-events';
 import { ChatPendingAttachment } from './ChatAttachmentPreview';
 import { ChatVoiceRecorder } from './ChatVoiceRecorder';
+import { ChatVideoRecorder } from './ChatVideoRecorder';
 import { ChatMentionPicker } from './ChatMentionPicker';
 import { ChatLocationPicker } from './ChatLocationPicker';
 import { ChatPollCreator } from './ChatPollCreator';
 import { ChatEventCreator } from './ChatEventCreator';
 import { ChatSnippetPicker } from './ChatSnippetPicker';
+import { ChatSlashCommands, SLASH_COMMANDS, type ChatSlashCommand } from './ChatSlashCommands';
 
 export interface ChatMessageInputProps {
   onSend: (
@@ -42,14 +46,17 @@ export interface ChatMessageInputProps {
         endsAt?: string;
         location?: string;
       };
+      priority?: 'normal' | 'urgent';
+      threadId?: string;
     }
   ) => void;
-  onTyping: (isTyping: boolean) => void;
+  onTyping: (isTyping: boolean, preview?: string) => void;
   replyTo: ChatMessageDTO | null;
   onCancelReply: () => void;
   channelId: string;
   user: CurrentUser;
   members?: ChatChannelMemberDTO[];
+  threadId?: string | null;
 }
 
 interface PendingUpload {
@@ -89,6 +96,7 @@ export function ChatMessageInput({
   onCancelReply,
   channelId,
   members,
+  threadId,
 }: ChatMessageInputProps) {
   const [text, setText] = useState('');
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
@@ -101,6 +109,9 @@ export function ChatMessageInput({
   const [showSnippetPicker, setShowSnippetPicker] = useState(false);
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const [mentionIndex, setMentionIndex] = useState(0);
+  const [isUrgent, setIsUrgent] = useState(false);
+  const [slashQuery, setSlashQuery] = useState<string | null>(null);
+  const [slashIndex, setSlashIndex] = useState(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const emojiRef = useRef<HTMLDivElement>(null);
@@ -127,10 +138,12 @@ export function ChatMessageInput({
   }, []);
 
   const sendTyping = useCallback(
-    (typing: boolean) => {
+    (typing: boolean, preview?: string) => {
       if (isTypingRef.current !== typing) {
         isTypingRef.current = typing;
-        onTyping(typing);
+        onTyping(typing, preview);
+      } else if (typing && preview !== undefined) {
+        onTyping(true, preview);
       }
     },
     [onTyping]
@@ -139,6 +152,14 @@ export function ChatMessageInput({
   const handleTextChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const value = e.target.value;
     setText(value);
+
+    // Detect slash command at start
+    if (value.startsWith('/') && !value.includes(' ')) {
+      setSlashQuery(value.slice(1));
+      setSlashIndex(0);
+    } else {
+      setSlashQuery(null);
+    }
 
     // Detect @mention
     const cursorPos = e.target.selectionStart;
@@ -152,7 +173,7 @@ export function ChatMessageInput({
     }
 
     if (value.length > 0) {
-      sendTyping(true);
+      sendTyping(true, value.slice(0, 20));
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
       typingTimeoutRef.current = setTimeout(() => sendTyping(false), 3000);
     } else {
@@ -177,16 +198,105 @@ export function ChatMessageInput({
   const handleSend = () => {
     const trimmed = text.trim();
     if (!trimmed && completedAttachmentIds.length === 0) return;
-    onSend(trimmed, completedAttachmentIds.length > 0 ? completedAttachmentIds : undefined);
+    onSend(trimmed, completedAttachmentIds.length > 0 ? completedAttachmentIds : undefined, {
+      priority: isUrgent ? 'urgent' : 'normal',
+      threadId: threadId ?? undefined,
+    });
     setText('');
     setCompletedAttachmentIds([]);
+    setIsUrgent(false);
+    setSlashQuery(null);
     sendTyping(false);
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
     }
   };
 
+  const handleSlashSelect = (cmd: ChatSlashCommand) => {
+    if (cmd.command === '/urgente') {
+      setIsUrgent((prev) => !prev);
+      setText('');
+      setSlashQuery(null);
+      setTimeout(() => textareaRef.current?.focus(), 0);
+      return;
+    }
+    if (cmd.command === '/encuesta') {
+      setShowPollCreator(true);
+      setText('');
+      setSlashQuery(null);
+      return;
+    }
+    if (cmd.command === '/evento') {
+      setShowEventCreator(true);
+      setText('');
+      setSlashQuery(null);
+      return;
+    }
+    if (cmd.command === '/ubicacion') {
+      setShowLocationPicker(true);
+      setText('');
+      setSlashQuery(null);
+      return;
+    }
+    if (cmd.command === '/voz') {
+      // Voice recorder is always visible; just clear the text
+      setText('');
+      setSlashQuery(null);
+      return;
+    }
+    if (cmd.command === '/video') {
+      // Video recorder is always visible; just clear the text
+      setText('');
+      setSlashQuery(null);
+      return;
+    }
+    if (cmd.command === '/snippet') {
+      setShowSnippetPicker(true);
+      setText('');
+      setSlashQuery(null);
+      return;
+    }
+    if (cmd.command === '/ai') {
+      setText('');
+      setSlashQuery(null);
+      return;
+    }
+    setText('');
+    setSlashQuery(null);
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // Slash command navigation
+    if (slashQuery !== null) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setSlashIndex((prev) => prev + 1);
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setSlashIndex((prev) => Math.max(0, prev - 1));
+        return;
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setSlashQuery(null);
+        return;
+      }
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        const filtered = SLASH_COMMANDS.filter(
+          (c) =>
+            slashQuery === '' ||
+            c.command.includes(slashQuery) ||
+            c.label.toLowerCase().includes(slashQuery.toLowerCase())
+        );
+        if (filtered[slashIndex % filtered.length]) {
+          handleSlashSelect(filtered[slashIndex % filtered.length]);
+        }
+        return;
+      }
+    }
     // Mention navigation
     if (mentionQuery !== null) {
       if (e.key === 'ArrowDown') {
@@ -504,6 +614,20 @@ export function ChatMessageInput({
         {/* Voice recorder */}
         <ChatVoiceRecorder onComplete={handleVoiceComplete} channelId={channelId} />
 
+        {/* Video recorder */}
+        <ChatVideoRecorder onComplete={handleVoiceComplete} channelId={channelId} />
+
+        {/* Urgent toggle */}
+        <button
+          type="button"
+          className={`chat-input-btn ${isUrgent ? 'urgent-active' : ''}`}
+          onClick={() => setIsUrgent((prev) => !prev)}
+          aria-label="Marcar como urgente"
+          title={isUrgent ? 'Urgente activado' : 'Marcar como urgente'}
+        >
+          <AlertCircle size={20} />
+        </button>
+
         {/* Location button */}
         <button
           type="button"
@@ -549,7 +673,7 @@ export function ChatMessageInput({
           <textarea
             ref={textareaRef}
             className="chat-input-textarea"
-            placeholder="Escribe un mensaje..."
+            placeholder="Escribe un mensaje... (usa / para comandos)"
             value={text}
             onChange={handleTextChange}
             onKeyDown={handleKeyDown}
@@ -557,6 +681,13 @@ export function ChatMessageInput({
             rows={1}
             aria-label="Mensaje"
           />
+          {slashQuery !== null && (
+            <ChatSlashCommands
+              query={slashQuery}
+              onSelect={handleSlashSelect}
+              activeIndex={slashIndex}
+            />
+          )}
           {mentionQuery !== null && filteredMembers.length > 0 && (
             <ChatMentionPicker
               members={filteredMembers}

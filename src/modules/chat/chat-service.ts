@@ -69,6 +69,8 @@ async function toMessageDTO(
     forwardedBy: string | null;
     editedAt: Date | null;
     deletedAt: Date | null;
+    priority: string;
+    threadId: string | null;
     createdAt: Date;
     sender: { name: string };
     replyTo: { content: string | null; sender: { name: string } } | null;
@@ -109,7 +111,8 @@ async function toMessageDTO(
       rsvps: { userId: string; status: string }[];
     } | null;
     pins?: { id: string }[];
-    bookmarks?: { id: string }[];
+    bookmarks?: { id: string; userId: string }[];
+    thread?: { id: string; rootMessageId: string } | null;
   },
   currentUserId: string
 ): Promise<ChatMessageDTO> {
@@ -175,6 +178,9 @@ async function toMessageDTO(
     forwardedBy: msg.forwardedBy,
     editedAt: msg.editedAt?.toISOString() ?? null,
     deletedAt: msg.deletedAt?.toISOString() ?? null,
+    priority: (msg.priority as 'normal' | 'urgent') ?? 'normal',
+    threadId: msg.threadId ?? null,
+    threadRootMessageId: msg.thread?.rootMessageId ?? null,
     createdAt: msg.createdAt.toISOString(),
     attachments: msg.attachments.map(toAttachmentDTO),
     reactions: toReactionDTO(msg.reactions),
@@ -190,7 +196,7 @@ async function toMessageDTO(
     poll: pollDto,
     event: eventDto,
     isPinned: (msg.pins ?? []).length > 0,
-    isBookmarked: (msg.bookmarks ?? []).some((b) => b.id === currentUserId) || false,
+    isBookmarked: (msg.bookmarks ?? []).some((b) => b.userId === currentUserId) || false,
   };
 }
 
@@ -461,6 +467,8 @@ export interface SendMessageInput {
     endsAt?: string | null;
     location?: string | null;
   } | null;
+  priority?: 'normal' | 'urgent';
+  threadId?: string | null;
 }
 
 const MESSAGE_INCLUDE = {
@@ -483,6 +491,7 @@ const MESSAGE_INCLUDE = {
   },
   pins: { select: { id: true } },
   bookmarks: { select: { id: true, userId: true } },
+  thread: { select: { id: true, rootMessageId: true } },
 } as const;
 
 export async function sendMessage(
@@ -532,6 +541,25 @@ export async function sendMessage(
     }
   }
 
+  // Validate thread if provided
+  let threadId = input.threadId ?? null;
+  if (threadId) {
+    const thread = await prisma.internalChatThread.findUnique({
+      where: { id: threadId },
+    });
+    if (!thread || thread.channelId !== input.channelId) {
+      throw new ChatError('Hilo no válido para este canal');
+    }
+  } else if (input.replyToId) {
+    // Auto-create thread if replying and no thread exists yet for this root
+    const existingThread = await prisma.internalChatThread.findUnique({
+      where: { rootMessageId: input.replyToId },
+    });
+    if (existingThread) {
+      threadId = existingThread.id;
+    }
+  }
+
   const message = await prisma.internalChatMessage.create({
     data: {
       channelId: input.channelId,
@@ -540,8 +568,24 @@ export async function sendMessage(
       replyToId: input.replyToId ?? null,
       forwardedFromId: input.forwardedFromId ?? null,
       forwardedBy: input.forwardedFromId ? actor.id : null,
+      priority: input.priority ?? 'normal',
+      threadId,
     },
   });
+
+  // Create thread if replying and no thread exists yet
+  if (input.replyToId && !threadId) {
+    const newThread = await prisma.internalChatThread.create({
+      data: {
+        channelId: input.channelId,
+        rootMessageId: input.replyToId,
+      },
+    });
+    await prisma.internalChatMessage.update({
+      where: { id: message.id },
+      data: { threadId: newThread.id },
+    });
+  }
 
   // Link pre-saved attachments if any
   if (input.attachmentIds && input.attachmentIds.length > 0) {
@@ -1127,16 +1171,19 @@ interface TypingState {
   userId: string;
   channelId: string;
   expiresAt: number;
+  preview?: string;
 }
 
 const typingUsers = new Map<string, TypingState>(); // key: channelId:userId
 const TYPING_TIMEOUT_MS = 5000;
 
-export function setTyping(userId: string, channelId: string): void {
+export function setTyping(userId: string, channelId: string, preview?: string): void {
+  const trimmedPreview = preview ? preview.slice(0, 20) : undefined;
   typingUsers.set(`${channelId}:${userId}`, {
     userId,
     channelId,
     expiresAt: Date.now() + TYPING_TIMEOUT_MS,
+    preview: trimmedPreview,
   });
 }
 
@@ -1144,16 +1191,16 @@ export function clearTyping(userId: string, channelId: string): void {
   typingUsers.delete(`${channelId}:${userId}`);
 }
 
-export function getTypingUsers(channelId: string): { userId: string }[] {
+export function getTypingUsers(channelId: string): { userId: string; preview?: string }[] {
   const now = Date.now();
-  const result: { userId: string }[] = [];
+  const result: { userId: string; preview?: string }[] = [];
   for (const [key, state] of typingUsers) {
     if (state.channelId !== channelId) continue;
     if (state.expiresAt < now) {
       typingUsers.delete(key);
       continue;
     }
-    result.push({ userId: state.userId });
+    result.push({ userId: state.userId, preview: state.preview });
   }
   return result;
 }
@@ -1695,4 +1742,146 @@ export async function exportChannel(
     channelName: channel?.name ?? null,
     messages: await Promise.all(messages.map((m) => toMessageDTO(m, userId))),
   };
+}
+
+// =====================================================
+// Broadcast to multiple channels
+// =====================================================
+
+const MAX_BROADCAST_CHANNELS = 5;
+
+export async function broadcastMessage(
+  actor: CurrentUser,
+  input: {
+    channelIds: string[];
+    content: string;
+    attachmentIds?: string[];
+    priority?: 'normal' | 'urgent';
+  }
+): Promise<ChatMessageDTO[]> {
+  if (input.channelIds.length === 0) {
+    throw new ChatError('Debes seleccionar al menos un canal');
+  }
+  if (input.channelIds.length > MAX_BROADCAST_CHANNELS) {
+    throw new ChatError(`Máximo ${MAX_BROADCAST_CHANNELS} canales por difusión`);
+  }
+
+  const trimmed = input.content.trim();
+  if (trimmed.length < 1 || trimmed.length > 10_000) {
+    throw new ChatError('Contenido inválido');
+  }
+
+  // Verify membership in all channels
+  for (const channelId of input.channelIds) {
+    await assertChannelMember(channelId, actor.id);
+  }
+
+  const results: ChatMessageDTO[] = [];
+  for (const channelId of input.channelIds) {
+    const message = await prisma.internalChatMessage.create({
+      data: {
+        channelId,
+        senderId: actor.id,
+        content: trimmed,
+        priority: input.priority ?? 'normal',
+      },
+    });
+
+    if (input.attachmentIds && input.attachmentIds.length > 0) {
+      await prisma.internalChatAttachment.updateMany({
+        where: { id: { in: input.attachmentIds } },
+        data: { messageId: message.id },
+      });
+    }
+
+    await prisma.internalChatChannel.update({
+      where: { id: channelId },
+      data: { lastMessageAt: message.createdAt },
+    });
+
+    const fullMsg = await prisma.internalChatMessage.findUnique({
+      where: { id: message.id },
+      include: MESSAGE_INCLUDE,
+    });
+    if (fullMsg) {
+      results.push(await toMessageDTO(fullMsg, actor.id));
+    }
+  }
+
+  await recordAuditEvent({
+    actorUserId: actor.id,
+    action: 'chat.broadcast',
+    targetType: 'chat_channel',
+    metadata: {
+      channelIds: input.channelIds,
+      contentLength: trimmed.length,
+      priority: input.priority ?? 'normal',
+    },
+  });
+
+  return results;
+}
+
+// =====================================================
+// Threads
+// =====================================================
+
+export async function listThreadMessages(
+  threadId: string,
+  userId: string
+): Promise<ChatMessageDTO[]> {
+  const thread = await prisma.internalChatThread.findUnique({
+    where: { id: threadId },
+    include: { channel: { include: { members: { where: { userId, leftAt: null } } } } },
+  });
+  if (!thread) throw new ChatError('Hilo no encontrado');
+  if (!thread.channel.members.length) throw new AuthorizationError('No eres miembro de este canal');
+
+  const messages = await prisma.internalChatMessage.findMany({
+    where: { threadId, deletedAt: null },
+    orderBy: { createdAt: 'asc' },
+    take: 100,
+    include: MESSAGE_INCLUDE,
+  });
+
+  return Promise.all(messages.map((m) => toMessageDTO(m, userId)));
+}
+
+export async function getThreadByRootMessage(
+  rootMessageId: string
+): Promise<{ id: string; channelId: string } | null> {
+  const thread = await prisma.internalChatThread.findUnique({
+    where: { rootMessageId },
+    select: { id: true, channelId: true },
+  });
+  return thread;
+}
+
+// =====================================================
+// Read receipts detailed
+// =====================================================
+
+export async function getMessageReaders(
+  messageId: string,
+  userId: string
+): Promise<{ userId: string; name: string; readAt: string }[]> {
+  const message = await prisma.internalChatMessage.findUnique({
+    where: { id: messageId },
+    include: { channel: { include: { members: { where: { userId, leftAt: null } } } } },
+  });
+  if (!message) throw new ChatError('Mensaje no encontrado');
+  if (!message.channel.members.length)
+    throw new AuthorizationError('No tienes acceso a este mensaje');
+
+  const receipts = await prisma.internalChatReadReceipt.findMany({
+    where: { messageId, userId: { not: userId } },
+    include: { user: { select: { name: true } } },
+    orderBy: { readAt: 'asc' },
+  });
+
+  return receipts.map((r) => ({
+    userId: r.userId,
+    name: r.user.name,
+    readAt: r.readAt.toISOString(),
+  }));
 }

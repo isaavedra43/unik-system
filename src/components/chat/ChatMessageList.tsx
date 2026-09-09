@@ -25,6 +25,7 @@ export interface ChatMessageListProps {
   onTranslate: (messageId: string) => void;
   onVotePoll: (pollId: string, optionIds: string[]) => void;
   onRsvpEvent: (eventId: string, status: 'yes' | 'no' | 'maybe') => void;
+  onOpenThread?: (threadId: string, rootMessage: ChatMessageDTO) => void;
   channelId: string;
 }
 
@@ -67,6 +68,7 @@ export function ChatMessageList({
   onTranslate,
   onVotePoll,
   onRsvpEvent,
+  onOpenThread,
   channelId,
 }: ChatMessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -182,6 +184,7 @@ export function ChatMessageList({
                 onTranslate={onTranslate}
                 onVotePoll={onVotePoll}
                 onRsvpEvent={onRsvpEvent}
+                onOpenThread={onOpenThread}
                 channelId={channelId}
                 currentUserId={currentUserId}
               />

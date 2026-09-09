@@ -46,6 +46,10 @@ export const invoicesAdapter: ZohoEntityAdapter = {
 
   supportsModifiedTimeSort: false,
 
+  /** Invoices LIST response already contains all fields needed for normalization.
+   *  No need to call /invoices/{id} per record — saves thousands of API calls. */
+  useListAsSnapshot: true,
+
   async listPage({ page, perPage }) {
     return listInvoices({ page, perPage });
   },

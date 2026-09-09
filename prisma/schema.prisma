@@ -201,6 +201,8 @@ model User {
   chatSnippets        InternalChatSnippet[]
   chatScheduledMsgs   InternalChatScheduledMessage[]
   chatNotifPrefs      InternalChatNotificationPreference[]
+  chatCallParticipants InternalChatCallParticipant[]
+  chatCallsInitiated  InternalChatCall[]
 
   @@index([isActive])
 }
@@ -734,6 +736,8 @@ model InternalChatChannel {
   messages      InternalChatMessage[]
   events        InternalChatEvent[]
   tags          InternalChatChannelTag[]
+  calls         InternalChatCall[]
+  threads       InternalChatThread[]
 
   @@index([type])
   @@index([lastMessageAt])
@@ -770,6 +774,8 @@ model InternalChatMessage {
   forwardedBy     String?
   editedAt        DateTime?
   deletedAt       DateTime?
+  priority        String                    @default("normal") // "normal" | "urgent"
+  threadId        String?
   createdAt       DateTime                  @default(now())
   channel         InternalChatChannel       @relation(fields: [channelId], references: [id], onDelete: Cascade)
   sender          User                      @relation(fields: [senderId], references: [id], onDelete: Cascade)
@@ -777,6 +783,8 @@ model InternalChatMessage {
   forwardedFrom   InternalChatMessage?      @relation("InternalChatMessageForward", fields: [forwardedFromId], references: [id], onDelete: SetNull)
   replies         InternalChatMessage[]     @relation("InternalChatMessageReply")
   forwards        InternalChatMessage[]     @relation("InternalChatMessageForward")
+  thread          InternalChatThread?      @relation("InternalChatThreadMessages", fields: [threadId], references: [id], onDelete: SetNull)
+  threadRoot      InternalChatThread?      @relation("InternalChatThreadRoot")
   attachments     InternalChatAttachment[]
   reactions       InternalChatReaction[]
   readReceipts    InternalChatReadReceipt[]
@@ -790,6 +798,8 @@ model InternalChatMessage {
   @@index([channelId, createdAt])
   @@index([senderId])
   @@index([replyToId])
+  @@index([threadId])
+  @@index([priority, createdAt])
   @@map("internal_chat_message")
 }
 
@@ -1069,4 +1079,72 @@ model InternalChatBookmark {
   @@unique([userId, messageId])
   @@index([userId])
   @@map("internal_chat_bookmark")
+}
+
+/// Llamada de voz/video WebRTC dentro de un canal de chat.
+model InternalChatCall {
+  id          String                       @id @default(cuid())
+  channelId   String
+  callerId    String
+  type        String // "audio" | "video"
+  status      String                       @default("ringing") // "ringing" | "active" | "ended" | "missed" | "declined"
+  startedAt   DateTime?
+  endedAt     DateTime?
+  createdAt   DateTime                     @default(now())
+  channel     InternalChatChannel           @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  caller      User                         @relation(fields: [callerId], references: [id], onDelete: Cascade)
+  participants InternalChatCallParticipant[]
+  signals     InternalChatCallSignal[]
+
+  @@index([channelId, status])
+  @@index([createdAt])
+  @@index([callerId])
+  @@map("internal_chat_call")
+}
+
+/// Participante de una llamada de chat.
+model InternalChatCallParticipant {
+  id         String            @id @default(cuid())
+  callId     String
+  userId     String
+  acceptedAt DateTime?
+  declinedAt DateTime?
+  call       InternalChatCall  @relation(fields: [callId], references: [id], onDelete: Cascade)
+  user       User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([callId, userId])
+  @@index([callId])
+  @@map("internal_chat_call_participant")
+}
+
+/// Señal WebRTC efímera (offer/answer/ICE) para una llamada.
+model InternalChatCallSignal {
+  id          String           @id @default(cuid())
+  callId      String
+  fromUserId  String
+  toUserId    String
+  signalType  String // "offer" | "answer" | "ice"
+  signal      String // JSON stringified SDP/ICE candidate
+  createdAt   DateTime         @default(now())
+  deliveredAt DateTime?
+  call        InternalChatCall  @relation(fields: [callId], references: [id], onDelete: Cascade)
+
+  @@index([toUserId, deliveredAt])
+  @@index([callId])
+  @@map("internal_chat_call_signal")
+}
+
+/// Hilo de conversación dentro de un canal de chat.
+model InternalChatThread {
+  id            String                @id @default(cuid())
+  channelId     String
+  rootMessageId String
+  createdAt     DateTime              @default(now())
+  channel       InternalChatChannel   @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  rootMessage   InternalChatMessage   @relation("InternalChatThreadRoot", fields: [rootMessageId], references: [id], onDelete: Cascade)
+  messages      InternalChatMessage[] @relation("InternalChatThreadMessages")
+
+  @@unique([rootMessageId])
+  @@index([channelId])
+  @@map("internal_chat_thread")
 }

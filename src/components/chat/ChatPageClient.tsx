@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { Menu, X, Search, Bookmark, Pin, Calendar } from 'lucide-react';
+import { Menu, X, Search, Bookmark, Pin, Calendar, BarChart3, Megaphone } from 'lucide-react';
 import type { CurrentUser } from '@/modules/auth/authorization';
 import { ChatSidebar } from './ChatSidebar';
 import { ChatConversation } from './ChatConversation';
@@ -10,6 +10,8 @@ import { ChatSearchDialog } from './ChatSearchDialog';
 import { ChatBookmarksPanel } from './ChatBookmarksPanel';
 import { ChatPinnedPanel } from './ChatPinnedPanel';
 import { ChatCalendarView } from './ChatCalendarView';
+import { ChatPersonalStats } from './ChatPersonalStats';
+import { ChatBroadcastDialog } from './ChatBroadcastDialog';
 import type { ChatInboxItem } from '@/modules/chat/chat-events';
 
 export interface ChatPageClientProps {
@@ -26,6 +28,8 @@ export function ChatPageClient({ user }: ChatPageClientProps) {
   const [showBookmarks, setShowBookmarks] = useState(false);
   const [showPinned, setShowPinned] = useState(false);
   const [showCalendar, setShowCalendar] = useState(false);
+  const [showStats, setShowStats] = useState(false);
+  const [showBroadcast, setShowBroadcast] = useState(false);
 
   const refreshInbox = useCallback(async () => {
     try {
@@ -166,6 +170,24 @@ export function ChatPageClient({ user }: ChatPageClientProps) {
           >
             <Calendar size={18} />
           </button>
+          <button
+            type="button"
+            className="chat-topbar-btn"
+            onClick={() => setShowBroadcast(true)}
+            aria-label="Difundir mensaje"
+            title="Difundir a canales"
+          >
+            <Megaphone size={18} />
+          </button>
+          <button
+            type="button"
+            className="chat-topbar-btn"
+            onClick={() => setShowStats(true)}
+            aria-label="Mis estadísticas"
+            title="Mis estadísticas"
+          >
+            <BarChart3 size={18} />
+          </button>
         </div>
       </div>
 
@@ -232,6 +254,19 @@ export function ChatPageClient({ user }: ChatPageClientProps) {
 
       {/* Calendar view */}
       {showCalendar && <ChatCalendarView onClose={() => setShowCalendar(false)} />}
+
+      {/* Personal stats */}
+      {showStats && <ChatPersonalStats onClose={() => setShowStats(false)} />}
+
+      {/* Broadcast dialog */}
+      {showBroadcast && (
+        <ChatBroadcastDialog
+          onClose={() => setShowBroadcast(false)}
+          onSent={() => {
+            handleRefresh();
+          }}
+        />
+      )}
     </div>
   );
 }

@@ -61,6 +61,8 @@ const sendSchema = z.object({
     })
     .optional()
     .nullable(),
+  priority: z.enum(['normal', 'urgent']).optional(),
+  threadId: z.string().optional().nullable(),
 });
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -90,6 +92,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       location: parsed.data.location,
       poll: parsed.data.poll,
       event: parsed.data.event,
+      priority: parsed.data.priority,
+      threadId: parsed.data.threadId,
     });
     return NextResponse.json(message);
   } catch (err) {

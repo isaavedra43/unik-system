@@ -7,6 +7,8 @@ import type { ChatChannelDTO, ChatMessageDTO, ChatStreamEvent } from '@/modules/
 import { ChatMessageList } from './ChatMessageList';
 import { ChatMessageInput } from './ChatMessageInput';
 import { ChatGroupSettings } from './ChatGroupSettings';
+import { ChatCallButton } from './ChatCallButton';
+import { ChatThreadPanel } from './ChatThreadPanel';
 
 export interface ChatConversationProps {
   channelId: string;
@@ -22,9 +24,15 @@ export function ChatConversation({ channelId, user, onRefresh, onBack }: ChatCon
   const [error, setError] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [typingUsers, setTypingUsers] = useState<Map<string, string>>(new Map());
+  const [typingUsers, setTypingUsers] = useState<Map<string, { name: string; preview?: string }>>(
+    new Map()
+  );
   const [replyTo, setReplyTo] = useState<ChatMessageDTO | null>(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [activeThread, setActiveThread] = useState<{
+    threadId: string;
+    rootMessage: ChatMessageDTO;
+  } | null>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
   const oldestMessageDate = useRef<string | null>(null);
 
@@ -153,12 +161,21 @@ export function ChatConversation({ channelId, user, onRefresh, onBack }: ChatCon
             setTypingUsers((prev) => {
               const next = new Map(prev);
               if (evt.data.isTyping) {
-                next.set(evt.data.userId, evt.data.userName);
+                next.set(evt.data.userId, { name: evt.data.userName, preview: evt.data.preview });
               } else {
                 next.delete(evt.data.userId);
               }
               return next;
             });
+            break;
+          case 'call_invite':
+            // Call invite received — UI handled by ChatCallButton if active
+            break;
+          case 'call_end':
+            // Call ended — UI cleanup if needed
+            break;
+          case 'webrtc_signal':
+            // WebRTC signal — handled by ChatCallDialog polling
             break;
           case 'presence':
             setChannel((prev) => {
@@ -231,6 +248,8 @@ export function ChatConversation({ channelId, user, onRefresh, onBack }: ChatCon
           endsAt?: string;
           location?: string;
         };
+        priority?: 'normal' | 'urgent';
+        threadId?: string;
       }
     ) => {
       try {
@@ -244,6 +263,8 @@ export function ChatConversation({ channelId, user, onRefresh, onBack }: ChatCon
             location: extra?.location ?? null,
             poll: extra?.poll ?? null,
             event: extra?.event ?? null,
+            priority: extra?.priority ?? 'normal',
+            threadId: extra?.threadId ?? null,
           }),
         });
         if (res.ok) {
@@ -264,11 +285,11 @@ export function ChatConversation({ channelId, user, onRefresh, onBack }: ChatCon
 
   // Typing indicator
   const handleTyping = useCallback(
-    (isTyping: boolean) => {
+    (isTyping: boolean, preview?: string) => {
       fetch(`/app/chat/api/channels/${channelId}/typing`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ isTyping }),
+        body: JSON.stringify({ isTyping, preview: isTyping ? preview : undefined }),
       }).catch(() => {});
     },
     [channelId]
@@ -476,8 +497,13 @@ export function ChatConversation({ channelId, user, onRefresh, onBack }: ChatCon
 
   const typingText = Array.from(typingUsers.entries())
     .filter(([uid]) => uid !== user.id)
-    .map(([, name]) => name)
+    .map(([, info]) => info.name)
     .join(', ');
+
+  const typingPreview = Array.from(typingUsers.entries())
+    .filter(([uid]) => uid !== user.id)
+    .map(([, info]) => info.preview)
+    .find((p) => p && p.length > 0);
 
   return (
     <div className="chat-conversation">
@@ -498,9 +524,24 @@ export function ChatConversation({ channelId, user, onRefresh, onBack }: ChatCon
         <div className="chat-conversation-info">
           <div className="chat-conversation-name">{getChannelName()}</div>
           <div className="chat-conversation-subtitle">
-            {typingText ? `${typingText} está escribiendo...` : getChannelSubtitle()}
+            {typingText ? (
+              <span className="chat-typing-indicator">
+                <span className="chat-typing-dots">
+                  <span />
+                  <span />
+                  <span />
+                </span>
+                {typingText} está escribiendo
+                {typingPreview && <span className="chat-typing-preview">: {typingPreview}</span>}
+              </span>
+            ) : (
+              getChannelSubtitle()
+            )}
           </div>
         </div>
+        {channel && (
+          <ChatCallButton channelId={channelId} members={channel.members} currentUserId={user.id} />
+        )}
         <button
           type="button"
           className="chat-conversation-settings-btn"
@@ -533,6 +574,7 @@ export function ChatConversation({ channelId, user, onRefresh, onBack }: ChatCon
         onTranslate={handleTranslate}
         onVotePoll={handleVotePoll}
         onRsvpEvent={handleRsvpEvent}
+        onOpenThread={(threadId, rootMessage) => setActiveThread({ threadId, rootMessage })}
         channelId={channelId}
       />
 
@@ -545,7 +587,19 @@ export function ChatConversation({ channelId, user, onRefresh, onBack }: ChatCon
         channelId={channelId}
         user={user}
         members={channel?.members}
+        threadId={activeThread?.threadId}
       />
+
+      {/* Thread panel */}
+      {activeThread && (
+        <ChatThreadPanel
+          threadId={activeThread.threadId}
+          rootMessage={activeThread.rootMessage}
+          channelId={channelId}
+          user={user}
+          onClose={() => setActiveThread(null)}
+        />
+      )}
 
       {/* Settings drawer */}
       {showSettings && channel && (
