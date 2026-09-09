@@ -498,6 +498,9 @@ registerTool({
       totalProducts,
       dateRange,
       statusCounts,
+      subStatusCounts,
+      paidStatusCounts,
+      invoicedStatusCounts,
       paymentMethodCounts,
       deliveryMethodCounts,
       recentOrders,
@@ -531,6 +534,21 @@ registerTool({
         _sum: { total: true },
       }),
       prisma.salesOrder.groupBy({
+        by: ['subStatus'],
+        _count: { id: true },
+        _sum: { total: true },
+      }),
+      prisma.salesOrder.groupBy({
+        by: ['paidStatus'],
+        _count: { id: true },
+        _sum: { total: true },
+      }),
+      prisma.salesOrder.groupBy({
+        by: ['invoicedStatus'],
+        _count: { id: true },
+        _sum: { total: true },
+      }),
+      prisma.salesOrder.groupBy({
         by: ['paymentMethod'],
         _count: { id: true },
         _sum: { total: true },
@@ -549,6 +567,8 @@ registerTool({
           total: true,
           orderDate: true,
           status: true,
+          subStatus: true,
+          paidStatus: true,
         },
       }),
     ]);
@@ -583,6 +603,27 @@ registerTool({
           total: decimalToString(s._sum.total),
         }))
         .sort((a, b) => b.count - a.count),
+      subStatuses: subStatusCounts
+        .map((s) => ({
+          subStatus: s.subStatus ?? 'Sin sub-estado',
+          count: s._count.id,
+          total: decimalToString(s._sum.total),
+        }))
+        .sort((a, b) => b.count - a.count),
+      paidStatuses: paidStatusCounts
+        .map((p) => ({
+          paidStatus: p.paidStatus ?? 'Sin estado de pago',
+          count: p._count.id,
+          total: decimalToString(p._sum.total),
+        }))
+        .sort((a, b) => b.count - a.count),
+      invoicedStatuses: invoicedStatusCounts
+        .map((i) => ({
+          invoicedStatus: i.invoicedStatus ?? 'Sin estado de facturación',
+          count: i._count.id,
+          total: decimalToString(i._sum.total),
+        }))
+        .sort((a, b) => b.count - a.count),
       paymentMethods: paymentMethodCounts
         .map((p) => ({
           method: p.paymentMethod ?? 'Sin método',
@@ -603,6 +644,8 @@ registerTool({
         total: decimalToString(o.total),
         date: formatDate(o.orderDate),
         status: o.status,
+        subStatus: o.subStatus,
+        paidStatus: o.paidStatus,
       })),
     };
   },

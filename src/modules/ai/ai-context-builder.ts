@@ -100,6 +100,9 @@ REGLAS CRÍTICAS:
 
 ### getDatabaseOverview — PANORAMA COMPLETO
 Úsalo cuando el usuario pregunte "qué datos hay", "cuántas órdenes hay", "qué vendedores hay", o al inicio para entender el contexto.
+- **ÚSALO SIEMPRE** antes de hacer una consulta con un filtro que no conoces (ej: subStatus, paidStatus, invoicedStatus).
+- Devuelve los valores únicos de TODOS los campos: statuses, subStatuses, paidStatuses, invoicedStatuses, paymentMethods, deliveryMethods, customers, salespeople, locations.
+- Si no sabes qué valor usar para un filtro, consulta getDatabaseOverview primero.
 
 ### Otros tools útiles
 - **getSalesOrderDetail**: detalle completo de UNA orden específica
@@ -136,12 +139,30 @@ REGLAS CRÍTICAS:
 
 ## REGLA CRÍTICA — RESULTADOS VACÍOS (CERO RESULTADOS)
 Si una tool devuelve 0 resultados (orders: [], total: 0), NO afirmes inmediatamente "no hay datos". Puede que el filtro esté mal.
-- **Primero**: Verifica si el filtro es correcto. ¿Usaste el campo correcto? ¿Usaste el valor correcto?
-- **Si tienes duda**: Haz otra consulta sin filtros o con getDatabaseOverview para verificar si hay datos.
-- **Solo después de verificar**: Di "no hay X" con confianza.
-- **NUNCA** digas "no hay pendientes de entrega" si solo filtraste por status="pending". Verifica con subStatus="Pendiente".
-- **NUNCA** digas "no hay ventas" si solo filtraste por un método de pago específico. Verifica sin el filtro de paymentMethods.
-- Si una consulta devuelve 0 pero esperabas datos, CAMBIA el filtro y reintenta antes de responder.
+
+### Protocolo OBLIGATORIO cuando recibes 0 resultados:
+1. **Revisa el campo "diagnostic"**: Si la tool devolvió un campo "diagnostic", ÚSALO. Te muestra los valores reales disponibles.
+2. **Reintenta con el valor correcto**: Si el diagnostic muestra que el valor que usaste no existe, reintenta con un valor que SÍ exista.
+3. **Si no hay diagnostic**: Usa getDatabaseOverview para ver qué valores existen, luego reintenta.
+4. **SOLO después de verificar**: Di "no hay X" con confianza.
+
+### Ejemplo crítico:
+- Usuario: "qué ventas no he entregado de la semana"
+- Si usas status="pending" y devuelve 0 → NO digas "no hay"
+- El diagnostic te mostrará que subStatus tiene valores "Pendiente" y "Enviado"
+- Reintenta con subStatus="Pendiente" → ahora sí tendrás resultados
+- Responde con los datos reales
+
+### NUNCA hagas esto:
+- "No hay ventas pendientes de entrega" (si no verificaste)
+- "Todas las órdenes han sido enviadas" (si no consultaste el subStatus)
+- "No hay datos" (si el filtro estaba mal)
+
+### SÍEMPRE haz esto:
+- Si el filtro devuelve 0, revisa el diagnostic
+- Si el diagnostic muestra valores disponibles, reintenta
+- Si no hay diagnostic, consulta getDatabaseOverview
+- Solo di "no hay" después de verificar con el filtro correcto
 
 ## REGLA CRÍTICA — DIRECCIONES DE ENTREGA
 Cuando el usuario pida "direcciones de entrega", "dónde se entregó", "dirección de envío", "a dónde fue":

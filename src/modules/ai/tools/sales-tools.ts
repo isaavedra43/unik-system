@@ -303,6 +303,35 @@ registerTool({
       );
     }
 
+    // AUTO-DIAGNÓSTICO: Si hay 0 resultados Y se usó algún filtro de estado,
+    // hacer una consulta sin ese filtro para mostrar qué valores existen realmente.
+    // Esto evita que la IA afirme "no hay datos" cuando el filtro estaba mal.
+    const usedStatusFilter = !!(args.status || args.subStatus || args.paidStatus || args.invoicedStatus);
+    let diagnostic: Record<string, unknown> | null = null;
+    if (filtered.length === 0 && usedStatusFilter) {
+      // Consultar sin filtros de estado para ver qué valores existen
+      const ordersForDiagnosis = orders; // Ya tenemos todas las órdenes del rango de fechas
+      const uniqueStatuses = new Map<string, number>();
+      const uniqueSubStatuses = new Map<string, number>();
+      const uniquePaidStatuses = new Map<string, number>();
+      const uniqueInvoicedStatuses = new Map<string, number>();
+      for (const o of ordersForDiagnosis) {
+        if (o.status) uniqueStatuses.set(o.status, (uniqueStatuses.get(o.status) ?? 0) + 1);
+        if (o.subStatus) uniqueSubStatuses.set(o.subStatus, (uniqueSubStatuses.get(o.subStatus) ?? 0) + 1);
+        if (o.paidStatus) uniquePaidStatuses.set(o.paidStatus, (uniquePaidStatuses.get(o.paidStatus) ?? 0) + 1);
+        if (o.invoicedStatus) uniqueInvoicedStatuses.set(o.invoicedStatus, (uniqueInvoicedStatuses.get(o.invoicedStatus) ?? 0) + 1);
+      }
+      diagnostic = {
+        message: 'La consulta con los filtros de estado actuales devolvió 0 resultados. Revisa los valores disponibles:',
+        totalOrdersInDateRange: ordersForDiagnosis.length,
+        availableStatuses: [...uniqueStatuses.entries()].map(([v, c]) => ({ value: v, count: c })),
+        availableSubStatuses: [...uniqueSubStatuses.entries()].map(([v, c]) => ({ value: v, count: c })),
+        availablePaidStatuses: [...uniquePaidStatuses.entries()].map(([v, c]) => ({ value: v, count: c })),
+        availableInvoicedStatuses: [...uniqueInvoicedStatuses.entries()].map(([v, c]) => ({ value: v, count: c })),
+        hint: 'Si el filtro no coincide con ningún valor disponible, reintenta con un valor que SÍ exista. NO digas "no hay datos" — reintenta con el valor correcto.',
+      };
+    }
+
     // Build the response based on groupBy
     if (args.groupBy === 'none') {
       // Return individual orders (paginated)
@@ -342,6 +371,7 @@ registerTool({
           product: args.product ?? null,
           search: args.search ?? null,
         },
+        ...(diagnostic ? { diagnostic } : {}),
         orders: paginated.map((o) => formatOrder(o, args.includeItems, args.includeShippingAddress)),
       };
     }
@@ -451,6 +481,7 @@ registerTool({
         product: args.product ?? null,
         search: args.search ?? null,
       },
+      ...(diagnostic ? { diagnostic } : {}),
       groups: groupedResult,
     };
   },
