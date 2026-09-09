@@ -77,32 +77,26 @@ export const DEFAULT_AI_SETTINGS: AiSettings = {
   },
   deployment: 'gpt-4o',
   fallbackDeployment: 'gpt-4o-mini',
-  temperature: 0.3,
-  maxTokens: 4000,
+  temperature: 0.4,
+  maxTokens: 6000,
   maxMessagesPerMinute: 60,
   maxTokensPerDay: 500_000,
-  maxConversationMessages: 10,
+  maxConversationMessages: 20,
   maxToolIterations: 10,
   systemPromptOverride: '',
   enabledTools: [
-    // Sales — Universal tools (primary)
+    // Sales — Universal tools (primary, cover 90% of queries)
     'querySalesOrders',
     'universalSearch',
     'getDatabaseOverview',
-    // Sales — Specialized tools (for backward compat / simple queries)
-    'getCashSales',
-    'getSalesOrdersSummary',
-    'searchSalesOrders',
+    // Sales — Specialized tools (unique functionality not in querySalesOrders)
     'getSalesOrderDetail',
     'getTopProducts',
-    'getSalesBySalesperson',
-    'getSalesByLocation',
     'getSalesTrend',
-    'getSalesByStatus',
-    'getSalesByPaymentMethod',
-    'getSalesByDeliveryMethod',
+    'getSalesRanking',
+    'getHourlySalesPattern',
+    'getWeekdaySalesPattern',
     'getOrdersWithBalance',
-    'getOrderItems',
     // Inventory
     'getProductCatalog',
     'getStockMovement',
@@ -121,10 +115,7 @@ export const DEFAULT_AI_SETTINGS: AiSettings = {
     'getBalanceAging',
     // Analytics
     'comparePeriods',
-    'getSalesRanking',
     'getSalesKPIs',
-    'getHourlySalesPattern',
-    'getWeekdaySalesPattern',
     'getDashboardSummary',
     'getCrossTabAnalysis',
     'compareEntities',
@@ -191,8 +182,19 @@ function mergeWithDefaults(stored: unknown): AiSettings {
   if (Array.isArray(storedTools)) {
     const defaultTools = defaults.enabledTools;
     const mergedTools = [...new Set([...storedTools, ...defaultTools])];
-    // Remove renamed/obsolete tools that no longer exist
-    const obsoleteTools = new Set(['getCashSalesToday']);
+    // Remove renamed/obsolete tools that no longer exist or were consolidated
+    const obsoleteTools = new Set([
+      'getCashSalesToday',
+      'getCashSales',
+      'getSalesOrdersSummary',
+      'searchSalesOrders',
+      'getSalesBySalesperson',
+      'getSalesByLocation',
+      'getSalesByStatus',
+      'getSalesByPaymentMethod',
+      'getSalesByDeliveryMethod',
+      'getOrderItems',
+    ]);
     merged.enabledTools = mergedTools.filter((t) => !obsoleteTools.has(t));
   }
   return merged as unknown as AiSettings;

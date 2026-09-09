@@ -44,10 +44,15 @@ export function AssistantChat({
   const [loadingConv, setLoadingConv] = useState(false);
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
   const [voiceModeOpen, setVoiceModeOpen] = useState(false);
+  const [prefillText, setPrefillText] = useState('');
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   const canUseVoice = user.permissionKeys.includes('assistant.voice') || user.isSuperAdmin;
+
+  const handleAddToChat = useCallback((text: string) => {
+    setPrefillText(text);
+  }, []);
   const canUseUpload = user.permissionKeys.includes('assistant.upload') || user.isSuperAdmin;
 
   useEffect(() => {
@@ -259,7 +264,7 @@ export function AssistantChat({
           </div>
         )}
         {messages.map((m) => (
-          <AssistantMessage key={m.id} message={m} />
+          <AssistantMessage key={m.id} message={m} onAddToChat={handleAddToChat} />
         ))}
         {(streaming || streamingContent || activeToolCalls.length > 0) && (
           <div className="assistant-msg-row assistant-msg-row-assistant">
@@ -323,6 +328,8 @@ export function AssistantChat({
           canUpload={canUseUpload}
           canUseVoice={canUseVoice}
           onVoiceOpen={() => setVoiceModeOpen(true)}
+          prefillText={prefillText}
+          onPrefillConsumed={() => setPrefillText('')}
         />
       </div>
       <AnimatePresence>

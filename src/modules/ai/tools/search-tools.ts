@@ -24,6 +24,62 @@ function toNumber(value: unknown): number {
   return Number(value);
 }
 
+/**
+ * Normaliza texto para búsqueda fuzzy:
+ * - minúsculas
+ * - sin acentos
+ * - sin espacios extra
+ * - sin caracteres especiales
+ */
+function normalizeText(text: string): string {
+  return text
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '') // quita acentos
+    .replace(/[^a-z0-9\s]/g, ' ') // caracteres especiales → espacio
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * Genera variaciones de búsqueda para fuzzy matching:
+ * - La frase completa normalizada
+ * - Cada palabra individual
+ * - Prefijos de palabras (para parciales)
+ */
+function buildSearchTerms(query: string): { full: string; words: string[]; prefixes: string[] } {
+  const normalized = normalizeText(query);
+  const words = normalized.split(' ').filter((w) => w.length >= 2);
+  const prefixes = words.map((w) => w.slice(0, Math.max(3, Math.floor(w.length * 0.6))));
+  return { full: normalized, words, prefixes };
+}
+
+/**
+ * Construye un filtro Prisma OR que busca por:
+ * 1. Frase completa (contains insensible)
+ * 2. Cada palabra individual
+ * 3. Prefijos de palabras (parciales)
+ */
+function buildFuzzyFilter<T extends string>(
+  fields: readonly T[],
+  terms: { full: string; words: string[]; prefixes: string[] }
+): Record<string, unknown>[] {
+  const conditions: Record<string, unknown>[] = [];
+  for (const field of fields) {
+    // Frase completa
+    conditions.push({ [field]: { contains: terms.full, mode: 'insensitive' } });
+    // Cada palabra individual
+    for (const word of terms.words) {
+      conditions.push({ [field]: { contains: word, mode: 'insensitive' } });
+    }
+    // Prefijos (parciales)
+    for (const prefix of terms.prefixes) {
+      conditions.push({ [field]: { contains: prefix, mode: 'insensitive' } });
+    }
+  }
+  return conditions;
+}
+
 registerTool({
   name: 'universalSearch',
   description:
@@ -54,35 +110,38 @@ registerTool({
   execute: async (_actor, rawArgs) => {
     const args = rawArgs as { query: string; limit: number };
     const limit = args.limit;
+    const terms = buildSearchTerms(args.query);
+
+    // Build fuzzy OR conditions for each entity type
+    const orderFields = [
+      'salesOrderNumber', 'referenceNumber', 'customerName', 'customerEmail',
+      'customerPhone', 'salespersonName', 'paymentMethod', 'deliveryMethod',
+      'locationName', 'branchName', 'status', 'subStatus', 'paidStatus',
+      'shippingAttention', 'shippingAddressLine1', 'shippingAddressLine2',
+      'shippingCity', 'shippingState', 'shippingPostalCode', 'notes',
+    ] as const;
+    const orderOrConditions = buildFuzzyFilter(orderFields, terms);
+
+    const productFields = ['name', 'sku', 'description', 'taxName'] as const;
+    const productOrConditions = buildFuzzyFilter(productFields, terms);
+
+    const customerFields = ['customerName', 'customerEmail', 'customerPhone'] as const;
+    const customerOrConditions = buildFuzzyFilter(customerFields, terms);
+
+    const salespersonFields = ['salespersonName'] as const;
+    const salespersonOrConditions = buildFuzzyFilter(salespersonFields, terms);
+
+    const deliveryFields = ['deliveryMethod'] as const;
+    const deliveryOrConditions = buildFuzzyFilter(deliveryFields, terms);
+
+    const paymentFields = ['paymentMethod'] as const;
+    const paymentOrConditions = buildFuzzyFilter(paymentFields, terms);
 
     // Run all searches in parallel for maximum speed
     const [orders, products, customers, salespeople, deliveryMethods, paymentMethods] = await Promise.all([
-      // 1. Search in SalesOrders — ALL text fields
+      // 1. Search in SalesOrders — ALL text fields with fuzzy matching
       prisma.salesOrder.findMany({
-        where: {
-          OR: [
-            { salesOrderNumber: { contains: args.query, mode: 'insensitive' } },
-            { referenceNumber: { contains: args.query, mode: 'insensitive' } },
-            { customerName: { contains: args.query, mode: 'insensitive' } },
-            { customerEmail: { contains: args.query, mode: 'insensitive' } },
-            { customerPhone: { contains: args.query, mode: 'insensitive' } },
-            { salespersonName: { contains: args.query, mode: 'insensitive' } },
-            { paymentMethod: { contains: args.query, mode: 'insensitive' } },
-            { deliveryMethod: { contains: args.query, mode: 'insensitive' } },
-            { locationName: { contains: args.query, mode: 'insensitive' } },
-            { branchName: { contains: args.query, mode: 'insensitive' } },
-            { status: { contains: args.query, mode: 'insensitive' } },
-            { subStatus: { contains: args.query, mode: 'insensitive' } },
-            { paidStatus: { contains: args.query, mode: 'insensitive' } },
-            { shippingAttention: { contains: args.query, mode: 'insensitive' } },
-            { shippingAddressLine1: { contains: args.query, mode: 'insensitive' } },
-            { shippingAddressLine2: { contains: args.query, mode: 'insensitive' } },
-            { shippingCity: { contains: args.query, mode: 'insensitive' } },
-            { shippingState: { contains: args.query, mode: 'insensitive' } },
-            { shippingPostalCode: { contains: args.query, mode: 'insensitive' } },
-            { notes: { contains: args.query, mode: 'insensitive' } },
-          ],
-        },
+        where: { OR: orderOrConditions },
         select: {
           id: true,
           salesOrderNumber: true,
@@ -111,16 +170,9 @@ registerTool({
         take: limit,
       }),
 
-      // 2. Search in SalesOrderItems (products) — name, SKU, description
+      // 2. Search in SalesOrderItems (products) — name, SKU, description with fuzzy
       prisma.salesOrderItem.findMany({
-        where: {
-          OR: [
-            { name: { contains: args.query, mode: 'insensitive' } },
-            { sku: { contains: args.query, mode: 'insensitive' } },
-            { description: { contains: args.query, mode: 'insensitive' } },
-            { taxName: { contains: args.query, mode: 'insensitive' } },
-          ],
-        },
+        where: { OR: productOrConditions },
         select: {
           name: true,
           sku: true,
@@ -144,15 +196,9 @@ registerTool({
         take: limit,
       }),
 
-      // 3. Search distinct customers — name, email, phone
+      // 3. Search distinct customers — name, email, phone with fuzzy
       prisma.salesOrder.findMany({
-        where: {
-          OR: [
-            { customerName: { contains: args.query, mode: 'insensitive' } },
-            { customerEmail: { contains: args.query, mode: 'insensitive' } },
-            { customerPhone: { contains: args.query, mode: 'insensitive' } },
-          ],
-        },
+        where: { OR: customerOrConditions },
         select: {
           customerName: true,
           customerEmail: true,
@@ -167,11 +213,9 @@ registerTool({
         take: limit * 3, // Get more to aggregate
       }),
 
-      // 4. Search distinct salespeople
+      // 4. Search distinct salespeople with fuzzy
       prisma.salesOrder.findMany({
-        where: {
-          salespersonName: { contains: args.query, mode: 'insensitive' },
-        },
+        where: { OR: salespersonOrConditions },
         select: {
           salespersonName: true,
           total: true,
@@ -183,11 +227,9 @@ registerTool({
         take: limit * 3,
       }),
 
-      // 5. Search by delivery method
+      // 5. Search by delivery method with fuzzy
       prisma.salesOrder.findMany({
-        where: {
-          deliveryMethod: { contains: args.query, mode: 'insensitive' },
-        },
+        where: { OR: deliveryOrConditions },
         select: {
           deliveryMethod: true,
           total: true,
@@ -199,11 +241,9 @@ registerTool({
         take: limit * 3,
       }),
 
-      // 6. Search by payment method
+      // 6. Search by payment method with fuzzy
       prisma.salesOrder.findMany({
-        where: {
-          paymentMethod: { contains: args.query, mode: 'insensitive' },
-        },
+        where: { OR: paymentOrConditions },
         select: {
           paymentMethod: true,
           total: true,

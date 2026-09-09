@@ -1,7 +1,7 @@
 'use client';
 
-import React from 'react';
-import { Bot, User as UserIcon, FileText, Image as ImageIcon } from 'lucide-react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
+import { Bot, User as UserIcon, FileText, Image as ImageIcon, Plus } from 'lucide-react';
 import { AssistantMarkdown } from './AssistantMarkdown';
 import { AssistantToolCallCard, type ToolCallData } from './AssistantToolCallCard';
 
@@ -40,7 +40,65 @@ function isImage(mimeType: string): boolean {
   return mimeType.startsWith('image/');
 }
 
-export function AssistantMessage({ message }: { message: AssistantMessageData }) {
+export interface AssistantMessageProps {
+  message: AssistantMessageData;
+  onAddToChat?: (text: string) => void;
+}
+
+export function AssistantMessage({ message, onAddToChat }: AssistantMessageProps) {
+  const contentRef = useRef<HTMLDivElement>(null);
+  const [showAddButton, setShowAddButton] = useState(false);
+  const [buttonPos, setButtonPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+
+  // Detect text selection within this message
+  const handleSelectionChange = useCallback(() => {
+    if (!contentRef.current || !onAddToChat) return;
+    const selection = window.getSelection();
+    if (!selection || selection.isCollapsed || selection.rangeCount === 0) {
+      setShowAddButton(false);
+      return;
+    }
+    const range = selection.getRangeAt(0);
+    // Check if selection is within this message's content
+    const container = contentRef.current;
+    if (!container.contains(range.commonAncestorContainer)) {
+      setShowAddButton(false);
+      return;
+    }
+    const text = selection.toString().trim();
+    if (text.length < 2) {
+      setShowAddButton(false);
+      return;
+    }
+    // Get selection position relative to the message container
+    const rect = range.getBoundingClientRect();
+    const containerRect = container.getBoundingClientRect();
+    setButtonPos({
+      x: rect.left - containerRect.left + rect.width / 2,
+      y: rect.top - containerRect.top - 8,
+    });
+    setShowAddButton(true);
+  }, [onAddToChat]);
+
+  useEffect(() => {
+    if (!onAddToChat) return;
+    document.addEventListener('selectionchange', handleSelectionChange);
+    return () => {
+      document.removeEventListener('selectionchange', handleSelectionChange);
+    };
+  }, [handleSelectionChange, onAddToChat]);
+
+  const handleAddToChat = useCallback(() => {
+    const selection = window.getSelection();
+    if (!selection) return;
+    const text = selection.toString().trim();
+    if (text && onAddToChat) {
+      onAddToChat(text);
+      selection.removeAllRanges();
+      setShowAddButton(false);
+    }
+  }, [onAddToChat]);
+
   if (message.role === 'tool') {
     // Tool messages are rendered as cards within the assistant message
     return null;
@@ -80,7 +138,27 @@ export function AssistantMessage({ message }: { message: AssistantMessageData })
             ))}
           </div>
         )}
-        {message.content && <AssistantMarkdown content={message.content} />}
+        <div ref={contentRef} className="assistant-msg-content" style={{ position: 'relative' }}>
+          {message.content && <AssistantMarkdown content={message.content} />}
+          {/* Floating "Agregar al chat" button */}
+          {showAddButton && onAddToChat && (
+            <button
+              type="button"
+              className="assistant-add-to-chat-btn"
+              onClick={handleAddToChat}
+              style={{
+                position: 'absolute',
+                left: `${buttonPos.x}px`,
+                top: `${buttonPos.y}px`,
+                transform: 'translate(-50%, -100%)',
+              }}
+              title="Agregar al chat"
+            >
+              <Plus size={12} />
+              <span>Agregar al chat</span>
+            </button>
+          )}
+        </div>
         {toolCallData.map((tc, idx) => (
           <AssistantToolCallCard key={idx} data={tc} />
         ))}

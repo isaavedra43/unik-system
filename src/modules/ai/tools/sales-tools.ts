@@ -288,7 +288,15 @@ registerTool({
     }
 
     // Group by dimension
-    const groups = new Map<string, { count: number; total: number; balance: number; orders: typeof filtered }>();
+    // For product grouping, we track total quantity per product and addresses per order
+    const groups = new Map<string, {
+      count: number;
+      total: number;
+      balance: number;
+      orders: typeof filtered;
+      totalQuantity?: number;
+      unit?: string;
+    }>();
 
     for (const o of filtered) {
       let key = 'SIN DATO';
@@ -312,10 +320,19 @@ registerTool({
         } else {
           for (const item of items) {
             const pkey = item.name ?? 'SIN NOMBRE';
-            const g = groups.get(pkey) ?? { count: 0, total: 0, balance: 0, orders: [] as typeof filtered };
+            const g = groups.get(pkey) ?? {
+              count: 0,
+              total: 0,
+              balance: 0,
+              orders: [] as typeof filtered,
+              totalQuantity: 0,
+              unit: item.unit ?? '',
+            };
             g.count++;
             g.total += toNumber(item.lineTotal);
             g.balance += toNumber(o.balance);
+            g.totalQuantity = (g.totalQuantity ?? 0) + toNumber(item.quantity);
+            if (!g.unit && item.unit) g.unit = item.unit;
             g.orders.push(o);
             groups.set(pkey, g);
           }
@@ -337,8 +354,13 @@ registerTool({
         count: g.count,
         total: g.total.toFixed(2),
         balance: g.balance.toFixed(2),
-        ...(args.includeItems ? {
-          orders: g.orders.slice(0, 50).map((o) => formatOrder(o, args.includeItems, args.includeShippingAddress)),
+        // For product grouping, include total quantity (m²) and unit
+        ...(args.groupBy === 'product' && g.totalQuantity !== undefined ? {
+          totalQuantity: g.totalQuantity.toFixed(2),
+          unit: g.unit ?? '',
+        } : {}),
+        ...(args.includeItems || args.groupBy === 'product' ? {
+          orders: g.orders.slice(0, 50).map((o) => formatOrder(o, args.includeItems || args.groupBy === 'product', args.includeShippingAddress)),
         } : {}),
       }))
       .sort((a, b) => Number(b.total) - Number(a.total));

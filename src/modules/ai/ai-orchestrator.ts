@@ -264,6 +264,99 @@ export async function* runAssistant(
     'generateTable',
   ]);
 
+  /**
+   * Builds a dynamic report title based on the tool name and its arguments.
+   * Works with querySalesOrders (the universal sales tool) and other tools.
+   */
+  function buildDynamicTitle(toolName: string, toolArgs: Record<string, unknown> | null): string {
+    const dateRange = toolArgs?.dateRange as string | undefined;
+    const dateLabel = dateRange === 'today' ? ' de Hoy'
+      : dateRange === 'yesterday' ? ' de Ayer'
+      : dateRange === 'this_week' ? ' de Esta Semana'
+      : dateRange === 'this_month' ? ' de Este Mes'
+      : dateRange === 'last_month' ? ' del Mes Pasado'
+      : dateRange === 'last_7_days' ? ' de los Últimos 7 Días'
+      : dateRange === 'last_30_days' ? ' de los Últimos 30 Días'
+      : dateRange === 'all' ? ' (Histórico)'
+      : '';
+
+    // For querySalesOrders, build title from filters
+    if (toolName === 'querySalesOrders') {
+      const parts: string[] = ['Ventas'];
+      const paymentMethods = toolArgs?.paymentMethods as string[] | undefined;
+      const deliveryMethod = toolArgs?.deliveryMethod as string | undefined;
+      const customer = toolArgs?.customer as string | undefined;
+      const salesperson = toolArgs?.salesperson as string | undefined;
+      const product = toolArgs?.product as string | undefined;
+      const groupBy = toolArgs?.groupBy as string | undefined;
+
+      if (paymentMethods && paymentMethods.length > 0) {
+        if (paymentMethods.length === 1) {
+          const pm = paymentMethods[0];
+          parts.push(pm === 'EFECTIVO' ? 'en Efectivo'
+            : pm === 'EFECTIVO EN BODEGA' ? 'en Efectivo en Bodega'
+            : pm === 'TRANSFERENCIA' ? 'por Transferencia'
+            : pm === 'DEPOSITO' ? 'por Depósito'
+            : pm === 'TARJETA' ? 'con Tarjeta'
+            : `por ${pm}`);
+        } else {
+          parts.push(`por ${paymentMethods.join(' + ')}`);
+        }
+      }
+      if (deliveryMethod) {
+        parts.push(deliveryMethod.toLowerCase().includes('pie') ? 'a Pie de Obra'
+          : deliveryMethod.toLowerCase().includes('recoge') ? 'Recoge en Bodega'
+          : deliveryMethod.toLowerCase().includes('instal') ? 'Instalación a Domicilio'
+          : deliveryMethod);
+      }
+      if (product) parts.push(`de ${product}`);
+      if (customer) parts.push(`de ${customer}`);
+      if (salesperson) parts.push(`de ${salesperson}`);
+      if (groupBy === 'product') parts.push('por Producto');
+      if (groupBy === 'paymentMethod') parts.push('por Método de Pago');
+      if (groupBy === 'deliveryMethod') parts.push('por Método de Entrega');
+      if (groupBy === 'salesperson') parts.push('por Vendedor');
+      if (groupBy === 'location') parts.push('por Sucursal');
+      if (groupBy === 'status') parts.push('por Estado');
+      if (groupBy === 'customer') parts.push('por Cliente');
+      if (groupBy === 'date') parts.push('por Fecha');
+
+      return `${parts.join(' ')}${dateLabel}`;
+    }
+
+    // For universalSearch
+    if (toolName === 'universalSearch') {
+      return `Resultados de Búsqueda: ${toolArgs?.query ?? ''}`;
+    }
+
+    // For getDatabaseOverview
+    if (toolName === 'getDatabaseOverview') {
+      return 'Panorama de Datos UNIK';
+    }
+
+    // Static title map for other tools
+    const titleMap: Record<string, string> = {
+      getTopProducts: 'Productos Más Vendidos',
+      getSalesTrend: 'Tendencia de Ventas',
+      getTopCustomers: 'Top Clientes',
+      getAccountsReceivable: 'Cuentas por Cobrar',
+      getRevenueAnalysis: 'Análisis de Ingresos',
+      getDailyRevenue: 'Ingresos Diarios',
+      getSalesRanking: 'Ranking de Ventas',
+      getSalesKPIs: 'KPIs de Ventas',
+      getDashboardSummary: 'Resumen Ejecutivo',
+      getProductCatalog: 'Catálogo de Productos',
+      getLowStockAlerts: 'Alertas de Bajo Stock',
+      getTeamPerformance: 'Rendimiento del Equipo',
+      getSalesForecast: 'Pronóstico de Ventas',
+      getSalesAlerts: 'Alertas de Ventas',
+      getBalanceAging: 'Antigüedad de Saldos',
+      getCustomerRetention: 'Retención de Clientes',
+      getProductBundles: 'Productos Comprados Juntos',
+    };
+    return titleMap[toolName] ?? 'Reporte UNIK';
+  }
+
   while (iteration < settings.maxToolIterations) {
     iteration++;
 
@@ -416,82 +509,43 @@ export async function* runAssistant(
             }
           }
           if (!argsObj.title && lastToolName) {
-            // Build title based on tool name AND its arguments
-            const paymentMethods = lastToolArgs?.paymentMethods as string[] | undefined;
-            const dateRange = lastToolArgs?.dateRange as string | undefined;
-            const dateLabel = dateRange === 'today' ? ' de Hoy'
-              : dateRange === 'yesterday' ? ' de Ayer'
-              : dateRange === 'this_week' ? ' de Esta Semana'
-              : dateRange === 'this_month' ? ' de Este Mes'
-              : dateRange === 'last_month' ? ' del Mes Pasado'
-              : '';
+            // Build title dynamically based on tool name AND its arguments
+            argsObj.title = buildDynamicTitle(lastToolName, lastToolArgs);
+          }
 
-            let cashLabel = 'Ventas';
-            if (lastToolName === 'getCashSales' && paymentMethods) {
-              if (paymentMethods.length === 1) {
-                const pm = paymentMethods[0];
-                cashLabel = pm === 'EFECTIVO' ? 'Ventas en Efectivo'
-                  : pm === 'EFECTIVO EN BODEGA' ? 'Ventas en Efectivo en Bodega'
-                  : pm === 'TRANSFERENCIA' ? 'Ventas por Transferencia'
-                  : pm === 'DEPOSITO' ? 'Ventas por Depósito'
-                  : pm === 'TARJETA' ? 'Ventas con Tarjeta'
-                  : `Ventas por ${pm}`;
-              } else {
-                cashLabel = `Ventas por ${paymentMethods.join(' + ')}`;
-              }
-            }
-
-            const titleMap: Record<string, string> = {
-              getCashSales: `${cashLabel}${dateLabel}`,
-              getSalesOrdersSummary: `Resumen de Ventas${dateLabel}`,
-              getTopProducts: 'Productos Más Vendidos',
-              getSalesBySalesperson: 'Ventas por Vendedor',
-              getSalesByLocation: 'Ventas por Sucursal',
-              getSalesByStatus: 'Ventas por Estado',
-              getSalesByPaymentMethod: 'Ventas por Método de Pago',
-              getSalesTrend: 'Tendencia de Ventas',
-              getTopCustomers: 'Top Clientes',
-              getAccountsReceivable: 'Cuentas por Cobrar',
-              getRevenueAnalysis: 'Análisis de Ingresos',
-              getDailyRevenue: 'Ingresos Diarios',
-              getSalesRanking: 'Ranking de Ventas',
-              getSalesKPIs: 'KPIs de Ventas',
-              getProductCatalog: 'Catálogo de Productos',
-              getLowStockAlerts: 'Alertas de Bajo Stock',
+          // Auto-inject summary cards from scalar fields in the last tool result
+          if (!argsObj.summaryCards && lastToolResult) {
+            const cards: Array<{ label: string; value: string }> = [];
+            const scalarFields: Record<string, string> = {
+              totalRevenue: 'Total',
+              totalOrders: 'Órdenes',
+              totalBalance: 'Saldo',
+              total: 'Total',
+              count: 'Órdenes',
+              totalQuantity: 'Cantidad',
             };
-            argsObj.title = titleMap[lastToolName] ?? 'Reporte UNIK';
+            for (const [key, label] of Object.entries(scalarFields)) {
+              const val = lastToolResult[key];
+              if (val !== undefined && val !== null) {
+                const numStr = String(val);
+                if (label === 'Total' || label === 'Saldo') {
+                  cards.push({ label, value: `$${Number(numStr).toLocaleString('es-MX', { minimumFractionDigits: 2 })}` });
+                } else {
+                  cards.push({ label, value: numStr });
+                }
+              }
+              if (cards.length >= 4) break;
+            }
+            if (cards.length > 0) {
+              argsObj.summaryCards = cards;
+            }
           }
         }
 
         // Auto-inject chart params for generateChart
         if (tc.name === 'generateChart' && lastToolRows && lastToolRows.length > 0) {
           if (!argsObj.title) {
-            const paymentMethods = lastToolArgs?.paymentMethods as string[] | undefined;
-            let chartLabel = 'Ventas';
-            if (lastToolName === 'getCashSales' && paymentMethods) {
-              if (paymentMethods.length === 1) {
-                const pm = paymentMethods[0];
-                chartLabel = pm === 'EFECTIVO' ? 'Ventas en Efectivo'
-                  : pm === 'EFECTIVO EN BODEGA' ? 'Ventas en Efectivo en Bodega'
-                  : pm === 'TRANSFERENCIA' ? 'Ventas por Transferencia'
-                  : pm === 'DEPOSITO' ? 'Ventas por Depósito'
-                  : `Ventas por ${pm}`;
-              } else {
-                chartLabel = `Ventas por ${paymentMethods.join(' + ')}`;
-              }
-            }
-            const titleMap: Record<string, string> = {
-              getCashSales: chartLabel,
-              getSalesOrdersSummary: 'Resumen de Ventas',
-              getTopProducts: 'Productos Más Vendidos',
-              getSalesBySalesperson: 'Ventas por Vendedor',
-              getSalesByLocation: 'Ventas por Sucursal',
-              getSalesByStatus: 'Ventas por Estado',
-              getSalesByPaymentMethod: 'Ventas por Método de Pago',
-              getSalesTrend: 'Tendencia de Ventas',
-              getTopCustomers: 'Top Clientes',
-            };
-            argsObj.title = titleMap[lastToolName ?? ''] ?? 'Gráfica de Datos';
+            argsObj.title = buildDynamicTitle(lastToolName ?? '', lastToolArgs);
           }
           if (!argsObj.chartType) {
             argsObj.chartType = 'bar';
