@@ -215,6 +215,11 @@ registerTool({
       count: orders.length,
       total: total.toFixed(2),
       paymentMethods: args.paymentMethods,
+      dateFilter: {
+        dateRange: args.dateRange,
+        dateFrom: args.dateFrom ?? null,
+        dateTo: args.dateTo ?? null,
+      },
       orders: orders.map((o) => ({
         number: o.salesOrderNumber,
         customer: o.customerName,

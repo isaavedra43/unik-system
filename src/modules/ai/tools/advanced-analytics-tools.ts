@@ -127,6 +127,12 @@ registerTool({
       totalRevenue: filteredOrders.reduce((s, o) => s + toNumber(o.total), 0).toFixed(2),
       methodCount: groups.size,
       filteredBy: args.deliveryMethod ?? null,
+      dateFilter: {
+        dateRange: args.dateRange,
+        dateFrom: args.dateFrom ?? null,
+        dateTo: args.dateTo ?? null,
+        totalOrdersBeforeDeliveryFilter: orders.length,
+      },
       byDeliveryMethod: byMethod,
     };
   },

@@ -7,12 +7,56 @@
  * These helpers create UTC-midnight Date objects so that Prisma `gte`/`lte`
  * comparisons match correctly regardless of the server's timezone.
  *
- * The "today" / "yesterday" concepts use the SERVER's local timezone
- * (America/Mexico_City, UTC-6) to determine which calendar date to query,
- * then create UTC-midnight Date objects for that date.
+ * The "today" / "yesterday" concepts use the AMERICA/MEXICO_CITY timezone
+ * (UTC-6) to determine which calendar date to query, then create UTC-midnight
+ * Date objects for that date. This ensures "hoy" matches what the user in
+ * Mexico considers "today", regardless of the server's timezone.
  */
 
 import { z } from 'zod';
+
+/**
+ * The timezone used for all "today"/"yesterday"/"this week" calculations.
+ * UNIK operates in Mexico, so we use America/Mexico_City (UTC-6).
+ */
+const UNIK_TIMEZONE = 'America/Mexico_City';
+
+/**
+ * Returns the current date components (year, month, day) in the UNIK timezone
+ * (America/Mexico_City), regardless of the server's local timezone.
+ */
+function getCurrentDateInUnikTz(): { year: number; month: number; day: number; dayOfWeek: number } {
+  const now = new Date();
+  const fmt = new Intl.DateTimeFormat('en-US', {
+    timeZone: UNIK_TIMEZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    weekday: 'short',
+  });
+  const parts = fmt.formatToParts(now);
+  const year = parseInt(parts.find((p) => p.type === 'year')?.value ?? '2026', 10);
+  const month = parseInt(parts.find((p) => p.type === 'month')?.value ?? '1', 10) - 1; // 0-indexed
+  const day = parseInt(parts.find((p) => p.type === 'day')?.value ?? '1', 10);
+  const weekdayStr = parts.find((p) => p.type === 'weekday')?.value ?? 'Mon';
+  const weekdayMap: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+  const dayOfWeek = weekdayMap[weekdayStr] ?? 0;
+  return { year, month, day, dayOfWeek };
+}
+
+/**
+ * Creates a UTC-midnight Date for the given date components.
+ */
+function utcDateFromComponents(year: number, month: number, day: number): Date {
+  return new Date(Date.UTC(year, month, day));
+}
+
+/**
+ * Creates a UTC end-of-day Date (23:59:59.999Z) for the given date components.
+ */
+function utcEndOfDayFromComponents(year: number, month: number, day: number): Date {
+  return new Date(Date.UTC(year, month, day, 23, 59, 59, 999));
+}
 
 /**
  * Date range shortcuts understood by resolveDateRange.
@@ -49,20 +93,6 @@ export const dateRangeSchema = z
   );
 
 /**
- * Creates a UTC-midnight Date for the given local date components.
- */
-function utcDateFromLocal(d: Date): Date {
-  return new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
-}
-
-/**
- * Creates a UTC end-of-day Date (23:59:59.999Z) for the given local date.
- */
-function utcEndOfDayFromLocal(d: Date): Date {
-  return new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999));
-}
-
-/**
  * Resolves a date range shortcut into UTC Date objects suitable for Prisma
  * queries on @db.Date fields.
  *
@@ -71,73 +101,75 @@ function utcEndOfDayFromLocal(d: Date): Date {
  * - to = UTC end-of-day (23:59:59.999Z) of the end date
  *
  * For "all", returns { from: null, to: null } meaning no date filter.
+ *
+ * All "today"/"yesterday"/"this_week"/"this_month" calculations use the
+ * America/Mexico_City timezone, NOT the server's local timezone.
  */
 export function resolveDateRange(
   range: DateRangeShortcut | string | undefined
 ): { from: Date | null; to: Date | null } {
-  const now = new Date();
+  const today = getCurrentDateInUnikTz();
 
   if (range === undefined || range === 'today') {
     return {
-      from: utcDateFromLocal(now),
-      to: utcEndOfDayFromLocal(now),
+      from: utcDateFromComponents(today.year, today.month, today.day),
+      to: utcEndOfDayFromComponents(today.year, today.month, today.day),
     };
   }
 
   if (range === 'yesterday') {
-    const y = new Date(now);
-    y.setDate(y.getDate() - 1);
+    const y = new Date(Date.UTC(today.year, today.month, today.day));
+    y.setUTCDate(y.getUTCDate() - 1);
     return {
-      from: utcDateFromLocal(y),
-      to: utcEndOfDayFromLocal(y),
+      from: new Date(Date.UTC(y.getUTCFullYear(), y.getUTCMonth(), y.getUTCDate())),
+      to: new Date(Date.UTC(y.getUTCFullYear(), y.getUTCMonth(), y.getUTCDate(), 23, 59, 59, 999)),
     };
   }
 
   if (range === 'this_week') {
     // Monday-based week start
-    const day = now.getDay();
-    const diff = (day + 6) % 7;
-    const monday = new Date(now);
-    monday.setDate(monday.getDate() - diff);
+    const diff = (today.dayOfWeek + 6) % 7;
+    const monday = new Date(Date.UTC(today.year, today.month, today.day));
+    monday.setUTCDate(monday.getUTCDate() - diff);
     return {
-      from: utcDateFromLocal(monday),
-      to: utcEndOfDayFromLocal(now),
+      from: new Date(Date.UTC(monday.getUTCFullYear(), monday.getUTCMonth(), monday.getUTCDate())),
+      to: utcEndOfDayFromComponents(today.year, today.month, today.day),
     };
   }
 
   if (range === 'this_month') {
-    const firstOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
     return {
-      from: utcDateFromLocal(firstOfMonth),
-      to: utcEndOfDayFromLocal(now),
+      from: utcDateFromComponents(today.year, today.month, 1),
+      to: utcEndOfDayFromComponents(today.year, today.month, today.day),
     };
   }
 
   if (range === 'last_month') {
     // First day of last month to last day of last month
-    const firstOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-    const lastOfLastMonth = new Date(now.getFullYear(), now.getMonth(), 0); // day 0 of current month = last day of prev
+    const lastMonthYear = today.month === 0 ? today.year - 1 : today.year;
+    const lastMonth = today.month === 0 ? 11 : today.month - 1;
+    const lastDayOfLastMonth = new Date(Date.UTC(today.year, today.month, 0)).getUTCDate();
     return {
-      from: utcDateFromLocal(firstOfLastMonth),
-      to: utcEndOfDayFromLocal(lastOfLastMonth),
+      from: utcDateFromComponents(lastMonthYear, lastMonth, 1),
+      to: utcEndOfDayFromComponents(lastMonthYear, lastMonth, lastDayOfLastMonth),
     };
   }
 
   if (range === 'last_7_days') {
-    const sevenDaysAgo = new Date(now);
-    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 6);
+    const sevenDaysAgo = new Date(Date.UTC(today.year, today.month, today.day));
+    sevenDaysAgo.setUTCDate(sevenDaysAgo.getUTCDate() - 6);
     return {
-      from: utcDateFromLocal(sevenDaysAgo),
-      to: utcEndOfDayFromLocal(now),
+      from: new Date(Date.UTC(sevenDaysAgo.getUTCFullYear(), sevenDaysAgo.getUTCMonth(), sevenDaysAgo.getUTCDate())),
+      to: utcEndOfDayFromComponents(today.year, today.month, today.day),
     };
   }
 
   if (range === 'last_30_days') {
-    const thirtyDaysAgo = new Date(now);
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 29);
+    const thirtyDaysAgo = new Date(Date.UTC(today.year, today.month, today.day));
+    thirtyDaysAgo.setUTCDate(thirtyDaysAgo.getUTCDate() - 29);
     return {
-      from: utcDateFromLocal(thirtyDaysAgo),
-      to: utcEndOfDayFromLocal(now),
+      from: new Date(Date.UTC(thirtyDaysAgo.getUTCFullYear(), thirtyDaysAgo.getUTCMonth(), thirtyDaysAgo.getUTCDate())),
+      to: utcEndOfDayFromComponents(today.year, today.month, today.day),
     };
   }
 
@@ -147,8 +179,8 @@ export function resolveDateRange(
 
   // Unknown string — default to today
   return {
-    from: utcDateFromLocal(now),
-    to: utcEndOfDayFromLocal(now),
+    from: utcDateFromComponents(today.year, today.month, today.day),
+    to: utcEndOfDayFromComponents(today.year, today.month, today.day),
   };
 }
 

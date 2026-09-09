@@ -4879,6 +4879,20 @@ textarea.input {
   flex-shrink: 0;
 }
 
+/* On desktop, topbar and actions wrappers are transparent (display: contents)
+   so all controls flow in a single row — preserving the existing desktop layout. */
+.assistant-input-topbar {
+  display: contents;
+}
+
+.assistant-input-actions {
+  display: contents;
+}
+
+.assistant-input-actions-left {
+  display: contents;
+}
+
 .model-selector {
   position: relative;
   flex-shrink: 0;
@@ -6222,49 +6236,100 @@ textarea.input {
     max-width: 100%;
   }
 
-  /* Input bar: full width, wrap on small screens */
+  /* Input bar: ChatGPT-style mobile composer
+     Model selector on top, textarea full-width, actions below */
   .assistant-input-bar {
+    flex-direction: column;
+    align-items: stretch;
     padding: 0 var(--unik-space-3) var(--unik-space-3);
-    flex-wrap: wrap;
+    gap: var(--unik-space-2);
     width: 100%;
     max-width: 100%;
-    gap: var(--unik-space-1);
   }
 
-  .assistant-input-bar > .model-selector {
-    flex-shrink: 1;
-    min-width: 0;
+  /* Model selector: own row on top */
+  .assistant-input-topbar {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: var(--unik-space-2);
+    width: 100%;
   }
 
-  .assistant-input-bar > .model-selector-trigger {
+  .assistant-input-topbar .model-selector-trigger {
     font-size: var(--unik-text-xs);
     padding: 0.3rem 0.5rem;
   }
 
-  .assistant-input-bar > .model-selector-dropdown {
+  .assistant-input-topbar .model-selector-dropdown {
     min-width: 200px;
     max-width: calc(100vw - 2rem);
   }
 
   /* Input container: full width */
-  .assistant-input {
-    width: 100%;
-    max-width: 100%;
-    min-width: 0;
-    padding: var(--unik-space-2) var(--unik-space-3) var(--unik-space-3);
-  }
-
   .assistant-input-container {
     width: 100%;
     max-width: 100%;
     min-width: 0;
   }
 
-  .assistant-input-textarea {
-    font-size: 16px;
+  /* Input: column layout — textarea on top, actions below */
+  .assistant-input {
+    display: flex;
+    flex-direction: column;
     width: 100%;
     max-width: 100%;
     min-width: 0;
+    padding: var(--unik-space-2) var(--unik-space-3) var(--unik-space-3);
+    gap: var(--unik-space-2);
+  }
+
+  /* Textarea: full width, grows vertically */
+  .assistant-input-textarea {
+    font-size: 16px; /* prevent iOS zoom */
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    min-height: 52px;
+    max-height: 200px;
+    resize: none;
+    flex-shrink: 1;
+  }
+
+  /* Actions row: [mic][attach] left, [send] right */
+  .assistant-input-actions {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    gap: var(--unik-space-2);
+  }
+
+  .assistant-input-actions-left {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: var(--unik-space-2);
+  }
+
+  /* Send button: circular, doesn't steal textarea width */
+  .assistant-input-send {
+    flex-shrink: 0;
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+  }
+
+  /* Voice + attach buttons: consistent touch targets */
+  .voice-mode-btn,
+  .assistant-input-attach {
+    flex-shrink: 0;
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
   }
 
   /* Suggestions: wrap properly */

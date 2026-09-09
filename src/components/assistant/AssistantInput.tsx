@@ -19,6 +19,8 @@ export interface AssistantInputProps {
   placeholder?: string;
   conversationId?: string | null;
   canUpload?: boolean;
+  canUseVoice?: boolean;
+  onVoiceOpen?: () => void;
 }
 
 export function AssistantInput({
@@ -29,6 +31,8 @@ export function AssistantInput({
   placeholder = 'Escribe tu mensaje…',
   conversationId,
   canUpload = false,
+  canUseVoice = false,
+  onVoiceOpen,
 }: AssistantInputProps) {
   const [value, setValue] = useState('');
   const [attachments, setAttachments] = useState<AttachmentDraft[]>([]);
@@ -168,35 +172,6 @@ export function AssistantInput({
       )}
 
       <div className="assistant-input">
-        {/* Attach button */}
-        {canUpload && (
-          <>
-            <input
-              ref={fileInputRef}
-              type="file"
-              multiple
-              accept="image/png,image/jpeg,application/pdf,text/plain,text/csv"
-              onChange={handleFileSelect}
-              style={{ display: 'none' }}
-              aria-label="Adjuntar archivos"
-            />
-            <button
-              type="button"
-              className="assistant-input-attach"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={disabled || streaming || uploading}
-              aria-label="Adjuntar archivos"
-              title="Adjuntar imagen o PDF"
-            >
-              {uploading ? (
-                <span className="spinner" aria-hidden="true" />
-              ) : (
-                <Paperclip size={18} />
-              )}
-            </button>
-          </>
-        )}
-
         <textarea
           ref={textareaRef}
           className="assistant-input-textarea"
@@ -208,15 +183,62 @@ export function AssistantInput({
           rows={1}
           aria-label="Mensaje al asistente"
         />
-        <button
-          type="button"
-          className="assistant-input-send"
-          onClick={handleSend}
-          disabled={!canSend}
-          aria-label="Enviar mensaje"
-        >
-          {streaming ? <span className="spinner" aria-hidden="true" /> : <Send size={18} />}
-        </button>
+        <div className="assistant-input-actions">
+          <div className="assistant-input-actions-left">
+            {canUseVoice && (
+              <button
+                type="button"
+                className="voice-mode-btn"
+                onClick={onVoiceOpen}
+                disabled={disabled || streaming}
+                aria-label="Asistente de voz"
+                title="Asistente de voz conversacional"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+                  <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                  <line x1="12" y1="19" x2="12" y2="22" />
+                </svg>
+              </button>
+            )}
+            {canUpload && (
+              <>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  multiple
+                  accept="image/png,image/jpeg,application/pdf,text/plain,text/csv"
+                  onChange={handleFileSelect}
+                  style={{ display: 'none' }}
+                  aria-label="Adjuntar archivos"
+                />
+                <button
+                  type="button"
+                  className="assistant-input-attach"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={disabled || streaming || uploading}
+                  aria-label="Adjuntar archivos"
+                  title="Adjuntar imagen o PDF"
+                >
+                  {uploading ? (
+                    <span className="spinner" aria-hidden="true" />
+                  ) : (
+                    <Paperclip size={18} />
+                  )}
+                </button>
+              </>
+            )}
+          </div>
+          <button
+            type="button"
+            className="assistant-input-send"
+            onClick={handleSend}
+            disabled={!canSend}
+            aria-label="Enviar mensaje"
+          >
+            {streaming ? <span className="spinner" aria-hidden="true" /> : <Send size={18} />}
+          </button>
+        </div>
         {maxLength > 0 && value.length > maxLength * 0.8 && (
           <span className="assistant-input-counter">
             {value.length}/{maxLength}
