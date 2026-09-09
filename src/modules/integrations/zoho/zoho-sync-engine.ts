@@ -544,7 +544,24 @@ function extractSummaries(adapter: ZohoEntityAdapter, rawPage: unknown): EntityS
   if (!Array.isArray(records)) {
     throw new SyncInvalidListError();
   }
-  return records.map((r) => adapter.extractSummary(r));
+  // Tolerate individual record failures — skip bad records instead of
+  // aborting the entire sync. This matches the user's requirement: bring
+  // ALL data, even if some records have missing fields.
+  const summaries: EntitySummary[] = [];
+  for (const record of records) {
+    try {
+      summaries.push(adapter.extractSummary(record));
+    } catch (error) {
+      console.warn(
+        JSON.stringify({
+          event: 'zoho.sync.extract_summary_skipped',
+          entityType: adapter.entityType,
+          error: error instanceof Error ? error.message : 'unknown',
+        })
+      );
+    }
+  }
+  return summaries;
 }
 
 /**

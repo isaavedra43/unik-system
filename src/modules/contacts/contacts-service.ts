@@ -240,7 +240,16 @@ function buildSortOrderBy(sort: ContactSort): Prisma.ContactOrderByWithRelationI
 function buildWhere(query: ContactQueryState, contactType: 'customer' | 'vendor'): Prisma.ContactWhereInput {
   const searchWhere = buildSearchWhere(query.search);
   const filterWhere = buildFilterWhere(query.filters);
-  const typeWhere: Prisma.ContactWhereInput = { contactType };
+  // Case-insensitive match on contactType. Also include contacts where
+  // Zoho returned 'both' (contact is both customer and vendor) or null
+  // (Zoho sometimes omits contact_type — we don't want to lose them).
+  const typeWhere: Prisma.ContactWhereInput = {
+    OR: [
+      { contactType: { equals: contactType, mode: 'insensitive' } },
+      { contactType: { equals: 'both', mode: 'insensitive' } },
+      { contactType: null },
+    ],
+  };
   return {
     AND: [typeWhere, searchWhere, filterWhere].filter((w) => Object.keys(w).length > 0),
   };

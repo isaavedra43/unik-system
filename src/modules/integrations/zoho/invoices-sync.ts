@@ -24,7 +24,9 @@ export const SOURCE = 'zoho';
 
 const invoiceSummarySchema = z.object({
   invoice_id: z.union([z.string().min(1), z.number()]).transform(String),
-  last_modified_time: z.string().min(1),
+  last_modified_time: z.string().min(1).optional(),
+  created_time: z.string().min(1).optional(),
+  date: z.string().min(1).optional(),
 });
 
 const invoiceDetailSchema = z.object({
@@ -54,9 +56,15 @@ export const invoicesAdapter: ZohoEntityAdapter = {
 
   extractSummary(rawRecord: unknown): EntitySummary {
     const parsed = invoiceSummarySchema.parse(rawRecord);
-    const modifiedAt = new Date(parsed.last_modified_time);
-    if (Number.isNaN(modifiedAt.getTime())) {
-      throw new Error(`Unusable last_modified_time: ${parsed.last_modified_time}`);
+    const ts = parsed.last_modified_time ?? parsed.created_time ?? parsed.date ?? null;
+    let modifiedAt: Date;
+    if (ts) {
+      modifiedAt = new Date(ts);
+      if (Number.isNaN(modifiedAt.getTime())) {
+        modifiedAt = new Date(0);
+      }
+    } else {
+      modifiedAt = new Date(0);
     }
     return { id: parsed.invoice_id, modifiedAt };
   },

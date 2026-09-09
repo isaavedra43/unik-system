@@ -325,11 +325,11 @@ function buildBreadcrumbs(pathname: string): { label: string; href?: string }[] 
     ];
   }
   if (pathname === '/app/contacts/customers') {
-    return [{ label: 'Inventario' }, { label: 'Clientes' }];
+    return [{ label: 'Ventas' }, { label: 'Clientes' }];
   }
   if (pathname.startsWith('/app/contacts/customers/')) {
     return [
-      { label: 'Inventario' },
+      { label: 'Ventas' },
       { label: 'Clientes', href: '/app/contacts/customers' },
       { label: 'Detalle' },
     ];
@@ -411,17 +411,17 @@ export default function AppShell({ user, children }: AppShellProps) {
           icon: <ShoppingCart size={18} />,
           visible: user.permissionKeys.includes('sales_orders.view') || user.isSuperAdmin,
         },
-      ],
-    },
-    {
-      title: 'Inventario',
-      items: [
         {
           href: '/app/contacts/customers',
           label: 'Clientes',
           icon: <UsersIcon size={18} />,
           visible: user.permissionKeys.includes('customers.view') || user.isSuperAdmin,
         },
+      ],
+    },
+    {
+      title: 'Inventario',
+      items: [
         {
           href: '/app/contacts/vendors',
           label: 'Proveedores',
