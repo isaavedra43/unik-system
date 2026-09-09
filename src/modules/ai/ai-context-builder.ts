@@ -241,6 +241,41 @@ Si el usuario pide "genera un PDF de las ventas en efectivo de ayer":
 
 SOLO necesitas pasar title y rows. NO pases conversationId (se inyecta solo). NO pases columns (se auto-generan de las claves de rows).
 
+### MODO MULTI-SECCIÓN — Reportes complejos con múltiples tablas
+Si el usuario pide un reporte completo (ej: "genera un PDF del resumen de agosto"), y la tool anterior devolvió múltiples arrays (byPaymentMethod, byStatus, bySalesperson, byLocation), usa el parámetro sections:
+
+1. La tool getSalesOrdersSummary devuelve {totalRevenue, totalOrders, byPaymentMethod: [...], byStatus: [...], bySalesperson: [...], byLocation: [...]}
+2. Llama generatePdfReport con:
+   - title: "Resumen de Ventas de Agosto 2026"
+   - summaryCards: [{label: "Total", value: "$9,693,723.76"}, {label: "Órdenes", value: "681"}]
+   - sections: [
+       {title: "Por Método de Pago", rows: byPaymentMethod},
+       {title: "Por Estado", rows: byStatus},
+       {title: "Por Vendedor", rows: bySalesperson},
+       {title: "Por Sucursal", rows: byLocation}
+     ]
+
+Cada sección se renderiza como una tabla separada con su propio título.
+
+### EDICIÓN ITERATIVA DE PDFs — Como ChatGPT
+Si el usuario ya generó un PDF y pide cambios (ej: "cambia el color a rojo", "agrega una sección de productos", "quita la tabla de sucursales", "cambia el título"):
+
+1. NO llames otra tool de datos. Los datos ya están en el contexto.
+2. Llama generatePdfReport NUEVAMENTE con los cambios solicitados:
+   - Si pide cambiar color → pasa brandColor: "#dc2626"
+   - Si pide agregar sección → agrega una sección a sections
+   - Si pide quitar sección → remueve esa sección de sections
+   - Si pide cambiar título → cambia el title
+   - Si pide cambiar columnas → pasa columns explícitamente
+3. El PDF anterior NO se borra, se genera uno nuevo con los cambios.
+4. El usuario puede pedir cambios cuantas veces quiera hasta quedar satisfecho.
+
+EJEMPLOS de edición iterativa:
+- "cambia el color a rojo" → generatePdfReport(title, rows/sections, brandColor: "#dc2626")
+- "agrega los productos más vendidos" → generatePdfReport(title, sections: [...existentes, {title: "Top Productos", rows: topProducts}])
+- "quita la tabla de sucursales" → generatePdfReport(title, sections: sections.filter(s => s.title !== "Por Sucursal"))
+- "cambia el título a Reporte Mensual" → generatePdfReport(title: "Reporte Mensual", rows/sections)
+
 ### Cuándo usar cada artefacto
 - **PDF** (generatePdfReport): reportes formales, para imprimir o enviar.
 - **Excel** (generateExcelReport): cuando el usuario quiere manipular datos.

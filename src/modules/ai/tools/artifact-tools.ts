@@ -4,7 +4,7 @@ import fs from 'fs/promises';
 import { prisma } from '@/lib/prisma';
 import { registerTool } from './registry';
 import { createArtifact } from '../ai-artifacts-service';
-import { generatePdfReport, type PdfTableColumn } from '../generators/pdf-generator';
+import { generatePdfReport, type PdfTableColumn, type PdfSection } from '../generators/pdf-generator';
 import { generateExcelReport, type ExcelColumn } from '../generators/excel-generator';
 import { generateCsvReport } from '../generators/csv-generator';
 import { generateChartSvg } from '../generators/chart-generator';
@@ -172,10 +172,14 @@ function flattenRow(row: Record<string, unknown>): Record<string, unknown> {
 registerTool({
   name: 'generatePdfReport',
   description:
-    'Genera un PDF con los datos que le pases. SOLO necesitas pasar title y rows. ' +
-    'rows es un array de objetos (los datos de la tool anterior). ' +
-    'EJEMPLO: si getCashSales devolvio {orders: [{number: "OV-1", customer: "Juan", total: "100"}]}, ' +
-    'pasa rows = [{number: "OV-1", customer: "Juan", total: "100"}] y title = "Ventas en Efectivo".',
+    'Genera un PDF con los datos que le pases. ' +
+    'MODO SIMPLE: pasa title y rows (un array de objetos). ' +
+    'MODO MULTI-SECCIÓN: pasa title y sections (array de secciones, cada una con title, rows y columns opcionales). ' +
+    'Úsalo para reportes complejos con múltiples tablas (ej: resumen de ventas con desglose por método de pago, estado, vendedor y sucursal). ' +
+    'EJEMPLO SIMPLE: si querySalesOrders devolvió {orders: [{number: "OV-1", customer: "Juan", total: "100"}]}, ' +
+    'pasa rows = [{number: "OV-1", customer: "Juan", total: "100"}] y title = "Ventas en Efectivo". ' +
+    'EJEMPLO MULTI-SECCIÓN: si getSalesOrdersSummary devolvió {byPaymentMethod: [...], byStatus: [...], bySalesperson: [...]}, ' +
+    'pasa sections = [{title: "Por Método de Pago", rows: byPaymentMethod}, {title: "Por Estado", rows: byStatus}, {title: "Por Vendedor", rows: bySalesperson}].',
   category: 'export',
   requiredPermission: 'sales_orders.view',
   enabledByDefault: true,
@@ -184,16 +188,28 @@ registerTool({
     title: z.string().default('Reporte UNIK').describe('Título del reporte (ej: "Ventas en Efectivo de Ayer")'),
     subtitle: z.string().optional().describe('Subtítulo opcional'),
     rows: z.array(z.record(z.unknown())).optional().describe(
-      'Los datos a mostrar. Pasa el array de la tool anterior. ' +
-      'EJ: si getCashSales devolvió orders, pasa ese array. ' +
-      'EJ: si getTopProducts devolvió topProducts, pasa ese array.'
+      'MODO SIMPLE: Los datos a mostrar como una sola tabla. Pasa el array de la tool anterior. ' +
+      'EJ: si querySalesOrders devolvió orders, pasa ese array.'
     ),
     columns: z.array(z.object({
       header: z.string(),
       key: z.string(),
       format: z.enum(['currency', 'number', 'percentage', 'date', 'text']).optional(),
     })).optional().describe(
-      'OPCIONAL. Si no lo pasas, se generan automáticamente de las claves de las rows.'
+      'OPCIONAL (modo simple). Si no lo pasas, se generan automáticamente de las claves de las rows.'
+    ),
+    sections: z.array(z.object({
+      title: z.string().optional().describe('Título de la sección (ej: "Por Método de Pago")'),
+      rows: z.array(z.record(z.unknown())).describe('Datos de esta sección'),
+      columns: z.array(z.object({
+        header: z.string(),
+        key: z.string(),
+        format: z.enum(['currency', 'number', 'percentage', 'date', 'text']).optional(),
+      })).optional().describe('Columnas opcionales. Se auto-generan si no se pasan.'),
+    })).optional().describe(
+      'MODO MULTI-SECCIÓN: Array de secciones para reportes complejos. ' +
+      'Cada sección tiene su propio título y tabla. ' +
+      'Úsalo cuando el usuario pida un reporte completo con múltiples desgloses.'
     ),
     summaryCards: z.array(z.object({
       label: z.string(),
@@ -208,59 +224,93 @@ registerTool({
       subtitle?: string;
       rows?: Record<string, unknown>[];
       columns?: Array<{ header: string; key: string; format?: string }>;
+      sections?: Array<{ title?: string; rows: Record<string, unknown>[]; columns?: Array<{ header: string; key: string; format?: string }> }>;
       summaryCards?: Array<{ label: string; value: string }>;
       brandColor?: string;
     };
 
-    const rows = (args.rows ?? []).map((r) => flattenRow(r));
-    if (rows.length === 0) {
-      return { error: 'No hay datos para generar el PDF. Llama primero una tool de datos (ej: getCashSales, getTopProducts).' };
+    // Build sections from either args.sections or args.rows
+    const hasSections = args.sections && args.sections.length > 0;
+    const hasRows = args.rows && args.rows.length > 0;
+
+    if (!hasSections && !hasRows) {
+      return { error: 'No hay datos para generar el PDF. Llama primero una tool de datos (ej: querySalesOrders, getTopProducts).' };
     }
 
     await ensureArtifactsDir();
     const artifactId = `pdf-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const filePath = getArtifactPath(artifactId, 'pdf');
 
-    const cols = args.columns ?? autoColumns(rows);
-
-    // Assign column widths based on content type (percentages of content width)
-    // A4 landscape content width ≈ 770pt
+    // Assign column widths based on content type
     const widthMap: Record<string, number> = {
-      number: 70,       // ~9%
-      customer: 150,    // ~19%
-      total: 85,        // ~11%
-      balance: 85,      // ~11%
-      status: 80,       // ~10%
-      date: 80,         // ~10%
-      paymentMethod: 110, // ~14%
-      salesperson: 110,   // ~14%
+      number: 70,
+      customer: 150,
+      total: 85,
+      balance: 85,
+      status: 80,
+      date: 80,
+      paymentMethod: 110,
+      salesperson: 110,
       location: 100,
       quantity: 70,
       count: 60,
       orders: 60,
       name: 150,
       totalProducts: 70,
+      deliveryMethod: 130,
+      key: 150,
+      revenue: 85,
+      amount: 85,
     };
 
-    const pdfColumns: PdfTableColumn[] = cols.map((c) => ({
-      header: c.header,
-      key: c.key,
-      width: widthMap[c.key] ?? 90,
-      align: c.format === 'currency' || c.format === 'number'
-        ? 'right'
-        : c.format === 'date' || c.key === 'status'
-        ? 'center'
-        : 'left',
-      format: (v: unknown) => formatValue(v, c.format),
-    }));
+    function buildPdfColumns(cols: Array<{ header: string; key: string; format?: string }>): PdfTableColumn[] {
+      return cols.map((c) => ({
+        header: c.header,
+        key: c.key,
+        width: widthMap[c.key] ?? 90,
+        align: c.format === 'currency' || c.format === 'number'
+          ? 'right'
+          : c.format === 'date' || c.key === 'status'
+          ? 'center'
+          : 'left',
+        format: (v: unknown) => formatValue(v, c.format),
+      }));
+    }
+
+    let pdfSections: PdfSection[] = [];
+    let totalRowCount = 0;
+
+    if (hasSections) {
+      // Multi-section mode
+      pdfSections = args.sections!.map((sec) => {
+        const flatRows = sec.rows.map((r) => flattenRow(r));
+        totalRowCount += flatRows.length;
+        const cols = sec.columns ?? autoColumns(flatRows);
+        return {
+          title: sec.title,
+          columns: buildPdfColumns(cols),
+          rows: flatRows,
+        };
+      });
+    } else {
+      // Simple mode
+      const flatRows = (args.rows ?? []).map((r) => flattenRow(r));
+      totalRowCount = flatRows.length;
+      const cols = args.columns ?? autoColumns(flatRows);
+      pdfSections = [{
+        columns: buildPdfColumns(cols),
+        rows: flatRows,
+      }];
+    }
 
     const { sizeBytes, pageCount } = await generatePdfReport(filePath, {
       title: args.title,
       subtitle: args.subtitle,
       brandColor: args.brandColor,
       logoText: 'UNIK',
-      columns: pdfColumns,
-      rows,
+      columns: pdfSections[0]?.columns ?? [],
+      rows: pdfSections[0]?.rows ?? [],
+      sections: pdfSections,
       summaryCards: args.summaryCards,
       orientation: 'landscape',
     });
@@ -275,8 +325,8 @@ registerTool({
         mimeType: 'application/pdf',
         sizeBytes,
         pageCount,
-        rowCount: rows.length,
-        columns: cols.map((c) => c.header),
+        rowCount: totalRowCount,
+        sectionCount: pdfSections.length,
         brandColor: args.brandColor,
       },
     });
@@ -288,7 +338,8 @@ registerTool({
       filename: `${args.title.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`,
       sizeBytes,
       pageCount,
-      rowCount: rows.length,
+      rowCount: totalRowCount,
+      sectionCount: pdfSections.length,
       downloadUrl: `/app/assistant/api/artifacts/${artifact.id}/download`,
     };
   },

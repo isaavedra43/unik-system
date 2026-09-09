@@ -209,6 +209,7 @@ export async function* runAssistant(
   let lastToolRows: Record<string, unknown>[] | null = null;
   let lastToolName: string | null = null;
   let lastToolArgs: Record<string, unknown> | null = null;
+  let lastToolResult: Record<string, unknown> | null = null;
 
   // Scan conversation history for the last tool result with data rows
   // This handles "generame un excel con la info que te pedi" (data from a previous message)
@@ -218,31 +219,37 @@ export async function* runAssistant(
       try {
         const parsed = JSON.parse(m.content);
         if (parsed && typeof parsed === 'object' && !parsed.error) {
-          // Find the array of objects in the result
+          lastToolResult = parsed as Record<string, unknown>;
+          // Find ALL arrays of objects in the result
+          const allArrays: Record<string, Record<string, unknown>[]> = {};
           for (const key of Object.keys(parsed)) {
             const val = parsed[key];
             if (Array.isArray(val) && val.length > 0 && typeof val[0] === 'object') {
-              lastToolRows = val as Record<string, unknown>[];
-              // Find the tool name and args from the previous assistant message's toolCalls
-              for (let j = i - 1; j >= 0; j--) {
-                const am = history[j];
-                if (am.role === 'assistant' && am.toolCalls) {
-                  const calls = am.toolCalls as Array<{ name: string; arguments: string }>;
-                  if (calls.length > 0) {
-                    lastToolName = calls[calls.length - 1].name;
-                    try {
-                      lastToolArgs = JSON.parse(calls[calls.length - 1].arguments);
-                    } catch {
-                      lastToolArgs = null;
-                    }
-                  }
-                  break;
-                }
-              }
-              break;
+              allArrays[key] = val as Record<string, unknown>[];
             }
           }
-          if (lastToolRows) break;
+          // Use the first array as the default rows (for simple mode)
+          const firstKey = Object.keys(allArrays)[0];
+          if (firstKey) {
+            lastToolRows = allArrays[firstKey];
+            // Find the tool name and args from the previous assistant message's toolCalls
+            for (let j = i - 1; j >= 0; j--) {
+              const am = history[j];
+              if (am.role === 'assistant' && am.toolCalls) {
+                const calls = am.toolCalls as Array<{ name: string; arguments: string }>;
+                if (calls.length > 0) {
+                  lastToolName = calls[calls.length - 1].name;
+                  try {
+                    lastToolArgs = JSON.parse(calls[calls.length - 1].arguments);
+                  } catch {
+                    lastToolArgs = null;
+                  }
+                }
+                break;
+              }
+            }
+          }
+          break;
         }
       } catch {
         // Not JSON, skip
@@ -374,9 +381,39 @@ export async function* runAssistant(
 
         // Auto-inject rows and title for artifact tools when the IA didn't pass them
         if (ARTIFACT_TOOLS.has(tc.name)) {
-          if (!argsObj.rows && lastToolRows && lastToolRows.length > 0) {
+          if (!argsObj.rows && !argsObj.sections && lastToolRows && lastToolRows.length > 0) {
             console.log(`[ai-orchestrator] Auto-injecting ${lastToolRows.length} rows from ${lastToolName} into ${tc.name}`);
             argsObj.rows = lastToolRows;
+          }
+          // Auto-inject sections for PDF when the tool result has multiple arrays
+          if (tc.name === 'generatePdfReport' && !argsObj.sections && !argsObj.rows && lastToolResult) {
+            const allArrays: Record<string, Record<string, unknown>[]> = {};
+            for (const key of Object.keys(lastToolResult)) {
+              const val = lastToolResult[key];
+              if (Array.isArray(val) && val.length > 0 && typeof val[0] === 'object') {
+                allArrays[key] = val as Record<string, unknown>[];
+              }
+            }
+            if (Object.keys(allArrays).length > 1) {
+              const sectionLabels: Record<string, string> = {
+                byPaymentMethod: 'Por Método de Pago',
+                byStatus: 'Por Estado',
+                bySalesperson: 'Por Vendedor',
+                byLocation: 'Por Sucursal',
+                byDeliveryMethod: 'Por Método de Entrega',
+                byCustomer: 'Por Cliente',
+                byProduct: 'Por Producto',
+                byDate: 'Por Fecha',
+                orders: 'Órdenes',
+                topProducts: 'Productos Más Vendidos',
+                topCustomers: 'Top Clientes',
+              };
+              argsObj.sections = Object.entries(allArrays).map(([key, rows]) => ({
+                title: sectionLabels[key] ?? key,
+                rows,
+              }));
+              console.log(`[ai-orchestrator] Auto-injecting ${Object.keys(allArrays).length} sections from ${lastToolName} into ${tc.name}`);
+            }
           }
           if (!argsObj.title && lastToolName) {
             // Build title based on tool name AND its arguments

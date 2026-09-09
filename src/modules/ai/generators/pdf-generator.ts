@@ -20,6 +20,12 @@ export interface PdfTableColumn {
   format?: (value: unknown) => string;
 }
 
+export interface PdfSection {
+  title?: string;
+  columns: PdfTableColumn[];
+  rows: Record<string, unknown>[];
+}
+
 export interface PdfReportOptions {
   title: string;
   subtitle?: string;
@@ -29,6 +35,7 @@ export interface PdfReportOptions {
   logoText?: string; // text-based logo
   columns: PdfTableColumn[];
   rows: Record<string, unknown>[];
+  sections?: PdfSection[]; // multiple tables in one PDF
   summaryCards?: Array<{ label: string; value: string; color?: string }>;
   metadata?: Record<string, string>;
   fontSize?: number;
@@ -227,25 +234,51 @@ export function generatePdfReport(
       cursorY += cardHeight + 12;
     }
 
-    // ===== TABLE =====
-    if (options.rows.length > 0) {
-      const cols = options.columns;
+    // ===== TABLE(S) =====
+    // Build sections: if options.sections is provided, use those; otherwise use the single table
+    const sections: PdfSection[] = options.sections && options.sections.length > 0
+      ? options.sections
+      : [{ columns: options.columns, rows: options.rows }];
+
+    for (let secIdx = 0; secIdx < sections.length; secIdx++) {
+      const section = sections[secIdx];
+
+      // Section title (if provided and not the first section, or if it's a multi-section PDF)
+      if (section.title && (sections.length > 1 || secIdx > 0)) {
+        // Page break if not enough space for title + header + at least one row
+        if (cursorY + 40 > pageBottom(doc)) {
+          doc.addPage();
+          cursorY = PAGE_MARGIN;
+        }
+        cursorY += 8;
+        doc.fontSize(11)
+          .fillColor('#1e293b')
+          .font('Helvetica-Bold')
+          .text(section.title, PAGE_MARGIN, cursorY, {
+            width: contentWidth(doc),
+          });
+        cursorY += 20;
+      }
+
+      if (section.rows.length === 0) {
+        cursorY += 12;
+        doc.fontSize(8)
+          .fillColor(accent)
+          .font('Helvetica-Oblique')
+          .text('(Sin datos)', PAGE_MARGIN, cursorY, { width: contentWidth(doc) });
+        cursorY += 16;
+        continue;
+      }
+
+      const cols = section.columns;
       const cw = contentWidth(doc);
       const colWidths = computeColumnWidths(cols, cw);
-
-      // Inner text width per column (account for horizontal padding)
       const innerWidths = colWidths.map((w) => w - CELL_PAD_X * 2);
 
-      /**
-       * Draws the table header row at the given Y position.
-       * Returns the Y position after the header.
-       */
       const drawTableHeader = (y: number): number => {
-        // Background bar
         doc.rect(PAGE_MARGIN, y, cw, HEADER_HEIGHT)
           .fillColor(brand)
           .fill();
-        // Header text — save Y so all columns align
         let x = PAGE_MARGIN;
         for (let i = 0; i < cols.length; i++) {
           const col = cols[i];
@@ -262,11 +295,9 @@ export function generatePdfReport(
         return y + HEADER_HEIGHT;
       };
 
-      // Start table immediately after header/summary
       let tableY = cursorY;
       const bottomLimit = pageBottom(doc);
 
-      // If header doesn't fit, new page
       if (tableY + HEADER_HEIGHT > bottomLimit) {
         doc.addPage();
         tableY = PAGE_MARGIN;
@@ -274,11 +305,9 @@ export function generatePdfReport(
 
       tableY = drawTableHeader(tableY);
 
-      // Data rows
-      for (let rowIdx = 0; rowIdx < options.rows.length; rowIdx++) {
-        const row = options.rows[rowIdx];
+      for (let rowIdx = 0; rowIdx < section.rows.length; rowIdx++) {
+        const row = section.rows[rowIdx];
 
-        // Pre-compute formatted values and measure lines for each cell
         const cellData = cols.map((col, i) => {
           const rawValue = row[col.key];
           const value = col.format
@@ -288,21 +317,18 @@ export function generatePdfReport(
           return { value, lines };
         });
 
-        // Row height = max lines * lineHeight + padding
         const maxLines = Math.max(...cellData.map((c) => c.lines), 1);
         const rowHeight = Math.max(
           MIN_ROW_HEIGHT,
           maxLines * LINE_HEIGHT + CELL_PAD_Y * 2
         );
 
-        // Page break BEFORE drawing — never split a row
         if (tableY + rowHeight > bottomLimit) {
           doc.addPage();
           tableY = PAGE_MARGIN;
           tableY = drawTableHeader(tableY);
         }
 
-        // Zebra striping — draw background for full row height
         const isAlt = rowIdx % 2 === 1;
         if (isAlt) {
           doc.rect(PAGE_MARGIN, tableY, cw, rowHeight)
@@ -310,7 +336,6 @@ export function generatePdfReport(
             .fill();
         }
 
-        // Draw all cells at the same rowY
         const rowY = tableY;
         let x = PAGE_MARGIN;
         for (let i = 0; i < cols.length; i++) {
@@ -327,11 +352,10 @@ export function generatePdfReport(
           x += colWidths[i];
         }
 
-        // Advance Y by the actual row height
         tableY += rowHeight;
       }
 
-      cursorY = tableY;
+      cursorY = tableY + 8;
     }
 
     // ===== METADATA FOOTER =====
