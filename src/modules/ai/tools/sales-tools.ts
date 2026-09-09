@@ -33,6 +33,389 @@ function toNumber(value: unknown): number {
 /* Tools                                                              */
 /* ------------------------------------------------------------------ */
 
+/* ------------------------------------------------------------------ */
+/* 0. querySalesOrders — UNIVERSAL sales query tool                   */
+/* Handles ANY combination of filters + grouping + item details       */
+/* ------------------------------------------------------------------ */
+const GROUP_BY_DIMENSIONS = [
+  'none', 'paymentMethod', 'deliveryMethod', 'status', 'salesperson',
+  'location', 'customer', 'date', 'product',
+] as const;
+
+registerTool({
+  name: 'querySalesOrders',
+  description:
+    'TOOL UNIVERSAL de ventas. Úsalo para CUALQUIER consulta de ventas, sola o combinada. ' +
+    'Soporta filtrar por fecha, método de pago, método de entrega, cliente, vendedor, estado, sucursal, y producto. ' +
+    'Puede agrupar por cualquier dimensión (paymentMethod, deliveryMethod, salesperson, location, customer, date, product). ' +
+    'Puede incluir los items (productos) de cada orden. ' +
+    'Este tool REEMPLAZA a getCashSales, getSalesByDeliveryMethod, getSalesByLocation, getSalesByStatus, getSalesBySalesperson, getSalesByPaymentMethod cuando se necesitan combinaciones de filtros. ' +
+    'EJEMPLOS: ' +
+    '"ventas de hoy en efectivo" → querySalesOrders(dateRange="today", paymentMethods=["EFECTIVO"]). ' +
+    '"ventas a pie de obra de hoy" → querySalesOrders(dateRange="today", deliveryMethod="A PIE DE OBRA"). ' +
+    '"ventas de efectivo y transferencia de ayer" → querySalesOrders(dateRange="yesterday", paymentMethods=["EFECTIVO","TRANSFERENCIA"]). ' +
+    '"ventas por método de entrega de hoy" → querySalesOrders(dateRange="today", groupBy="deliveryMethod"). ' +
+    '"ventas por vendedor de este mes" → querySalesOrders(dateRange="this_month", groupBy="salesperson"). ' +
+    '"ventas del producto silla de hoy" → querySalesOrders(dateRange="today", product="silla"). ' +
+    '"ventas de hoy con detalle de productos" → querySalesOrders(dateRange="today", includeItems=true). ' +
+    '"ventas de hoy en efectivo a pie de obra" → querySalesOrders(dateRange="today", paymentMethods=["EFECTIVO"], deliveryMethod="A PIE DE OBRA").',
+  category: 'sales',
+  requiredPermission: 'sales_orders.view',
+  enabledByDefault: true,
+  parameters: z.object({
+    dateRange: dateRangeSchema,
+    dateFrom: z.string().optional().describe('Fecha inicio YYYY-MM-DD. Para fechas específicas.'),
+    dateTo: z.string().optional().describe('Fecha fin YYYY-MM-DD.'),
+    // Payment filters
+    paymentMethods: z.array(z.string()).optional().describe(
+      'Filtrar por métodos de pago EXACTOS (mayúsculas). Ej: ["EFECTIVO"], ["EFECTIVO","TRANSFERENCIA"], ["EFECTIVO EN BODEGA"]. ' +
+      'NUNCA incluyas "EFECTIVO EN BODEGA" si el usuario pide solo "efectivo".'
+    ),
+    // Delivery filter
+    deliveryMethod: z.string().optional().describe(
+      'Filtrar por método de entrega (búsqueda parcial, case-insensitive). Ej: "A PIE DE OBRA", "RECOGE EN BODEGA", "INSTALACIÓN".'
+    ),
+    // Other filters
+    customer: z.string().optional().describe('Filtrar por nombre del cliente (búsqueda parcial).'),
+    salesperson: z.string().optional().describe('Filtrar por vendedor (búsqueda parcial).'),
+    status: z.string().optional().describe('Filtrar por estado (búsqueda parcial). Ej: "Confirmada", "Cerrada".'),
+    location: z.string().optional().describe('Filtrar por sucursal (búsqueda parcial). Ej: "Patio Unik".'),
+    product: z.string().optional().describe(
+      'Filtrar por nombre de producto (búsqueda parcial en los items de la orden). ' +
+      'Ej: "silla", "loseta", "cemento". Solo devuelve órdenes que contienen ese producto.'
+    ),
+    search: z.string().optional().describe('Búsqueda libre en número de orden, cliente, referencia.'),
+    // Grouping
+    groupBy: z.enum(GROUP_BY_DIMENSIONS).default('none').describe(
+      'Agrupar resultados por una dimensión. ' +
+      '"none" = lista de órdenes individuales. ' +
+      '"paymentMethod" = agrupar por método de pago. ' +
+      '"deliveryMethod" = agrupar por método de entrega. ' +
+      '"salesperson" = agrupar por vendedor. ' +
+      '"location" = agrupar por sucursal. ' +
+      '"customer" = agrupar por cliente. ' +
+      '"status" = agrupar por estado. ' +
+      '"date" = agrupar por fecha. ' +
+      '"product" = agrupar por producto (requiere includeItems o product filter).'
+    ),
+    // Output options
+    includeItems: z.boolean().default(false).describe(
+      'true = incluir los items (productos) de cada orden con nombre, cantidad, unidad y total. ' +
+      'Útil cuando el usuario pide "qué productos tiene cada venta" o "detalle de productos".'
+    ),
+    includeShippingAddress: z.boolean().default(false).describe(
+      'true = incluir la dirección de entrega de cada orden. ' +
+      'Útil cuando el usuario pide "dirección de entrega" o "dónde se entregó".'
+    ),
+    // Pagination
+    page: z.number().int().min(1).default(1),
+    pageSize: z.number().int().min(1).max(100).default(50),
+  }),
+  execute: async (_actor, rawArgs) => {
+    const args = rawArgs as {
+      dateRange: string;
+      dateFrom?: string;
+      dateTo?: string;
+      paymentMethods?: string[];
+      deliveryMethod?: string;
+      customer?: string;
+      salesperson?: string;
+      status?: string;
+      location?: string;
+      product?: string;
+      search?: string;
+      groupBy: (typeof GROUP_BY_DIMENSIONS)[number];
+      includeItems: boolean;
+      includeShippingAddress: boolean;
+      page: number;
+      pageSize: number;
+    };
+
+    const dateWhere = buildOrderDateWhereFlexible(args.dateRange, args.dateFrom, args.dateTo);
+
+    // Build the base where clause — only date goes in SQL, everything else in JS
+    const where: Record<string, unknown> = { ...dateWhere };
+
+    // Fetch orders with items if needed
+    const orders = await prisma.salesOrder.findMany({
+      where: where as never,
+      select: {
+        id: true,
+        salesOrderNumber: true,
+        customerName: true,
+        salespersonName: true,
+        status: true,
+        paymentMethod: true,
+        deliveryMethod: true,
+        locationName: true,
+        total: true,
+        balance: true,
+        orderDate: true,
+        referenceNumber: true,
+        shippingAddressLine1: true,
+        shippingAddressLine2: true,
+        shippingCity: true,
+        shippingState: true,
+        shippingPostalCode: true,
+        ...(args.includeItems || args.product || args.groupBy === 'product' ? {
+          items: {
+            select: {
+              name: true,
+              sku: true,
+              quantity: true,
+              unit: true,
+              rate: true,
+              lineTotal: true,
+              description: true,
+            },
+          },
+        } : {}),
+      },
+      orderBy: { orderDate: 'desc' },
+      take: 1000,
+    });
+
+    // Apply ALL filters in JavaScript for reliability
+    let filtered = orders;
+
+    // Payment methods filter (exact match, case-insensitive)
+    if (args.paymentMethods && args.paymentMethods.length > 0) {
+      const methods = args.paymentMethods.map((m) => m.toLowerCase());
+      filtered = filtered.filter((o) => {
+        const pm = o.paymentMethod?.toLowerCase() ?? '';
+        return methods.includes(pm);
+      });
+    }
+
+    // Delivery method filter (partial match, case-insensitive)
+    if (args.deliveryMethod) {
+      const dm = args.deliveryMethod.toLowerCase();
+      filtered = filtered.filter((o) => {
+        const odm = o.deliveryMethod?.toLowerCase() ?? '';
+        return odm.includes(dm);
+      });
+    }
+
+    // Customer filter (partial match)
+    if (args.customer) {
+      const c = args.customer.toLowerCase();
+      filtered = filtered.filter((o) =>
+        (o.customerName?.toLowerCase() ?? '').includes(c)
+      );
+    }
+
+    // Salesperson filter (partial match)
+    if (args.salesperson) {
+      const s = args.salesperson.toLowerCase();
+      filtered = filtered.filter((o) =>
+        (o.salespersonName?.toLowerCase() ?? '').includes(s)
+      );
+    }
+
+    // Status filter (partial match)
+    if (args.status) {
+      const s = args.status.toLowerCase();
+      filtered = filtered.filter((o) =>
+        (o.status?.toLowerCase() ?? '').includes(s)
+      );
+    }
+
+    // Location filter (partial match)
+    if (args.location) {
+      const l = args.location.toLowerCase();
+      filtered = filtered.filter((o) =>
+        (o.locationName?.toLowerCase() ?? '').includes(l)
+      );
+    }
+
+    // Product filter (partial match on items)
+    if (args.product) {
+      const p = args.product.toLowerCase();
+      filtered = filtered.filter((o) => {
+        const items = (o as { items?: Array<{ name?: string }> }).items ?? [];
+        return items.some((item) => (item.name?.toLowerCase() ?? '').includes(p));
+      });
+    }
+
+    // Free text search
+    if (args.search) {
+      const s = args.search.toLowerCase();
+      filtered = filtered.filter((o) =>
+        (o.salesOrderNumber?.toLowerCase() ?? '').includes(s) ||
+        (o.customerName?.toLowerCase() ?? '').includes(s) ||
+        (o.referenceNumber?.toLowerCase() ?? '').includes(s)
+      );
+    }
+
+    // Build the response based on groupBy
+    if (args.groupBy === 'none') {
+      // Return individual orders (paginated)
+      const total = filtered.length;
+      const totalPages = Math.ceil(total / args.pageSize);
+      const paginated = filtered.slice(
+        (args.page - 1) * args.pageSize,
+        args.page * args.pageSize
+      );
+
+      const totalSum = filtered.reduce((s, o) => s + toNumber(o.total), 0);
+      const balanceSum = filtered.reduce((s, o) => s + toNumber(o.balance), 0);
+
+      return {
+        mode: 'list',
+        total,
+        page: args.page,
+        pageSize: args.pageSize,
+        totalPages,
+        totalSum: totalSum.toFixed(2),
+        balanceSum: balanceSum.toFixed(2),
+        dateFilter: {
+          dateRange: args.dateRange,
+          dateFrom: args.dateFrom ?? null,
+          dateTo: args.dateTo ?? null,
+        },
+        filters: {
+          paymentMethods: args.paymentMethods ?? null,
+          deliveryMethod: args.deliveryMethod ?? null,
+          customer: args.customer ?? null,
+          salesperson: args.salesperson ?? null,
+          status: args.status ?? null,
+          location: args.location ?? null,
+          product: args.product ?? null,
+          search: args.search ?? null,
+        },
+        orders: paginated.map((o) => formatOrder(o, args.includeItems, args.includeShippingAddress)),
+      };
+    }
+
+    // Group by dimension
+    const groups = new Map<string, { count: number; total: number; balance: number; orders: typeof filtered }>();
+
+    for (const o of filtered) {
+      let key = 'SIN DATO';
+      if (args.groupBy === 'paymentMethod') key = o.paymentMethod ?? 'SIN MÉTODO DE PAGO';
+      else if (args.groupBy === 'deliveryMethod') key = o.deliveryMethod ?? 'SIN MÉTODO DE ENTREGA';
+      else if (args.groupBy === 'status') key = o.status ?? 'SIN ESTADO';
+      else if (args.groupBy === 'salesperson') key = o.salespersonName ?? 'SIN VENDEDOR';
+      else if (args.groupBy === 'location') key = o.locationName ?? 'SIN SUCURSAL';
+      else if (args.groupBy === 'customer') key = o.customerName ?? 'SIN CLIENTE';
+      else if (args.groupBy === 'date') key = formatDate(o.orderDate) ?? 'SIN FECHA';
+      else if (args.groupBy === 'product') {
+        // Group by product — each order's items expand into multiple groups
+        const items = (o as { items?: Array<{ name?: string; quantity?: unknown; unit?: string; lineTotal?: unknown }> }).items ?? [];
+        if (items.length === 0) {
+          const g = groups.get('SIN PRODUCTOS') ?? { count: 0, total: 0, balance: 0, orders: [] as typeof filtered };
+          g.count++;
+          g.total += toNumber(o.total);
+          g.balance += toNumber(o.balance);
+          g.orders.push(o);
+          groups.set('SIN PRODUCTOS', g);
+        } else {
+          for (const item of items) {
+            const pkey = item.name ?? 'SIN NOMBRE';
+            const g = groups.get(pkey) ?? { count: 0, total: 0, balance: 0, orders: [] as typeof filtered };
+            g.count++;
+            g.total += toNumber(item.lineTotal);
+            g.balance += toNumber(o.balance);
+            g.orders.push(o);
+            groups.set(pkey, g);
+          }
+        }
+        continue;
+      }
+
+      const g = groups.get(key) ?? { count: 0, total: 0, balance: 0, orders: [] as typeof filtered };
+      g.count++;
+      g.total += toNumber(o.total);
+      g.balance += toNumber(o.balance);
+      g.orders.push(o);
+      groups.set(key, g);
+    }
+
+    const groupedResult = [...groups.entries()]
+      .map(([key, g]) => ({
+        key,
+        count: g.count,
+        total: g.total.toFixed(2),
+        balance: g.balance.toFixed(2),
+        ...(args.includeItems ? {
+          orders: g.orders.slice(0, 50).map((o) => formatOrder(o, args.includeItems, args.includeShippingAddress)),
+        } : {}),
+      }))
+      .sort((a, b) => Number(b.total) - Number(a.total));
+
+    return {
+      mode: 'grouped',
+      groupBy: args.groupBy,
+      groupCount: groups.size,
+      totalOrders: filtered.length,
+      totalRevenue: filtered.reduce((s, o) => s + toNumber(o.total), 0).toFixed(2),
+      totalBalance: filtered.reduce((s, o) => s + toNumber(o.balance), 0).toFixed(2),
+      dateFilter: {
+        dateRange: args.dateRange,
+        dateFrom: args.dateFrom ?? null,
+        dateTo: args.dateTo ?? null,
+      },
+      filters: {
+        paymentMethods: args.paymentMethods ?? null,
+        deliveryMethod: args.deliveryMethod ?? null,
+        customer: args.customer ?? null,
+        salesperson: args.salesperson ?? null,
+        status: args.status ?? null,
+        location: args.location ?? null,
+        product: args.product ?? null,
+        search: args.search ?? null,
+      },
+      groups: groupedResult,
+    };
+  },
+});
+
+/** Helper to format an order for the response. */
+function formatOrder(
+  o: Record<string, unknown>,
+  includeItems: boolean,
+  includeShippingAddress: boolean
+): Record<string, unknown> {
+  const result: Record<string, unknown> = {
+    number: o.salesOrderNumber,
+    customer: o.customerName,
+    salesperson: o.salespersonName,
+    status: o.status,
+    paymentMethod: o.paymentMethod,
+    deliveryMethod: o.deliveryMethod,
+    location: o.locationName,
+    total: decimalToString(o.total),
+    balance: decimalToString(o.balance),
+    date: formatDate(o.orderDate as Date | null | undefined),
+  };
+
+  if (includeItems) {
+    const items = (o.items as Array<Record<string, unknown>> | undefined) ?? [];
+    result.items = items.map((item) => ({
+      name: item.name,
+      sku: item.sku,
+      quantity: decimalToString(item.quantity),
+      unit: item.unit,
+      rate: decimalToString(item.rate),
+      lineTotal: decimalToString(item.lineTotal),
+      description: item.description,
+    }));
+  }
+
+  if (includeShippingAddress) {
+    const addrParts = [
+      o.shippingAddressLine1,
+      o.shippingAddressLine2,
+      o.shippingCity,
+      o.shippingState,
+      o.shippingPostalCode,
+    ].filter((p) => p !== null && p !== undefined && String(p).trim() !== '');
+    result.shippingAddress = addrParts.length > 0 ? addrParts.join(', ') : null;
+  }
+
+  return result;
+}
+
 // 1. getSalesOrdersSummary
 registerTool({
   name: 'getSalesOrdersSummary',
