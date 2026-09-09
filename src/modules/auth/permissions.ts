@@ -100,12 +100,20 @@ import { SALES_ORDERS_PERMISSIONS } from '@/modules/sales/permissions';
 import { INTEGRATIONS_PERMISSIONS } from '@/modules/integrations/permissions';
 import { AI_PERMISSIONS } from '@/modules/ai/permissions';
 import { CHAT_PERMISSIONS } from '@/modules/chat/permissions';
+import { CONTACTS_PERMISSIONS } from '@/modules/contacts/permissions';
+import { PRODUCTS_PERMISSIONS } from '@/modules/products/permissions';
+import { PACKAGES_PERMISSIONS } from '@/modules/packages/permissions';
+import { INVOICES_PERMISSIONS } from '@/modules/invoices/permissions';
 
 /** Every known permission. Future modules spread their definitions here. */
 export const PERMISSION_REGISTRY: PermissionDefinition[] = [
   ...USERS_PERMISSIONS,
   ...ROLES_PERMISSIONS,
   ...SALES_ORDERS_PERMISSIONS,
+  ...CONTACTS_PERMISSIONS,
+  ...PRODUCTS_PERMISSIONS,
+  ...PACKAGES_PERMISSIONS,
+  ...INVOICES_PERMISSIONS,
   ...INTEGRATIONS_PERMISSIONS,
   ...AI_PERMISSIONS,
   ...CHAT_PERMISSIONS,

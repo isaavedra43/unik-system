@@ -1,6 +1,8 @@
 /**
  * Next.js instrumentation hook. Runs once per server instance.
- * Kept intentionally minimal: all scheduler logic lives in the Zoho module.
+ * Registers all Zoho entity sync schedulers.
+ * Each scheduler uses the shared organization-wide rate budget and
+ * checks integration enabled status before starting.
  */
 export async function register() {
   if (process.env.NEXT_RUNTIME !== 'nodejs') {
@@ -9,6 +11,18 @@ export async function register() {
 
   const { startSalesOrdersScheduler } =
     await import('@/modules/integrations/zoho/sales-orders-scheduler');
+  const { startContactsScheduler } =
+    await import('@/modules/integrations/zoho/contacts-scheduler');
+  const { productsScheduler } =
+    await import('@/modules/integrations/zoho/products-scheduler');
+  const { packagesScheduler } =
+    await import('@/modules/integrations/zoho/packages-scheduler');
+  const { invoicesScheduler } =
+    await import('@/modules/integrations/zoho/invoices-scheduler');
 
   void startSalesOrdersScheduler();
+  void startContactsScheduler();
+  void productsScheduler.start();
+  void packagesScheduler.start();
+  void invoicesScheduler.start();
 }

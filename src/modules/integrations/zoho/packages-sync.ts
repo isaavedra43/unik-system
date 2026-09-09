@@ -1,6 +1,112 @@
-/**
- * This file was stubbed because the Zoho inventory module schema
- * was removed from prisma/schema.prisma in a previous session.
- * Kept as placeholder for future re-implementation.
- */
-export {};
+import { z } from 'zod';
+import { listPackages, getPackage } from './packages';
+import {
+  type ZohoEntityAdapter,
+  type EntitySummary,
+  type SyncOptions,
+  type SyncResult,
+  type StartSyncResult,
+  type SyncRunStatus,
+  type BaselineResult,
+  runSync,
+  startSync,
+  getLatestSyncRun,
+  getActiveSyncRun,
+  baselineEntity,
+} from './zoho-sync-engine';
+
+export const PACKAGES_ENTITY_TYPE = 'package';
+export const SOURCE = 'zoho';
+
+// ---------------------------------------------------------------------------
+// Zod schemas for extracting summaries from Zoho list/detail payloads
+// ---------------------------------------------------------------------------
+
+const packageSummarySchema = z.object({
+  package_id: z.union([z.string().min(1), z.number()]).transform(String),
+  last_modified_time: z.string().min(1),
+});
+
+const packageDetailSchema = z.object({
+  package: z.object({
+    last_modified_time: z.string().min(1),
+  }),
+});
+
+// ---------------------------------------------------------------------------
+// Adapter
+// ---------------------------------------------------------------------------
+
+export const packagesAdapter: ZohoEntityAdapter = {
+  entityType: PACKAGES_ENTITY_TYPE,
+
+  supportsModifiedTimeSort: true,
+
+  async listPage({ page, perPage, sorted }) {
+    const opts: Parameters<typeof listPackages>[0] = { page, perPage };
+    if (sorted) {
+      opts.sortColumn = 'last_modified_time';
+      opts.sortOrder = 'D';
+    }
+    return listPackages(opts);
+  },
+
+  async getDetail(externalId: string) {
+    return getPackage(externalId);
+  },
+
+  extractSummary(rawRecord: unknown): EntitySummary {
+    const parsed = packageSummarySchema.parse(rawRecord);
+    const modifiedAt = new Date(parsed.last_modified_time);
+    if (Number.isNaN(modifiedAt.getTime())) {
+      throw new Error(`Unusable last_modified_time: ${parsed.last_modified_time}`);
+    }
+    return { id: parsed.package_id, modifiedAt };
+  },
+
+  extractDetailModifiedAt(rawDetail: unknown): Date | null {
+    const parsed = packageDetailSchema.safeParse(rawDetail);
+    if (!parsed.success) return null;
+    const d = new Date(parsed.data.package.last_modified_time);
+    return Number.isNaN(d.getTime()) ? null : d;
+  },
+
+  async normalizePendingSnapshots({ limit }) {
+    const { normalizePendingPackageSnapshots } = await import(
+      '@/modules/packages/packages-normalizer'
+    );
+    await normalizePendingPackageSnapshots({ limit });
+  },
+};
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
+
+export async function syncPackages(options?: SyncOptions): Promise<SyncResult> {
+  return runSync(packagesAdapter, options);
+}
+
+export async function startSyncPackages(options?: SyncOptions): Promise<StartSyncResult> {
+  return startSync(packagesAdapter, options);
+}
+
+export async function getLatestPackagesSyncRun(): Promise<SyncRunStatus | null> {
+  return getLatestSyncRun(PACKAGES_ENTITY_TYPE);
+}
+
+export async function getActivePackagesSyncRun(): Promise<SyncRunStatus | null> {
+  return getActiveSyncRun(PACKAGES_ENTITY_TYPE);
+}
+
+export async function baselinePackages(): Promise<BaselineResult> {
+  return baselineEntity(packagesAdapter);
+}
+
+export {
+  type SyncRunStatus,
+  type BaselineResult,
+  SyncAlreadyRunningError,
+  SyncFailedError,
+  BaselineAlreadyCompletedError,
+} from './zoho-sync-engine';

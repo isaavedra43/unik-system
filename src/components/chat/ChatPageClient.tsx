@@ -100,25 +100,29 @@ export function ChatPageClient({ user }: ChatPageClientProps) {
     setRefreshKey((k) => k + 1);
   };
 
+  const handleBack = () => {
+    setActiveChannelId(null);
+  };
+
   return (
     <div className="chat-page">
-      <div className="chat-page-body">
-        {/* Mobile sidebar toggle */}
-        <button
-          type="button"
-          className="chat-sidebar-toggle"
-          onClick={() => setSidebarOpen(true)}
-          aria-label="Ver conversaciones"
-        >
-          <Menu size={18} />
-          <span>Conversaciones</span>
-          {totalUnread > 0 && (
-            <span className="chat-sidebar-toggle-badge">
-              {totalUnread > 99 ? '99+' : totalUnread}
-            </span>
-          )}
-        </button>
+      {/* Mobile sidebar toggle (outside body so it sits on top) */}
+      <button
+        type="button"
+        className="chat-sidebar-toggle"
+        onClick={() => setSidebarOpen(true)}
+        aria-label="Ver conversaciones"
+      >
+        <Menu size={18} />
+        <span>Conversaciones</span>
+        {totalUnread > 0 && (
+          <span className="chat-sidebar-toggle-badge">
+            {totalUnread > 99 ? '99+' : totalUnread}
+          </span>
+        )}
+      </button>
 
+      <div className="chat-page-body">
         {/* Mobile backdrop */}
         {sidebarOpen && (
           <div
@@ -147,7 +151,12 @@ export function ChatPageClient({ user }: ChatPageClientProps) {
         {/* Main conversation area */}
         <div className="chat-page-main">
           {activeChannelId ? (
-            <ChatConversation channelId={activeChannelId} user={user} onRefresh={handleRefresh} />
+            <ChatConversation
+              channelId={activeChannelId}
+              user={user}
+              onRefresh={handleRefresh}
+              onBack={handleBack}
+            />
           ) : (
             <ChatEmptyState onNewChat={() => setSidebarOpen(true)} />
           )}

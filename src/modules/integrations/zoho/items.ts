@@ -51,3 +51,33 @@ export async function getItem(itemId: string): Promise<unknown> {
 
   return zohoGet(`/items/${itemId}`);
 }
+
+/**
+ * Fetches detailed information for multiple items in a single API call
+ * using the bulk /itemdetails endpoint.
+ *
+ * The batch size is configurable via the `batchSize` parameter.
+ * Zoho accepts a comma-separated list of item_ids in the `item_ids` query param.
+ *
+ * Returns the RAW JSON response exactly as Zoho provides it.
+ */
+export async function listItemDetails(
+  itemIds: string[],
+  batchSize?: number
+): Promise<unknown> {
+  if (itemIds.length === 0) {
+    return { code: 0, message: 'success', itemdetails: [] };
+  }
+
+  // Validate all IDs
+  for (const id of itemIds) {
+    itemIdSchema.parse(id);
+  }
+
+  const ids = batchSize && batchSize > 0 ? itemIds.slice(0, batchSize) : itemIds;
+  const query: Record<string, string> = {
+    item_ids: ids.join(','),
+  };
+
+  return zohoGet('/itemdetails', query);
+}

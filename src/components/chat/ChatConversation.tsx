@@ -12,9 +12,10 @@ export interface ChatConversationProps {
   channelId: string;
   user: CurrentUser;
   onRefresh: () => void;
+  onBack?: () => void;
 }
 
-export function ChatConversation({ channelId, user, onRefresh }: ChatConversationProps) {
+export function ChatConversation({ channelId, user, onRefresh, onBack }: ChatConversationProps) {
   const [channel, setChannel] = useState<ChatChannelDTO | null>(null);
   const [messages, setMessages] = useState<ChatMessageDTO[]>([]);
   const [loading, setLoading] = useState(true);
@@ -361,7 +362,7 @@ export function ChatConversation({ channelId, user, onRefresh }: ChatConversatio
         <button
           type="button"
           className="chat-back-btn"
-          onClick={() => onRefresh()}
+          onClick={() => (onBack ? onBack() : onRefresh())}
           aria-label="Volver"
         >
           <ArrowLeft size={18} />
