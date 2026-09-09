@@ -310,9 +310,29 @@ export function generatePdfReport(
 
         const cellData = cols.map((col, i) => {
           const rawValue = row[col.key];
-          const value = col.format
-            ? col.format(rawValue)
-            : String(rawValue ?? '');
+          let value: string;
+          if (col.format) {
+            value = col.format(rawValue);
+          } else if (rawValue === null || rawValue === undefined) {
+            value = '';
+          } else if (typeof rawValue === 'object') {
+            // Safely stringify objects/arrays to prevent [object Object]
+            if (Array.isArray(rawValue)) {
+              value = rawValue.map((v) =>
+                typeof v === 'object' && v !== null
+                  ? Object.entries(v as Record<string, unknown>)
+                      .map(([k, v2]) => `${k}: ${String(v2 ?? '')}`)
+                      .join(', ')
+                  : String(v)
+              ).join('\n');
+            } else {
+              value = Object.entries(rawValue as Record<string, unknown>)
+                .map(([k, v]) => `${k}: ${String(v ?? '')}`)
+                .join(', ');
+            }
+          } else {
+            value = String(rawValue);
+          }
           const lines = measureLines(doc, value, innerWidths[i], fontSize);
           return { value, lines };
         });

@@ -535,17 +535,20 @@ export async function* runAssistant(
       // Track the last data tool result for auto-injection into artifact tools
       if (result.success && result.result && typeof result.result === 'object' && !ARTIFACT_TOOLS.has(tc.name)) {
         const toolResult = result.result as Record<string, unknown>;
-        // Find the array of objects in the result (common keys: orders, products, rows, items, customers, etc.)
-        let foundRows: Record<string, unknown>[] | null = null;
+        // Preserve the COMPLETE result for multi-section PDF injection
+        lastToolResult = toolResult;
+        // Find ALL arrays of objects in the result (not just the first)
+        const allArrays: Record<string, Record<string, unknown>[]> = {};
         for (const key of Object.keys(toolResult)) {
           const val = toolResult[key];
           if (Array.isArray(val) && val.length > 0 && typeof val[0] === 'object') {
-            foundRows = val as Record<string, unknown>[];
-            break;
+            allArrays[key] = val as Record<string, unknown>[];
           }
         }
-        if (foundRows) {
-          lastToolRows = foundRows;
+        // Use the first array as the default rows (for simple mode)
+        const firstKey = Object.keys(allArrays)[0];
+        if (firstKey) {
+          lastToolRows = allArrays[firstKey];
           lastToolName = tc.name;
           lastToolArgs = (parsedArgs as Record<string, unknown>) ?? null;
         }

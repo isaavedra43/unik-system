@@ -88,6 +88,7 @@ export const DEFAULT_AI_SETTINGS: AiSettings = {
     // Sales — Universal tools (primary)
     'querySalesOrders',
     'universalSearch',
+    'getDatabaseOverview',
     // Sales — Specialized tools (for backward compat / simple queries)
     'getCashSales',
     'getSalesOrdersSummary',
