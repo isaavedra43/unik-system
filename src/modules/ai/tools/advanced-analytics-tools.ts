@@ -60,13 +60,10 @@ registerTool({
     const args = rawArgs as { dateRange: string; dateFrom?: string; dateTo?: string; deliveryMethod?: string; includeOrders: boolean };
     const dateWhere = buildOrderDateWhereFlexible(args.dateRange, args.dateFrom, args.dateTo);
 
-    const where: Record<string, unknown> = { ...dateWhere };
-    if (args.deliveryMethod) {
-      where.deliveryMethod = { contains: args.deliveryMethod, mode: 'insensitive' };
-    }
-
+    // Query ALL orders for the date range — NO deliveryMethod filter in SQL
+    // We filter in JavaScript for reliability (Prisma contains+insensitive can be finicky)
     const orders = await prisma.salesOrder.findMany({
-      where: where as never,
+      where: dateWhere as never,
       select: {
         salesOrderNumber: true,
         customerName: true,
@@ -82,11 +79,20 @@ registerTool({
       take: 500,
     });
 
+    // Filter by deliveryMethod in JavaScript (case-insensitive partial match)
+    const filterMethod = args.deliveryMethod?.trim().toLowerCase();
+    const filteredOrders = filterMethod
+      ? orders.filter((o) => {
+          const dm = o.deliveryMethod?.toLowerCase() ?? '';
+          return dm.includes(filterMethod);
+        })
+      : orders;
+
     // Group by delivery method
-    const groups = new Map<string, { count: number; total: number; balance: number; orders: typeof orders }>();
-    for (const o of orders) {
+    const groups = new Map<string, { count: number; total: number; balance: number; orders: typeof filteredOrders }>();
+    for (const o of filteredOrders) {
       const key = o.deliveryMethod ?? 'SIN MÉTODO';
-      const g = groups.get(key) ?? { count: 0, total: 0, balance: 0, orders: [] as typeof orders };
+      const g = groups.get(key) ?? { count: 0, total: 0, balance: 0, orders: [] as typeof filteredOrders };
       g.count++;
       g.total += toNumber(o.total);
       g.balance += toNumber(o.balance);
@@ -117,9 +123,10 @@ registerTool({
       .sort((a, b) => Number(b.total) - Number(a.total));
 
     return {
-      totalOrders: orders.length,
-      totalRevenue: orders.reduce((s, o) => s + toNumber(o.total), 0).toFixed(2),
+      totalOrders: filteredOrders.length,
+      totalRevenue: filteredOrders.reduce((s, o) => s + toNumber(o.total), 0).toFixed(2),
       methodCount: groups.size,
+      filteredBy: args.deliveryMethod ?? null,
       byDeliveryMethod: byMethod,
     };
   },

@@ -279,9 +279,7 @@ registerTool({
     if (args.paymentMethod) {
       where.paymentMethod = { equals: args.paymentMethod, mode: "insensitive" };
     }
-    if (args.deliveryMethod) {
-      where.deliveryMethod = { contains: args.deliveryMethod, mode: 'insensitive' };
-    }
+    // NOTE: deliveryMethod is filtered in JavaScript (not in SQL) for reliability
     if (args.location) {
       where.locationName = { contains: args.location, mode: 'insensitive' };
     }
@@ -293,33 +291,49 @@ registerTool({
       ];
     }
 
-    const [orders, total, totalSum, balanceSum] = await Promise.all([
-      prisma.salesOrder.findMany({
-        where: where as never,
-        select: {
-          id: true,
-          salesOrderNumber: true,
-          customerName: true,
-          salespersonName: true,
-          status: true,
-          paymentMethod: true,
-          deliveryMethod: true,
-          locationName: true,
-          total: true,
-          balance: true,
-          orderDate: true,
-        },
-        orderBy: { orderDate: 'desc' },
-        skip: (args.page - 1) * args.pageSize,
-        take: args.pageSize,
-      }),
-      prisma.salesOrder.count({ where: where as never }),
-      prisma.salesOrder.aggregate({ where: where as never, _sum: { total: true } }),
-      prisma.salesOrder.aggregate({ where: where as never, _sum: { balance: true } }),
-    ]);
+    // Fetch all matching records (without deliveryMethod filter in SQL)
+    // then filter by deliveryMethod in JavaScript for reliability
+    const allOrders = await prisma.salesOrder.findMany({
+      where: where as never,
+      select: {
+        id: true,
+        salesOrderNumber: true,
+        customerName: true,
+        salespersonName: true,
+        status: true,
+        paymentMethod: true,
+        deliveryMethod: true,
+        locationName: true,
+        total: true,
+        balance: true,
+        orderDate: true,
+      },
+      orderBy: { orderDate: 'desc' },
+      take: 500,
+    });
+
+    // Filter by deliveryMethod in JavaScript (case-insensitive partial match)
+    const filterMethod = args.deliveryMethod?.trim().toLowerCase();
+    const filteredOrders = filterMethod
+      ? allOrders.filter((o) => {
+          const dm = o.deliveryMethod?.toLowerCase() ?? '';
+          return dm.includes(filterMethod);
+        })
+      : allOrders;
+
+    // Paginate the filtered results
+    const total = filteredOrders.length;
+    const paginatedOrders = filteredOrders.slice(
+      (args.page - 1) * args.pageSize,
+      args.page * args.pageSize
+    );
+
+    // Calculate sums from filtered results
+    const totalSum = filteredOrders.reduce((s, o) => s + toNumber(o.total), 0);
+    const balanceSum = filteredOrders.reduce((s, o) => s + toNumber(o.balance), 0);
 
     return {
-      rows: orders.map((o) => ({
+      rows: paginatedOrders.map((o) => ({
         id: o.id,
         number: o.salesOrderNumber,
         customer: o.customerName,
@@ -336,8 +350,8 @@ registerTool({
       page: args.page,
       pageSize: args.pageSize,
       totalPages: Math.ceil(total / args.pageSize),
-      totalSum: decimalToString(totalSum._sum.total),
-      balanceSum: decimalToString(balanceSum._sum.balance),
+      totalSum: totalSum.toFixed(2),
+      balanceSum: balanceSum.toFixed(2),
     };
   },
 });
