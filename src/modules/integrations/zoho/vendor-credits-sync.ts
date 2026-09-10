@@ -23,14 +23,14 @@ export const SOURCE = 'zoho';
 // ---------------------------------------------------------------------------
 
 const vendorCreditSummarySchema = z.object({
-  vendorcredit_id: z.union([z.string().min(1), z.number()]).transform(String),
+  vendor_credit_id: z.union([z.string().min(1), z.number()]).transform(String),
   last_modified_time: z.string().min(1).optional(),
   created_time: z.string().min(1).optional(),
   date: z.string().min(1).optional(),
 });
 
 const vendorCreditDetailSchema = z.object({
-  vendorcredit: z.object({
+  vendor_credit: z.object({
     last_modified_time: z.string().min(1),
   }),
 });
@@ -67,13 +67,13 @@ export const vendorCreditsAdapter: ZohoEntityAdapter = {
     } else {
       modifiedAt = new Date(0);
     }
-    return { id: parsed.vendorcredit_id, modifiedAt };
+    return { id: parsed.vendor_credit_id, modifiedAt };
   },
 
   extractDetailModifiedAt(rawDetail: unknown): Date | null {
     const parsed = vendorCreditDetailSchema.safeParse(rawDetail);
     if (!parsed.success) return null;
-    const d = new Date(parsed.data.vendorcredit.last_modified_time);
+    const d = new Date(parsed.data.vendor_credit.last_modified_time);
     return Number.isNaN(d.getTime()) ? null : d;
   },
 

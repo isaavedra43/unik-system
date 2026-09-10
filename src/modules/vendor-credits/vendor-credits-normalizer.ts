@@ -60,8 +60,8 @@ function log(payload: Record<string, unknown>) {
 
 const vendorCreditPayloadSchema = z
   .object({
-    vendorcredit_id: z.union([z.string(), z.number()]).transform(String),
-    vendorcredit_number: z.string().nullish(),
+    vendor_credit_id: z.union([z.string(), z.number()]).transform(String),
+    vendor_credit_number: z.string().nullish(),
     status: z.string().nullish(),
     date: z.string().nullish(),
     vendor_id: z.string().nullish(),
@@ -97,8 +97,8 @@ function buildVendorCreditData(
   payload: z.infer<typeof vendorCreditPayloadSchema>
 ): Prisma.VendorCreditCreateInput {
   return {
-    zohoVendorCreditId: payload.vendorcredit_id,
-    vendorCreditNumber: payload.vendorcredit_number ?? null,
+    zohoVendorCreditId: payload.vendor_credit_id,
+    vendorCreditNumber: payload.vendor_credit_number ?? null,
     status: payload.status ?? null,
     date: payload.date ? safeDate(payload.date) : null,
     zohoVendorId: payload.vendor_id ?? null,
@@ -122,7 +122,7 @@ function extractVendorCreditPayload(raw: unknown): ExtractPayloadResult {
     return { data: null, error: 'Snapshot payload is not an object' };
   }
   const obj = raw as Record<string, unknown>;
-  if (typeof obj.vendorcredit_id === 'string' || typeof obj.vendorcredit_id === 'number') {
+  if (typeof obj.vendor_credit_id === 'string' || typeof obj.vendor_credit_id === 'number') {
     const parse = vendorCreditPayloadSchema.safeParse(raw);
     if (!parse.success) return { data: null, error: 'Invalid direct vendor credit shape' };
     return { data: parse.data, error: null };
@@ -131,10 +131,10 @@ function extractVendorCreditPayload(raw: unknown): ExtractPayloadResult {
     if (typeof obj.code !== 'number' || obj.code !== 0) {
       return { data: null, error: `Zoho API error code: ${obj.code}` };
     }
-    if (typeof obj.vendorcredit !== 'object' || obj.vendorcredit === null || Array.isArray(obj.vendorcredit)) {
-      return { data: null, error: 'Missing or invalid vendorcredit in Zoho wrapper' };
+    if (typeof obj.vendor_credit !== 'object' || obj.vendor_credit === null || Array.isArray(obj.vendor_credit)) {
+      return { data: null, error: 'Missing or invalid vendor_credit in Zoho wrapper' };
     }
-    const parse = vendorCreditPayloadSchema.safeParse(obj.vendorcredit);
+    const parse = vendorCreditPayloadSchema.safeParse(obj.vendor_credit);
     if (!parse.success) return { data: null, error: 'Invalid wrapped vendor credit shape' };
     return { data: parse.data, error: null };
   }
@@ -187,7 +187,7 @@ export async function normalizeVendorCreditSnapshot(
 
   return prisma.$transaction(async (tx) => {
     const existing = await tx.vendorCredit.findUnique({
-      where: { zohoVendorCreditId: payload.vendorcredit_id },
+      where: { zohoVendorCreditId: payload.vendor_credit_id },
       select: { id: true, sourceRemoteModifiedAt: true },
     });
 
@@ -197,7 +197,7 @@ export async function normalizeVendorCreditSnapshot(
     }
 
     const vendorCredit = await tx.vendorCredit.upsert({
-      where: { zohoVendorCreditId: payload.vendorcredit_id },
+      where: { zohoVendorCreditId: payload.vendor_credit_id },
       create: vendorCreditData,
       update: vendorCreditData,
     });
