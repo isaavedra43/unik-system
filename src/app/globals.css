@@ -456,7 +456,7 @@ button {
   padding: 0 var(--unik-space-8);
   gap: var(--unik-space-4);
   min-width: 0;
-  overflow: hidden;
+  overflow: visible;
   flex-shrink: 0;
   position: sticky;
   top: 0;
