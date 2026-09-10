@@ -18,7 +18,7 @@ import { Users } from 'lucide-react';
 ```
 
 ## Reglas
-
+K
 - NO emojis como iconos de UI.
 - NO mezclar librerías.
 - NO SVG random de diferentes estilos.
