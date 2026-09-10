@@ -25,7 +25,13 @@ export default async function CustomerDetailPage({
   }
 
   const { id } = await params;
-  const contact = await getContactById(id);
+  let contact;
+  try {
+    contact = await getContactById(id);
+  } catch (error) {
+    console.error('Error loading customer contact:', error);
+    notFound();
+  }
   if (!contact) {
     notFound();
   }
@@ -33,12 +39,20 @@ export default async function CustomerDetailPage({
   const isWatched = await isEntityWatched(session!.user.id, CONTACT_ENTITY_TYPE_CUSTOMER, id);
   const canWatch = session!.user.isSuperAdmin || session!.user.permissionKeys.includes('customers.watch');
 
-  const [relatedPackages, relatedInvoices, relatedSalesOrders, relatedPayments] = await Promise.all([
-    getPackagesByContactZohoId(contact!.zohoContactId),
-    getInvoicesByContactZohoId(contact!.zohoContactId),
-    getSalesOrdersByContactZohoId(contact!.zohoContactId),
-    getPaymentsByContactZohoId(contact!.zohoContactId),
-  ]);
+  let relatedPackages: Awaited<ReturnType<typeof getPackagesByContactZohoId>> = [];
+  let relatedInvoices: Awaited<ReturnType<typeof getInvoicesByContactZohoId>> = [];
+  let relatedSalesOrders: Awaited<ReturnType<typeof getSalesOrdersByContactZohoId>> = [];
+  let relatedPayments: Awaited<ReturnType<typeof getPaymentsByContactZohoId>> = [];
+  try {
+    [relatedPackages, relatedInvoices, relatedSalesOrders, relatedPayments] = await Promise.all([
+      getPackagesByContactZohoId(contact!.zohoContactId),
+      getInvoicesByContactZohoId(contact!.zohoContactId),
+      getSalesOrdersByContactZohoId(contact!.zohoContactId),
+      getPaymentsByContactZohoId(contact!.zohoContactId),
+    ]);
+  } catch (error) {
+    console.error('Error loading customer relationships:', error);
+  }
 
   return (
     <ContactDetailPage

@@ -16,6 +16,20 @@ export interface PurchaseOrdersListResult {
   totalPages: number;
 }
 
+function isPrismaTableError(error: unknown): boolean {
+  if (error instanceof Error) {
+    const msg = error.message.toLowerCase();
+    return (
+      msg.includes('does not exist') ||
+      msg.includes('relation') ||
+      msg.includes('p2021') ||
+      msg.includes('the table') ||
+      msg.includes('no such table')
+    );
+  }
+  return false;
+}
+
 export async function getPurchaseOrdersWorkspace(options: {
   page?: number;
   pageSize?: number;
@@ -35,30 +49,46 @@ export async function getPurchaseOrdersWorkspace(options: {
       }
     : {};
 
-  const [rows, total] = await Promise.all([
-    prisma.purchaseOrder.findMany({
-      where,
-      orderBy: { date: 'desc' },
-      skip: (page - 1) * pageSize,
-      take: pageSize,
-    }),
-    prisma.purchaseOrder.count({ where }),
-  ]);
+  try {
+    const [rows, total] = await Promise.all([
+      prisma.purchaseOrder.findMany({
+        where,
+        orderBy: { date: 'desc' },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+      prisma.purchaseOrder.count({ where }),
+    ]);
 
-  return {
-    rows: rows.map(toPurchaseOrderListRow),
-    total,
-    page,
-    pageSize,
-    totalPages: Math.ceil(total / pageSize),
-  };
+    return {
+      rows: rows.map(toPurchaseOrderListRow),
+      total,
+      page,
+      pageSize,
+      totalPages: Math.ceil(total / pageSize),
+    };
+  } catch (error) {
+    if (isPrismaTableError(error)) {
+      console.error('PurchaseOrder table not available — migration may not be applied:', error);
+      return { rows: [], total: 0, page, pageSize, totalPages: 0 };
+    }
+    throw error;
+  }
 }
 
 export async function getPurchaseOrderById(id: string): Promise<PurchaseOrderDetail | null> {
-  const purchaseOrder = await prisma.purchaseOrder.findUnique({
-    where: { id },
-    include: { items: { orderBy: { sortOrder: 'asc' } } },
-  });
-  if (!purchaseOrder) return null;
-  return toPurchaseOrderDetail(purchaseOrder);
+  try {
+    const purchaseOrder = await prisma.purchaseOrder.findUnique({
+      where: { id },
+      include: { items: { orderBy: { sortOrder: 'asc' } } },
+    });
+    if (!purchaseOrder) return null;
+    return toPurchaseOrderDetail(purchaseOrder);
+  } catch (error) {
+    if (isPrismaTableError(error)) {
+      console.error('PurchaseOrder table not available — migration may not be applied:', error);
+      return null;
+    }
+    throw error;
+  }
 }

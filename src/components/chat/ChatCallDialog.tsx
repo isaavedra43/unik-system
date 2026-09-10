@@ -1,7 +1,13 @@
 'use client';
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Phone, PhoneOff, Video, VideoOff, Mic, MicOff, X, User } from 'lucide-react';
+import { Phone, PhoneOff, Video, VideoOff, Mic, MicOff, User, Loader2, AlertCircle } from 'lucide-react';
+import {
+  Dialog, DialogContent, DialogTitle, DialogDescription,
+} from '@/components/shadcn/dialog';
+import { Button } from '@/components/shadcn/button';
+import { Avatar, AvatarFallback } from '@/components/shadcn/avatar';
+import { cn } from '@/lib/utils';
 import type { ChatCallDTO } from '@/modules/chat/chat-events';
 
 export interface ChatCallDialogProps {
@@ -407,85 +413,127 @@ export function ChatCallDialog({
   const callType = role === 'callee' ? callData?.type ?? type : type;
   const remoteName = role === 'callee' ? callData?.callerName : participants[0]?.name;
 
+  const statusColor = {
+    initiating: 'bg-muted-foreground',
+    ringing: 'bg-info animate-pulse',
+    connecting: 'bg-warning animate-pulse',
+    active: 'bg-success',
+    ended: 'bg-muted-foreground',
+    declined: 'bg-destructive',
+    failed: 'bg-destructive',
+  }[callState.status];
+
   return (
-    <div className="chat-call-dialog-overlay">
-      <div className="chat-call-dialog">
-        <div className="chat-call-header">
-          <div className="chat-call-status">
-            <span className={`chat-call-status-dot ${callState.status}`} />
-            <span>{statusText}</span>
+    <Dialog open onOpenChange={(v) => !v && handleHangUp()}>
+      <DialogContent
+        showCloseButton={false}
+        className="sm:max-w-md p-0 overflow-hidden gap-0 bg-background"
+      >
+        <DialogTitle className="sr-only">
+          {callType === 'video' ? 'Videollamada' : 'Llamada de voz'}
+        </DialogTitle>
+        <DialogDescription className="sr-only">
+          Estado: {statusText}
+        </DialogDescription>
+
+        {/* Header with status */}
+        <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+          <div className="flex items-center gap-2">
+            <span className={cn('size-2.5 rounded-full', statusColor)} />
+            <span className="text-sm font-medium text-foreground">{statusText}</span>
           </div>
-          <button
-            type="button"
-            className="chat-call-close"
-            onClick={handleHangUp}
-            aria-label="Cerrar"
-          >
-            <X size={20} />
-          </button>
+          {callState.status === 'failed' && callState.error && (
+            <div className="flex items-center gap-1 text-xs text-destructive">
+              <AlertCircle size={14} /> {callState.error}
+            </div>
+          )}
         </div>
 
-        <div className="chat-call-body">
+        {/* Body */}
+        <div className="relative flex-1 min-h-[280px] bg-black/5 dark:bg-black/30">
           {callType === 'video' ? (
-            <div className="chat-call-video-grid">
-              <div className="chat-call-video-local">
-                <video ref={localVideoRef} autoPlay muted playsInline />
+            <div className="grid grid-cols-2 gap-1 p-2 h-full">
+              <div className="relative rounded-lg overflow-hidden bg-black aspect-video">
+                <video ref={localVideoRef} autoPlay muted playsInline className="w-full h-full object-cover" />
                 {!isActive && (
-                  <div className="chat-call-video-placeholder">
-                    <User size={48} />
+                  <div className="absolute inset-0 flex items-center justify-center bg-black/50">
+                    <User size={32} className="text-white/70" />
                   </div>
                 )}
+                <span className="absolute bottom-1 left-1 text-[10px] text-white bg-black/50 px-1.5 py-0.5 rounded">
+                  Tú
+                </span>
               </div>
-              <div className="chat-call-video-remote">
-                <video ref={remoteVideoRef} autoPlay playsInline />
+              <div className="relative rounded-lg overflow-hidden bg-black aspect-video">
+                <video ref={remoteVideoRef} autoPlay playsInline className="w-full h-full object-cover" />
                 {!isActive && (
-                  <div className="chat-call-video-placeholder">
-                    <User size={48} />
-                    <span>Esperando respuesta...</span>
+                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/50">
+                    {callState.status === 'ringing' || callState.status === 'connecting' ? (
+                      <Loader2 size={32} className="text-white/70 animate-spin" />
+                    ) : (
+                      <User size={32} className="text-white/70" />
+                    )}
+                    <span className="text-xs text-white/70">Esperando respuesta...</span>
                   </div>
                 )}
+                <span className="absolute bottom-1 left-1 text-[10px] text-white bg-black/50 px-1.5 py-0.5 rounded">
+                  {remoteName ?? 'Usuario'}
+                </span>
               </div>
             </div>
           ) : (
-            <div className="chat-call-audio-view">
-              <div className="chat-call-audio-avatar">
-                <Phone size={56} />
+            <div className="flex flex-col items-center justify-center gap-3 py-8 h-full">
+              <Avatar className="size-20">
+                <AvatarFallback className="text-2xl font-semibold bg-primary text-primary-foreground">
+                  {remoteName ? remoteName.slice(0, 2).toUpperCase() : <Phone size={32} />}
+                </AvatarFallback>
+              </Avatar>
+              <div className="text-lg font-semibold text-foreground">{remoteName ?? 'Usuario'}</div>
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                {(callState.status === 'ringing' || callState.status === 'connecting') && (
+                  <Loader2 size={14} className="animate-spin" />
+                )}
+                {statusText}
               </div>
-              <div className="chat-call-audio-name">{remoteName ?? 'Usuario'}</div>
-              <div className="chat-call-audio-status">{statusText}</div>
             </div>
           )}
         </div>
 
-        <div className="chat-call-controls">
-          <button
-            type="button"
-            className={`chat-call-control-btn ${muted ? 'active' : ''}`}
+        {/* Controls */}
+        <div className="flex items-center justify-center gap-3 p-4 border-t border-border">
+          <Button
+            variant={muted ? 'secondary' : 'outline'}
+            size="icon"
+            className="size-12 rounded-full"
             onClick={toggleMute}
             aria-label={muted ? 'Activar micrófono' : 'Silenciar micrófono'}
+            aria-pressed={muted}
           >
             {muted ? <MicOff size={22} /> : <Mic size={22} />}
-          </button>
+          </Button>
           {callType === 'video' && (
-            <button
-              type="button"
-              className={`chat-call-control-btn ${videoOff ? 'active' : ''}`}
+            <Button
+              variant={videoOff ? 'secondary' : 'outline'}
+              size="icon"
+              className="size-12 rounded-full"
               onClick={toggleVideo}
               aria-label={videoOff ? 'Activar cámara' : 'Apagar cámara'}
+              aria-pressed={videoOff}
             >
               {videoOff ? <VideoOff size={22} /> : <Video size={22} />}
-            </button>
+            </Button>
           )}
-          <button
-            type="button"
-            className="chat-call-control-btn hangup"
+          <Button
+            variant="destructive"
+            size="icon"
+            className="size-12 rounded-full"
             onClick={handleHangUp}
             aria-label="Colgar"
           >
             <PhoneOff size={22} />
-          </button>
+          </Button>
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }

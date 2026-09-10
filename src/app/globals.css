@@ -62,6 +62,13 @@
   --unik-topbar-height: 60px;
   --unik-content-max: 1440px;
 
+  /* Chat layout tokens */
+  --unik-chat-sidebar-width: 320px;
+  --unik-chat-thread-width: 400px;
+  --unik-chat-bubble-max: 480px;
+  --unik-chat-timeline-max: 960px;
+  --unik-chat-compact-density: 0.875rem;
+
   /* Typography */
   --unik-font-sans:
     -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans',
@@ -123,6 +130,42 @@
   --unik-shadow-md: 0 4px 12px rgba(0, 0, 0, 0.65);
   --unik-shadow-lg: 0 12px 40px rgba(0, 0, 0, 0.75);
   --unik-shadow-focus: 0 0 0 3px rgba(255, 255, 255, 0.18);
+}
+
+/* =====================================================
+   Tailwind v4 theme — maps shadcn tokens to UNIK tokens
+   so shadcn primitives render with the UNIK design system.
+   ===================================================== */
+@theme inline {
+  --color-background: var(--unik-bg);
+  --color-foreground: var(--unik-text);
+  --color-card: var(--unik-surface);
+  --color-card-foreground: var(--unik-text);
+  --color-popover: var(--unik-surface);
+  --color-popover-foreground: var(--unik-text);
+  --color-primary: var(--unik-brand);
+  --color-primary-foreground: var(--unik-text-inverse);
+  --color-secondary: var(--unik-surface-hover);
+  --color-secondary-foreground: var(--unik-text);
+  --color-muted: var(--unik-surface-hover);
+  --color-muted-foreground: var(--unik-text-muted);
+  --color-accent: var(--unik-surface-hover);
+  --color-accent-foreground: var(--unik-text);
+  --color-destructive: var(--unik-danger);
+  --color-destructive-foreground: var(--unik-text-inverse);
+  --color-border: var(--unik-border);
+  --color-input: var(--unik-border);
+  --color-ring: var(--unik-brand);
+  --color-success: var(--unik-success);
+  --color-success-foreground: var(--unik-text-inverse);
+  --color-warning: var(--unik-warning);
+  --color-warning-foreground: var(--unik-text-inverse);
+  --color-info: var(--unik-info);
+  --color-info-foreground: var(--unik-text-inverse);
+  --radius-sm: var(--unik-radius-sm);
+  --radius-md: var(--unik-radius-md);
+  --radius-lg: var(--unik-radius-lg);
+  --radius-xl: var(--unik-radius-xl);
 }
 
 /* =====================================================
@@ -7663,7 +7706,7 @@ textarea.input {
 }
 
 .chat-msg-wrapper.own .chat-msg-read svg {
-  color: #60a5fa;
+  color: var(--unik-info);
 }
 
 /* Reactions */
@@ -8875,6 +8918,51 @@ textarea.input {
    ===================================================== */
 
 /* =====================================================
+   Chat — Tablet Responsive (max-width: 1024px)
+   ===================================================== */
+@media (max-width: 1024px) {
+  .chat-sidebar {
+    width: 280px;
+  }
+
+  .chat-conversation-header {
+    padding: var(--unik-space-2) var(--unik-space-3);
+    min-height: 56px;
+  }
+
+  .chat-input-wrapper {
+    padding: var(--unik-space-2) var(--unik-space-3);
+  }
+
+  .chat-msg-wrapper {
+    max-width: 70%;
+  }
+
+  .chat-att-image {
+    max-width: 200px;
+    width: 180px;
+    height: 180px;
+  }
+
+  .chat-att-video {
+    max-width: 280px;
+  }
+
+  .chat-att-doc {
+    max-width: 240px;
+  }
+
+  .chat-emoji-picker-popup {
+    width: 260px;
+  }
+
+  .chat-thread-panel {
+    width: 100%;
+    max-width: 380px;
+  }
+}
+
+/* =====================================================
    Chat — Mobile Responsive (< 768px)
    ===================================================== */
 @media (max-width: 768px) {
@@ -9175,7 +9263,57 @@ textarea.input {
 }
 
 .dark .chat-sidebar-presence.online {
-  background: #22c55e;
+  background: var(--unik-success);
+}
+
+.dark .chat-sidebar-presence.away {
+  background: var(--unik-warning);
+}
+
+.dark .chat-msg-bubble.other {
+  background: var(--unik-surface-hover);
+}
+
+.dark .chat-sidebar-item.active {
+  background: var(--unik-brand-subtle);
+}
+
+.dark .chat-input-textarea {
+  background: var(--unik-surface);
+  border-color: var(--unik-border);
+}
+
+.dark .chat-input-textarea:focus {
+  border-color: var(--unik-brand);
+}
+
+.dark .chat-msg-reaction {
+  background: var(--unik-surface);
+  border-color: var(--unik-border);
+}
+
+.dark .chat-msg-reaction.active {
+  background: var(--unik-brand-subtle);
+  border-color: var(--unik-brand);
+}
+
+.dark .chat-date-separator span {
+  background: var(--unik-surface);
+  color: var(--unik-text-muted);
+  border-color: var(--unik-border);
+}
+
+.dark .chat-att-doc,
+.dark .chat-att-audio {
+  background: var(--unik-surface-hover);
+}
+
+.dark .chat-poll-option {
+  background: var(--unik-surface-hover);
+}
+
+.dark .chat-event-message {
+  background: var(--unik-surface-hover);
 }
 
 /* =====================================================

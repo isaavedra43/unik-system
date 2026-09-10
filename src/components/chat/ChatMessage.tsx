@@ -18,6 +18,18 @@ import {
   MessageSquareText,
 } from 'lucide-react';
 import type { ChatMessageDTO } from '@/modules/chat/chat-events';
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
+} from '@/components/shadcn/dialog';
+import { Button } from '@/components/shadcn/button';
+import { Avatar, AvatarFallback } from '@/components/shadcn/avatar';
+import { ScrollArea } from '@/components/shadcn/scroll-area';
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator,
+} from '@/components/shadcn/dropdown-menu';
+import { ChatEmojiPicker } from './ChatEmojiPicker';
+import { Users } from 'lucide-react';
+import { cn } from '@/lib/utils';
 import { ChatAttachmentPreview } from './ChatAttachmentPreview';
 import { ChatLocationMap } from './ChatLocationMap';
 import { ChatPollMessage } from './ChatPollMessage';
@@ -46,28 +58,6 @@ export interface ChatMessageProps {
   channelId: string;
   currentUserId: string;
 }
-
-const QUICK_EMOJIS = ['👍', '❤️', '😂', '😮', '😢', '🎉'];
-const ALL_EMOJIS = [
-  '👍',
-  '❤️',
-  '😂',
-  '😮',
-  '😢',
-  '🎉',
-  '🔥',
-  '👏',
-  '🙏',
-  '💯',
-  '✅',
-  '❌',
-  '👀',
-  '💪',
-  '🤝',
-  '😅',
-  '🤔',
-  '⭐',
-];
 
 function formatTime(iso: string): string {
   return new Date(iso).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' });
@@ -111,15 +101,12 @@ export function ChatMessage({
   currentUserId,
 }: ChatMessageProps) {
   const [showActions, setShowActions] = useState(false);
-  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [showMoreActions, setShowMoreActions] = useState(false);
   const [editing, setEditing] = useState(false);
   const [editContent, setEditContent] = useState(message.content ?? '');
   const [showForwardDialog, setShowForwardDialog] = useState(false);
   const [showReaders, setShowReaders] = useState(false);
   const actionsRef = useRef<HTMLDivElement>(null);
-  const emojiRef = useRef<HTMLDivElement>(null);
-  const moreRef = useRef<HTMLDivElement>(null);
   const editInputRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
@@ -133,9 +120,6 @@ export function ChatMessage({
     const onClick = (e: MouseEvent) => {
       if (actionsRef.current && !actionsRef.current.contains(e.target as Node))
         setShowActions(false);
-      if (emojiRef.current && !emojiRef.current.contains(e.target as Node))
-        setShowEmojiPicker(false);
-      if (moreRef.current && !moreRef.current.contains(e.target as Node)) setShowMoreActions(false);
     };
     document.addEventListener('mousedown', onClick);
     return () => document.removeEventListener('mousedown', onClick);
@@ -147,18 +131,6 @@ export function ChatMessage({
       onEdit(message.id, trimmed);
     }
     setEditing(false);
-  };
-
-  const handleEmojiClick = (emoji: string) => {
-    const hasReacted = message.reactions.some(
-      (r) => r.userId === currentUserId && r.emoji === emoji
-    );
-    if (hasReacted) {
-      onRemoveReaction(message.id, emoji);
-    } else {
-      onReaction(message.id, emoji);
-    }
-    setShowEmojiPicker(false);
   };
 
   // Group reactions by emoji
@@ -335,106 +307,59 @@ export function ChatMessage({
       {/* Action toolbar */}
       {showActions && !isDeleted && !editing && (
         <div className="chat-msg-actions" ref={actionsRef}>
-          <button
-            type="button"
-            onClick={() => setShowEmojiPicker(!showEmojiPicker)}
-            aria-label="Reaccionar"
-          >
-            <Smile size={16} />
-          </button>
-          <button type="button" onClick={onReply} aria-label="Responder">
+          <ChatEmojiPicker onSelect={(emoji) => onReaction(message.id, emoji)} align="end">
+            <button type="button" aria-label="Reaccionar" className="chat-msg-action-btn">
+              <Smile size={16} />
+            </button>
+          </ChatEmojiPicker>
+          <button type="button" onClick={onReply} aria-label="Responder" className="chat-msg-action-btn">
             <Reply size={16} />
           </button>
-          <button type="button" onClick={() => setShowForwardDialog(true)} aria-label="Reenviar">
+          <button type="button" onClick={() => setShowForwardDialog(true)} aria-label="Reenviar" className="chat-msg-action-btn">
             <Forward size={16} />
           </button>
-          <button type="button" onClick={() => onTranslate(message.id)} aria-label="Traducir">
+          <button type="button" onClick={() => onTranslate(message.id)} aria-label="Traducir" className="chat-msg-action-btn">
             <Languages size={16} />
           </button>
-          <div className="chat-msg-actions-more" ref={moreRef}>
-            <button
-              type="button"
-              onClick={() => setShowMoreActions(!showMoreActions)}
-              aria-label="Más"
-            >
-              <MoreHorizontal size={16} />
-            </button>
-            {showMoreActions && (
-              <div className="chat-msg-more-menu">
-                {canEdit && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setEditing(true);
-                      setShowMoreActions(false);
-                    }}
-                  >
-                    <Pencil size={14} /> Editar
-                  </button>
-                )}
-                {canDelete && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onDelete(message.id);
-                      setShowMoreActions(false);
-                    }}
-                    className="danger"
+          <DropdownMenu open={showMoreActions} onOpenChange={setShowMoreActions}>
+            <DropdownMenuTrigger asChild>
+              <button type="button" aria-label="Más" className="chat-msg-action-btn">
+                <MoreHorizontal size={16} />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              {canEdit && (
+                <DropdownMenuItem onClick={() => { setEditing(true); setShowMoreActions(false); }}>
+                  <Pencil size={14} /> Editar
+                </DropdownMenuItem>
+              )}
+              <DropdownMenuItem onClick={() => {
+                if (message.isBookmarked) onUnbookmark(message.id);
+                else onBookmark(message.id);
+                setShowMoreActions(false);
+              }}>
+                <Bookmark size={14} /> {message.isBookmarked ? 'Quitar de favoritos' : 'Guardar en favoritos'}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => {
+                if (message.isPinned) onUnpin(message.id);
+                else onPin(message.id);
+                setShowMoreActions(false);
+              }}>
+                <Pin size={14} /> {message.isPinned ? 'Desfijar' : 'Fijar'}
+              </DropdownMenuItem>
+              {canDelete && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    onClick={() => { onDelete(message.id); setShowMoreActions(false); }}
+                    className="text-destructive"
                   >
                     <Trash2 size={14} /> Eliminar
-                  </button>
-                )}
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (message.isBookmarked) onUnbookmark(message.id);
-                    else onBookmark(message.id);
-                    setShowMoreActions(false);
-                  }}
-                >
-                  <Bookmark size={14} />{' '}
-                  {message.isBookmarked ? 'Quitar de favoritos' : 'Guardar en favoritos'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (message.isPinned) onUnpin(message.id);
-                    else onPin(message.id);
-                    setShowMoreActions(false);
-                  }}
-                >
-                  <Pin size={14} /> {message.isPinned ? 'Desfijar' : 'Fijar'}
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Emoji picker */}
-      {showEmojiPicker && (
-        <div className="chat-emoji-picker" ref={emojiRef}>
-          {QUICK_EMOJIS.map((emoji) => (
-            <button
-              key={emoji}
-              type="button"
-              className="chat-emoji-btn"
-              onClick={() => handleEmojiClick(emoji)}
-            >
-              {emoji}
-            </button>
-          ))}
-          <div className="chat-emoji-divider" />
-          {ALL_EMOJIS.slice(6).map((emoji) => (
-            <button
-              key={emoji}
-              type="button"
-              className="chat-emoji-btn"
-              onClick={() => handleEmojiClick(emoji)}
-            >
-              {emoji}
-            </button>
-          ))}
+                  </DropdownMenuItem>
+                </>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       )}
 
@@ -515,52 +440,60 @@ function ForwardDialog({
   };
 
   return (
-    <div className="chat-dialog-overlay" onClick={onClose}>
-      <div className="chat-dialog" onClick={(e) => e.stopPropagation()}>
-        <div className="chat-dialog-header">
-          <h2>Reenviar a...</h2>
-          <button type="button" onClick={onClose} aria-label="Cerrar">
-            <span style={{ fontSize: '20px' }}>×</span>
-          </button>
-        </div>
-        <div className="chat-dialog-list">
-          {channels.length === 0 ? (
-            <div className="chat-dialog-empty">No hay otros canales</div>
-          ) : (
-            channels.map((c) => (
-              <button
-                key={c.id}
-                type="button"
-                className={`chat-dialog-user ${selected.has(c.id) ? 'selected' : ''}`}
-                onClick={() => toggle(c.id)}
-              >
-                <div className="chat-dialog-user-avatar">
-                  {c.type === 'group' ? '👥' : c.name.slice(0, 2).toUpperCase()}
-                </div>
-                <div className="chat-dialog-user-info">
-                  <div className="chat-dialog-user-name">{c.name}</div>
-                </div>
-                {selected.has(c.id) && <Check size={18} className="chat-dialog-check" />}
-              </button>
-            ))
-          )}
-        </div>
-        <div className="chat-dialog-footer">
-          <button type="button" className="chat-dialog-cancel" onClick={onClose}>
+    <Dialog open onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Reenviar a...</DialogTitle>
+          <DialogDescription>Selecciona una o más conversaciones</DialogDescription>
+        </DialogHeader>
+
+        <ScrollArea className="max-h-[40vh]">
+          <div className="flex flex-col gap-1 pr-3">
+            {channels.length === 0 ? (
+              <div className="py-8 text-center text-sm text-muted-foreground">
+                No hay otros canales
+              </div>
+            ) : (
+              channels.map((c) => {
+                const isSelected = selected.has(c.id);
+                return (
+                  <button
+                    key={c.id}
+                    type="button"
+                    className={cn(
+                      'flex items-center gap-3 rounded-md p-2 text-left transition-colors',
+                      'hover:bg-accent focus:bg-accent focus:outline-none',
+                      isSelected && 'bg-accent'
+                    )}
+                    onClick={() => toggle(c.id)}
+                  >
+                    <Avatar className="size-8">
+                      <AvatarFallback className="text-xs font-semibold">
+                        {c.type === 'group' ? <Users size={14} /> : c.name.slice(0, 2).toUpperCase()}
+                      </AvatarFallback>
+                    </Avatar>
+                    <span className="flex-1 text-sm font-medium text-foreground truncate">
+                      {c.name}
+                    </span>
+                    {isSelected && <Check size={18} className="text-primary shrink-0" />}
+                  </button>
+                );
+              })
+            )}
+          </div>
+        </ScrollArea>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>
             Cancelar
-          </button>
-          <button
-            type="button"
-            className="chat-dialog-create"
-            disabled={loading || selected.size === 0}
-            onClick={handleForward}
-          >
+          </Button>
+          <Button disabled={loading || selected.size === 0} onClick={handleForward}>
             {loading
               ? 'Reenviando...'
               : `Reenviar${selected.size > 0 ? ` (${selected.size})` : ''}`}
-          </button>
-        </div>
-      </div>
-    </div>
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

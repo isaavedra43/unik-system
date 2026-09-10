@@ -3,6 +3,12 @@
 import React, { useState } from 'react';
 import Image from 'next/image';
 import { FileText, Film, Music, Download, X, ImageIcon } from 'lucide-react';
+import {
+  Dialog, DialogContent, DialogTitle, DialogDescription,
+} from '@/components/shadcn/dialog';
+import { Progress } from '@/components/shadcn/progress';
+import { Button } from '@/components/shadcn/button';
+import { cn } from '@/lib/utils';
 import type { ChatAttachmentDTO } from '@/modules/chat/chat-events';
 
 export interface ChatAttachmentPreviewProps {
@@ -17,28 +23,18 @@ function formatSize(bytes: number): string {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
-function isImage(mime: string) {
-  return mime.startsWith('image/');
-}
-function isVideo(mime: string) {
-  return mime.startsWith('video/');
-}
-function isAudio(mime: string) {
-  return mime.startsWith('audio/');
-}
+function isImage(mime: string) { return mime.startsWith('image/'); }
+function isVideo(mime: string) { return mime.startsWith('video/'); }
+function isAudio(mime: string) { return mime.startsWith('audio/'); }
 
-export function ChatAttachmentPreview({
-  attachment,
-  onRemove,
-  compact,
-}: ChatAttachmentPreviewProps) {
+export function ChatAttachmentPreview({ attachment, onRemove, compact }: ChatAttachmentPreviewProps) {
   const [lightbox, setLightbox] = useState(false);
   const url = `/app/chat/api/attachments/${attachment.id}`;
 
   if (isImage(attachment.mimeType)) {
     return (
       <>
-        <div className={`chat-att-image ${compact ? 'compact' : ''}`}>
+        <div className={cn('chat-att-image', compact && 'compact')}>
           <Image
             src={url}
             alt={attachment.fileName}
@@ -59,42 +55,46 @@ export function ChatAttachmentPreview({
             </button>
           )}
         </div>
-        {lightbox && (
-          <div className="chat-lightbox" onClick={() => setLightbox(false)}>
-            <div className="chat-lightbox-img-wrap">
+        <Dialog open={lightbox} onOpenChange={setLightbox}>
+          <DialogContent
+            showCloseButton={false}
+            className="sm:max-w-3xl p-0 overflow-hidden bg-black/95 border-0"
+          >
+            <DialogTitle className="sr-only">{attachment.fileName}</DialogTitle>
+            <DialogDescription className="sr-only">Imagen adjunta</DialogDescription>
+            <div className="relative w-full h-[80vh] flex items-center justify-center">
               <Image
                 src={url}
                 alt={attachment.fileName}
                 fill
                 unoptimized
-                className="chat-lightbox-img"
+                className="object-contain"
               />
             </div>
-            <a
-              href={url}
-              download={attachment.fileName}
-              className="chat-lightbox-download"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <Download size={20} /> Descargar
-            </a>
-            <button
-              type="button"
-              className="chat-lightbox-close"
-              onClick={() => setLightbox(false)}
-              aria-label="Cerrar"
-            >
-              <X size={24} />
-            </button>
-          </div>
-        )}
+            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-2">
+              <Button asChild variant="secondary" size="sm">
+                <a href={url} download={attachment.fileName}>
+                  <Download size={16} /> Descargar
+                </a>
+              </Button>
+              <Button
+                variant="secondary"
+                size="icon"
+                onClick={() => setLightbox(false)}
+                aria-label="Cerrar"
+              >
+                <X size={18} />
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
       </>
     );
   }
 
   if (isVideo(attachment.mimeType)) {
     return (
-      <div className={`chat-att-video ${compact ? 'compact' : ''}`}>
+      <div className={cn('chat-att-video', compact && 'compact')}>
         <video src={url} controls preload="metadata" />
         {onRemove && (
           <button type="button" className="chat-att-remove" onClick={onRemove} aria-label="Quitar">
@@ -107,7 +107,7 @@ export function ChatAttachmentPreview({
 
   if (isAudio(attachment.mimeType)) {
     return (
-      <div className={`chat-att-audio ${compact ? 'compact' : ''}`}>
+      <div className={cn('chat-att-audio', compact && 'compact')}>
         <div className="chat-att-audio-icon">
           <Music size={20} />
         </div>
@@ -121,12 +121,11 @@ export function ChatAttachmentPreview({
     );
   }
 
-  // Document
   return (
     <a
       href={url}
       download={attachment.fileName}
-      className={`chat-att-doc ${compact ? 'compact' : ''}`}
+      className={cn('chat-att-doc', compact && 'compact')}
     >
       <div className="chat-att-doc-icon">
         <FileText size={24} />
@@ -153,7 +152,6 @@ export function ChatAttachmentPreview({
   );
 }
 
-// Pending attachment (before upload completes)
 export function ChatPendingAttachment({
   fileName,
   mimeType,
@@ -181,9 +179,7 @@ export function ChatPendingAttachment({
       <div className="chat-att-doc-info">
         <div className="chat-att-doc-name">{fileName}</div>
         <div className="chat-att-doc-size">{formatSize(sizeBytes)}</div>
-        <div className="chat-att-progress">
-          <div className="chat-att-progress-bar" style={{ width: `${progress}%` }} />
-        </div>
+        <Progress value={progress} className="h-1.5 mt-1" />
       </div>
     </div>
   );

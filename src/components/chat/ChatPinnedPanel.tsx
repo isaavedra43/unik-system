@@ -1,7 +1,16 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { Pin, X, Loader2 } from 'lucide-react';
+import { Pin, Loader2 } from 'lucide-react';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from '@/components/shadcn/dialog';
+import { ScrollArea } from '@/components/shadcn/scroll-area';
+import { cn } from '@/lib/utils';
 
 export interface ChatPinnedPanelProps {
   channelId: string;
@@ -52,38 +61,50 @@ export function ChatPinnedPanel({ channelId, onClose }: ChatPinnedPanelProps) {
   }, [loadPinned]);
 
   return (
-    <div className="chat-dialog-overlay" onClick={onClose}>
-      <div className="chat-dialog chat-pinned-panel" onClick={(e) => e.stopPropagation()}>
-        <div className="chat-pinned-header">
-          <h2>
+    <Dialog open onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
             <Pin size={18} /> Mensajes fijados
-          </h2>
-          <button type="button" onClick={onClose} aria-label="Cerrar">
-            <X size={20} />
-          </button>
-        </div>
+          </DialogTitle>
+          <DialogDescription>Mensajes destacados de esta conversación</DialogDescription>
+        </DialogHeader>
 
-        <div className="chat-pinned-list">
-          {loading && (
-            <div className="chat-panel-loading">
-              <Loader2 size={20} className="spin" /> Cargando...
-            </div>
-          )}
-          {error && <div className="chat-dialog-error">{error}</div>}
-          {!loading && !error && pinned.length === 0 && (
-            <div className="chat-dialog-empty">No hay mensajes fijados</div>
-          )}
-          {pinned.map((msg) => (
-            <div key={msg.messageId} className="chat-pinned-item">
-              <span className="chat-pinned-sender">{msg.senderName}</span>
-              <span className="chat-pinned-preview">
-                {msg.content?.slice(0, 200) ?? '[Archivo]'}
-              </span>
-              <span className="chat-pinned-date">{formatDate(msg.createdAt)}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
+        <ScrollArea className="max-h-[60vh]">
+          <div className="flex flex-col gap-2 pr-3">
+            {loading && (
+              <div className="flex items-center justify-center gap-2 py-8 text-sm text-muted-foreground">
+                <Loader2 size={20} className="animate-spin" /> Cargando...
+              </div>
+            )}
+            {error && (
+              <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">
+                {error}
+              </div>
+            )}
+            {!loading && !error && pinned.length === 0 && (
+              <div className="py-8 text-center text-sm text-muted-foreground">
+                No hay mensajes fijados
+              </div>
+            )}
+            {pinned.map((msg) => (
+              <div
+                key={msg.messageId}
+                className={cn(
+                  'flex flex-col gap-1 rounded-md border border-border p-3',
+                  'transition-colors hover:bg-accent'
+                )}
+              >
+                <span className="text-sm font-semibold text-foreground">{msg.senderName}</span>
+                <span className="text-sm text-muted-foreground line-clamp-3">
+                  {msg.content?.slice(0, 200) ?? '[Archivo]'}
+                </span>
+                <span className="text-xs text-muted-foreground">{formatDate(msg.createdAt)}</span>
+              </div>
+            ))}
+          </div>
+        </ScrollArea>
+      </DialogContent>
+    </Dialog>
   );
 }

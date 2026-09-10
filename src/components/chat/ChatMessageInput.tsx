@@ -7,10 +7,6 @@ import {
   Smile,
   X,
   CornerUpRight,
-  MapPin,
-  BarChart3,
-  Calendar,
-  FileText,
   AlertCircle,
 } from 'lucide-react';
 import type { CurrentUser } from '@/modules/auth/authorization';
@@ -24,6 +20,8 @@ import { ChatPollCreator } from './ChatPollCreator';
 import { ChatEventCreator } from './ChatEventCreator';
 import { ChatSnippetPicker } from './ChatSnippetPicker';
 import { ChatSlashCommands, SLASH_COMMANDS, type ChatSlashCommand } from './ChatSlashCommands';
+import { ChatAttachMenu } from './ChatAttachMenu';
+import { ChatEmojiPicker } from './ChatEmojiPicker';
 
 export interface ChatMessageInputProps {
   onSend: (
@@ -66,27 +64,6 @@ interface PendingUpload {
   error?: string;
 }
 
-const COMMON_EMOJIS = [
-  '😀',
-  '😂',
-  '😍',
-  '👍',
-  '👎',
-  '❤️',
-  '🎉',
-  '🔥',
-  '👏',
-  '🙏',
-  '💪',
-  '🤔',
-  '😅',
-  '😮',
-  '😢',
-  '✅',
-  '❌',
-  '⭐',
-];
-
 export function ChatMessageInput({
   onSend,
   onTyping,
@@ -97,7 +74,6 @@ export function ChatMessageInput({
   threadId,
 }: ChatMessageInputProps) {
   const [text, setText] = useState('');
-  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [pendingUploads, setPendingUploads] = useState<PendingUpload[]>([]);
   const [completedAttachmentIds, setCompletedAttachmentIds] = useState<string[]>([]);
   const [isDragging, setIsDragging] = useState(false);
@@ -105,6 +81,8 @@ export function ChatMessageInput({
   const [showPollCreator, setShowPollCreator] = useState(false);
   const [showEventCreator, setShowEventCreator] = useState(false);
   const [showSnippetPicker, setShowSnippetPicker] = useState(false);
+  const [showVoiceRecorder, setShowVoiceRecorder] = useState(false);
+  const [showVideoRecorder, setShowVideoRecorder] = useState(false);
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const [mentionIndex, setMentionIndex] = useState(0);
   const [isUrgent, setIsUrgent] = useState(false);
@@ -112,7 +90,6 @@ export function ChatMessageInput({
   const [slashIndex, setSlashIndex] = useState(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const emojiRef = useRef<HTMLDivElement>(null);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isTypingRef = useRef(false);
 
@@ -123,17 +100,6 @@ export function ChatMessageInput({
       textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 120)}px`;
     }
   }, [text]);
-
-  // Close emoji picker on outside click
-  useEffect(() => {
-    const onClick = (e: MouseEvent) => {
-      if (emojiRef.current && !emojiRef.current.contains(e.target as Node)) {
-        setShowEmojiPicker(false);
-      }
-    };
-    document.addEventListener('mousedown', onClick);
-    return () => document.removeEventListener('mousedown', onClick);
-  }, []);
 
   const sendTyping = useCallback(
     (typing: boolean, preview?: string) => {
@@ -591,15 +557,20 @@ export function ChatMessageInput({
       )}
 
       <div className="chat-input-row">
-        {/* Attach button */}
-        <button
-          type="button"
-          className="chat-input-btn"
-          onClick={() => fileInputRef.current?.click()}
-          aria-label="Adjuntar archivo"
+        {/* Attach menu */}
+        <ChatAttachMenu
+          onAttachFile={() => fileInputRef.current?.click()}
+          onPickLocation={() => setShowLocationPicker(true)}
+          onPickPoll={() => setShowPollCreator(true)}
+          onPickEvent={() => setShowEventCreator(true)}
+          onPickSnippet={() => setShowSnippetPicker(true)}
+          onRecordVoice={() => setShowVoiceRecorder(true)}
+          onRecordVideo={() => setShowVideoRecorder(true)}
         >
-          <Paperclip size={20} />
-        </button>
+          <button type="button" className="chat-input-btn" aria-label="Adjuntar">
+            <Paperclip size={20} />
+          </button>
+        </ChatAttachMenu>
         <input
           ref={fileInputRef}
           type="file"
@@ -610,61 +581,28 @@ export function ChatMessageInput({
         />
 
         {/* Voice recorder */}
-        <ChatVoiceRecorder onComplete={handleVoiceComplete} channelId={channelId} />
+        {showVoiceRecorder && (
+          <ChatVoiceRecorder onComplete={handleVoiceComplete} channelId={channelId} />
+        )}
 
         {/* Video recorder */}
-        <ChatVideoRecorder onComplete={handleVoiceComplete} channelId={channelId} />
+        {showVideoRecorder && (
+          <ChatVideoRecorder onComplete={handleVoiceComplete} channelId={channelId} />
+        )}
 
-        {/* Urgent toggle */}
-        <button
-          type="button"
-          className={`chat-input-btn ${isUrgent ? 'urgent-active' : ''}`}
-          onClick={() => setIsUrgent((prev) => !prev)}
-          aria-label="Marcar como urgente"
-          title={isUrgent ? 'Urgente activado' : 'Marcar como urgente'}
-        >
-          <AlertCircle size={20} />
-        </button>
-
-        {/* Location button */}
-        <button
-          type="button"
-          className="chat-input-btn"
-          onClick={() => setShowLocationPicker(!showLocationPicker)}
-          aria-label="Enviar ubicación"
-        >
-          <MapPin size={20} />
-        </button>
-
-        {/* Poll button */}
-        <button
-          type="button"
-          className="chat-input-btn"
-          onClick={() => setShowPollCreator(!showPollCreator)}
-          aria-label="Crear encuesta"
-        >
-          <BarChart3 size={20} />
-        </button>
-
-        {/* Event button */}
-        <button
-          type="button"
-          className="chat-input-btn"
-          onClick={() => setShowEventCreator(!showEventCreator)}
-          aria-label="Crear evento"
-        >
-          <Calendar size={20} />
-        </button>
-
-        {/* Snippet button */}
-        <button
-          type="button"
-          className="chat-input-btn"
-          onClick={() => setShowSnippetPicker(!showSnippetPicker)}
-          aria-label="Plantillas"
-        >
-          <FileText size={20} />
-        </button>
+        {/* Urgent toggle — only visible when there's text */}
+        {text.trim() && (
+          <button
+            type="button"
+            className={`chat-input-btn ${isUrgent ? 'urgent-active' : ''}`}
+            onClick={() => setIsUrgent((prev) => !prev)}
+            aria-label="Marcar como urgente"
+            aria-pressed={isUrgent}
+            title={isUrgent ? 'Urgente activado' : 'Marcar como urgente'}
+          >
+            <AlertCircle size={20} />
+          </button>
+        )}
 
         {/* Textarea with mention picker */}
         <div className="chat-input-text-wrapper">
@@ -696,35 +634,18 @@ export function ChatMessageInput({
           )}
         </div>
 
-        {/* Emoji button */}
-        <div className="chat-input-emoji-wrapper" ref={emojiRef}>
-          <button
-            type="button"
-            className="chat-input-btn"
-            onClick={() => setShowEmojiPicker(!showEmojiPicker)}
-            aria-label="Emojis"
-          >
+        {/* Emoji picker */}
+        <ChatEmojiPicker
+          onSelect={(emoji) => {
+            setText((prev) => prev + emoji);
+            textareaRef.current?.focus();
+          }}
+          align="end"
+        >
+          <button type="button" className="chat-input-btn" aria-label="Emojis">
             <Smile size={20} />
           </button>
-          {showEmojiPicker && (
-            <div className="chat-emoji-picker-popup">
-              {COMMON_EMOJIS.map((emoji) => (
-                <button
-                  key={emoji}
-                  type="button"
-                  className="chat-emoji-btn"
-                  onClick={() => {
-                    setText((prev) => prev + emoji);
-                    setShowEmojiPicker(false);
-                    textareaRef.current?.focus();
-                  }}
-                >
-                  {emoji}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
+        </ChatEmojiPicker>
 
         {/* Send button */}
         <button

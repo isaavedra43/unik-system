@@ -2,16 +2,15 @@
 
 import React, { useState, useEffect } from 'react';
 import {
-  X,
-  MessageSquare,
-  Paperclip,
-  Smile,
-  Users,
-  Calendar,
-  TrendingUp,
-  Loader2,
-  BarChart3,
+  MessageSquare, Paperclip, Smile, Users, Calendar as CalendarIcon,
+  TrendingUp, Loader2, BarChart3,
 } from 'lucide-react';
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
+} from '@/components/shadcn/dialog';
+import { Avatar, AvatarFallback } from '@/components/shadcn/avatar';
+import { ScrollArea } from '@/components/shadcn/scroll-area';
+import { cn } from '@/lib/utils';
 
 interface PersonalStats {
   totalMessages: number;
@@ -55,131 +54,122 @@ export function ChatPersonalStats({ onClose }: ChatPersonalStatsProps) {
         if (!cancelled) setLoading(false);
       }
     })();
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, []);
 
   const maxActivity = stats ? Math.max(...stats.activityByDay.map((d) => d.count), 1) : 1;
   const maxHour = stats ? Math.max(...stats.messagesByHour.map((h) => h.count), 1) : 1;
 
+  const summaryCards = stats ? [
+    { icon: MessageSquare, value: stats.totalMessages, label: 'Mensajes enviados' },
+    { icon: Users, value: stats.activeChannels, label: 'Canales activos' },
+    { icon: CalendarIcon, value: stats.activeDays, label: 'Días activos (30d)' },
+    { icon: Paperclip, value: stats.totalAttachments, label: 'Adjuntos enviados' },
+    { icon: Smile, value: stats.totalReactions, label: 'Reacciones dadas' },
+    { icon: TrendingUp, value: stats.messagesToday, label: 'Mensajes hoy' },
+  ] : [];
+
   return (
-    <div className="chat-dialog-overlay" onClick={onClose}>
-      <div className="chat-personal-stats" onClick={(e) => e.stopPropagation()}>
-        <div className="chat-dialog-header">
-          <h2>
-            <BarChart3 size={20} /> Mis estadísticas
-          </h2>
-          <button type="button" onClick={onClose} aria-label="Cerrar">
-            <X size={20} />
-          </button>
-        </div>
+    <Dialog open onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <BarChart3 size={18} /> Mis estadísticas
+          </DialogTitle>
+          <DialogDescription>Tu actividad en el chat</DialogDescription>
+        </DialogHeader>
 
         {loading && (
-          <div className="chat-panel-loading">
-            <Loader2 size={24} className="spin" /> Cargando estadísticas...
+          <div className="flex items-center justify-center gap-2 py-12 text-sm text-muted-foreground">
+            <Loader2 size={24} className="animate-spin" /> Cargando estadísticas...
           </div>
         )}
-        {error && <div className="chat-dialog-error">{error}</div>}
+        {error && (
+          <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">{error}</div>
+        )}
 
         {stats && !loading && (
-          <>
-            {/* Summary cards */}
-            <div className="chat-stats-grid">
-              <div className="chat-stat-card">
-                <MessageSquare size={20} />
-                <div className="chat-stat-value">{stats.totalMessages}</div>
-                <div className="chat-stat-label">Mensajes enviados</div>
-              </div>
-              <div className="chat-stat-card">
-                <Users size={20} />
-                <div className="chat-stat-value">{stats.activeChannels}</div>
-                <div className="chat-stat-label">Canales activos</div>
-              </div>
-              <div className="chat-stat-card">
-                <Calendar size={20} />
-                <div className="chat-stat-value">{stats.activeDays}</div>
-                <div className="chat-stat-label">Días activos (30d)</div>
-              </div>
-              <div className="chat-stat-card">
-                <Paperclip size={20} />
-                <div className="chat-stat-value">{stats.totalAttachments}</div>
-                <div className="chat-stat-label">Adjuntos enviados</div>
-              </div>
-              <div className="chat-stat-card">
-                <Smile size={20} />
-                <div className="chat-stat-value">{stats.totalReactions}</div>
-                <div className="chat-stat-label">Reacciones dadas</div>
-              </div>
-              <div className="chat-stat-card">
-                <TrendingUp size={20} />
-                <div className="chat-stat-value">{stats.messagesToday}</div>
-                <div className="chat-stat-label">Mensajes hoy</div>
-              </div>
-            </div>
-
-            {/* Activity chart */}
-            <div className="chat-stats-section">
-              <h3>Actividad últimos 30 días</h3>
-              <div className="chat-stats-chart">
-                {stats.activityByDay.map((d) => (
+          <ScrollArea className="max-h-[60vh]">
+            <div className="flex flex-col gap-4 pr-3">
+              <div className="grid grid-cols-3 gap-2">
+                {summaryCards.map((card, i) => (
                   <div
-                    key={d.date}
-                    className="chat-stats-bar"
-                    style={{ height: `${(d.count / maxActivity) * 100}%` }}
-                    title={`${d.date}: ${d.count} mensajes`}
+                    key={i}
+                    className="flex flex-col items-center gap-1 rounded-lg border border-border bg-card p-3 text-center"
                   >
-                    <span className="chat-stats-bar-count">{d.count > 0 ? d.count : ''}</span>
+                    <card.icon size={18} className="text-primary" />
+                    <div className="text-lg font-bold text-foreground">{card.value}</div>
+                    <div className="text-[11px] text-muted-foreground">{card.label}</div>
                   </div>
                 ))}
               </div>
-            </div>
 
-            {/* Activity by hour */}
-            <div className="chat-stats-section">
-              <h3>Actividad por hora</h3>
-              <div className="chat-stats-chart hourly">
-                {stats.messagesByHour.map((h) => (
-                  <div
-                    key={h.hour}
-                    className="chat-stats-bar"
-                    style={{ height: `${(h.count / maxHour) * 100}%` }}
-                    title={`${h.hour}:00 - ${h.count} mensajes`}
-                  />
-                ))}
-              </div>
-              <div className="chat-stats-hours-labels">
-                <span>0h</span>
-                <span>6h</span>
-                <span>12h</span>
-                <span>18h</span>
-                <span>23h</span>
-              </div>
-            </div>
-
-            {/* Top contacts */}
-            <div className="chat-stats-section">
-              <h3>Contactos frecuentes</h3>
-              {stats.topContacts.length === 0 ? (
-                <div className="chat-dialog-empty">Sin contactos frecuentes aún</div>
-              ) : (
-                <div className="chat-stats-contacts">
-                  {stats.topContacts.map((c, i) => (
-                    <div key={c.userId} className="chat-stats-contact">
-                      <span className="chat-stats-contact-rank">{i + 1}</span>
-                      <div className="chat-stats-contact-avatar">
-                        {c.name.slice(0, 2).toUpperCase()}
-                      </div>
-                      <span className="chat-stats-contact-name">{c.name}</span>
-                      <span className="chat-stats-contact-count">{c.messageCount}</span>
-                    </div>
+              <div className="flex flex-col gap-2">
+                <h3 className="text-sm font-semibold text-foreground">Actividad últimos 30 días</h3>
+                <div className="flex items-end gap-0.5 h-24">
+                  {stats.activityByDay.map((d) => (
+                    <div
+                      key={d.date}
+                      className="flex-1 rounded-t bg-primary/30 hover:bg-primary/50 transition-colors min-h-[2px]"
+                      style={{ height: `${(d.count / maxActivity) * 100}%` }}
+                      title={`${d.date}: ${d.count} mensajes`}
+                    />
                   ))}
                 </div>
-              )}
+              </div>
+
+              <div className="flex flex-col gap-2">
+                <h3 className="text-sm font-semibold text-foreground">Actividad por hora</h3>
+                <div className="flex items-end gap-0.5 h-20">
+                  {stats.messagesByHour.map((h) => (
+                    <div
+                      key={h.hour}
+                      className="flex-1 rounded-t bg-info/30 hover:bg-info/50 transition-colors min-h-[2px]"
+                      style={{ height: `${(h.count / maxHour) * 100}%` }}
+                      title={`${h.hour}:00 - ${h.count} mensajes`}
+                    />
+                  ))}
+                </div>
+                <div className="flex justify-between text-[10px] text-muted-foreground">
+                  <span>0h</span><span>6h</span><span>12h</span><span>18h</span><span>23h</span>
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-2">
+                <h3 className="text-sm font-semibold text-foreground">Contactos frecuentes</h3>
+                {stats.topContacts.length === 0 ? (
+                  <div className="py-4 text-center text-sm text-muted-foreground">
+                    Sin contactos frecuentes aún
+                  </div>
+                ) : (
+                  <div className="flex flex-col gap-1">
+                    {stats.topContacts.map((c, i) => (
+                      <div
+                        key={c.userId}
+                        className={cn(
+                          'flex items-center gap-3 rounded-md p-2',
+                          'transition-colors hover:bg-accent'
+                        )}
+                      >
+                        <span className="text-sm font-bold text-muted-foreground w-5">{i + 1}</span>
+                        <Avatar className="size-8">
+                          <AvatarFallback className="text-xs font-semibold">
+                            {c.name.slice(0, 2).toUpperCase()}
+                          </AvatarFallback>
+                        </Avatar>
+                        <span className="flex-1 text-sm font-medium text-foreground truncate">
+                          {c.name}
+                        </span>
+                        <span className="text-sm text-muted-foreground">{c.messageCount}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
-          </>
+          </ScrollArea>
         )}
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }

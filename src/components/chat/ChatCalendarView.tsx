@@ -1,7 +1,16 @@
 'use client';
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { X, ChevronLeft, ChevronRight, Calendar as CalendarIcon, Loader2 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Calendar as CalendarIcon, Loader2 } from 'lucide-react';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from '@/components/shadcn/dialog';
+import { Button } from '@/components/shadcn/button';
+import { cn } from '@/lib/utils';
 
 export interface ChatCalendarViewProps {
   onClose: () => void;
@@ -16,39 +25,22 @@ interface CalendarEvent {
 
 const WEEKDAYS = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
 const MONTH_NAMES = [
-  'Enero',
-  'Febrero',
-  'Marzo',
-  'Abril',
-  'Mayo',
-  'Junio',
-  'Julio',
-  'Agosto',
-  'Septiembre',
-  'Octubre',
-  'Noviembre',
-  'Diciembre',
+  'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+  'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre',
 ];
 
 function getMonthGrid(year: number, month: number): Date[] {
   const firstDay = new Date(year, month, 1);
   const lastDay = new Date(year, month + 1, 0);
-
-  // Monday = 0 ... Sunday = 6
   let firstWeekday = firstDay.getDay() - 1;
   if (firstWeekday < 0) firstWeekday = 6;
-
   const days: Date[] = [];
-  // Leading days from previous month
   for (let i = 0; i < firstWeekday; i++) {
-    const d = new Date(year, month, -firstWeekday + i + 1);
-    days.push(d);
+    days.push(new Date(year, month, -firstWeekday + i + 1));
   }
-  // Current month days
   for (let d = 1; d <= lastDay.getDate(); d++) {
     days.push(new Date(year, month, d));
   }
-  // Trailing days to fill the grid (complete to multiple of 7)
   while (days.length % 7 !== 0) {
     const last = days[days.length - 1];
     days.push(new Date(last.getFullYear(), last.getMonth(), last.getDate() + 1));
@@ -57,18 +49,12 @@ function getMonthGrid(year: number, month: number): Date[] {
 }
 
 function isSameDay(a: Date, b: Date): boolean {
-  return (
-    a.getFullYear() === b.getFullYear() &&
-    a.getMonth() === b.getMonth() &&
-    a.getDate() === b.getDate()
-  );
+  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 }
 
 export function ChatCalendarView({ onClose, onSelectEvent }: ChatCalendarViewProps) {
   const today = useMemo(() => new Date(), []);
-  const [viewDate, setViewDate] = useState(
-    () => new Date(today.getFullYear(), today.getMonth(), 1)
-  );
+  const [viewDate, setViewDate] = useState(() => new Date(today.getFullYear(), today.getMonth(), 1));
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -97,7 +83,6 @@ export function ChatCalendarView({ onClose, onSelectEvent }: ChatCalendarViewPro
 
   const days = useMemo(() => getMonthGrid(viewDate.getFullYear(), viewDate.getMonth()), [viewDate]);
 
-  // Map events by yyyy-mm-dd
   const eventsByDay = useMemo(() => {
     const map = new Map<string, CalendarEvent[]>();
     for (const event of events) {
@@ -110,17 +95,9 @@ export function ChatCalendarView({ onClose, onSelectEvent }: ChatCalendarViewPro
     return map;
   }, [events]);
 
-  const prevMonth = useCallback(() => {
-    setViewDate((prev) => new Date(prev.getFullYear(), prev.getMonth() - 1, 1));
-  }, []);
-
-  const nextMonth = useCallback(() => {
-    setViewDate((prev) => new Date(prev.getFullYear(), prev.getMonth() + 1, 1));
-  }, []);
-
-  const goToday = useCallback(() => {
-    setViewDate(new Date(today.getFullYear(), today.getMonth(), 1));
-  }, [today]);
+  const prevMonth = useCallback(() => setViewDate((p) => new Date(p.getFullYear(), p.getMonth() - 1, 1)), []);
+  const nextMonth = useCallback(() => setViewDate((p) => new Date(p.getFullYear(), p.getMonth() + 1, 1)), []);
+  const goToday = useCallback(() => setViewDate(new Date(today.getFullYear(), today.getMonth(), 1)), [today]);
 
   const handleEventClick = useCallback(
     (eventId: string) => {
@@ -130,87 +107,76 @@ export function ChatCalendarView({ onClose, onSelectEvent }: ChatCalendarViewPro
   );
 
   return (
-    <div className="chat-dialog-overlay" onClick={onClose}>
-      <div className="chat-dialog chat-calendar-view" onClick={(e) => e.stopPropagation()}>
-        <div className="chat-calendar-header">
-          <h2>
-            <CalendarIcon size={20} /> Calendario
-          </h2>
-          <button type="button" onClick={onClose} aria-label="Cerrar">
-            <X size={20} />
-          </button>
-        </div>
+    <Dialog open onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <CalendarIcon size={18} /> Calendario
+          </DialogTitle>
+          <DialogDescription>Eventos de tus conversaciones</DialogDescription>
+        </DialogHeader>
 
-        <div className="chat-calendar-nav">
-          <button
-            type="button"
-            className="chat-calendar-nav-btn"
-            onClick={prevMonth}
-            aria-label="Mes anterior"
-          >
-            <ChevronLeft size={18} />
-          </button>
-          <span className="chat-calendar-month-label">
+        <div className="flex items-center justify-between gap-2">
+          <Button variant="outline" size="icon-sm" onClick={prevMonth} aria-label="Mes anterior">
+            <ChevronLeft size={16} />
+          </Button>
+          <span className="text-sm font-semibold text-foreground">
             {MONTH_NAMES[viewDate.getMonth()]} {viewDate.getFullYear()}
           </span>
-          <button
-            type="button"
-            className="chat-calendar-nav-btn"
-            onClick={nextMonth}
-            aria-label="Mes siguiente"
-          >
-            <ChevronRight size={18} />
-          </button>
-          <button type="button" className="chat-calendar-nav-btn" onClick={goToday}>
-            Hoy
-          </button>
+          <Button variant="outline" size="icon-sm" onClick={nextMonth} aria-label="Mes siguiente">
+            <ChevronRight size={16} />
+          </Button>
+          <Button variant="ghost" size="sm" onClick={goToday}>Hoy</Button>
         </div>
 
         {loading && (
-          <div className="chat-panel-loading">
-            <Loader2 size={20} className="spin" /> Cargando eventos...
+          <div className="flex items-center justify-center gap-2 py-8 text-sm text-muted-foreground">
+            <Loader2 size={20} className="animate-spin" /> Cargando eventos...
           </div>
         )}
-        {error && <div className="chat-dialog-error">{error}</div>}
+        {error && (
+          <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">{error}</div>
+        )}
 
         {!loading && !error && (
           <>
-            <div className="chat-calendar-weekdays">
+            <div className="grid grid-cols-7 gap-1 text-center text-xs font-medium text-muted-foreground">
               {WEEKDAYS.map((day) => (
-                <div key={day} className="chat-calendar-weekday">
-                  {day}
-                </div>
+                <div key={day}>{day}</div>
               ))}
             </div>
-            <div className="chat-calendar-grid">
+            <div className="grid grid-cols-7 gap-1">
               {days.map((day, index) => {
                 const isOtherMonth = day.getMonth() !== viewDate.getMonth();
                 const isToday = isSameDay(day, today);
                 const key = `${day.getFullYear()}-${day.getMonth()}-${day.getDate()}`;
                 const dayEvents = eventsByDay.get(key) ?? [];
-
                 return (
                   <div
                     key={index}
-                    className={`chat-calendar-day ${isOtherMonth ? 'chat-calendar-day-other' : ''} ${isToday ? 'chat-calendar-today' : ''}`}
+                    className={cn(
+                      'flex flex-col gap-0.5 rounded-md p-1 min-h-[56px]',
+                      isOtherMonth && 'opacity-40',
+                      isToday && 'bg-primary/10 ring-1 ring-primary'
+                    )}
                   >
-                    <span className="chat-calendar-day-number">{day.getDate()}</span>
-                    <div className="chat-calendar-day-events">
-                      {dayEvents.slice(0, 3).map((event) => (
+                    <span className={cn('text-xs', isToday ? 'font-bold text-primary' : 'text-foreground')}>
+                      {day.getDate()}
+                    </span>
+                    <div className="flex flex-col gap-0.5 overflow-hidden">
+                      {dayEvents.slice(0, 2).map((event) => (
                         <button
                           key={event.id}
                           type="button"
-                          className="chat-calendar-event"
+                          className="truncate rounded bg-primary/15 px-1 text-left text-[10px] text-primary hover:bg-primary/25 transition-colors"
                           onClick={() => handleEventClick(event.id)}
                           title={event.title}
                         >
                           {event.title}
                         </button>
                       ))}
-                      {dayEvents.length > 3 && (
-                        <span className="chat-calendar-event-more">
-                          +{dayEvents.length - 3} más
-                        </span>
+                      {dayEvents.length > 2 && (
+                        <span className="text-[10px] text-muted-foreground">+{dayEvents.length - 2} más</span>
                       )}
                     </div>
                   </div>
@@ -219,7 +185,7 @@ export function ChatCalendarView({ onClose, onSelectEvent }: ChatCalendarViewPro
             </div>
           </>
         )}
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }

@@ -1,7 +1,20 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { X, Send, Loader2, Megaphone, AlertCircle, Check } from 'lucide-react';
+import { Send, Loader2, Megaphone, AlertCircle, Check, Users } from 'lucide-react';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from '@/components/shadcn/dialog';
+import { Textarea } from '@/components/shadcn/textarea';
+import { Button } from '@/components/shadcn/button';
+import { Avatar, AvatarFallback } from '@/components/shadcn/avatar';
+import { ScrollArea } from '@/components/shadcn/scroll-area';
+import { cn } from '@/lib/utils';
 
 interface Channel {
   id: string;
@@ -78,50 +91,64 @@ export function ChatBroadcastDialog({ onClose, onSent }: ChatBroadcastDialogProp
   }, [content, selected, priority, onSent, onClose]);
 
   return (
-    <div className="chat-dialog-overlay" onClick={onClose}>
-      <div className="chat-broadcast-dialog" onClick={(e) => e.stopPropagation()}>
-        <div className="chat-dialog-header">
-          <h2>
-            <Megaphone size={20} /> Difundir a canales
-          </h2>
-          <button type="button" onClick={onClose} aria-label="Cerrar">
-            <X size={20} />
-          </button>
-        </div>
+    <Dialog open onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Megaphone size={18} /> Difundir a canales
+          </DialogTitle>
+          <DialogDescription>Envía un mensaje a múltiples conversaciones (máx. 5)</DialogDescription>
+        </DialogHeader>
 
-        <div className="chat-broadcast-body">
-          <div className="chat-broadcast-section">
-            <label className="chat-broadcast-label">Selecciona canales ({selected.size}/5)</label>
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-col gap-1.5">
+            <label className="text-sm font-medium text-foreground">
+              Selecciona canales ({selected.size}/5)
+            </label>
             {loading ? (
-              <div className="chat-panel-loading">
-                <Loader2 size={20} className="spin" /> Cargando...
+              <div className="flex items-center justify-center gap-2 py-6 text-sm text-muted-foreground">
+                <Loader2 size={20} className="animate-spin" /> Cargando...
               </div>
             ) : (
-              <div className="chat-broadcast-channels">
-                {channels.map((c) => (
-                  <button
-                    key={c.id}
-                    type="button"
-                    className={`chat-broadcast-channel ${selected.has(c.id) ? 'selected' : ''}`}
-                    onClick={() => toggle(c.id)}
-                  >
-                    <div className="chat-dialog-user-avatar">
-                      {c.type === 'group' ? '👥' : c.name.slice(0, 2).toUpperCase()}
-                    </div>
-                    <div className="chat-dialog-user-info">
-                      <div className="chat-dialog-user-name">{c.name}</div>
-                    </div>
-                    {selected.has(c.id) && <Check size={18} className="chat-dialog-check" />}
-                  </button>
-                ))}
-              </div>
+              <ScrollArea className="max-h-[30vh]">
+                <div className="flex flex-col gap-1 pr-3">
+                  {channels.map((c) => {
+                    const isSelected = selected.has(c.id);
+                    return (
+                      <button
+                        key={c.id}
+                        type="button"
+                        className={cn(
+                          'flex items-center gap-3 rounded-md p-2 text-left transition-colors',
+                          'hover:bg-accent focus:bg-accent focus:outline-none',
+                          isSelected && 'bg-accent'
+                        )}
+                        onClick={() => toggle(c.id)}
+                      >
+                        <Avatar className="size-8">
+                          <AvatarFallback className="text-xs font-semibold">
+                            {c.type === 'group' ? (
+                              <Users size={14} />
+                            ) : (
+                              c.name.slice(0, 2).toUpperCase()
+                            )}
+                          </AvatarFallback>
+                        </Avatar>
+                        <span className="flex-1 text-sm font-medium text-foreground truncate">
+                          {c.name}
+                        </span>
+                        {isSelected && <Check size={18} className="text-primary shrink-0" />}
+                      </button>
+                    );
+                  })}
+                </div>
+              </ScrollArea>
             )}
           </div>
 
-          <div className="chat-broadcast-section">
-            <label className="chat-broadcast-label">Mensaje</label>
-            <textarea
-              className="chat-broadcast-textarea"
+          <div className="flex flex-col gap-1.5">
+            <label className="text-sm font-medium text-foreground">Mensaje</label>
+            <Textarea
               placeholder="Escribe el mensaje a difundir..."
               value={content}
               onChange={(e) => setContent(e.target.value)}
@@ -129,54 +156,56 @@ export function ChatBroadcastDialog({ onClose, onSent }: ChatBroadcastDialogProp
               maxLength={10000}
               aria-label="Mensaje a difundir"
             />
-            <div className="chat-broadcast-char-count">{content.length}/10000</div>
+            <span className="text-xs text-muted-foreground text-right">
+              {content.length}/10000
+            </span>
           </div>
 
-          <div className="chat-broadcast-section">
-            <label className="chat-broadcast-label">Prioridad</label>
-            <div className="chat-broadcast-priority">
-              <button
-                type="button"
-                className={`chat-broadcast-priority-btn ${priority === 'normal' ? 'active' : ''}`}
+          <div className="flex flex-col gap-1.5">
+            <label className="text-sm font-medium text-foreground">Prioridad</label>
+            <div className="flex gap-2">
+              <Button
+                variant={priority === 'normal' ? 'default' : 'outline'}
+                size="sm"
                 onClick={() => setPriority('normal')}
               >
                 Normal
-              </button>
-              <button
-                type="button"
-                className={`chat-broadcast-priority-btn ${priority === 'urgent' ? 'active urgent' : ''}`}
+              </Button>
+              <Button
+                variant={priority === 'urgent' ? 'destructive' : 'outline'}
+                size="sm"
                 onClick={() => setPriority('urgent')}
               >
                 <AlertCircle size={14} /> Urgente
-              </button>
+              </Button>
             </div>
           </div>
 
-          {error && <div className="chat-dialog-error">{error}</div>}
+          {error && (
+            <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">{error}</div>
+          )}
         </div>
 
-        <div className="chat-dialog-footer">
-          <button type="button" className="chat-dialog-cancel" onClick={onClose}>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>
             Cancelar
-          </button>
-          <button
-            type="button"
-            className="chat-dialog-create"
+          </Button>
+          <Button
             disabled={sending || selected.size === 0 || !content.trim()}
             onClick={handleSend}
           >
             {sending ? (
               <>
-                <Loader2 size={16} className="spin" /> Difundiendo...
+                <Loader2 size={16} className="animate-spin" /> Difundiendo...
               </>
             ) : (
               <>
                 <Send size={16} /> Difundir{selected.size > 0 ? ` (${selected.size})` : ''}
               </>
             )}
-          </button>
-        </div>
-      </div>
-    </div>
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

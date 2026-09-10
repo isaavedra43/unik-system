@@ -43,9 +43,10 @@ export const packagesAdapter: ZohoEntityAdapter = {
 
   supportsModifiedTimeSort: true,
 
-  /** Packages LIST response already contains all fields needed for normalization.
-   *  No need to call /packages/{id} per record — saves thousands of API calls. */
-  useListAsSnapshot: true,
+  /** Packages LIST response does NOT include package_items or shipping_address.
+   *  We MUST call /packages/{id} per record to get the full detail with items
+   *  and shipping address. This is required for the package detail page. */
+  useListAsSnapshot: false,
 
   async listPage({ page, perPage, sorted }) {
     const opts: Parameters<typeof listPackages>[0] = { page, perPage };

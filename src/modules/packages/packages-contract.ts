@@ -4,8 +4,10 @@ export interface PackageItemListRow {
   id: string;
   name: string | null;
   sku: string | null;
+  description: string | null;
   quantity: string | null;
   unit: string | null;
+  zohoItemId: string | null;
 }
 
 export interface PackageListRow {
@@ -122,7 +124,7 @@ export function toPackageDetail(pkg: {
   normalizedAt: Date;
   createdAt: Date;
   updatedAt: Date;
-  items?: { id: string; name: string | null; sku: string | null; quantity: Prisma.Decimal | null; unit: string | null }[];
+  items?: { id: string; name: string | null; sku: string | null; description: string | null; quantity: Prisma.Decimal | null; unit: string | null; zohoItemId: string | null }[];
 }): PackageDetail {
   return {
     id: pkg.id,
@@ -162,8 +164,10 @@ export function toPackageDetail(pkg: {
       id: item.id,
       name: item.name,
       sku: item.sku,
+      description: item.description,
       quantity: decimalToString(item.quantity),
       unit: item.unit,
+      zohoItemId: item.zohoItemId,
     })),
   };
 }

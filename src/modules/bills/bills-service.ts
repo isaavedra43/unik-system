@@ -16,6 +16,20 @@ export interface BillsListResult {
   totalPages: number;
 }
 
+function isPrismaTableError(error: unknown): boolean {
+  if (error instanceof Error) {
+    const msg = error.message.toLowerCase();
+    return (
+      msg.includes('does not exist') ||
+      msg.includes('relation') ||
+      msg.includes('p2021') ||
+      msg.includes('the table') ||
+      msg.includes('no such table')
+    );
+  }
+  return false;
+}
+
 export async function getBillsWorkspace(options: {
   page?: number;
   pageSize?: number;
@@ -34,27 +48,43 @@ export async function getBillsWorkspace(options: {
       }
     : {};
 
-  const [rows, total] = await Promise.all([
-    prisma.bill.findMany({
-      where,
-      orderBy: { date: 'desc' },
-      skip: (page - 1) * pageSize,
-      take: pageSize,
-    }),
-    prisma.bill.count({ where }),
-  ]);
+  try {
+    const [rows, total] = await Promise.all([
+      prisma.bill.findMany({
+        where,
+        orderBy: { date: 'desc' },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+      prisma.bill.count({ where }),
+    ]);
 
-  return {
-    rows: rows.map(toBillListRow),
-    total,
-    page,
-    pageSize,
-    totalPages: Math.ceil(total / pageSize),
-  };
+    return {
+      rows: rows.map(toBillListRow),
+      total,
+      page,
+      pageSize,
+      totalPages: Math.ceil(total / pageSize),
+    };
+  } catch (error) {
+    if (isPrismaTableError(error)) {
+      console.error('Bill table not available — migration may not be applied:', error);
+      return { rows: [], total: 0, page, pageSize, totalPages: 0 };
+    }
+    throw error;
+  }
 }
 
 export async function getBillById(id: string): Promise<BillDetail | null> {
-  const bill = await prisma.bill.findUnique({ where: { id } });
-  if (!bill) return null;
-  return toBillDetail(bill);
+  try {
+    const bill = await prisma.bill.findUnique({ where: { id } });
+    if (!bill) return null;
+    return toBillDetail(bill);
+  } catch (error) {
+    if (isPrismaTableError(error)) {
+      console.error('Bill table not available — migration may not be applied:', error);
+      return null;
+    }
+    throw error;
+  }
 }

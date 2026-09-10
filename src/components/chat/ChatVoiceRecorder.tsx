@@ -1,7 +1,8 @@
 'use client';
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Mic, X, Send } from 'lucide-react';
+import { Mic, X, Send, AlertCircle } from 'lucide-react';
+import { Button } from '@/components/shadcn/button';
 
 export interface ChatVoiceRecorderProps {
   onComplete: (blob: Blob, durationMs: number) => void;
@@ -145,40 +146,45 @@ export function ChatVoiceRecorder({ onComplete }: ChatVoiceRecorderProps) {
 
   if (!isRecording) {
     return (
-      <div className="chat-voice-recorder">
-        <button
-          type="button"
-          className="chat-voice-btn"
+      <div className="flex items-center gap-2">
+        <Button
+          variant="ghost"
+          size="icon-sm"
           onClick={startRecording}
           aria-label="Grabar nota de voz"
         >
           <Mic size={20} />
-        </button>
-        {error && <span className="chat-voice-error">{error}</span>}
+        </Button>
+        {error && (
+          <span className="flex items-center gap-1 text-xs text-destructive">
+            <AlertCircle size={12} /> {error}
+          </span>
+        )}
       </div>
     );
   }
 
   return (
-    <div className="chat-voice-recorder chat-voice-recording">
-      <span className="chat-voice-dot" aria-hidden="true" />
-      <span className="chat-voice-timer">{formatDuration(elapsedMs)}</span>
-      <button
-        type="button"
-        className="chat-voice-cancel"
+    <div className="flex items-center gap-2 rounded-md border border-border bg-card p-2">
+      <span className="size-2 rounded-full bg-destructive animate-pulse" aria-hidden="true" />
+      <span className="font-mono text-xs font-medium text-foreground">{formatDuration(elapsedMs)}</span>
+      <Button
+        variant="ghost"
+        size="icon-sm"
         onClick={handleCancel}
         aria-label="Cancelar grabación"
+        className="text-muted-foreground hover:text-destructive"
       >
         <X size={18} />
-      </button>
-      <button
-        type="button"
-        className="chat-voice-send"
+      </Button>
+      <Button
+        variant="default"
+        size="icon-sm"
         onClick={handleSend}
         aria-label="Enviar nota de voz"
       >
         <Send size={18} />
-      </button>
+      </Button>
     </div>
   );
 }

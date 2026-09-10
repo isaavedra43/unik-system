@@ -1,7 +1,20 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { Code2, X, Plus, Loader2 } from 'lucide-react';
+import { Code2, Plus, Loader2 } from 'lucide-react';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from '@/components/shadcn/dialog';
+import { Input } from '@/components/shadcn/input';
+import { Textarea } from '@/components/shadcn/textarea';
+import { Button } from '@/components/shadcn/button';
+import { ScrollArea } from '@/components/shadcn/scroll-area';
+import { cn } from '@/lib/utils';
 
 export interface ChatSnippetPickerProps {
   onSelect: (content: string) => void;
@@ -80,75 +93,85 @@ export function ChatSnippetPicker({ onSelect, onClose }: ChatSnippetPickerProps)
   );
 
   return (
-    <div className="chat-dialog-overlay" onClick={onClose}>
-      <div className="chat-dialog chat-snippet-picker" onClick={(e) => e.stopPropagation()}>
-        <div className="chat-dialog-header">
-          <h2>
-            <Code2 size={20} /> Snippets
-          </h2>
-          <button type="button" onClick={onClose} aria-label="Cerrar">
-            <X size={20} />
-          </button>
-        </div>
+    <Dialog open onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Code2 size={18} /> Plantillas
+          </DialogTitle>
+          <DialogDescription>
+            {showCreate ? 'Crea una nueva plantilla' : 'Inserta una plantilla guardada'}
+          </DialogDescription>
+        </DialogHeader>
 
         {!showCreate ? (
           <>
-            <div className="chat-snippet-list">
-              {loading && (
-                <div className="chat-panel-loading">
-                  <Loader2 size={20} className="spin" /> Cargando...
-                </div>
-              )}
-              {error && <div className="chat-dialog-error">{error}</div>}
-              {!loading && !error && snippets.length === 0 && (
-                <div className="chat-dialog-empty">No tienes snippets guardados</div>
-              )}
-              {snippets.map((snippet) => (
-                <button
-                  key={snippet.id}
-                  type="button"
-                  className="chat-snippet-item"
-                  onClick={() => handleSelect(snippet.content)}
-                >
-                  <span className="chat-snippet-title">{snippet.title}</span>
-                  <span className="chat-snippet-preview">{snippet.content.slice(0, 120)}</span>
-                </button>
-              ))}
-            </div>
+            <ScrollArea className="max-h-[40vh]">
+              <div className="flex flex-col gap-1 pr-3">
+                {loading && (
+                  <div className="flex items-center justify-center gap-2 py-8 text-sm text-muted-foreground">
+                    <Loader2 size={20} className="animate-spin" /> Cargando...
+                  </div>
+                )}
+                {error && (
+                  <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">
+                    {error}
+                  </div>
+                )}
+                {!loading && !error && snippets.length === 0 && (
+                  <div className="py-8 text-center text-sm text-muted-foreground">
+                    No tienes plantillas guardadas
+                  </div>
+                )}
+                {snippets.map((snippet) => (
+                  <button
+                    key={snippet.id}
+                    type="button"
+                    className={cn(
+                      'flex flex-col gap-1 rounded-md p-3 text-left transition-colors',
+                      'hover:bg-accent focus:bg-accent focus:outline-none'
+                    )}
+                    onClick={() => handleSelect(snippet.content)}
+                  >
+                    <span className="text-sm font-semibold text-foreground">{snippet.title}</span>
+                    <span className="text-sm text-muted-foreground line-clamp-2">
+                      {snippet.content.slice(0, 120)}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </ScrollArea>
 
-            <div className="chat-dialog-footer">
-              <button
-                type="button"
-                className="chat-snippet-create"
-                onClick={() => setShowCreate(true)}
-              >
-                <Plus size={16} /> Nuevo snippet
-              </button>
-            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setShowCreate(true)}>
+                <Plus size={16} /> Nueva plantilla
+              </Button>
+            </DialogFooter>
           </>
         ) : (
-          <div className="chat-snippet-form">
-            <input
+          <div className="flex flex-col gap-3">
+            <Input
               type="text"
-              className="chat-snippet-form-title"
               placeholder="Título"
               value={newTitle}
               onChange={(e) => setNewTitle(e.target.value)}
               maxLength={100}
               autoFocus
             />
-            <textarea
-              className="chat-snippet-form-content"
-              placeholder="Contenido del snippet..."
+            <Textarea
+              placeholder="Contenido de la plantilla..."
               value={newContent}
               onChange={(e) => setNewContent(e.target.value)}
               rows={6}
             />
-            {error && <div className="chat-dialog-error">{error}</div>}
-            <div className="chat-dialog-footer">
-              <button
-                type="button"
-                className="chat-dialog-cancel"
+            {error && (
+              <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">
+                {error}
+              </div>
+            )}
+            <DialogFooter>
+              <Button
+                variant="outline"
                 onClick={() => {
                   setShowCreate(false);
                   setNewTitle('');
@@ -157,19 +180,17 @@ export function ChatSnippetPicker({ onSelect, onClose }: ChatSnippetPickerProps)
                 }}
               >
                 Cancelar
-              </button>
-              <button
-                type="button"
-                className="chat-dialog-create"
+              </Button>
+              <Button
                 disabled={creating || !newTitle.trim() || !newContent.trim()}
                 onClick={handleCreate}
               >
                 {creating ? 'Guardando...' : 'Guardar'}
-              </button>
-            </div>
+              </Button>
+            </DialogFooter>
           </div>
         )}
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }

@@ -1,7 +1,9 @@
 'use client';
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Video, X, Send } from 'lucide-react';
+import { Video, X, Send, AlertCircle } from 'lucide-react';
+import { Button } from '@/components/shadcn/button';
+import { cn } from '@/lib/utils';
 
 export interface ChatVideoRecorderProps {
   onComplete: (blob: Blob, durationMs: number) => void;
@@ -165,49 +167,54 @@ export function ChatVideoRecorder({ onComplete }: ChatVideoRecorderProps) {
 
   if (!isRecording) {
     return (
-      <div className="chat-voice-recorder">
-        <button
-          type="button"
-          className="chat-voice-btn"
+      <div className="flex items-center gap-2">
+        <Button
+          variant="ghost"
+          size="icon-sm"
           onClick={startRecording}
           aria-label="Grabar nota de video"
           title="Grabar nota de video (máx 3 min)"
         >
           <Video size={20} />
-        </button>
-        {error && <span className="chat-voice-error">{error}</span>}
+        </Button>
+        {error && (
+          <span className="flex items-center gap-1 text-xs text-destructive">
+            <AlertCircle size={12} /> {error}
+          </span>
+        )}
       </div>
     );
   }
 
   return (
-    <div className="chat-video-recorder">
-      <div className="chat-video-preview">
-        <video ref={previewRef} autoPlay muted playsInline />
+    <div className="flex items-center gap-2 rounded-md border border-border bg-card p-2">
+      <div className="relative size-12 rounded-md overflow-hidden bg-black shrink-0">
+        <video ref={previewRef} autoPlay muted playsInline className="w-full h-full object-cover" />
       </div>
-      <div className="chat-video-recording-info">
-        <span className="chat-voice-dot" aria-hidden="true" />
-        <span className="chat-voice-timer">{formatDuration(elapsedMs)}</span>
-        <span className="chat-video-limit">/ 03:00</span>
+      <div className="flex items-center gap-1.5 text-xs">
+        <span className="size-2 rounded-full bg-destructive animate-pulse" aria-hidden="true" />
+        <span className="font-mono font-medium text-foreground">{formatDuration(elapsedMs)}</span>
+        <span className={cn('text-muted-foreground', elapsedMs >= MAX_DURATION_MS - 30000 && 'text-warning')}>
+          / 03:00
+        </span>
       </div>
-      <div className="chat-video-controls">
-        <button
-          type="button"
-          className="chat-voice-cancel"
-          onClick={handleCancel}
-          aria-label="Cancelar grabación"
-        >
-          <X size={18} />
-        </button>
-        <button
-          type="button"
-          className="chat-voice-send"
-          onClick={handleSend}
-          aria-label="Enviar nota de video"
-        >
-          <Send size={18} />
-        </button>
-      </div>
+      <Button
+        variant="ghost"
+        size="icon-sm"
+        onClick={handleCancel}
+        aria-label="Cancelar grabación"
+        className="text-muted-foreground hover:text-destructive"
+      >
+        <X size={18} />
+      </Button>
+      <Button
+        variant="default"
+        size="icon-sm"
+        onClick={handleSend}
+        aria-label="Enviar nota de video"
+      >
+        <Send size={18} />
+      </Button>
     </div>
   );
 }

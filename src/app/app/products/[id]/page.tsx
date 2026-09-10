@@ -32,24 +32,35 @@ export default async function ProductDetailPageRoute({
   const isWatched = await isEntityWatched(session!.user.id, PRODUCT_ENTITY_TYPE, id);
   const canWatch = session!.user.isSuperAdmin || session!.user.permissionKeys.includes('products.watch');
 
-  const [salesOrderHistory, invoiceHistory, packageHistory] = await Promise.all([
-    getProductSalesOrderHistory(product!.zohoItemId),
-    getProductInvoiceHistory(product!.zohoItemId),
-    getProductPackageHistory(product!.zohoItemId),
-  ]);
+  let salesOrderHistory: Awaited<ReturnType<typeof getProductSalesOrderHistory>> = [];
+  let invoiceHistory: Awaited<ReturnType<typeof getProductInvoiceHistory>> = [];
+  let packageHistory: Awaited<ReturnType<typeof getProductPackageHistory>> = [];
+  try {
+    [salesOrderHistory, invoiceHistory, packageHistory] = await Promise.all([
+      getProductSalesOrderHistory(product!.zohoItemId),
+      getProductInvoiceHistory(product!.zohoItemId),
+      getProductPackageHistory(product!.zohoItemId),
+    ]);
+  } catch (error) {
+    console.error('Error loading product history:', error);
+  }
 
   // Find vendor contact by zohoVendorId
   let vendorId: string | null = null;
   let vendorName: string | null = null;
   if (product!.zohoVendorId) {
-    const { prisma } = await import('@/lib/prisma');
-    const vendor = await prisma.contact.findUnique({
-      where: { zohoContactId: product!.zohoVendorId },
-      select: { id: true, contactName: true },
-    });
-    if (vendor) {
-      vendorId = vendor.id;
-      vendorName = vendor.contactName;
+    try {
+      const { prisma } = await import('@/lib/prisma');
+      const vendor = await prisma.contact.findUnique({
+        where: { zohoContactId: product!.zohoVendorId },
+        select: { id: true, contactName: true },
+      });
+      if (vendor) {
+        vendorId = vendor.id;
+        vendorName = vendor.contactName;
+      }
+    } catch (error) {
+      console.error('Error loading vendor for product:', error);
     }
   }
 

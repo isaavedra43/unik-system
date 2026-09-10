@@ -1,7 +1,16 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
-import { X, CornerUpRight, Send, Loader2 } from 'lucide-react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { CornerUpRight, Send, Loader2, AlertCircle } from 'lucide-react';
+import {
+  Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription,
+} from '@/components/shadcn/sheet';
+import { Input } from '@/components/shadcn/input';
+import { Button } from '@/components/shadcn/button';
+import { Avatar, AvatarFallback } from '@/components/shadcn/avatar';
+import { ScrollArea } from '@/components/shadcn/scroll-area';
+import { Skeleton } from '@/components/shadcn/skeleton';
+import { cn } from '@/lib/utils';
 import type { ChatMessageDTO } from '@/modules/chat/chat-events';
 import type { CurrentUser } from '@/modules/auth/authorization';
 
@@ -13,18 +22,23 @@ export interface ChatThreadPanelProps {
   onClose: () => void;
 }
 
-export function ChatThreadPanel({
-  threadId,
-  rootMessage,
-  channelId,
-  user,
-  onClose,
-}: ChatThreadPanelProps) {
+function formatTime(iso: string): string {
+  return new Date(iso).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' });
+}
+
+function getInitials(name: string): string {
+  const parts = name.trim().split(/\s+/);
+  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+  return name.slice(0, 2).toUpperCase();
+}
+
+export function ChatThreadPanel({ threadId, rootMessage, channelId, user, onClose }: ChatThreadPanelProps) {
   const [messages, setMessages] = useState<ChatMessageDTO[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
+  const bottomRef = useRef<HTMLDivElement>(null);
 
   const loadMessages = useCallback(async () => {
     setLoading(true);
@@ -47,6 +61,12 @@ export function ChatThreadPanel({
   useEffect(() => {
     loadMessages();
   }, [loadMessages]);
+
+  useEffect(() => {
+    if (bottomRef.current) {
+      bottomRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [messages]);
 
   const handleSend = useCallback(async () => {
     const trimmed = text.trim();
@@ -74,72 +94,129 @@ export function ChatThreadPanel({
     }
   }, [text, channelId, rootMessage.id, threadId]);
 
-  const formatTime = (iso: string) =>
-    new Date(iso).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' });
-
   return (
-    <div className="chat-thread-panel">
-      <div className="chat-thread-header">
-        <div className="chat-thread-title">
-          <CornerUpRight size={18} />
-          <span>Hilo de conversación</span>
+    <Sheet open onOpenChange={(v) => !v && onClose()}>
+      <SheetContent side="right" className="w-full sm:max-w-md p-0 gap-0">
+        <SheetHeader className="border-b border-border px-4 py-3">
+          <SheetTitle className="flex items-center gap-2">
+            <CornerUpRight size={18} /> Hilo de conversación
+          </SheetTitle>
+          <SheetDescription>
+            {messages.length} {messages.length === 1 ? 'respuesta' : 'respuestas'}
+          </SheetDescription>
+        </SheetHeader>
+
+        {/* Root message */}
+        <div className="border-b border-border p-4 bg-muted/30">
+          <div className="flex items-start gap-3">
+            <Avatar className="size-8 shrink-0">
+              <AvatarFallback className="text-xs font-semibold">
+                {getInitials(rootMessage.senderName)}
+              </AvatarFallback>
+            </Avatar>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-semibold text-foreground">
+                  {rootMessage.senderName}
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  {formatTime(rootMessage.createdAt)}
+                </span>
+              </div>
+              <div className="text-sm text-foreground mt-0.5 break-words">
+                {rootMessage.content ?? '[Archivo]'}
+              </div>
+            </div>
+          </div>
         </div>
-        <button type="button" onClick={onClose} aria-label="Cerrar hilo">
-          <X size={18} />
-        </button>
-      </div>
 
-      {/* Root message */}
-      <div className="chat-thread-root">
-        <div className="chat-thread-root-sender">{rootMessage.senderName}</div>
-        <div className="chat-thread-root-content">{rootMessage.content ?? '[Archivo]'}</div>
-        <div className="chat-thread-root-time">{formatTime(rootMessage.createdAt)}</div>
-      </div>
-
-      {/* Thread messages */}
-      <div className="chat-thread-messages">
-        {loading && (
-          <div className="chat-panel-loading">
-            <Loader2 size={20} className="spin" /> Cargando...
+        {/* Thread messages */}
+        <ScrollArea className="flex-1">
+          <div className="flex flex-col gap-3 p-4">
+            {loading && (
+              <div className="flex flex-col gap-3">
+                <div className="flex gap-2 items-end">
+                  <Skeleton className="size-7 rounded-full" />
+                  <Skeleton className="h-10 w-40 rounded-lg" />
+                </div>
+                <div className="flex gap-2 items-end justify-end">
+                  <Skeleton className="h-10 w-32 rounded-lg" />
+                </div>
+              </div>
+            )}
+            {error && (
+              <div className="flex items-center gap-2 rounded-md bg-destructive/10 p-3 text-sm text-destructive">
+                <AlertCircle size={16} /> {error}
+              </div>
+            )}
+            {!loading && !error && messages.length === 0 && (
+              <div className="py-8 text-center text-sm text-muted-foreground">
+                No hay respuestas en este hilo todavía
+              </div>
+            )}
+            {messages.map((msg) => {
+              const isOwn = msg.senderId === user.id;
+              return (
+                <div
+                  key={msg.id}
+                  className={cn('flex gap-2', isOwn && 'flex-row-reverse')}
+                >
+                  <Avatar className="size-7 shrink-0">
+                    <AvatarFallback className="text-[10px] font-semibold">
+                      {getInitials(msg.senderName)}
+                    </AvatarFallback>
+                  </Avatar>
+                  <div className={cn('flex flex-col gap-0.5 max-w-[80%]', isOwn && 'items-end')}>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-medium text-foreground">{msg.senderName}</span>
+                      <span className="text-[10px] text-muted-foreground">
+                        {formatTime(msg.createdAt)}
+                      </span>
+                    </div>
+                    <div
+                      className={cn(
+                        'rounded-lg px-3 py-1.5 text-sm break-words',
+                        isOwn
+                          ? 'bg-primary text-primary-foreground'
+                          : 'bg-muted text-foreground'
+                      )}
+                    >
+                      {msg.content}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+            <div ref={bottomRef} />
           </div>
-        )}
-        {error && <div className="chat-dialog-error">{error}</div>}
-        {!loading && !error && messages.length === 0 && (
-          <div className="chat-thread-empty">No hay respuestas en este hilo todavía</div>
-        )}
-        {messages.map((msg) => (
-          <div key={msg.id} className={`chat-thread-msg ${msg.senderId === user.id ? 'own' : ''}`}>
-            <div className="chat-thread-msg-sender">{msg.senderName}</div>
-            <div className="chat-thread-msg-content">{msg.content}</div>
-            <div className="chat-thread-msg-time">{formatTime(msg.createdAt)}</div>
-          </div>
-        ))}
-      </div>
+        </ScrollArea>
 
-      {/* Input */}
-      <div className="chat-thread-input">
-        <input
-          type="text"
-          placeholder="Responder en el hilo..."
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-              e.preventDefault();
-              handleSend();
-            }
-          }}
-          aria-label="Responder en hilo"
-        />
-        <button
-          type="button"
-          onClick={handleSend}
-          disabled={sending || !text.trim()}
-          aria-label="Enviar"
-        >
-          {sending ? <Loader2 size={18} className="spin" /> : <Send size={18} />}
-        </button>
-      </div>
-    </div>
+        {/* Input */}
+        <div className="border-t border-border p-3 flex items-center gap-2">
+          <Input
+            type="text"
+            placeholder="Responder en el hilo..."
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                handleSend();
+              }
+            }}
+            aria-label="Responder en hilo"
+            disabled={sending}
+          />
+          <Button
+            size="icon"
+            onClick={handleSend}
+            disabled={sending || !text.trim()}
+            aria-label="Enviar"
+          >
+            {sending ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />}
+          </Button>
+        </div>
+      </SheetContent>
+    </Sheet>
   );
 }

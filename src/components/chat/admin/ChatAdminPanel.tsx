@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/shadcn/tabs';
 import { ChatAdminOverview } from './ChatAdminOverview';
 import { ChatAdminConversations } from './ChatAdminConversations';
 import { ChatAdminMessages } from './ChatAdminMessages';
@@ -13,47 +14,44 @@ export interface ChatAdminPanelProps {
   canManage: boolean;
 }
 
-type TabId =
-  'overview' | 'conversations' | 'messages' | 'users' | 'moderation' | 'alerts' | 'config';
-
-const TABS: Array<{ id: TabId; label: string }> = [
-  { id: 'overview', label: 'Resumen' },
-  { id: 'conversations', label: 'Conversaciones' },
-  { id: 'messages', label: 'Mensajes' },
-  { id: 'users', label: 'Usuarios' },
-  { id: 'moderation', label: 'Moderación' },
-  { id: 'alerts', label: 'Alertas' },
-  { id: 'config', label: 'Configuración' },
-];
-
 export function ChatAdminPanel({ canManage }: ChatAdminPanelProps) {
-  const [activeTab, setActiveTab] = useState<TabId>('overview');
+  const [activeTab, setActiveTab] = useState('overview');
 
   return (
-    <div className="chat-admin-panel">
-      <div className="chat-admin-tabs" role="tablist">
-        {TABS.map((tab) => (
-          <button
-            key={tab.id}
-            type="button"
-            role="tab"
-            aria-selected={activeTab === tab.id}
-            className={`chat-admin-tab ${activeTab === tab.id ? 'active' : ''}`}
-            onClick={() => setActiveTab(tab.id)}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
-      <div className="chat-admin-tab-content">
-        {activeTab === 'overview' && <ChatAdminOverview />}
-        {activeTab === 'conversations' && <ChatAdminConversations />}
-        {activeTab === 'messages' && <ChatAdminMessages />}
-        {activeTab === 'users' && <ChatAdminUsers />}
-        {activeTab === 'moderation' && <ChatAdminModeration canManage={canManage} />}
-        {activeTab === 'alerts' && <ChatAdminAlerts canManage={canManage} />}
-        {activeTab === 'config' && <ChatAdminConfig canManage={canManage} />}
-      </div>
+    <div className="flex flex-col gap-4">
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+        <TabsList className="flex-wrap h-auto justify-start">
+          <TabsTrigger value="overview">Resumen</TabsTrigger>
+          <TabsTrigger value="conversations">Conversaciones</TabsTrigger>
+          <TabsTrigger value="messages">Mensajes</TabsTrigger>
+          <TabsTrigger value="users">Usuarios</TabsTrigger>
+          <TabsTrigger value="moderation">Moderación</TabsTrigger>
+          <TabsTrigger value="alerts">Alertas</TabsTrigger>
+          <TabsTrigger value="config">Configuración</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="overview" className="mt-4">
+          <ChatAdminOverview />
+        </TabsContent>
+        <TabsContent value="conversations" className="mt-4">
+          <ChatAdminConversations />
+        </TabsContent>
+        <TabsContent value="messages" className="mt-4">
+          <ChatAdminMessages />
+        </TabsContent>
+        <TabsContent value="users" className="mt-4">
+          <ChatAdminUsers />
+        </TabsContent>
+        <TabsContent value="moderation" className="mt-4">
+          <ChatAdminModeration canManage={canManage} />
+        </TabsContent>
+        <TabsContent value="alerts" className="mt-4">
+          <ChatAdminAlerts canManage={canManage} />
+        </TabsContent>
+        <TabsContent value="config" className="mt-4">
+          <ChatAdminConfig canManage={canManage} />
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

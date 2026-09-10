@@ -5,6 +5,20 @@ import { prisma } from '@/lib/prisma';
 // Links Contacts ↔ Packages/Invoices and Invoices ↔ Sales Orders.
 // ---------------------------------------------------------------------------
 
+function isPrismaTableError(error: unknown): boolean {
+  if (error instanceof Error) {
+    const msg = error.message.toLowerCase();
+    return (
+      msg.includes('does not exist') ||
+      msg.includes('relation') ||
+      msg.includes('p2021') ||
+      msg.includes('the table') ||
+      msg.includes('no such table')
+    );
+  }
+  return false;
+}
+
 export interface RelatedPackageSummary {
   id: string;
   packageNumber: string | null;
@@ -245,16 +259,21 @@ export async function getPaymentsByContactZohoId(
   zohoCustomerId: string,
   limit = 10
 ): Promise<RelatedPaymentSummary[]> {
-  const payments = await prisma.customerPayment.findMany({
-    where: { zohoCustomerId },
-    orderBy: { date: 'desc' },
-    take: Math.max(1, Math.min(limit, 50)),
-    select: { id: true, paymentNumber: true, paymentMode: true, status: true, date: true, amount: true, currencyCode: true },
-  });
-  return payments.map((p) => ({
-    id: p.id, paymentNumber: p.paymentNumber, paymentMode: p.paymentMode, status: p.status,
-    date: p.date?.toISOString() ?? null, amount: p.amount?.toString() ?? null, currencyCode: p.currencyCode,
-  }));
+  try {
+    const payments = await prisma.customerPayment.findMany({
+      where: { zohoCustomerId },
+      orderBy: { date: 'desc' },
+      take: Math.max(1, Math.min(limit, 50)),
+      select: { id: true, paymentNumber: true, paymentMode: true, status: true, date: true, amount: true, currencyCode: true },
+    });
+    return payments.map((p) => ({
+      id: p.id, paymentNumber: p.paymentNumber, paymentMode: p.paymentMode, status: p.status,
+      date: p.date?.toISOString() ?? null, amount: p.amount?.toString() ?? null, currencyCode: p.currencyCode,
+    }));
+  } catch (error) {
+    if (isPrismaTableError(error)) return [];
+    throw error;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -265,17 +284,22 @@ export async function getPurchaseOrdersByVendorZohoId(
   zohoVendorId: string,
   limit = 10
 ): Promise<RelatedPurchaseOrderSummary[]> {
-  const purchaseOrders = await prisma.purchaseOrder.findMany({
-    where: { zohoVendorId },
-    orderBy: { date: 'desc' },
-    take: Math.max(1, Math.min(limit, 50)),
-    select: { id: true, purchaseOrderNumber: true, status: true, date: true, total: true, balance: true, currencyCode: true },
-  });
-  return purchaseOrders.map((po) => ({
-    id: po.id, purchaseOrderNumber: po.purchaseOrderNumber, status: po.status,
-    date: po.date?.toISOString() ?? null, total: po.total?.toString() ?? null,
-    balance: po.balance?.toString() ?? null, currencyCode: po.currencyCode,
-  }));
+  try {
+    const purchaseOrders = await prisma.purchaseOrder.findMany({
+      where: { zohoVendorId },
+      orderBy: { date: 'desc' },
+      take: Math.max(1, Math.min(limit, 50)),
+      select: { id: true, purchaseOrderNumber: true, status: true, date: true, total: true, balance: true, currencyCode: true },
+    });
+    return purchaseOrders.map((po) => ({
+      id: po.id, purchaseOrderNumber: po.purchaseOrderNumber, status: po.status,
+      date: po.date?.toISOString() ?? null, total: po.total?.toString() ?? null,
+      balance: po.balance?.toString() ?? null, currencyCode: po.currencyCode,
+    }));
+  } catch (error) {
+    if (isPrismaTableError(error)) return [];
+    throw error;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -286,18 +310,23 @@ export async function getBillsByVendorZohoId(
   zohoVendorId: string,
   limit = 10
 ): Promise<RelatedBillSummary[]> {
-  const bills = await prisma.bill.findMany({
-    where: { zohoVendorId },
-    orderBy: { date: 'desc' },
-    take: Math.max(1, Math.min(limit, 50)),
-    select: { id: true, billNumber: true, status: true, date: true, total: true, balance: true, currencyCode: true, zohoPurchaseOrderId: true },
-  });
-  return bills.map((b) => ({
-    id: b.id, billNumber: b.billNumber, status: b.status,
-    date: b.date?.toISOString() ?? null, total: b.total?.toString() ?? null,
-    balance: b.balance?.toString() ?? null, currencyCode: b.currencyCode,
-    zohoPurchaseOrderId: b.zohoPurchaseOrderId,
-  }));
+  try {
+    const bills = await prisma.bill.findMany({
+      where: { zohoVendorId },
+      orderBy: { date: 'desc' },
+      take: Math.max(1, Math.min(limit, 50)),
+      select: { id: true, billNumber: true, status: true, date: true, total: true, balance: true, currencyCode: true, zohoPurchaseOrderId: true },
+    });
+    return bills.map((b) => ({
+      id: b.id, billNumber: b.billNumber, status: b.status,
+      date: b.date?.toISOString() ?? null, total: b.total?.toString() ?? null,
+      balance: b.balance?.toString() ?? null, currencyCode: b.currencyCode,
+      zohoPurchaseOrderId: b.zohoPurchaseOrderId,
+    }));
+  } catch (error) {
+    if (isPrismaTableError(error)) return [];
+    throw error;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -308,17 +337,22 @@ export async function getVendorCreditsByVendorZohoId(
   zohoVendorId: string,
   limit = 10
 ): Promise<RelatedVendorCreditSummary[]> {
-  const vendorCredits = await prisma.vendorCredit.findMany({
-    where: { zohoVendorId },
-    orderBy: { date: 'desc' },
-    take: Math.max(1, Math.min(limit, 50)),
-    select: { id: true, vendorCreditNumber: true, status: true, date: true, total: true, balance: true, currencyCode: true },
-  });
-  return vendorCredits.map((vc) => ({
-    id: vc.id, vendorCreditNumber: vc.vendorCreditNumber, status: vc.status,
-    date: vc.date?.toISOString() ?? null, total: vc.total?.toString() ?? null,
-    balance: vc.balance?.toString() ?? null, currencyCode: vc.currencyCode,
-  }));
+  try {
+    const vendorCredits = await prisma.vendorCredit.findMany({
+      where: { zohoVendorId },
+      orderBy: { date: 'desc' },
+      take: Math.max(1, Math.min(limit, 50)),
+      select: { id: true, vendorCreditNumber: true, status: true, date: true, total: true, balance: true, currencyCode: true },
+    });
+    return vendorCredits.map((vc) => ({
+      id: vc.id, vendorCreditNumber: vc.vendorCreditNumber, status: vc.status,
+      date: vc.date?.toISOString() ?? null, total: vc.total?.toString() ?? null,
+      balance: vc.balance?.toString() ?? null, currencyCode: vc.currencyCode,
+    }));
+  } catch (error) {
+    if (isPrismaTableError(error)) return [];
+    throw error;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -468,16 +502,21 @@ export async function getBillsByPurchaseOrderZohoId(
   zohoPurchaseOrderId: string,
   limit = 10
 ): Promise<RelatedBillSummary[]> {
-  const bills = await prisma.bill.findMany({
-    where: { zohoPurchaseOrderId },
-    orderBy: { date: 'desc' },
-    take: Math.max(1, Math.min(limit, 50)),
-    select: { id: true, billNumber: true, status: true, date: true, total: true, balance: true, currencyCode: true, zohoPurchaseOrderId: true },
-  });
-  return bills.map((b) => ({
-    id: b.id, billNumber: b.billNumber, status: b.status,
-    date: b.date?.toISOString() ?? null, total: b.total?.toString() ?? null,
-    balance: b.balance?.toString() ?? null, currencyCode: b.currencyCode,
-    zohoPurchaseOrderId: b.zohoPurchaseOrderId,
-  }));
+  try {
+    const bills = await prisma.bill.findMany({
+      where: { zohoPurchaseOrderId },
+      orderBy: { date: 'desc' },
+      take: Math.max(1, Math.min(limit, 50)),
+      select: { id: true, billNumber: true, status: true, date: true, total: true, balance: true, currencyCode: true, zohoPurchaseOrderId: true },
+    });
+    return bills.map((b) => ({
+      id: b.id, billNumber: b.billNumber, status: b.status,
+      date: b.date?.toISOString() ?? null, total: b.total?.toString() ?? null,
+      balance: b.balance?.toString() ?? null, currencyCode: b.currencyCode,
+      zohoPurchaseOrderId: b.zohoPurchaseOrderId,
+    }));
+  } catch (error) {
+    if (isPrismaTableError(error)) return [];
+    throw error;
+  }
 }

@@ -1,7 +1,17 @@
 'use client';
 
 import React, { useState, useCallback } from 'react';
-import { MapPin, Send, X, Loader2 } from 'lucide-react';
+import { MapPin, Send, Loader2 } from 'lucide-react';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from '@/components/shadcn/dialog';
+import { Input } from '@/components/shadcn/input';
+import { Button } from '@/components/shadcn/button';
 
 export interface ChatLocationPickerProps {
   onSend: (location: { latitude: number; longitude: number; label?: string }) => void;
@@ -51,49 +61,46 @@ export function ChatLocationPicker({ onSend, onCancel }: ChatLocationPickerProps
   }, [coords, label, onSend]);
 
   return (
-    <div className="chat-dialog-overlay" onClick={onCancel}>
-      <div className="chat-dialog chat-location-picker" onClick={(e) => e.stopPropagation()}>
-        <div className="chat-dialog-header">
-          <h2>Compartir ubicación</h2>
-          <button type="button" onClick={onCancel} aria-label="Cerrar">
-            <X size={20} />
-          </button>
-        </div>
+    <Dialog open onOpenChange={(v) => !v && onCancel()}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Compartir ubicación</DialogTitle>
+          <DialogDescription>Comparte tu ubicación actual</DialogDescription>
+        </DialogHeader>
 
-        <div className="chat-location-picker-body">
+        <div className="flex flex-col gap-3">
           {!coords && !loading && !error && (
-            <button type="button" className="chat-location-get-btn" onClick={getLocation}>
+            <Button onClick={getLocation} className="w-full">
               <MapPin size={18} /> Obtener mi ubicación
-            </button>
+            </Button>
           )}
 
           {loading && (
-            <div className="chat-location-loading">
-              <Loader2 size={20} className="spin" /> Obteniendo ubicación...
+            <div className="flex items-center justify-center gap-2 py-4 text-sm text-muted-foreground">
+              <Loader2 size={20} className="animate-spin" /> Obteniendo ubicación...
             </div>
           )}
 
           {error && (
-            <div className="chat-location-error">
+            <div className="flex flex-col items-center gap-2 rounded-md bg-destructive/10 p-4 text-sm text-destructive">
               {error}
-              <button type="button" onClick={getLocation}>
+              <Button variant="outline" size="sm" onClick={getLocation}>
                 Reintentar
-              </button>
+              </Button>
             </div>
           )}
 
           {coords && (
             <>
-              <div className="chat-location-preview">
-                <MapPin size={18} />
-                <div className="chat-location-coords">
-                  <span>Latitud: {coords.latitude.toFixed(6)}</span>
-                  <span>Longitud: {coords.longitude.toFixed(6)}</span>
+              <div className="flex items-center gap-3 rounded-md border border-border p-3">
+                <MapPin size={18} className="text-primary shrink-0" />
+                <div className="flex flex-col text-sm">
+                  <span className="text-foreground">Latitud: {coords.latitude.toFixed(6)}</span>
+                  <span className="text-foreground">Longitud: {coords.longitude.toFixed(6)}</span>
                 </div>
               </div>
-              <input
+              <Input
                 type="text"
-                className="chat-location-label-input"
                 placeholder="Etiqueta (opcional)"
                 value={label}
                 onChange={(e) => setLabel(e.target.value)}
@@ -103,20 +110,15 @@ export function ChatLocationPicker({ onSend, onCancel }: ChatLocationPickerProps
           )}
         </div>
 
-        <div className="chat-dialog-footer">
-          <button type="button" className="chat-dialog-cancel" onClick={onCancel}>
+        <DialogFooter>
+          <Button variant="outline" onClick={onCancel}>
             Cancelar
-          </button>
-          <button
-            type="button"
-            className="chat-location-send"
-            disabled={!coords}
-            onClick={handleSend}
-          >
+          </Button>
+          <Button disabled={!coords} onClick={handleSend}>
             <Send size={16} /> Enviar
-          </button>
-        </div>
-      </div>
-    </div>
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

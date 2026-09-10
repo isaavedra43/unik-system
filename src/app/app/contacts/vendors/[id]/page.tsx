@@ -25,7 +25,13 @@ export default async function VendorDetailPage({
   }
 
   const { id } = await params;
-  const contact = await getContactById(id);
+  let contact;
+  try {
+    contact = await getContactById(id);
+  } catch (error) {
+    console.error('Error loading vendor contact:', error);
+    notFound();
+  }
   if (!contact) {
     notFound();
   }
@@ -33,12 +39,20 @@ export default async function VendorDetailPage({
   const isWatched = await isEntityWatched(session!.user.id, CONTACT_ENTITY_TYPE_VENDOR, id);
   const canWatch = session!.user.isSuperAdmin || session!.user.permissionKeys.includes('vendors.watch');
 
-  const [relatedPurchaseOrders, relatedBills, relatedVendorCredits, relatedProducts] = await Promise.all([
-    getPurchaseOrdersByVendorZohoId(contact!.zohoContactId),
-    getBillsByVendorZohoId(contact!.zohoContactId),
-    getVendorCreditsByVendorZohoId(contact!.zohoContactId),
-    getProductsByVendorZohoId(contact!.zohoContactId),
-  ]);
+  let relatedPurchaseOrders: Awaited<ReturnType<typeof getPurchaseOrdersByVendorZohoId>> = [];
+  let relatedBills: Awaited<ReturnType<typeof getBillsByVendorZohoId>> = [];
+  let relatedVendorCredits: Awaited<ReturnType<typeof getVendorCreditsByVendorZohoId>> = [];
+  let relatedProducts: Awaited<ReturnType<typeof getProductsByVendorZohoId>> = [];
+  try {
+    [relatedPurchaseOrders, relatedBills, relatedVendorCredits, relatedProducts] = await Promise.all([
+      getPurchaseOrdersByVendorZohoId(contact!.zohoContactId),
+      getBillsByVendorZohoId(contact!.zohoContactId),
+      getVendorCreditsByVendorZohoId(contact!.zohoContactId),
+      getProductsByVendorZohoId(contact!.zohoContactId),
+    ]);
+  } catch (error) {
+    console.error('Error loading vendor relationships:', error);
+  }
 
   return (
     <ContactDetailPage

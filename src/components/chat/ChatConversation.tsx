@@ -1,16 +1,16 @@
 'use client';
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { ArrowLeft, MoreVertical, Users } from 'lucide-react';
+import { toast } from 'sonner';
 import type { CurrentUser } from '@/modules/auth/authorization';
 import type { ChatChannelDTO, ChatMessageDTO, ChatStreamEvent } from '@/modules/chat/chat-events';
 import { ChatMessageList } from './ChatMessageList';
 import { ChatMessageInput } from './ChatMessageInput';
 import { ChatGroupSettings } from './ChatGroupSettings';
-import { ChatCallButton } from './ChatCallButton';
 import { ChatCallDialog } from './ChatCallDialog';
 import { ChatIncomingCallDialog } from './ChatIncomingCallDialog';
 import { ChatThreadPanel } from './ChatThreadPanel';
+import { ChatConversationHeader } from './ChatConversationHeader';
 import type { ChatCallDTO } from '@/modules/chat/chat-events';
 
 export interface ChatConversationProps {
@@ -382,6 +382,31 @@ export function ChatConversation({ channelId, user, onRefresh, onBack }: ChatCon
     setActiveCall(null);
   }, []);
 
+  const startCall = useCallback(
+    async (type: 'audio' | 'video') => {
+      if (!channel) return;
+      const otherMembers = channel.members.filter((m) => m.userId !== user.id);
+      if (otherMembers.length === 0) return;
+      try {
+        const res = await fetch('/app/chat/api/calls', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            channelId,
+            type,
+            participantIds: otherMembers.map((m) => m.userId),
+          }),
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        setActiveCall({ callData: data.data, role: 'caller' });
+      } catch {
+        // silent
+      }
+    },
+    [channel, channelId, user.id]
+  );
+
   // Forward
   const handleForward = useCallback(
     async (messageId: string, targetChannelIds: string[]) => {
@@ -465,12 +490,11 @@ export function ChatConversation({ channelId, user, onRefresh, onBack }: ChatCon
       if (res.ok) {
         const data = await res.json();
         if (data.translation) {
-          // Show translation in an alert or update message — for now, use alert
-          alert(`Traducción:\n${data.translation}`);
+          toast.success('Traducción', { description: data.translation });
         }
       } else {
         const data = await res.json();
-        alert(data.error || 'No se pudo traducir el mensaje');
+        toast.error(data.error || 'No se pudo traducir el mensaje');
       }
     } catch {
       // silent
@@ -503,37 +527,6 @@ export function ChatConversation({ channelId, user, onRefresh, onBack }: ChatCon
     }
   }, []);
 
-  // Channel display info
-  const getChannelName = () => {
-    if (!channel) return '';
-    if (channel.type === 'group') return channel.name ?? 'Grupo';
-    const other = channel.members.find((m) => m.userId !== user.id);
-    return other?.name ?? 'Usuario';
-  };
-
-  const getChannelSubtitle = () => {
-    if (!channel) return '';
-    if (channel.type === 'group') {
-      return `${channel.members.length} miembros`;
-    }
-    const other = channel.members.find((m) => m.userId !== user.id);
-    if (!other) return '';
-    if (other.status === 'online') return 'en línea';
-    if (other.status === 'away') return 'ausente';
-    return 'desconectado';
-  };
-
-  const getChannelAvatar = () => {
-    if (!channel) return null;
-    if (channel.type === 'group') return <Users size={20} />;
-    const other = channel.members.find((m) => m.userId !== user.id);
-    return other?.name.slice(0, 2).toUpperCase() ?? '??';
-  };
-
-  const otherUserOnline =
-    channel?.type === 'dm' &&
-    channel.members.find((m) => m.userId !== user.id)?.status === 'online';
-
   const typingText = Array.from(typingUsers.entries())
     .filter(([uid]) => uid !== user.id)
     .map(([, info]) => info.name)
@@ -547,49 +540,16 @@ export function ChatConversation({ channelId, user, onRefresh, onBack }: ChatCon
   return (
     <div className="chat-conversation">
       {/* Header */}
-      <div className="chat-conversation-header">
-        <button
-          type="button"
-          className="chat-back-btn"
-          onClick={() => (onBack ? onBack() : onRefresh())}
-          aria-label="Volver"
-        >
-          <ArrowLeft size={18} />
-        </button>
-        <div className="chat-conversation-avatar">
-          {getChannelAvatar()}
-          {otherUserOnline && <span className="chat-sidebar-presence online" />}
-        </div>
-        <div className="chat-conversation-info">
-          <div className="chat-conversation-name">{getChannelName()}</div>
-          <div className="chat-conversation-subtitle">
-            {typingText ? (
-              <span className="chat-typing-indicator">
-                <span className="chat-typing-dots">
-                  <span />
-                  <span />
-                  <span />
-                </span>
-                {typingText} está escribiendo
-                {typingPreview && <span className="chat-typing-preview">: {typingPreview}</span>}
-              </span>
-            ) : (
-              getChannelSubtitle()
-            )}
-          </div>
-        </div>
-        {channel && (
-          <ChatCallButton channelId={channelId} members={channel.members} currentUserId={user.id} />
-        )}
-        <button
-          type="button"
-          className="chat-conversation-settings-btn"
-          onClick={() => setShowSettings(true)}
-          aria-label="Configuración"
-        >
-          <MoreVertical size={18} />
-        </button>
-      </div>
+      <ChatConversationHeader
+        channel={channel}
+        user={user}
+        typingText={typingText}
+        typingPreview={typingPreview}
+        onBack={() => (onBack ? onBack() : onRefresh())}
+        onShowSettings={() => setShowSettings(true)}
+        onCallAudio={() => startCall('audio')}
+        onCallVideo={() => startCall('video')}
+      />
 
       {/* Messages */}
       <ChatMessageList
@@ -678,6 +638,22 @@ export function ChatConversation({ channelId, user, onRefresh, onBack }: ChatCon
           currentUserId={user.id}
           onClose={handleCloseCall}
           role="callee"
+          callData={activeCall.callData}
+        />
+      )}
+
+      {/* Active call dialog (caller mode) */}
+      {activeCall && activeCall.role === 'caller' && (
+        <ChatCallDialog
+          channelId={channelId}
+          type={activeCall.callData.type}
+          participants={activeCall.callData.participants.map((p) => ({
+            userId: p.userId,
+            name: p.name,
+          }))}
+          currentUserId={user.id}
+          onClose={handleCloseCall}
+          role="caller"
           callData={activeCall.callData}
         />
       )}

@@ -1,7 +1,17 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { X, CheckCheck, Loader2 } from 'lucide-react';
+import { CheckCheck, Loader2 } from 'lucide-react';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from '@/components/shadcn/dialog';
+import { ScrollArea } from '@/components/shadcn/scroll-area';
+import { Avatar, AvatarFallback } from '@/components/shadcn/avatar';
+import { cn } from '@/lib/utils';
 
 export interface ChatReadReceiptsDialogProps {
   messageId: string;
@@ -52,38 +62,57 @@ export function ChatReadReceiptsDialog({ messageId, onClose }: ChatReadReceiptsD
     });
 
   return (
-    <div className="chat-dialog-overlay" onClick={onClose}>
-      <div className="chat-read-receipts" onClick={(e) => e.stopPropagation()}>
-        <div className="chat-dialog-header">
-          <h2>
-            <CheckCheck size={20} /> Leído por
-          </h2>
-          <button type="button" onClick={onClose} aria-label="Cerrar">
-            <X size={20} />
-          </button>
-        </div>
-        <div className="chat-read-receipts-list">
-          {loading && (
-            <div className="chat-panel-loading">
-              <Loader2 size={20} className="spin" /> Cargando...
-            </div>
-          )}
-          {error && <div className="chat-dialog-error">{error}</div>}
-          {!loading && !error && readers.length === 0 && (
-            <div className="chat-dialog-empty">Nadie ha leído este mensaje todavía</div>
-          )}
-          {readers.map((r) => (
-            <div key={r.userId} className="chat-read-receipt-item">
-              <div className="chat-read-receipt-avatar">{r.name.slice(0, 2).toUpperCase()}</div>
-              <div className="chat-read-receipt-info">
-                <div className="chat-read-receipt-name">{r.name}</div>
-                <div className="chat-read-receipt-time">Leído a las {formatTime(r.readAt)}</div>
+    <Dialog open onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <CheckCheck size={18} /> Leído por
+          </DialogTitle>
+          <DialogDescription>Quienes han visto este mensaje</DialogDescription>
+        </DialogHeader>
+
+        <ScrollArea className="max-h-[50vh]">
+          <div className="flex flex-col gap-1 pr-3">
+            {loading && (
+              <div className="flex items-center justify-center gap-2 py-8 text-sm text-muted-foreground">
+                <Loader2 size={20} className="animate-spin" /> Cargando...
               </div>
-              <CheckCheck size={16} className="chat-read-receipt-icon" />
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
+            )}
+            {error && (
+              <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">
+                {error}
+              </div>
+            )}
+            {!loading && !error && readers.length === 0 && (
+              <div className="py-8 text-center text-sm text-muted-foreground">
+                Nadie ha leído este mensaje todavía
+              </div>
+            )}
+            {readers.map((r) => (
+              <div
+                key={r.userId}
+                className={cn(
+                  'flex items-center gap-3 rounded-md p-2',
+                  'transition-colors hover:bg-accent'
+                )}
+              >
+                <Avatar className="size-8">
+                  <AvatarFallback className="text-xs font-semibold">
+                    {r.name.slice(0, 2).toUpperCase()}
+                  </AvatarFallback>
+                </Avatar>
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-medium text-foreground truncate">{r.name}</div>
+                  <div className="text-xs text-muted-foreground">
+                    Leído a las {formatTime(r.readAt)}
+                  </div>
+                </div>
+                <CheckCheck size={16} className="text-info shrink-0" />
+              </div>
+            ))}
+          </div>
+        </ScrollArea>
+      </DialogContent>
+    </Dialog>
   );
 }

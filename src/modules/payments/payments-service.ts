@@ -16,6 +16,20 @@ export interface PaymentsListResult {
   totalPages: number;
 }
 
+function isPrismaTableError(error: unknown): boolean {
+  if (error instanceof Error) {
+    const msg = error.message.toLowerCase();
+    return (
+      msg.includes('does not exist') ||
+      msg.includes('relation') ||
+      msg.includes('p2021') ||
+      msg.includes('the table') ||
+      msg.includes('no such table')
+    );
+  }
+  return false;
+}
+
 export async function getPaymentsWorkspace(options: {
   page?: number;
   pageSize?: number;
@@ -35,27 +49,43 @@ export async function getPaymentsWorkspace(options: {
       }
     : {};
 
-  const [rows, total] = await Promise.all([
-    prisma.customerPayment.findMany({
-      where,
-      orderBy: { date: 'desc' },
-      skip: (page - 1) * pageSize,
-      take: pageSize,
-    }),
-    prisma.customerPayment.count({ where }),
-  ]);
+  try {
+    const [rows, total] = await Promise.all([
+      prisma.customerPayment.findMany({
+        where,
+        orderBy: { date: 'desc' },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+      prisma.customerPayment.count({ where }),
+    ]);
 
-  return {
-    rows: rows.map(toPaymentListRow),
-    total,
-    page,
-    pageSize,
-    totalPages: Math.ceil(total / pageSize),
-  };
+    return {
+      rows: rows.map(toPaymentListRow),
+      total,
+      page,
+      pageSize,
+      totalPages: Math.ceil(total / pageSize),
+    };
+  } catch (error) {
+    if (isPrismaTableError(error)) {
+      console.error('CustomerPayment table not available — migration may not be applied:', error);
+      return { rows: [], total: 0, page, pageSize, totalPages: 0 };
+    }
+    throw error;
+  }
 }
 
 export async function getPaymentById(id: string): Promise<PaymentDetail | null> {
-  const payment = await prisma.customerPayment.findUnique({ where: { id } });
-  if (!payment) return null;
-  return toPaymentDetail(payment);
+  try {
+    const payment = await prisma.customerPayment.findUnique({ where: { id } });
+    if (!payment) return null;
+    return toPaymentDetail(payment);
+  } catch (error) {
+    if (isPrismaTableError(error)) {
+      console.error('CustomerPayment table not available — migration may not be applied:', error);
+      return null;
+    }
+    throw error;
+  }
 }

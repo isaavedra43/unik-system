@@ -13,9 +13,14 @@ export default async function PurchaseOrderDetailPage({ params }: { params: Prom
   const purchaseOrder = await getPurchaseOrderById(id);
   if (!purchaseOrder) notFound();
 
-  const relatedBills = purchaseOrder.zohoPurchaseOrderId
-    ? await getBillsByPurchaseOrderZohoId(purchaseOrder.zohoPurchaseOrderId)
-    : [];
+  let relatedBills: Awaited<ReturnType<typeof getBillsByPurchaseOrderZohoId>> = [];
+  try {
+    relatedBills = purchaseOrder.zohoPurchaseOrderId
+      ? await getBillsByPurchaseOrderZohoId(purchaseOrder.zohoPurchaseOrderId)
+      : [];
+  } catch (error) {
+    console.error('Error loading related bills:', error);
+  }
 
   return (
     <div className="app-content">

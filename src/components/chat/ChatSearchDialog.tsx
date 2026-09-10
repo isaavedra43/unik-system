@@ -1,7 +1,17 @@
 'use client';
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Search, X, Loader2 } from 'lucide-react';
+import { Search, Loader2 } from 'lucide-react';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from '@/components/shadcn/dialog';
+import { Input } from '@/components/shadcn/input';
+import { ScrollArea } from '@/components/shadcn/scroll-area';
+import { cn } from '@/lib/utils';
 
 export interface ChatSearchDialogProps {
   open: boolean;
@@ -95,53 +105,75 @@ export function ChatSearchDialog({ open, onClose, onSelectChannel }: ChatSearchD
     }
   }, [open]);
 
-  if (!open) return null;
-
   return (
-    <div className="chat-dialog-overlay" onClick={handleClose}>
-      <div className="chat-dialog chat-search-dialog" onClick={(e) => e.stopPropagation()}>
-        <div className="chat-dialog-header">
-          <h2>Buscar mensajes</h2>
-          <button type="button" onClick={handleClose} aria-label="Cerrar">
-            <X size={20} />
-          </button>
-        </div>
+    <Dialog open={open} onOpenChange={(v) => !v && handleClose()}>
+      <DialogContent className="sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>Buscar mensajes</DialogTitle>
+          <DialogDescription>Busca en todas tus conversaciones</DialogDescription>
+        </DialogHeader>
 
-        <div className="chat-search-input">
-          <Search size={18} />
-          <input
+        <div className="relative">
+          <Search
+            size={18}
+            className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+          />
+          <Input
             ref={inputRef}
             type="text"
             placeholder="Escribe para buscar..."
             value={query}
             onChange={(e) => setQuery(e.target.value)}
+            className="pl-10"
           />
-          {loading && <Loader2 size={18} className="spin" />}
+          {loading && (
+            <Loader2
+              size={18}
+              className="absolute right-3 top-1/2 -translate-y-1/2 animate-spin text-muted-foreground"
+            />
+          )}
         </div>
 
-        <div className="chat-search-results">
-          {error && <div className="chat-dialog-error">{error}</div>}
-          {!error && !loading && query.trim().length >= 2 && results.length === 0 && (
-            <div className="chat-dialog-empty">No se encontraron mensajes</div>
-          )}
-          {!error && query.trim().length < 2 && (
-            <div className="chat-dialog-empty">Escribe al menos 2 caracteres</div>
-          )}
-          {results.map((result) => (
-            <button
-              key={result.messageId}
-              type="button"
-              className="chat-search-result"
-              onClick={() => handleSelect(result)}
-            >
-              <span className="chat-search-result-channel">{result.channelName}</span>
-              <span className="chat-search-result-sender">{result.senderName}</span>
-              <span className="chat-search-result-preview">{result.content.slice(0, 120)}</span>
-              <span className="chat-search-result-date">{formatDate(result.createdAt)}</span>
-            </button>
-          ))}
-        </div>
-      </div>
-    </div>
+        <ScrollArea className="max-h-[50vh]">
+          <div className="flex flex-col gap-1 pr-3">
+            {error && (
+              <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">
+                {error}
+              </div>
+            )}
+            {!error && !loading && query.trim().length >= 2 && results.length === 0 && (
+              <div className="py-8 text-center text-sm text-muted-foreground">
+                No se encontraron mensajes
+              </div>
+            )}
+            {!error && query.trim().length < 2 && (
+              <div className="py-8 text-center text-sm text-muted-foreground">
+                Escribe al menos 2 caracteres
+              </div>
+            )}
+            {results.map((result) => (
+              <button
+                key={result.messageId}
+                type="button"
+                className={cn(
+                  'flex flex-col gap-1 rounded-md p-3 text-left transition-colors',
+                  'hover:bg-accent focus:bg-accent focus:outline-none'
+                )}
+                onClick={() => handleSelect(result)}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-sm font-semibold text-primary">{result.channelName}</span>
+                  <span className="text-xs text-muted-foreground">{formatDate(result.createdAt)}</span>
+                </div>
+                <span className="text-xs font-medium text-foreground">{result.senderName}</span>
+                <span className="text-sm text-muted-foreground line-clamp-2">
+                  {result.content.slice(0, 120)}
+                </span>
+              </button>
+            ))}
+          </div>
+        </ScrollArea>
+      </DialogContent>
+    </Dialog>
   );
 }

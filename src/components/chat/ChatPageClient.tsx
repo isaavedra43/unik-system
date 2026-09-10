@@ -1,7 +1,15 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { Menu, X, Search, Bookmark, Pin, Calendar, BarChart3, Megaphone } from 'lucide-react';
+import { Menu, Search, Bookmark, Pin, Calendar, BarChart3, Megaphone } from 'lucide-react';
+import { Button } from '@/components/shadcn/button';
+import {
+  Sheet, SheetContent, SheetHeader, SheetTitle,
+} from '@/components/shadcn/sheet';
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+} from '@/components/shadcn/dropdown-menu';
+import { MoreVertical } from 'lucide-react';
 import type { CurrentUser } from '@/modules/auth/authorization';
 import { ChatSidebar } from './ChatSidebar';
 import { ChatConversation } from './ChatConversation';
@@ -97,7 +105,6 @@ export function ChatPageClient({ user }: ChatPageClientProps) {
     setActiveChannelId(id);
     setSidebarOpen(false);
     if (id) {
-      // Mark as read
       fetch(`/app/chat/api/channels/${id}/read`, { method: 'POST' }).catch(() => {});
     }
   };
@@ -108,107 +115,77 @@ export function ChatPageClient({ user }: ChatPageClientProps) {
     setRefreshKey((k) => k + 1);
   };
 
-  const handleRefresh = () => {
-    setRefreshKey((k) => k + 1);
-  };
-
-  const handleBack = () => {
-    setActiveChannelId(null);
-  };
+  const handleRefresh = () => setRefreshKey((k) => k + 1);
+  const handleBack = () => setActiveChannelId(null);
 
   return (
     <div className="chat-page">
-      {/* Mobile sidebar toggle (outside body so it sits on top) */}
-      <div className="chat-topbar">
-        <button
-          type="button"
-          className="chat-sidebar-toggle"
+      {/* Compact topbar */}
+      <div className="chat-topbar flex items-center gap-1 px-3 py-2 border-b border-border bg-background">
+        <Button
+          variant="ghost"
+          size="sm"
           onClick={() => setSidebarOpen(true)}
           aria-label="Ver conversaciones"
+          className="md:hidden relative"
         >
           <Menu size={18} />
-          <span>Conversaciones</span>
           {totalUnread > 0 && (
-            <span className="chat-sidebar-toggle-badge">
+            <span className="absolute -top-0.5 -right-0.5 inline-flex items-center justify-center rounded-full bg-primary text-primary-foreground text-[9px] font-bold min-w-[16px] h-4 px-1">
               {totalUnread > 99 ? '99+' : totalUnread}
             </span>
           )}
-        </button>
+        </Button>
 
-        <div className="chat-topbar-actions">
-          <button
-            type="button"
-            className="chat-topbar-btn"
-            onClick={() => setShowSearch(true)}
-            aria-label="Buscar mensajes"
-          >
+        <div className="flex-1" />
+
+        <div className="flex items-center gap-0.5">
+          <Button variant="ghost" size="icon-sm" onClick={() => setShowSearch(true)} aria-label="Buscar mensajes">
             <Search size={18} />
-          </button>
-          <button
-            type="button"
-            className="chat-topbar-btn"
-            onClick={() => setShowBookmarks(true)}
-            aria-label="Favoritos"
-          >
+          </Button>
+          <Button variant="ghost" size="icon-sm" onClick={() => setShowBookmarks(true)} aria-label="Favoritos">
             <Bookmark size={18} />
-          </button>
+          </Button>
           {activeChannelId && (
-            <button
-              type="button"
-              className="chat-topbar-btn"
-              onClick={() => setShowPinned(true)}
-              aria-label="Mensajes fijados"
-            >
+            <Button variant="ghost" size="icon-sm" onClick={() => setShowPinned(true)} aria-label="Mensajes fijados">
               <Pin size={18} />
-            </button>
+            </Button>
           )}
-          <button
-            type="button"
-            className="chat-topbar-btn"
-            onClick={() => setShowCalendar(true)}
-            aria-label="Calendario"
-          >
+          <Button variant="ghost" size="icon-sm" onClick={() => setShowCalendar(true)} aria-label="Calendario" className="hidden sm:inline-flex">
             <Calendar size={18} />
-          </button>
-          <button
-            type="button"
-            className="chat-topbar-btn"
-            onClick={() => setShowBroadcast(true)}
-            aria-label="Difundir mensaje"
-            title="Difundir a canales"
-          >
+          </Button>
+          <Button variant="ghost" size="icon-sm" onClick={() => setShowBroadcast(true)} aria-label="Difundir mensaje" className="hidden sm:inline-flex">
             <Megaphone size={18} />
-          </button>
-          <button
-            type="button"
-            className="chat-topbar-btn"
-            onClick={() => setShowStats(true)}
-            aria-label="Mis estadísticas"
-            title="Mis estadísticas"
-          >
+          </Button>
+          <Button variant="ghost" size="icon-sm" onClick={() => setShowStats(true)} aria-label="Mis estadísticas" className="hidden sm:inline-flex">
             <BarChart3 size={18} />
-          </button>
+          </Button>
+
+          {/* Overflow menu for small screens */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon-sm" aria-label="Más opciones" className="sm:hidden">
+                <MoreVertical size={18} />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => setShowCalendar(true)}>
+                <Calendar size={16} /> Calendario
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setShowBroadcast(true)}>
+                <Megaphone size={16} /> Difundir
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setShowStats(true)}>
+                <BarChart3 size={16} /> Mis estadísticas
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
 
       <div className="chat-page-body">
-        {/* Mobile backdrop */}
-        {sidebarOpen && (
-          <div
-            className="chat-sidebar-backdrop"
-            onClick={() => setSidebarOpen(false)}
-            aria-hidden="true"
-          />
-        )}
-
-        {/* Sidebar */}
-        <div className={`chat-sidebar-wrapper ${sidebarOpen ? 'open' : ''}`}>
-          <div className="chat-sidebar-header-mobile">
-            <span>Conversaciones</span>
-            <button type="button" onClick={() => setSidebarOpen(false)} aria-label="Cerrar">
-              <X size={20} />
-            </button>
-          </div>
+        {/* Desktop sidebar */}
+        <div className="chat-sidebar-wrapper hidden md:flex">
           <ChatSidebar
             activeId={activeChannelId}
             inbox={inbox}
@@ -216,6 +193,21 @@ export function ChatPageClient({ user }: ChatPageClientProps) {
             onChannelCreated={handleChannelCreated}
           />
         </div>
+
+        {/* Mobile sidebar as Sheet */}
+        <Sheet open={sidebarOpen} onOpenChange={setSidebarOpen}>
+          <SheetContent side="left" className="w-3/4 sm:max-w-xs p-0 gap-0">
+            <SheetHeader className="border-b border-border px-4 py-3">
+              <SheetTitle>Conversaciones</SheetTitle>
+            </SheetHeader>
+            <ChatSidebar
+              activeId={activeChannelId}
+              inbox={inbox}
+              onSelect={handleSelectChannel}
+              onChannelCreated={handleChannelCreated}
+            />
+          </SheetContent>
+        </Sheet>
 
         {/* Main conversation area */}
         <div className="chat-page-main">
@@ -262,9 +254,7 @@ export function ChatPageClient({ user }: ChatPageClientProps) {
       {showBroadcast && (
         <ChatBroadcastDialog
           onClose={() => setShowBroadcast(false)}
-          onSent={() => {
-            handleRefresh();
-          }}
+          onSent={() => handleRefresh()}
         />
       )}
     </div>

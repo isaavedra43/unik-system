@@ -1,7 +1,18 @@
 'use client';
 
 import React, { useState, useCallback } from 'react';
-import { X, Calendar } from 'lucide-react';
+import { Calendar } from 'lucide-react';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from '@/components/shadcn/dialog';
+import { Input } from '@/components/shadcn/input';
+import { Textarea } from '@/components/shadcn/textarea';
+import { Button } from '@/components/shadcn/button';
 
 export interface ChatEventCreatorProps {
   onCreate: (event: {
@@ -47,29 +58,25 @@ export function ChatEventCreator({ onCreate, onCancel }: ChatEventCreatorProps) 
   }, [title, description, startsAt, endsAt, location, onCreate]);
 
   return (
-    <div className="chat-dialog-overlay" onClick={onCancel}>
-      <div className="chat-dialog chat-event-creator" onClick={(e) => e.stopPropagation()}>
-        <div className="chat-dialog-header">
-          <h2>
-            <Calendar size={20} /> Crear evento
-          </h2>
-          <button type="button" onClick={onCancel} aria-label="Cerrar">
-            <X size={20} />
-          </button>
-        </div>
+    <Dialog open onOpenChange={(v) => !v && onCancel()}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Calendar size={18} /> Crear evento
+          </DialogTitle>
+          <DialogDescription>Crea un evento para esta conversación</DialogDescription>
+        </DialogHeader>
 
-        <div className="chat-event-creator-body">
-          <input
+        <div className="flex flex-col gap-4">
+          <Input
             type="text"
-            className="chat-event-title-input"
             placeholder="Título del evento"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             maxLength={200}
           />
 
-          <textarea
-            className="chat-event-desc-input"
+          <Textarea
             placeholder="Descripción (opcional)"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
@@ -77,43 +84,44 @@ export function ChatEventCreator({ onCreate, onCancel }: ChatEventCreatorProps) 
             maxLength={2000}
           />
 
-          <label className="chat-event-field-label">Inicio</label>
-          <input
-            type="datetime-local"
-            className="chat-event-starts-at"
-            value={startsAt}
-            onChange={(e) => setStartsAt(e.target.value)}
-          />
+          <div className="flex flex-col gap-1.5">
+            <label className="text-sm font-medium text-foreground">Inicio</label>
+            <Input
+              type="datetime-local"
+              value={startsAt}
+              onChange={(e) => setStartsAt(e.target.value)}
+            />
+          </div>
 
-          <label className="chat-event-field-label">Fin (opcional)</label>
-          <input
-            type="datetime-local"
-            className="chat-event-ends-at"
-            value={endsAt}
-            onChange={(e) => setEndsAt(e.target.value)}
-          />
+          <div className="flex flex-col gap-1.5">
+            <label className="text-sm font-medium text-foreground">Fin (opcional)</label>
+            <Input
+              type="datetime-local"
+              value={endsAt}
+              onChange={(e) => setEndsAt(e.target.value)}
+            />
+          </div>
 
-          <input
+          <Input
             type="text"
-            className="chat-event-location-input"
             placeholder="Ubicación (opcional)"
             value={location}
             onChange={(e) => setLocation(e.target.value)}
             maxLength={300}
           />
 
-          {error && <div className="chat-dialog-error">{error}</div>}
+          {error && (
+            <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">{error}</div>
+          )}
         </div>
 
-        <div className="chat-dialog-footer">
-          <button type="button" className="chat-event-cancel-btn" onClick={onCancel}>
+        <DialogFooter>
+          <Button variant="outline" onClick={onCancel}>
             Cancelar
-          </button>
-          <button type="button" className="chat-event-create-btn" onClick={handleCreate}>
-            Crear evento
-          </button>
-        </div>
-      </div>
-    </div>
+          </Button>
+          <Button onClick={handleCreate}>Crear evento</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

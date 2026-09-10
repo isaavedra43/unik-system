@@ -1,7 +1,21 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { X, Search, Users, Check } from 'lucide-react';
+import { Search, Users, Check, MessageCircle } from 'lucide-react';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from '@/components/shadcn/dialog';
+import { Tabs, TabsList, TabsTrigger } from '@/components/shadcn/tabs';
+import { Input } from '@/components/shadcn/input';
+import { Button } from '@/components/shadcn/button';
+import { Avatar, AvatarFallback } from '@/components/shadcn/avatar';
+import { ScrollArea } from '@/components/shadcn/scroll-area';
+import { cn } from '@/lib/utils';
 
 export interface ChatNewDialogProps {
   onClose: () => void;
@@ -103,42 +117,33 @@ export function ChatNewDialog({ onClose, onChannelCreated }: ChatNewDialogProps)
   }, [mode, selected, groupName, onChannelCreated]);
 
   return (
-    <div className="chat-dialog-overlay" onClick={onClose}>
-      <div className="chat-dialog" onClick={(e) => e.stopPropagation()}>
-        <div className="chat-dialog-header">
-          <h2>Nueva conversación</h2>
-          <button type="button" onClick={onClose} aria-label="Cerrar">
-            <X size={20} />
-          </button>
-        </div>
+    <Dialog open onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Nueva conversación</DialogTitle>
+          <DialogDescription>Inicia un mensaje directo o crea un grupo</DialogDescription>
+        </DialogHeader>
 
-        <div className="chat-dialog-tabs">
-          <button
-            type="button"
-            className={mode === 'dm' ? 'active' : ''}
-            onClick={() => {
-              setMode('dm');
-              setSelected([]);
-            }}
-          >
-            <MessageCircleIcon /> Mensaje directo
-          </button>
-          <button
-            type="button"
-            className={mode === 'group' ? 'active' : ''}
-            onClick={() => {
-              setMode('group');
-              setSelected([]);
-            }}
-          >
-            <Users size={16} /> Grupo
-          </button>
-        </div>
+        <Tabs
+          value={mode}
+          onValueChange={(v) => {
+            setMode(v as 'dm' | 'group');
+            setSelected([]);
+          }}
+        >
+          <TabsList className="grid w-full grid-cols-2">
+            <TabsTrigger value="dm">
+              <MessageCircle size={16} /> Mensaje directo
+            </TabsTrigger>
+            <TabsTrigger value="group">
+              <Users size={16} /> Grupo
+            </TabsTrigger>
+          </TabsList>
+        </Tabs>
 
         {mode === 'group' && (
-          <input
+          <Input
             type="text"
-            className="chat-dialog-input"
             placeholder="Nombre del grupo"
             value={groupName}
             onChange={(e) => setGroupName(e.target.value)}
@@ -146,101 +151,104 @@ export function ChatNewDialog({ onClose, onChannelCreated }: ChatNewDialogProps)
           />
         )}
 
-        <div className="chat-dialog-search">
-          <Search size={16} />
-          <input
+        <div className="relative">
+          <Search
+            size={18}
+            className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+          />
+          <Input
             type="text"
             placeholder="Buscar por nombre o usuario..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
+            className="pl-10"
             autoFocus
           />
         </div>
 
-        <div className="chat-dialog-list">
-          {results.length === 0 && search.trim() && (
-            <div className="chat-dialog-empty">No se encontraron usuarios</div>
-          )}
-          {results.length === 0 && !search.trim() && (
-            <div className="chat-dialog-empty">Escribe para buscar usuarios</div>
-          )}
-          {results.map((user) => {
-            const isSelected = selected.some((u) => u.id === user.id);
-            return (
-              <button
-                key={user.id}
-                type="button"
-                className={`chat-dialog-user ${isSelected ? 'selected' : ''}`}
-                onClick={() => toggleSelect(user)}
-              >
-                <div className="chat-dialog-user-avatar">
-                  {user.name.slice(0, 2).toUpperCase()}
-                  {user.status === 'online' && <span className="chat-sidebar-presence online" />}
-                </div>
-                <div className="chat-dialog-user-info">
-                  <div className="chat-dialog-user-name">{user.name}</div>
-                  <div className="chat-dialog-user-username">@{user.username}</div>
-                </div>
-                {isSelected && <Check size={18} className="chat-dialog-check" />}
-              </button>
-            );
-          })}
-        </div>
+        <ScrollArea className="max-h-[40vh]">
+          <div className="flex flex-col gap-1 pr-3">
+            {results.length === 0 && search.trim() && (
+              <div className="py-8 text-center text-sm text-muted-foreground">
+                No se encontraron usuarios
+              </div>
+            )}
+            {results.length === 0 && !search.trim() && (
+              <div className="py-8 text-center text-sm text-muted-foreground">
+                Escribe para buscar usuarios
+              </div>
+            )}
+            {results.map((user) => {
+              const isSelected = selected.some((u) => u.id === user.id);
+              return (
+                <button
+                  key={user.id}
+                  type="button"
+                  className={cn(
+                    'flex items-center gap-3 rounded-md p-2 text-left transition-colors',
+                    'hover:bg-accent focus:bg-accent focus:outline-none',
+                    isSelected && 'bg-accent'
+                  )}
+                  onClick={() => toggleSelect(user)}
+                >
+                  <div className="relative">
+                    <Avatar className="size-9">
+                      <AvatarFallback className="text-xs font-semibold">
+                        {user.name.slice(0, 2).toUpperCase()}
+                      </AvatarFallback>
+                    </Avatar>
+                    {user.status === 'online' && (
+                      <span className="absolute -bottom-0.5 -right-0.5 size-3 rounded-full bg-success ring-2 ring-background" />
+                    )}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium text-foreground truncate">{user.name}</div>
+                    <div className="text-xs text-muted-foreground truncate">@{user.username}</div>
+                  </div>
+                  {isSelected && <Check size={18} className="text-primary shrink-0" />}
+                </button>
+              );
+            })}
+          </div>
+        </ScrollArea>
 
         {selected.length > 0 && (
-          <div className="chat-dialog-selected">
+          <div className="flex flex-wrap gap-1.5">
             {selected.map((u) => (
-              <span key={u.id} className="chat-dialog-chip">
+              <span
+                key={u.id}
+                className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary"
+              >
                 {u.name}
                 <button
                   type="button"
                   onClick={() => toggleSelect(u)}
+                  className="hover:opacity-70"
                   aria-label={`Quitar ${u.name}`}
                 >
-                  <X size={12} />
+                  <span className="text-base leading-none">&times;</span>
                 </button>
               </span>
             ))}
           </div>
         )}
 
-        {error && <div className="chat-dialog-error">{error}</div>}
+        {error && (
+          <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">{error}</div>
+        )}
 
-        <div className="chat-dialog-footer">
-          <button type="button" className="chat-dialog-cancel" onClick={onClose}>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>
             Cancelar
-          </button>
-          <button
-            type="button"
-            className="chat-dialog-create"
+          </Button>
+          <Button
             disabled={loading || selected.length === 0}
             onClick={handleCreate}
           >
             {loading ? 'Creando...' : mode === 'dm' ? 'Iniciar chat' : 'Crear grupo'}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function MessageCircleIcon() {
-  return <MessageCircleIconInner />;
-}
-
-function MessageCircleIconInner() {
-  return (
-    <svg
-      width="16"
-      height="16"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
-    </svg>
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

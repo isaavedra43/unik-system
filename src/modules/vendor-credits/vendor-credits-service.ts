@@ -16,6 +16,20 @@ export interface VendorCreditsListResult {
   totalPages: number;
 }
 
+function isPrismaTableError(error: unknown): boolean {
+  if (error instanceof Error) {
+    const msg = error.message.toLowerCase();
+    return (
+      msg.includes('does not exist') ||
+      msg.includes('relation') ||
+      msg.includes('p2021') ||
+      msg.includes('the table') ||
+      msg.includes('no such table')
+    );
+  }
+  return false;
+}
+
 export async function getVendorCreditsWorkspace(options: {
   page?: number;
   pageSize?: number;
@@ -34,27 +48,43 @@ export async function getVendorCreditsWorkspace(options: {
       }
     : {};
 
-  const [rows, total] = await Promise.all([
-    prisma.vendorCredit.findMany({
-      where,
-      orderBy: { date: 'desc' },
-      skip: (page - 1) * pageSize,
-      take: pageSize,
-    }),
-    prisma.vendorCredit.count({ where }),
-  ]);
+  try {
+    const [rows, total] = await Promise.all([
+      prisma.vendorCredit.findMany({
+        where,
+        orderBy: { date: 'desc' },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+      prisma.vendorCredit.count({ where }),
+    ]);
 
-  return {
-    rows: rows.map(toVendorCreditListRow),
-    total,
-    page,
-    pageSize,
-    totalPages: Math.ceil(total / pageSize),
-  };
+    return {
+      rows: rows.map(toVendorCreditListRow),
+      total,
+      page,
+      pageSize,
+      totalPages: Math.ceil(total / pageSize),
+    };
+  } catch (error) {
+    if (isPrismaTableError(error)) {
+      console.error('VendorCredit table not available — migration may not be applied:', error);
+      return { rows: [], total: 0, page, pageSize, totalPages: 0 };
+    }
+    throw error;
+  }
 }
 
 export async function getVendorCreditById(id: string): Promise<VendorCreditDetail | null> {
-  const vendorCredit = await prisma.vendorCredit.findUnique({ where: { id } });
-  if (!vendorCredit) return null;
-  return toVendorCreditDetail(vendorCredit);
+  try {
+    const vendorCredit = await prisma.vendorCredit.findUnique({ where: { id } });
+    if (!vendorCredit) return null;
+    return toVendorCreditDetail(vendorCredit);
+  } catch (error) {
+    if (isPrismaTableError(error)) {
+      console.error('VendorCredit table not available — migration may not be applied:', error);
+      return null;
+    }
+    throw error;
+  }
 }

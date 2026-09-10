@@ -1,7 +1,15 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { X, Users, UserPlus, UserMinus, Trash2, Search } from 'lucide-react';
+import { Users, UserPlus, UserMinus, Trash2, Search } from 'lucide-react';
+import {
+  Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription,
+} from '@/components/shadcn/sheet';
+import { Input } from '@/components/shadcn/input';
+import { Button } from '@/components/shadcn/button';
+import { Avatar, AvatarFallback } from '@/components/shadcn/avatar';
+import { ScrollArea } from '@/components/shadcn/scroll-area';
+import { cn } from '@/lib/utils';
 import type { CurrentUser } from '@/modules/auth/authorization';
 import type { ChatChannelDTO } from '@/modules/chat/chat-events';
 
@@ -39,7 +47,6 @@ export function ChatGroupSettings({ channel, user, onClose, onRefresh }: ChatGro
         const res = await fetch(`/app/chat/api/users/search?q=${encodeURIComponent(search)}`);
         if (res.ok) {
           const json = await res.json();
-          // Filter out existing members
           const memberIds = new Set(channel.members.map((m) => m.userId));
           setSearchResults(json.data.filter((u: { id: string }) => !memberIds.has(u.id)));
         }
@@ -132,144 +139,176 @@ export function ChatGroupSettings({ channel, user, onClose, onRefresh }: ChatGro
   };
 
   return (
-    <div className="chat-settings-overlay" onClick={onClose}>
-      <div className="chat-settings-drawer" onClick={(e) => e.stopPropagation()}>
-        <div className="chat-settings-header">
-          <h2>Información</h2>
-          <button type="button" onClick={onClose} aria-label="Cerrar">
-            <X size={20} />
-          </button>
-        </div>
+    <Sheet open onOpenChange={(v) => !v && onClose()}>
+      <SheetContent side="right" className="w-full sm:max-w-md p-0 gap-0">
+        <SheetHeader className="border-b border-border px-4 py-3">
+          <SheetTitle>Información</SheetTitle>
+          <SheetDescription>
+            {isGroup ? 'Configuración del grupo' : 'Información de la conversación'}
+          </SheetDescription>
+        </SheetHeader>
 
-        <div className="chat-settings-body">
-          {/* Channel avatar */}
-          <div className="chat-settings-avatar">
-            {isGroup ? (
-              <Users size={36} />
-            ) : (
-              <span>
-                {channel.members
-                  .find((m) => m.userId !== user.id)
-                  ?.name.slice(0, 2)
-                  .toUpperCase()}
-              </span>
-            )}
-          </div>
-
-          {/* Name */}
-          {isGroup && isAdmin ? (
-            <div className="chat-settings-name-edit">
-              <input
-                type="text"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                maxLength={100}
-                placeholder="Nombre del grupo"
-              />
-              <button
-                type="button"
-                onClick={handleSaveName}
-                disabled={saving || name.trim() === channel.name}
-              >
-                {saving ? '...' : 'Guardar'}
-              </button>
-            </div>
-          ) : (
-            <div className="chat-settings-name">
-              {isGroup ? channel.name : channel.members.find((m) => m.userId !== user.id)?.name}
-            </div>
-          )}
-
-          {/* Members count */}
-          <div className="chat-settings-members-count">
-            {channel.members.length} {channel.members.length === 1 ? 'miembro' : 'miembros'}
-          </div>
-
-          {/* Add members (group only, admin only) */}
-          {isGroup && isAdmin && (
-            <div className="chat-settings-add">
-              <div className="chat-settings-search">
-                <Search size={16} />
-                <input
-                  type="text"
-                  placeholder="Agregar miembros..."
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                />
-              </div>
-              {searchResults.length > 0 && (
-                <div className="chat-settings-search-results">
-                  {searchResults.map((u) => (
-                    <button
-                      key={u.id}
-                      type="button"
-                      className="chat-settings-search-item"
-                      onClick={() => handleAddMember(u.id)}
-                    >
-                      <div className="chat-dialog-user-avatar">
-                        {u.name.slice(0, 2).toUpperCase()}
-                      </div>
-                      <div className="chat-dialog-user-info">
-                        <div className="chat-dialog-user-name">{u.name}</div>
-                        <div className="chat-dialog-user-username">@{u.username}</div>
-                      </div>
-                      <UserPlus size={18} />
-                    </button>
-                  ))}
+        <ScrollArea className="flex-1">
+          <div className="flex flex-col gap-4 p-4">
+            <div className="flex flex-col items-center gap-2">
+              <Avatar className="size-16">
+                <AvatarFallback className="text-xl font-semibold bg-primary text-primary-foreground">
+                  {isGroup ? (
+                    <Users size={28} />
+                  ) : (
+                    channel.members
+                      .find((m) => m.userId !== user.id)
+                      ?.name.slice(0, 2)
+                      .toUpperCase()
+                  )}
+                </AvatarFallback>
+              </Avatar>
+              {isGroup && isAdmin ? (
+                <div className="flex items-center gap-2 w-full">
+                  <Input
+                    type="text"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    maxLength={100}
+                    placeholder="Nombre del grupo"
+                  />
+                  <Button
+                    size="sm"
+                    onClick={handleSaveName}
+                    disabled={saving || name.trim() === channel.name}
+                  >
+                    {saving ? '...' : 'Guardar'}
+                  </Button>
+                </div>
+              ) : (
+                <div className="text-lg font-semibold text-foreground text-center">
+                  {isGroup
+                    ? channel.name
+                    : channel.members.find((m) => m.userId !== user.id)?.name}
                 </div>
               )}
+              <div className="text-sm text-muted-foreground">
+                {channel.members.length} {channel.members.length === 1 ? 'miembro' : 'miembros'}
+              </div>
             </div>
-          )}
 
-          {/* Members list */}
-          <div className="chat-settings-members">
-            {channel.members.map((m) => (
-              <div key={m.userId} className="chat-settings-member">
-                <div className="chat-settings-member-avatar">
-                  {m.name.slice(0, 2).toUpperCase()}
-                  {m.status === 'online' && <span className="chat-sidebar-presence online" />}
+            {isGroup && isAdmin && (
+              <div className="flex flex-col gap-2">
+                <div className="relative">
+                  <Search
+                    size={16}
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                  />
+                  <Input
+                    type="text"
+                    placeholder="Agregar miembros..."
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    className="pl-9"
+                  />
                 </div>
-                <div className="chat-settings-member-info">
-                  <div className="chat-settings-member-name">
-                    {m.name}
-                    {m.userId === user.id && <span className="chat-settings-you"> (tú)</span>}
+                {searchResults.length > 0 && (
+                  <div className="flex flex-col gap-1 rounded-md border border-border p-1">
+                    {searchResults.map((u) => (
+                      <button
+                        key={u.id}
+                        type="button"
+                        className={cn(
+                          'flex items-center gap-3 rounded-md p-2 text-left transition-colors',
+                          'hover:bg-accent focus:bg-accent focus:outline-none'
+                        )}
+                        onClick={() => handleAddMember(u.id)}
+                      >
+                        <Avatar className="size-8">
+                          <AvatarFallback className="text-xs font-semibold">
+                            {u.name.slice(0, 2).toUpperCase()}
+                          </AvatarFallback>
+                        </Avatar>
+                        <div className="flex-1 min-w-0">
+                          <div className="text-sm font-medium text-foreground truncate">{u.name}</div>
+                          <div className="text-xs text-muted-foreground truncate">@{u.username}</div>
+                        </div>
+                        <UserPlus size={18} className="text-primary shrink-0" />
+                      </button>
+                    ))}
                   </div>
-                  <div className="chat-settings-member-status">{getStatusLabel(m.status)}</div>
-                </div>
-                {m.role === 'owner' && <span className="chat-settings-role">admin</span>}
-                {isGroup && isAdmin && m.userId !== user.id && (
-                  <button
-                    type="button"
-                    className="chat-settings-remove"
-                    onClick={() => handleRemoveMember(m.userId)}
-                    aria-label={`Remover ${m.name}`}
-                  >
-                    <UserMinus size={16} />
-                  </button>
                 )}
               </div>
-            ))}
-          </div>
+            )}
 
-          {/* Actions */}
-          <div className="chat-settings-actions">
-            <button
-              type="button"
-              className="chat-settings-leave"
-              onClick={() => handleRemoveMember(user.id)}
-            >
-              {isGroup ? 'Salir del grupo' : 'Cerrar conversación'}
-            </button>
-            {isGroup && isOwner && (
-              <button type="button" className="chat-settings-delete" onClick={handleDeleteGroup}>
-                <Trash2 size={16} /> Eliminar grupo
-              </button>
+            <div className="flex flex-col gap-1">
+              {channel.members.map((m) => (
+                <div
+                  key={m.userId}
+                  className={cn(
+                    'flex items-center gap-3 rounded-md p-2',
+                    'transition-colors hover:bg-accent'
+                  )}
+                >
+                  <div className="relative">
+                    <Avatar className="size-9">
+                      <AvatarFallback className="text-xs font-semibold">
+                        {m.name.slice(0, 2).toUpperCase()}
+                      </AvatarFallback>
+                    </Avatar>
+                    {m.status === 'online' && (
+                      <span className="absolute -bottom-0.5 -right-0.5 size-3 rounded-full bg-success ring-2 ring-background" />
+                    )}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium text-foreground truncate">
+                      {m.name}
+                      {m.userId === user.id && (
+                        <span className="text-muted-foreground"> (tú)</span>
+                      )}
+                    </div>
+                    <div className="text-xs text-muted-foreground">{getStatusLabel(m.status)}</div>
+                  </div>
+                  {m.role === 'owner' && (
+                    <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">
+                      admin
+                    </span>
+                  )}
+                  {isGroup && isAdmin && m.userId !== user.id && (
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      onClick={() => handleRemoveMember(m.userId)}
+                      aria-label={`Remover ${m.name}`}
+                      className="text-muted-foreground hover:text-destructive shrink-0"
+                    >
+                      <UserMinus size={16} />
+                    </Button>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            <div className="flex flex-col gap-2 pt-2 border-t border-border">
+              <Button
+                variant="outline"
+                onClick={() => handleRemoveMember(user.id)}
+                className="w-full"
+              >
+                {isGroup ? 'Salir del grupo' : 'Cerrar conversación'}
+              </Button>
+              {isGroup && isOwner && (
+                <Button
+                  variant="destructive"
+                  onClick={handleDeleteGroup}
+                  className="w-full"
+                >
+                  <Trash2 size={16} /> Eliminar grupo
+                </Button>
+              )}
+            </div>
+
+            {error && (
+              <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">{error}</div>
             )}
           </div>
-
-          {error && <div className="chat-settings-error">{error}</div>}
-        </div>
-      </div>
-    </div>
+        </ScrollArea>
+      </SheetContent>
+    </Sheet>
   );
 }
