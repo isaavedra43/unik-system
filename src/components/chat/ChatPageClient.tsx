@@ -50,6 +50,7 @@ export function ChatPageClient({ user }: ChatPageClientProps) {
 
   // Presence heartbeat
   useEffect(() => {
+    if (typeof window === 'undefined') return;
     const heartbeat = () => {
       fetch('/app/chat/api/presence', {
         method: 'POST',

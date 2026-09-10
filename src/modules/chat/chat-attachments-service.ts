@@ -143,13 +143,17 @@ export async function getAttachmentForUser(
 
   if (!membership) return null;
 
-  const buffer = await chatStorage.read(attachment.storagePath);
-  return {
-    buffer,
-    fileName: attachment.fileName,
-    mimeType: attachment.mimeType,
-    sizeBytes: attachment.sizeBytes,
-  };
+  try {
+    const buffer = await chatStorage.read(attachment.storagePath);
+    return {
+      buffer,
+      fileName: attachment.fileName,
+      mimeType: attachment.mimeType,
+      sizeBytes: attachment.sizeBytes,
+    };
+  } catch {
+    return null;
+  }
 }
 
 export async function deleteAttachment(attachmentId: string): Promise<void> {
