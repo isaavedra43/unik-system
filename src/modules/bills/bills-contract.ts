@@ -5,6 +5,7 @@ export interface BillListRow {
   billNumber: string | null;
   status: string | null;
   date: string | null;
+  dueDate: string | null;
   vendorName: string | null;
   total: string | null;
   balance: string | null;
@@ -46,6 +47,7 @@ export function toBillListRow(b: {
   billNumber: string | null;
   status: string | null;
   date: Date | null;
+  dueDate: Date | null;
   vendorName: string | null;
   total: Prisma.Decimal | null;
   balance: Prisma.Decimal | null;
@@ -57,6 +59,7 @@ export function toBillListRow(b: {
     billNumber: b.billNumber,
     status: b.status,
     date: b.date?.toISOString() ?? null,
+    dueDate: b.dueDate?.toISOString() ?? null,
     vendorName: b.vendorName,
     total: dec(b.total),
     balance: dec(b.balance),

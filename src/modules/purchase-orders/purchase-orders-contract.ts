@@ -15,6 +15,7 @@ export interface PurchaseOrderListRow {
   purchaseOrderNumber: string | null;
   status: string | null;
   date: string | null;
+  dueDate: string | null;
   vendorName: string | null;
   total: string | null;
   balance: string | null;
@@ -60,6 +61,7 @@ export function toPurchaseOrderListRow(po: {
   purchaseOrderNumber: string | null;
   status: string | null;
   date: Date | null;
+  dueDate: Date | null;
   vendorName: string | null;
   total: Prisma.Decimal | null;
   balance: Prisma.Decimal | null;
@@ -71,6 +73,7 @@ export function toPurchaseOrderListRow(po: {
     purchaseOrderNumber: po.purchaseOrderNumber,
     status: po.status,
     date: po.date?.toISOString() ?? null,
+    dueDate: po.dueDate?.toISOString() ?? null,
     vendorName: po.vendorName,
     total: dec(po.total),
     balance: dec(po.balance),

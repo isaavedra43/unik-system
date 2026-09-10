@@ -3,28 +3,26 @@
 import React from 'react';
 import { EntityWorkspace } from '@/components/common/EntityWorkspace';
 import {
-  PRODUCT_COLUMNS,
-  PRODUCT_COLUMN_MAP,
-  PRODUCT_DEFAULT_COLUMN_ORDER,
-} from '@/modules/products/products-columns';
+  PAYMENT_COLUMNS,
+  PAYMENT_COLUMN_MAP,
+  PAYMENT_DEFAULT_COLUMN_ORDER,
+} from '@/modules/payments/payments-columns';
 import {
-  type ProductQueryState,
+  type PaymentQueryState,
   type TablePreferenceConfig,
-} from '@/modules/products/products-filters';
-import { type ProductsListResult, type ProductListRow } from '@/modules/products/products-service';
+} from '@/modules/payments/payments-filters';
+import { type PaymentsListResult, type PaymentListRow } from '@/modules/payments/payments-service';
 import {
   formatCurrency,
   formatDateOnly,
-  formatNumber,
-  getProductStatusConfig,
-  getProductStatusLabel,
-  getProductStatusOptions,
-} from '@/modules/products/products-helpers';
-import { ProductPreviewDrawer } from './ProductPreviewDrawer';
+  getPaymentStatusConfig,
+  getPaymentStatusLabel,
+  getPaymentStatusOptions,
+} from '@/modules/payments/payments-helpers';
+import { PaymentPreviewDrawer } from './PaymentPreviewDrawer';
 import { CurrentUser } from '@/modules/auth/authorization';
 import type {
   EntityColumnDefinition,
-  EntityListResult,
   EntityQueryState,
   StatusConfig,
   SyncStatus,
@@ -37,7 +35,7 @@ import type {
   ExportAction,
 } from '@/modules/shared/entity-workspace-types';
 
-export interface ProductsWorkspaceProps {
+export interface PaymentsWorkspaceProps {
   user: CurrentUser;
   tableKey: string;
   entityLabel: string;
@@ -47,8 +45,8 @@ export interface ProductsWorkspaceProps {
   permissionExport: string;
   permissionWatch: string;
   permissionShareViews: string;
-  initialData: ProductsListResult;
-  initialQuery: ProductQueryState;
+  initialData: PaymentsListResult;
+  initialQuery: PaymentQueryState;
   preference: TablePreferenceConfig;
   views: { privateViews: TableViewRow[]; sharedViews: TableViewRow[] };
   defaultViewId: string | null;
@@ -68,7 +66,7 @@ export interface ProductsWorkspaceProps {
 }
 
 function StatusCell({ value, label }: { value: string | null; label: string }) {
-  const config = getProductStatusConfig(value);
+  const config = getPaymentStatusConfig(value);
   if (!value) {
     return (
       <span className="so-status-cell">
@@ -85,44 +83,42 @@ function StatusCell({ value, label }: { value: string | null; label: string }) {
   );
 }
 
-function renderCell(row: ProductListRow, column: EntityColumnDefinition): React.ReactNode {
+function renderCell(row: PaymentListRow, column: EntityColumnDefinition): React.ReactNode {
   const value = (row as unknown as Record<string, unknown>)[column.id];
-  if (value === null || value === undefined) return '—';
   if (column.formatter === 'currency') {
     return (
       <span style={{ fontVariantNumeric: 'tabular-nums', textAlign: 'right', display: 'block' }}>
-        {formatCurrency(value as string | number, row.currencyCode)}
+        {formatCurrency(value as string | null, row.currencyCode)}
       </span>
     );
   }
   if (column.formatter === 'date') {
-    return formatDateOnly(value as string | Date);
+    return formatDateOnly(value as string | null);
   }
   if (column.formatter === 'statusDot') {
     return <StatusCell value={value as string | null} label={column.label} />;
   }
-  if (column.formatter === 'boolean') {
-    return value === true ? 'Sí' : value === false ? 'No' : '—';
-  }
-  if (column.type === 'number') {
-    return formatNumber(value as string | number);
-  }
+  if (value === null || value === undefined) return '—';
   return String(value);
 }
 
 function getStatusConfigAdapter(value: string | null): StatusConfig {
-  const config = getProductStatusConfig(value);
+  const config = getPaymentStatusConfig(value);
   return { label: config.label, tone: config.tone };
 }
 
-export function ProductsWorkspace(props: ProductsWorkspaceProps) {
+export function PaymentsWorkspace(props: PaymentsWorkspaceProps) {
+  // EntityQueryState expects `search` as a required string; PaymentQueryState
+  // allows it to be optional, so normalize it here. Filter rule values are
+  // always strings at runtime (deserialized from JSON), so the Date-typed
+  // union in the Zod schema is structurally compatible via this cast.
   const initialQuery = {
     ...props.initialQuery,
     search: props.initialQuery.search ?? '',
   } as unknown as EntityQueryState;
 
   return (
-    <EntityWorkspace<ProductListRow>
+    <EntityWorkspace<PaymentListRow>
       user={props.user}
       tableKey={props.tableKey}
       entityLabel={props.entityLabel}
@@ -132,7 +128,7 @@ export function ProductsWorkspace(props: ProductsWorkspaceProps) {
       permissionExport={props.permissionExport}
       permissionWatch={props.permissionWatch}
       permissionShareViews={props.permissionShareViews}
-      initialData={props.initialData as unknown as EntityListResult<ProductListRow>}
+      initialData={props.initialData}
       initialQuery={initialQuery}
       preference={props.preference}
       views={props.views}
@@ -143,17 +139,17 @@ export function ProductsWorkspace(props: ProductsWorkspaceProps) {
       canWatch={props.canWatch}
       canShareViews={props.canShareViews}
       initialSyncStatus={props.initialSyncStatus}
-      columns={PRODUCT_COLUMNS}
-      columnMap={PRODUCT_COLUMN_MAP}
-      defaultColumnOrder={PRODUCT_DEFAULT_COLUMN_ORDER}
+      columns={PAYMENT_COLUMNS}
+      columnMap={PAYMENT_COLUMN_MAP}
+      defaultColumnOrder={PAYMENT_DEFAULT_COLUMN_ORDER}
       renderCell={renderCell}
       getStatusConfig={getStatusConfigAdapter}
-      getStatusLabel={getProductStatusLabel}
-      getStatusOptions={getProductStatusOptions}
+      getStatusLabel={getPaymentStatusLabel}
+      getStatusOptions={getPaymentStatusOptions}
       formatCurrency={formatCurrency}
       formatDateOnly={formatDateOnly}
-      nameField="name"
-      searchPlaceholder="Buscar productos..."
+      nameField="paymentNumber"
+      searchPlaceholder="Buscar por folio, cliente, referencia..."
       savePreferenceAction={props.savePreferenceAction}
       resetPreferenceAction={props.resetPreferenceAction}
       createViewAction={props.createViewAction}
@@ -161,8 +157,8 @@ export function ProductsWorkspace(props: ProductsWorkspaceProps) {
       unwatchAction={props.unwatchAction}
       bulkWatchAction={props.bulkWatchAction}
       exportAction={props.exportAction}
-      renderPreviewDrawer={({ entityId, ...drawerProps }) => (
-        <ProductPreviewDrawer {...drawerProps} productId={entityId} />
+      renderPreviewDrawer={(drawerProps) => (
+        <PaymentPreviewDrawer {...drawerProps} />
       )}
     />
   );

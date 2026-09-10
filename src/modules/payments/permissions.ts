@@ -19,6 +19,12 @@ export const PAYMENTS_PERMISSIONS: PermissionDefinition[] = [
     label: 'Seguir pagos',
     description: 'Permite marcar pagos para recibir notificaciones cuando cambien',
   },
+  {
+    key: 'payments.share_views',
+    group: 'Pagos',
+    label: 'Compartir vistas de pagos',
+    description: 'Permite compartir vistas guardadas con otros usuarios de UNIK',
+  },
 ];
 
 export const PAYMENT_ENTITY_TYPE = 'customer_payment';

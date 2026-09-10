@@ -45,3 +45,24 @@ export async function GET(request: Request) {
   const result = await getProductsWorkspace(query);
   return NextResponse.json(result);
 }
+
+export async function POST(request: Request) {
+  const session = await getCurrentSession();
+  if (!session) {
+    return NextResponse.json({ error: 'No autenticado' }, { status: 401 });
+  }
+  if (!session.user.isSuperAdmin && !session.user.permissionKeys.includes('products.view')) {
+    return NextResponse.json({ error: 'Sin permiso' }, { status: 403 });
+  }
+
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: 'Cuerpo inválido' }, { status: 400 });
+  }
+
+  const query = productQueryStateSchema.parse(body);
+  const result = await getProductsWorkspace(query);
+  return NextResponse.json(result);
+}

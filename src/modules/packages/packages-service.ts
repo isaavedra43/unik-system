@@ -12,7 +12,7 @@ import {
 } from './packages-filters';
 import { toPackageListRow, toPackageDetail } from './packages-contract';
 import type { PackageListRow, PackageDetail } from './packages-contract';
-import { formatCurrency, formatDateOnly, getPackageStatusConfig } from './packages-helpers';
+import { formatDateOnly, getPackageStatusConfig } from './packages-helpers';
 
 const MIN_PAGE = 1;
 const MAX_EXPORT_ROWS = 50_000;

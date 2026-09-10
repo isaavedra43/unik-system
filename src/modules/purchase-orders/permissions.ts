@@ -19,6 +19,12 @@ export const PURCHASE_ORDERS_PERMISSIONS: PermissionDefinition[] = [
     label: 'Seguir órdenes de compra',
     description: 'Permite marcar órdenes de compra para recibir notificaciones cuando cambien',
   },
+  {
+    key: 'purchase_orders.share_views',
+    group: 'Órdenes de Compra',
+    label: 'Compartir vistas de órdenes de compra',
+    description: 'Permite compartir vistas guardadas con otros usuarios de UNIK',
+  },
 ];
 
 export const PURCHASE_ORDER_ENTITY_TYPE = 'purchase_order';

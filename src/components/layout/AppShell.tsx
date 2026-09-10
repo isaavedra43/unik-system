@@ -10,7 +10,7 @@ import { DropdownMenu } from '@/components/ui/composite';
 import { ChevronDown, Home, LogOut, Menu, Shield, Users } from '@/components/ui/icons';
 import {
   Bell, Bot, ShoppingCart, Plug, MessageCircle, MessageSquare, X,
-  Package, FileText, Boxes, Users as UsersIcon, UserCog, Truck,
+  FileText, Boxes, Users as UsersIcon, UserCog, Truck,
   CreditCard, Receipt, Wallet,
 } from 'lucide-react';
 import { AssistantWidget } from '@/components/assistant/AssistantWidget';
@@ -336,11 +336,11 @@ function buildBreadcrumbs(pathname: string): { label: string; href?: string }[] 
     ];
   }
   if (pathname === '/app/contacts/vendors') {
-    return [{ label: 'Inventario' }, { label: 'Proveedores' }];
+    return [{ label: 'Compras' }, { label: 'Proveedores' }];
   }
   if (pathname.startsWith('/app/contacts/vendors/')) {
     return [
-      { label: 'Inventario' },
+      { label: 'Compras' },
       { label: 'Proveedores', href: '/app/contacts/vendors' },
       { label: 'Detalle' },
     ];
@@ -356,62 +356,62 @@ function buildBreadcrumbs(pathname: string): { label: string; href?: string }[] 
     ];
   }
   if (pathname === '/app/packages') {
-    return [{ label: 'Envíos' }, { label: 'Paquetes' }];
+    return [{ label: 'Inventario' }, { label: 'Paquetes' }];
   }
   if (pathname.startsWith('/app/packages/')) {
     return [
-      { label: 'Envíos' },
+      { label: 'Inventario' },
       { label: 'Paquetes', href: '/app/packages' },
       { label: 'Detalle' },
     ];
   }
   if (pathname === '/app/invoices') {
-    return [{ label: 'Facturación' }, { label: 'Facturas' }];
+    return [{ label: 'Ventas' }, { label: 'Facturas' }];
   }
   if (pathname.startsWith('/app/invoices/')) {
     return [
-      { label: 'Facturación' },
+      { label: 'Ventas' },
       { label: 'Facturas', href: '/app/invoices' },
       { label: 'Detalle' },
     ];
   }
   if (pathname === '/app/payments') {
-    return [{ label: 'Facturación' }, { label: 'Pagos' }];
+    return [{ label: 'Ventas' }, { label: 'Pagos' }];
   }
   if (pathname.startsWith('/app/payments/')) {
     return [
-      { label: 'Facturación' },
+      { label: 'Ventas' },
       { label: 'Pagos', href: '/app/payments' },
       { label: 'Detalle' },
     ];
   }
   if (pathname === '/app/purchase-orders') {
-    return [{ label: 'Compras' }, { label: 'Órdenes de Compra' }];
+    return [{ label: 'Compras' }, { label: 'Órdenes de compra' }];
   }
   if (pathname.startsWith('/app/purchase-orders/')) {
     return [
       { label: 'Compras' },
-      { label: 'Órdenes de Compra', href: '/app/purchase-orders' },
+      { label: 'Órdenes de compra', href: '/app/purchase-orders' },
       { label: 'Detalle' },
     ];
   }
   if (pathname === '/app/bills') {
-    return [{ label: 'Compras' }, { label: 'Bills' }];
+    return [{ label: 'Compras' }, { label: 'Facturas de compra' }];
   }
   if (pathname.startsWith('/app/bills/')) {
     return [
       { label: 'Compras' },
-      { label: 'Bills', href: '/app/bills' },
+      { label: 'Facturas de compra', href: '/app/bills' },
       { label: 'Detalle' },
     ];
   }
   if (pathname === '/app/vendor-credits') {
-    return [{ label: 'Compras' }, { label: 'Créditos de Proveedor' }];
+    return [{ label: 'Compras' }, { label: 'Créditos de proveedor' }];
   }
   if (pathname.startsWith('/app/vendor-credits/')) {
     return [
       { label: 'Compras' },
-      { label: 'Créditos de Proveedor', href: '/app/vendor-credits' },
+      { label: 'Créditos de proveedor', href: '/app/vendor-credits' },
       { label: 'Detalle' },
     ];
   }
@@ -458,39 +458,6 @@ export default function AppShell({ user, children }: AppShellProps) {
           icon: <UsersIcon size={18} />,
           visible: user.permissionKeys.includes('customers.view') || user.isSuperAdmin,
         },
-      ],
-    },
-    {
-      title: 'Inventario',
-      items: [
-        {
-          href: '/app/contacts/vendors',
-          label: 'Proveedores',
-          icon: <UserCog size={18} />,
-          visible: user.permissionKeys.includes('vendors.view') || user.isSuperAdmin,
-        },
-        {
-          href: '/app/products',
-          label: 'Productos',
-          icon: <Boxes size={18} />,
-          visible: user.permissionKeys.includes('products.view') || user.isSuperAdmin,
-        },
-      ],
-    },
-    {
-      title: 'Envíos',
-      items: [
-        {
-          href: '/app/packages',
-          label: 'Paquetes',
-          icon: <Truck size={18} />,
-          visible: user.permissionKeys.includes('packages.view') || user.isSuperAdmin,
-        },
-      ],
-    },
-    {
-      title: 'Facturación',
-      items: [
         {
           href: '/app/invoices',
           label: 'Facturas',
@@ -506,8 +473,31 @@ export default function AppShell({ user, children }: AppShellProps) {
       ],
     },
     {
+      title: 'Inventario',
+      items: [
+        {
+          href: '/app/products',
+          label: 'Productos',
+          icon: <Boxes size={18} />,
+          visible: user.permissionKeys.includes('products.view') || user.isSuperAdmin,
+        },
+        {
+          href: '/app/packages',
+          label: 'Paquetes',
+          icon: <Truck size={18} />,
+          visible: user.permissionKeys.includes('packages.view') || user.isSuperAdmin,
+        },
+      ],
+    },
+    {
       title: 'Compras',
       items: [
+        {
+          href: '/app/contacts/vendors',
+          label: 'Proveedores',
+          icon: <UserCog size={18} />,
+          visible: user.permissionKeys.includes('vendors.view') || user.isSuperAdmin,
+        },
         {
           href: '/app/purchase-orders',
           label: 'Órdenes de compra',
@@ -516,7 +506,7 @@ export default function AppShell({ user, children }: AppShellProps) {
         },
         {
           href: '/app/bills',
-          label: 'Bills',
+          label: 'Facturas de compra',
           icon: <Receipt size={18} />,
           visible: user.permissionKeys.includes('bills.view') || user.isSuperAdmin,
         },

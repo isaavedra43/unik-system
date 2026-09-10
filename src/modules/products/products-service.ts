@@ -12,7 +12,7 @@ import {
 } from './products-filters';
 import { toProductListRow, toProductDetail } from './products-contract';
 import type { ProductListRow, ProductDetail } from './products-contract';
-import { formatCurrency, formatDateOnly, getProductStatusConfig, formatNumber } from './products-helpers';
+import { formatCurrency, formatDateOnly, getProductStatusConfig } from './products-helpers';
 
 const MIN_PAGE = 1;
 const MAX_EXPORT_ROWS = 50_000;
