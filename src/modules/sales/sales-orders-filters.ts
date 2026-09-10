@@ -35,11 +35,11 @@ export const DATE_OPERATORS = ['equals', 'before', 'after', 'between'] as const;
 
 export const BOOLEAN_OPERATORS = ['equals'] as const;
 
-export type TextOperator = (typeof TEXT_OPERATORS)[number];
-export type SelectOperator = (typeof SELECT_OPERATORS)[number];
-export type NumberOperator = (typeof NUMBER_OPERATORS)[number];
-export type DateOperator = (typeof DATE_OPERATORS)[number];
-export type BooleanOperator = (typeof BOOLEAN_OPERATORS)[number];
+type TextOperator = (typeof TEXT_OPERATORS)[number];
+type SelectOperator = (typeof SELECT_OPERATORS)[number];
+type NumberOperator = (typeof NUMBER_OPERATORS)[number];
+type DateOperator = (typeof DATE_OPERATORS)[number];
+type BooleanOperator = (typeof BOOLEAN_OPERATORS)[number];
 
 export type FilterOperator =
   TextOperator | SelectOperator | NumberOperator | DateOperator | BooleanOperator;
@@ -127,7 +127,7 @@ const booleanFilterSchema = z.object({
   value: z.boolean().optional(),
 });
 
-export const salesOrderFilterRuleSchema = z.union([
+const salesOrderFilterRuleSchema = z.union([
   textFilterSchema,
   selectFilterSchema,
   numberFilterSchema,
@@ -135,7 +135,6 @@ export const salesOrderFilterRuleSchema = z.union([
   booleanFilterSchema,
 ]);
 
-export type SalesOrderFilterRule = z.infer<typeof salesOrderFilterRuleSchema>;
 
 export const salesOrderFilterGroupSchema = z.object({
   logic: z.enum(['AND', 'OR']).default('AND'),
@@ -145,14 +144,13 @@ export const salesOrderFilterGroupSchema = z.object({
 export type SalesOrderFilterGroup = z.infer<typeof salesOrderFilterGroupSchema>;
 
 /** Sort rule: field + direction. */
-export const salesOrderSortRuleSchema = z.object({
+const salesOrderSortRuleSchema = z.object({
   field: z.string().refine((f) => SALES_ORDER_SORTABLE_FIELDS.has(f)),
   direction: z.enum(['asc', 'desc']),
 });
 
-export type SalesOrderSortRule = z.infer<typeof salesOrderSortRuleSchema>;
 
-export const salesOrderSortSchema = z.array(salesOrderSortRuleSchema).default([]);
+const salesOrderSortSchema = z.array(salesOrderSortRuleSchema).default([]);
 
 export type SalesOrderSort = z.infer<typeof salesOrderSortSchema>;
 
@@ -168,7 +166,7 @@ export const salesOrderQueryStateSchema = z.object({
 export type SalesOrderQueryState = z.output<typeof salesOrderQueryStateSchema>;
 
 /** Presentation state (persisted in UserTablePreference, NOT in URL). */
-export const salesOrderPresentationStateSchema = z.object({
+const salesOrderPresentationStateSchema = z.object({
   version: z.literal(1).default(1),
   columnOrder: z.array(z.string()).default([]),
   columnVisibility: z.record(z.boolean()).default({}),
@@ -183,7 +181,6 @@ export const salesOrderPresentationStateSchema = z.object({
   pageSize: z.number().int().min(1).max(500).default(50),
 });
 
-export type SalesOrderPresentationState = z.output<typeof salesOrderPresentationStateSchema>;
 
 /** Saved view config: combines query + presentation. */
 export const salesOrderViewConfigSchema = z.object({
@@ -192,7 +189,6 @@ export const salesOrderViewConfigSchema = z.object({
   presentation: salesOrderPresentationStateSchema,
 });
 
-export type SalesOrderViewConfig = z.output<typeof salesOrderViewConfigSchema>;
 
 /** Generic table preference config (same shape as presentation state). */
 export const tablePreferenceConfigSchema = z.object({

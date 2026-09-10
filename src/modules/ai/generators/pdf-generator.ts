@@ -26,7 +26,7 @@ export interface PdfSection {
   rows: Record<string, unknown>[];
 }
 
-export interface PdfReportOptions {
+interface PdfReportOptions {
   title: string;
   subtitle?: string;
   author?: string;

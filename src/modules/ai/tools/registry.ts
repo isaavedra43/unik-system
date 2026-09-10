@@ -4,7 +4,7 @@ import { zodToJsonSchema } from './zod-to-json-schema';
 
 export type ToolCategory = 'sales' | 'system' | 'export' | 'finance' | 'inventory';
 
-export interface ToolDefinition {
+interface ToolDefinition {
   name: string;
   description: string;
   parameters: ZodType<unknown>;
@@ -23,7 +23,7 @@ export function registerTool(def: ToolDefinition): void {
   registry.set(def.name, def);
 }
 
-export function getTool(name: string): ToolDefinition | undefined {
+function getTool(name: string): ToolDefinition | undefined {
   return registry.get(name);
 }
 
@@ -66,7 +66,7 @@ export function toOpenAiTools(
   }));
 }
 
-export interface ToolExecutionResult {
+interface ToolExecutionResult {
   success: boolean;
   result?: unknown;
   error?: string;

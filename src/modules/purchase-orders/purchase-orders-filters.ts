@@ -90,7 +90,7 @@ const booleanFilterSchema = z.object({
   value: z.boolean().optional(),
 });
 
-export const purchaseOrderFilterRuleSchema = z.union([
+const purchaseOrderFilterRuleSchema = z.union([
   textFilterSchema,
   selectFilterSchema,
   numberFilterSchema,
@@ -98,7 +98,6 @@ export const purchaseOrderFilterRuleSchema = z.union([
   booleanFilterSchema,
 ]);
 
-export type PurchaseOrderFilterRule = z.infer<typeof purchaseOrderFilterRuleSchema>;
 
 export const purchaseOrderFilterGroupSchema = z.object({
   logic: z.enum(['AND', 'OR']).default('AND'),
@@ -107,14 +106,13 @@ export const purchaseOrderFilterGroupSchema = z.object({
 
 export type PurchaseOrderFilterGroup = z.infer<typeof purchaseOrderFilterGroupSchema>;
 
-export const purchaseOrderSortRuleSchema = z.object({
+const purchaseOrderSortRuleSchema = z.object({
   field: z.string().refine((f) => PURCHASE_ORDER_SORTABLE_FIELDS.has(f)),
   direction: z.enum(['asc', 'desc']),
 });
 
-export type PurchaseOrderSortRule = z.infer<typeof purchaseOrderSortRuleSchema>;
 
-export const purchaseOrderSortSchema = z.array(purchaseOrderSortRuleSchema).default([]);
+const purchaseOrderSortSchema = z.array(purchaseOrderSortRuleSchema).default([]);
 
 export type PurchaseOrderSort = z.infer<typeof purchaseOrderSortSchema>;
 

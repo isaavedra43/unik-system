@@ -6,13 +6,6 @@
  * BigInt — everything is string-encoded).
  */
 
-export interface ChatUserDTO {
-  id: string;
-  name: string;
-  username: string;
-  email: string | null;
-}
-
 export interface ChatAttachmentDTO {
   id: string;
   fileName: string;
@@ -30,13 +23,13 @@ export interface ChatReactionDTO {
   userName: string;
 }
 
-export interface ChatLocationDTO {
+interface ChatLocationDTO {
   latitude: number;
   longitude: number;
   label: string | null;
 }
 
-export interface ChatPollOptionDTO {
+interface ChatPollOptionDTO {
   id: string;
   text: string;
   voteCount: number;

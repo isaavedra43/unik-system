@@ -10,7 +10,7 @@ import { AuthorizationError, CurrentUser } from '@/modules/auth/authorization';
 
 export const SALES_ORDER_ENTITY_TYPE = 'sales_order';
 
-export interface EntityWatchRow {
+interface EntityWatchRow {
   id: string;
   userId: string;
   entityType: string;

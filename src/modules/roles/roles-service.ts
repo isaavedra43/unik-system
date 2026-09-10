@@ -80,7 +80,7 @@ export async function getRoleById(roleId: string): Promise<RoleDetail | null> {
  * Generates an immutable role key from the visible name:
  * lowercase, no accents, [a-z0-9_] only.
  */
-export function slugifyRoleKey(name: string): string {
+function slugifyRoleKey(name: string): string {
   return name
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
@@ -91,7 +91,7 @@ export function slugifyRoleKey(name: string): string {
     .slice(0, 64);
 }
 
-export interface CreateRoleInput {
+interface CreateRoleInput {
   name: string;
   description?: string | null;
 }
@@ -133,7 +133,7 @@ export async function createRole(actor: CurrentUser, input: CreateRoleInput): Pr
   return role.id;
 }
 
-export interface UpdateRoleInput {
+interface UpdateRoleInput {
   name: string;
   description?: string | null;
 }

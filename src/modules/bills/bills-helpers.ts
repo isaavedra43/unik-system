@@ -44,12 +44,6 @@ export function getBillStatusConfig(raw: string | null | undefined): BillStatusC
   );
 }
 
-/** Returns the shared StatusConfig shape expected by EntityWorkspace. */
-export function getBillStatusConfigShared(raw: string | null | undefined): StatusConfig {
-  const config = getBillStatusConfig(raw);
-  return { label: config.label, tone: config.tone };
-}
-
 export function getBillStatusLabel(raw: string | null | undefined): string {
   return getBillStatusConfig(raw).label;
 }

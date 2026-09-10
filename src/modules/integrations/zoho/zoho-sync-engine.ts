@@ -82,11 +82,6 @@ export interface EntitySummary {
   modifiedAt: Date;
 }
 
-export interface ListPageResult {
-  records: EntitySummary[];
-  hasMore: boolean;
-}
-
 /**
  * Each entity (contact, item, package, invoice) provides an adapter that
  * encapsulates only the entity-specific concerns. The engine handles

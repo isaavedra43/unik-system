@@ -80,7 +80,7 @@ const booleanFilterSchema = z.object({
   value: z.boolean().optional(),
 });
 
-export const paymentFilterRuleSchema = z.union([
+const paymentFilterRuleSchema = z.union([
   textFilterSchema,
   selectFilterSchema,
   numberFilterSchema,
@@ -88,7 +88,6 @@ export const paymentFilterRuleSchema = z.union([
   booleanFilterSchema,
 ]);
 
-export type PaymentFilterRule = z.infer<typeof paymentFilterRuleSchema>;
 
 export const paymentFilterGroupSchema = z.object({
   logic: z.enum(['AND', 'OR']).default('AND'),
@@ -97,14 +96,13 @@ export const paymentFilterGroupSchema = z.object({
 
 export type PaymentFilterGroup = z.infer<typeof paymentFilterGroupSchema>;
 
-export const paymentSortRuleSchema = z.object({
+const paymentSortRuleSchema = z.object({
   field: z.string().refine((f) => PAYMENT_SORTABLE_FIELDS.has(f)),
   direction: z.enum(['asc', 'desc']),
 });
 
-export type PaymentSortRule = z.infer<typeof paymentSortRuleSchema>;
 
-export const paymentSortSchema = z.array(paymentSortRuleSchema).default([]);
+const paymentSortSchema = z.array(paymentSortRuleSchema).default([]);
 
 export type PaymentSort = z.infer<typeof paymentSortSchema>;
 

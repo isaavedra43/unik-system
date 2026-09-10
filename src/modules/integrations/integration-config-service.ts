@@ -171,7 +171,7 @@ export async function isIntegrationEnabled(
 }
 
 /** Invalidates the in-memory cache so the next read hits the DB. */
-export function invalidateIntegrationConfigCache(source?: IntegrationSourceKey): void {
+function invalidateIntegrationConfigCache(source?: IntegrationSourceKey): void {
   if (source) {
     cache.delete(source);
   } else {

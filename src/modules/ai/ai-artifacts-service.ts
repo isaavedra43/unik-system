@@ -15,9 +15,9 @@ import { Prisma } from '@prisma/client';
  * up automatically.
  */
 
-export type ArtifactType = 'pdf' | 'xlsx' | 'csv' | 'table' | 'chart' | 'image';
+type ArtifactType = 'pdf' | 'xlsx' | 'csv' | 'table' | 'chart' | 'image';
 
-export interface ArtifactMeta {
+interface ArtifactMeta {
   title: string;
   description?: string;
   filename?: string;
@@ -37,7 +37,7 @@ export interface ArtifactMeta {
   [key: string]: unknown;
 }
 
-export interface CreateArtifactInput {
+interface CreateArtifactInput {
   conversationId: string;
   messageId?: string;
   type: ArtifactType;

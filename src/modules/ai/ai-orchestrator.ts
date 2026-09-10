@@ -19,14 +19,14 @@ import { validateInput, validateOutput } from './ai-guardrails';
 import { processAttachment, type AttachmentResult } from './ai-attachments-service';
 import { prisma } from '@/lib/prisma';
 
-export interface OrchestratorAttachment {
+interface OrchestratorAttachment {
   id: string;
   fileName: string;
   mimeType: string;
   storagePath: string;
 }
 
-export interface OrchestratorInput {
+interface OrchestratorInput {
   conversationId: string;
   message: string;
   actor: CurrentUser;
@@ -37,7 +37,7 @@ export interface OrchestratorInput {
   attachments?: OrchestratorAttachment[];
 }
 
-export interface OrchestratorEvent {
+interface OrchestratorEvent {
   type: 'token' | 'tool_call_start' | 'tool_call_end' | 'artifact' | 'done' | 'error';
   data?: unknown;
 }

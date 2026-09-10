@@ -33,7 +33,7 @@ const PRICING: Record<string, { prompt: number; completion: number }> = {
   'gemini-2.0-flash': { prompt: 0.1, completion: 0.4 },
 };
 
-export function estimateCost(
+function estimateCost(
   promptTokens: number,
   completionTokens: number,
   deployment = 'gpt-4o'

@@ -6,7 +6,7 @@ type PrismaExecutor = Omit<
   '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'
 >;
 
-export interface AiApiCallInput {
+interface AiApiCallInput {
   userId?: string | null;
   conversationId?: string | null;
   deployment: string;
@@ -19,7 +19,7 @@ export interface AiApiCallInput {
   finishReason?: string | null;
 }
 
-export interface AiToolCallInput {
+interface AiToolCallInput {
   messageId: string;
   toolName: string;
   args: unknown;
@@ -29,7 +29,7 @@ export interface AiToolCallInput {
   errorCode?: string | null;
 }
 
-export interface AiAuditEventInput {
+interface AiAuditEventInput {
   actorUserId?: string | null;
   action: string;
   targetType: string;

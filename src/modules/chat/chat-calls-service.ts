@@ -3,7 +3,7 @@ import { CurrentUser, AuthorizationError } from '@/modules/auth/authorization';
 import { recordAuditEvent } from '@/modules/auth/audit-service';
 import { assertChannelMember } from './chat-service';
 
-export class ChatCallError extends Error {
+class ChatCallError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'ChatCallError';

@@ -23,7 +23,7 @@ async function ensureDir(): Promise<void> {
   await fs.mkdir(STORAGE_DIR, { recursive: true });
 }
 
-export class DiskChatStorage implements ChatStorage {
+class DiskChatStorage implements ChatStorage {
   async save(buffer: Buffer, key: string, ext: string): Promise<string> {
     await ensureDir();
     const fileName = `${key}.${ext}`;
@@ -89,16 +89,4 @@ export function getExtensionFromMime(mimeType: string): string {
     'application/octet-stream': 'bin',
   };
   return map[mimeType] ?? 'bin';
-}
-
-export function isImageMime(mimeType: string): boolean {
-  return mimeType.startsWith('image/');
-}
-
-export function isVideoMime(mimeType: string): boolean {
-  return mimeType.startsWith('video/');
-}
-
-export function isAudioMime(mimeType: string): boolean {
-  return mimeType.startsWith('audio/');
 }

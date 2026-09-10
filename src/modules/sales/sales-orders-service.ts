@@ -23,7 +23,7 @@ const MAX_EXPORT_ROWS = 50_000;
  * @deprecated Use salesOrderQueryStateSchema instead. Kept for backward compat
  * with any existing API route consumers.
  */
-export const legacySalesOrderListQuerySchema = z.object({
+const legacySalesOrderListQuerySchema = z.object({
   page: z.coerce.number().int().min(MIN_PAGE).default(MIN_PAGE),
   page_size: z.coerce.number().int().min(1).max(MAX_PAGE_SIZE).default(DEFAULT_PAGE_SIZE),
   date_from: z.coerce.date().optional(),
@@ -36,12 +36,9 @@ export const legacySalesOrderListQuerySchema = z.object({
   search: z.string().optional(),
 });
 
-export type LegacySalesOrderListQuery = z.output<typeof legacySalesOrderListQuerySchema>;
+type LegacySalesOrderListQuery = z.output<typeof legacySalesOrderListQuerySchema>;
 
 export type { SalesOrderListRow, SalesOrderDetail };
-
-/** @deprecated Use SalesOrderListRow. Kept until all consumers migrate. */
-export type SalesOrderListItem = SalesOrderListRow;
 
 const LIST_SELECT = {
   id: true,
@@ -363,15 +360,6 @@ export interface ExportOptions {
   pageSize?: number;
 }
 
-export interface ExportResult {
-  format: 'csv' | 'xlsx';
-  rowCount: number;
-  /** Base64-encoded content for download. */
-  content: string;
-  filename: string;
-}
-
-export const EXPORT_COLUMN_IDS = SALES_ORDER_COLUMNS.map((c) => c.id);
 
 function getExportColumns(includeAll: boolean): typeof SALES_ORDER_COLUMNS {
   if (includeAll) return SALES_ORDER_COLUMNS;
@@ -449,19 +437,11 @@ export function buildCsv(rows: SalesOrderListRow[], columns: typeof SALES_ORDER_
   return [header, ...lines].join('\r\n');
 }
 
-export function buildCsvFromRows(
-  rows: SalesOrderListRow[],
-  columns: typeof SALES_ORDER_COLUMNS
-): string {
-  return buildCsv(rows, columns);
-}
-
 // ---------------------------------------------------------------------------
 // Legacy compat (existing API route consumers)
 // ---------------------------------------------------------------------------
 
 export const salesOrderListQuerySchema = legacySalesOrderListQuerySchema;
-export type SalesOrderListQuery = LegacySalesOrderListQuery;
 
 export async function getSalesOrdersList(query: LegacySalesOrderListQuery) {
   const where: Prisma.SalesOrderWhereInput = {};

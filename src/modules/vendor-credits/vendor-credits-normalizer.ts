@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { SOURCE, VENDOR_CREDITS_ENTITY_TYPE } from '@/modules/integrations/zoho/vendor-credits-sync';
 
-export const CURRENT_VENDOR_CREDIT_NORMALIZER_VERSION = 1;
+const CURRENT_VENDOR_CREDIT_NORMALIZER_VERSION = 1;
 
 export const NORMALIZATION_ERROR_CODE = {
   SNAPSHOT_SHAPE_INVALID: 'SNAPSHOT_SHAPE_INVALID',

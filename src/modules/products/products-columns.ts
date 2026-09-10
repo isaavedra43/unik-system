@@ -1,6 +1,6 @@
 export const PRODUCTS_TABLE_KEY = 'products';
 
-export interface ProductColumnDefinition {
+interface ProductColumnDefinition {
   id: string;
   label: string;
   field: string;
@@ -210,10 +210,6 @@ export const PRODUCT_COLUMN_MAP: Record<string, ProductColumnDefinition> = Objec
 
 export const PRODUCT_DEFAULT_COLUMN_ORDER: string[] = PRODUCT_COLUMNS.sort(
   (a, b) => a.priority - b.priority
-).map((c) => c.id);
-
-export const PRODUCT_DEFAULT_VISIBLE_COLUMNS: string[] = PRODUCT_COLUMNS.filter(
-  (c) => c.defaultVisible
 ).map((c) => c.id);
 
 export const PRODUCT_SORTABLE_FIELDS = new Set(

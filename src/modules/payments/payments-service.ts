@@ -341,7 +341,6 @@ export interface ExportOptions {
   pageSize?: number;
 }
 
-export const EXPORT_COLUMN_IDS = PAYMENT_COLUMNS.map((c) => c.id);
 
 function getExportColumns(includeAll: boolean): typeof PAYMENT_COLUMNS {
   if (includeAll) return PAYMENT_COLUMNS;

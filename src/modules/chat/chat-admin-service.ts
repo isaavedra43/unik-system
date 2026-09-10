@@ -120,7 +120,7 @@ export async function getChatActivityByDay(days = 30): Promise<ChatActivityByDay
   return result;
 }
 
-export interface ChatTopUser {
+interface ChatTopUser {
   userId: string;
   userName: string;
   messageCount: number;
@@ -177,7 +177,7 @@ export async function getTopChatUsers(limit = 10): Promise<ChatTopUser[]> {
 // Conversations (admin view)
 // =====================================================
 
-export interface AdminChannelView {
+interface AdminChannelView {
   id: string;
   type: string;
   name: string | null;
@@ -328,7 +328,7 @@ export async function searchAllMessages(
 // User activity (admin)
 // =====================================================
 
-export interface AdminUserActivity {
+interface AdminUserActivity {
   userId: string;
   userName: string;
   username: string;

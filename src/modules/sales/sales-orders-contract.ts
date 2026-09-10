@@ -38,7 +38,7 @@ export interface SalesOrderListRow {
   shippingAddress: string | null;
 }
 
-export interface SalesOrderDetailItem {
+interface SalesOrderDetailItem {
   id: string;
   zohoLineItemId: string | null;
   zohoItemId: string | null;

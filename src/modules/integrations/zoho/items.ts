@@ -7,7 +7,7 @@ const itemIdSchema = z
   .max(30)
   .regex(/^\d+$/, 'itemId must be numeric');
 
-export interface ListItemsOptions {
+interface ListItemsOptions {
   page?: number;
   perPage?: number;
   /** Column to sort by, e.g. 'last_modified_time', 'created_time'. */

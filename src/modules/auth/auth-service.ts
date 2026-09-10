@@ -25,7 +25,7 @@ export const LOCKED_LOGIN_ERROR = 'Acceso temporalmente no disponible. Intenta d
  */
 const DUMMY_HASH = '$2b$12$sx4lmBCHikDSe.KCLQ0oIulUOEwnMLGe9Rm3ekcLkMN8PjEBB3A6q';
 
-export type LoginResult =
+type LoginResult =
   { ok: true; token: string; mustChangePassword: boolean } | { ok: false; error: string };
 
 /**
@@ -88,7 +88,7 @@ export async function logout(token: string): Promise<void> {
   await revokeSessionByToken(token);
 }
 
-export type ChangeOwnPasswordResult = { ok: true } | { ok: false; error: string };
+type ChangeOwnPasswordResult = { ok: true } | { ok: false; error: string };
 
 /**
  * Changes the password of an authenticated user, verifying the current one.

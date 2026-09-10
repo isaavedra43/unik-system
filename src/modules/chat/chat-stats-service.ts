@@ -7,7 +7,7 @@ import { prisma } from '@/lib/prisma';
  * All queries are scoped to the requesting user's data.
  */
 
-export interface PersonalStatsDTO {
+interface PersonalStatsDTO {
   totalMessages: number;
   totalAttachments: number;
   totalReactions: number;

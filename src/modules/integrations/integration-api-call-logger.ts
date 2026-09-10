@@ -18,7 +18,7 @@ import { prisma } from '@/lib/prisma';
 
 const MAX_PREVIEW_LENGTH = 4096;
 
-export interface LogApiCallInput {
+interface LogApiCallInput {
   source: string;
   method: string;
   path: string;

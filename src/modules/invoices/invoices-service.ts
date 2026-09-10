@@ -160,7 +160,6 @@ export async function getInvoiceById(id: string): Promise<InvoiceDetail | null> 
 }
 
 export interface ExportOptions { format: 'csv' | 'xlsx'; scope: 'current_page' | 'selected' | 'filtered'; selectedIds?: string[]; includeAllColumns?: boolean; page?: number; pageSize?: number; }
-export const EXPORT_COLUMN_IDS = INVOICE_COLUMNS.map((c) => c.id);
 
 function getExportColumns(includeAll: boolean): typeof INVOICE_COLUMNS {
   if (includeAll) return INVOICE_COLUMNS;

@@ -15,7 +15,7 @@ import type {
 import { getPresence } from './chat-presence-service';
 import { detectChatAlerts } from './chat-admin-service';
 
-export class ChatError extends Error {
+class ChatError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'ChatError';
@@ -446,7 +446,7 @@ export async function assertChannelAdmin(channelId: string, userId: string): Pro
 // Message operations
 // =====================================================
 
-export interface SendMessageInput {
+interface SendMessageInput {
   channelId: string;
   content?: string | null;
   replyToId?: string | null;

@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { SOURCE, PURCHASE_ORDERS_ENTITY_TYPE } from '@/modules/integrations/zoho/purchase-orders-sync';
 
-export const CURRENT_PURCHASE_ORDER_NORMALIZER_VERSION = 1;
+const CURRENT_PURCHASE_ORDER_NORMALIZER_VERSION = 1;
 
 export const NORMALIZATION_ERROR_CODE = {
   SNAPSHOT_SHAPE_INVALID: 'SNAPSHOT_SHAPE_INVALID',

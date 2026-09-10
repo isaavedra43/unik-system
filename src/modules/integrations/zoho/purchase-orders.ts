@@ -7,7 +7,7 @@ const purchaseOrderIdSchema = z
   .max(30)
   .regex(/^\d+$/, 'purchaseOrderId must be numeric');
 
-export interface ListPurchaseOrdersOptions {
+interface ListPurchaseOrdersOptions {
   page?: number;
   perPage?: number;
   /** Column to sort by, e.g. 'last_modified_time', 'created_time'. */

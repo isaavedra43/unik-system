@@ -7,7 +7,7 @@ const packageIdSchema = z
   .max(30)
   .regex(/^\d+$/, 'packageId must be numeric');
 
-export interface ListPackagesOptions {
+interface ListPackagesOptions {
   page?: number;
   perPage?: number;
   /** Column to sort by, e.g. 'last_modified_time', 'created_time'. */

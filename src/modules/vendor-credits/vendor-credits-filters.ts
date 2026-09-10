@@ -85,7 +85,7 @@ const booleanFilterSchema = z.object({
   value: z.boolean().optional(),
 });
 
-export const vendorCreditFilterRuleSchema = z.union([
+const vendorCreditFilterRuleSchema = z.union([
   textFilterSchema,
   selectFilterSchema,
   numberFilterSchema,
@@ -93,7 +93,6 @@ export const vendorCreditFilterRuleSchema = z.union([
   booleanFilterSchema,
 ]);
 
-export type VendorCreditFilterRule = z.infer<typeof vendorCreditFilterRuleSchema>;
 
 export const vendorCreditFilterGroupSchema = z.object({
   logic: z.enum(['AND', 'OR']).default('AND'),
@@ -102,12 +101,12 @@ export const vendorCreditFilterGroupSchema = z.object({
 
 export type VendorCreditFilterGroup = z.infer<typeof vendorCreditFilterGroupSchema>;
 
-export const vendorCreditSortRuleSchema = z.object({
+const vendorCreditSortRuleSchema = z.object({
   field: z.string().refine((f) => VENDOR_CREDIT_SORTABLE_FIELDS.has(f)),
   direction: z.enum(['asc', 'desc']),
 });
 
-export const vendorCreditSortSchema = z.array(vendorCreditSortRuleSchema).default([]);
+const vendorCreditSortSchema = z.array(vendorCreditSortRuleSchema).default([]);
 
 export type VendorCreditSort = z.infer<typeof vendorCreditSortSchema>;
 

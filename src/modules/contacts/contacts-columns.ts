@@ -193,10 +193,6 @@ export const CONTACT_DEFAULT_COLUMN_ORDER: string[] = CONTACT_COLUMNS.sort(
   (a, b) => a.priority - b.priority
 ).map((c) => c.id);
 
-export const CONTACT_DEFAULT_VISIBLE_COLUMNS: string[] = CONTACT_COLUMNS.filter(
-  (c) => c.defaultVisible
-).map((c) => c.id);
-
 export const CONTACT_SORTABLE_FIELDS = new Set(
   CONTACT_COLUMNS.filter((c) => c.sortable).map((c) => c.field)
 );

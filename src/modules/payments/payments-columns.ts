@@ -2,7 +2,7 @@ import type { EntityColumnDefinition } from '@/modules/shared/entity-workspace-t
 
 export const PAYMENTS_TABLE_KEY = 'payments';
 
-export type PaymentColumnDefinition = EntityColumnDefinition;
+type PaymentColumnDefinition = EntityColumnDefinition;
 
 export const PAYMENT_COLUMNS: PaymentColumnDefinition[] = [
   {
@@ -145,10 +145,6 @@ export const PAYMENT_COLUMN_MAP: Record<string, PaymentColumnDefinition> = Objec
 export const PAYMENT_DEFAULT_COLUMN_ORDER: string[] = [...PAYMENT_COLUMNS]
   .sort((a, b) => a.priority - b.priority)
   .map((c) => c.id);
-
-export const PAYMENT_DEFAULT_VISIBLE_COLUMNS: string[] = PAYMENT_COLUMNS.filter(
-  (c) => c.defaultVisible
-).map((c) => c.id);
 
 export const PAYMENT_SORTABLE_FIELDS = new Set(
   PAYMENT_COLUMNS.filter((c) => c.sortable).map((c) => c.field)

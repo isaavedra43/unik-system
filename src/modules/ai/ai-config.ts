@@ -1,4 +1,3 @@
-import { z } from 'zod';
 import type { ProviderId } from './providers/types';
 import { PROVIDER_IDS } from './providers/types';
 import { getAiSettings } from './ai-admin-config-service';
@@ -60,7 +59,7 @@ export interface ProviderConfig {
 }
 
 /** Returns the default provider id from env (sync, no DB). */
-export function getActiveProviderIdFromEnv(): ProviderId {
+function getActiveProviderIdFromEnv(): ProviderId {
   const raw = process.env.AI_PROVIDER?.trim().toLowerCase();
   if (raw && (PROVIDER_IDS as string[]).includes(raw)) {
     return raw as ProviderId;
@@ -195,7 +194,3 @@ export async function getConfiguredProviders(): Promise<ProviderId[]> {
   return result;
 }
 
-// Keep zod import used for future schema validation extension
-export const _aiConfigSchema = z.object({
-  AI_PROVIDER: z.enum(['openai', 'anthropic', 'gemini', 'local']).optional(),
-});

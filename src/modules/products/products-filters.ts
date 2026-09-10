@@ -114,7 +114,7 @@ const booleanFilterSchema = z.object({
   value: z.boolean().optional(),
 });
 
-export const productFilterRuleSchema = z.union([
+const productFilterRuleSchema = z.union([
   textFilterSchema,
   selectFilterSchema,
   numberFilterSchema,
@@ -122,7 +122,6 @@ export const productFilterRuleSchema = z.union([
   booleanFilterSchema,
 ]);
 
-export type ProductFilterRule = z.infer<typeof productFilterRuleSchema>;
 
 export const productFilterGroupSchema = z.object({
   logic: z.enum(['AND', 'OR']).default('AND'),
@@ -131,14 +130,13 @@ export const productFilterGroupSchema = z.object({
 
 export type ProductFilterGroup = z.infer<typeof productFilterGroupSchema>;
 
-export const productSortRuleSchema = z.object({
+const productSortRuleSchema = z.object({
   field: z.string().refine((f) => PRODUCT_SORTABLE_FIELDS.has(f)),
   direction: z.enum(['asc', 'desc']),
 });
 
-export type ProductSortRule = z.infer<typeof productSortRuleSchema>;
 
-export const productSortSchema = z.array(productSortRuleSchema).default([]);
+const productSortSchema = z.array(productSortRuleSchema).default([]);
 
 export type ProductSort = z.infer<typeof productSortSchema>;
 

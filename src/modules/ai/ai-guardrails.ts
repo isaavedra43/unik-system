@@ -15,13 +15,13 @@ const PROMPT_INJECTION_PATTERNS = [
   /show\s+me\s+(your\s+)?(system\s+)?prompt/i,
 ];
 
-export interface InputValidationResult {
+interface InputValidationResult {
   valid: boolean;
   error?: string;
   warnings?: string[];
 }
 
-export interface OutputValidationResult {
+interface OutputValidationResult {
   valid: boolean;
   warnings?: string[];
 }

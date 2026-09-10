@@ -33,13 +33,11 @@ const selectFilterSchema = z.object({ field: z.string().refine((f) => INVOICE_FI
 const numberFilterSchema = z.object({ field: z.string().refine((f) => INVOICE_FILTERABLE_FIELDS.has(f)), operator: z.enum(NUMBER_OPERATORS), value: z.union([z.number(), z.string()]).optional(), valueTo: z.union([z.number(), z.string()]).optional() });
 const dateFilterSchema = z.object({ field: z.string().refine((f) => INVOICE_FILTERABLE_FIELDS.has(f)), operator: z.enum(DATE_OPERATORS), value: z.union([z.string(), z.date()]).optional(), valueTo: z.union([z.string(), z.date()]).optional(), shortcut: z.enum(DATE_SHORTCUTS).optional() });
 
-export const invoiceFilterRuleSchema = z.union([textFilterSchema, selectFilterSchema, numberFilterSchema, dateFilterSchema]);
-export type InvoiceFilterRule = z.infer<typeof invoiceFilterRuleSchema>;
+const invoiceFilterRuleSchema = z.union([textFilterSchema, selectFilterSchema, numberFilterSchema, dateFilterSchema]);
 export const invoiceFilterGroupSchema = z.object({ logic: z.enum(['AND', 'OR']).default('AND'), rules: z.array(invoiceFilterRuleSchema).default([]) });
 export type InvoiceFilterGroup = z.infer<typeof invoiceFilterGroupSchema>;
-export const invoiceSortRuleSchema = z.object({ field: z.string().refine((f) => INVOICE_SORTABLE_FIELDS.has(f)), direction: z.enum(['asc', 'desc']) });
-export type InvoiceSortRule = z.infer<typeof invoiceSortRuleSchema>;
-export const invoiceSortSchema = z.array(invoiceSortRuleSchema).default([]);
+const invoiceSortRuleSchema = z.object({ field: z.string().refine((f) => INVOICE_SORTABLE_FIELDS.has(f)), direction: z.enum(['asc', 'desc']) });
+const invoiceSortSchema = z.array(invoiceSortRuleSchema).default([]);
 export type InvoiceSort = z.infer<typeof invoiceSortSchema>;
 
 export const invoiceQueryStateSchema = z.object({

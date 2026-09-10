@@ -15,8 +15,8 @@ import type { ProviderId } from './providers/types';
  * - available: whether this provider is implemented (not a stub)
  */
 
-export type ModelSpeed = 'fast' | 'medium' | 'slow';
-export type ModelCapability = 'vision' | 'tool_use' | 'streaming' | 'json_mode' | 'audio' | 'reasoning';
+type ModelSpeed = 'fast' | 'medium' | 'slow';
+type ModelCapability = 'vision' | 'tool_use' | 'streaming' | 'json_mode' | 'audio' | 'reasoning';
 
 export interface ModelInfo {
   id: string;
@@ -247,21 +247,9 @@ export const MODEL_CATALOG: ModelInfo[] = [
   },
 ];
 
-/** Returns all models in the catalog. */
-export function getAllModels(): ModelInfo[] {
-  return MODEL_CATALOG;
-}
-
 /** Returns models for a specific provider. */
 export function getModelsByProvider(provider: ProviderId): ModelInfo[] {
   return MODEL_CATALOG.filter((m) => m.provider === provider);
-}
-
-/** Returns models that are available (provider implemented) and optionally filtered by provider. */
-export function getAvailableModels(provider?: ProviderId): ModelInfo[] {
-  return MODEL_CATALOG.filter(
-    (m) => m.available && (provider ? m.provider === provider : true)
-  );
 }
 
 /** Finds a model by id. */

@@ -15,7 +15,7 @@ export class UserManagementError extends Error {
   }
 }
 
-export interface UserListItem {
+interface UserListItem {
   id: string;
   name: string;
   username: string;
@@ -64,14 +64,14 @@ async function targetIsSuperAdmin(userId: string): Promise<boolean> {
   return membership !== null;
 }
 
-export interface CreateUserInput {
+interface CreateUserInput {
   name: string;
   username: string;
   email?: string | null;
   roleIds: string[];
 }
 
-export interface CreateUserResult {
+interface CreateUserResult {
   userId: string;
   temporaryPassword: string;
 }
@@ -145,7 +145,7 @@ export async function createUser(
   return { userId: user.id, temporaryPassword };
 }
 
-export interface UpdateUserInput {
+interface UpdateUserInput {
   name: string;
   email?: string | null;
 }
@@ -364,7 +364,7 @@ export async function assignRoles(
   }
 }
 
-export interface ResetPasswordResult {
+interface ResetPasswordResult {
   temporaryPassword: string;
 }
 

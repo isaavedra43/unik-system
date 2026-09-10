@@ -141,12 +141,6 @@ export function assertAnyPermission(user: CurrentUser, permissionKeys: string[])
   }
 }
 
-export function assertAllPermissions(user: CurrentUser, permissionKeys: string[]): void {
-  if (!hasAllPermissions(user, permissionKeys)) {
-    throw new AuthorizationError();
-  }
-}
-
 /**
  * Page-level guard: authenticated + permission, otherwise redirect.
  * Unknown permission keys throw before redirect.

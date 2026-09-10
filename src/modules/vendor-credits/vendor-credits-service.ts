@@ -267,7 +267,7 @@ function buildWhere(query: VendorCreditQueryState): Prisma.VendorCreditWhereInpu
 // Public query functions
 // ---------------------------------------------------------------------------
 
-export type VendorCreditsListResult = EntityListResult<VendorCreditListRow>;
+type VendorCreditsListResult = EntityListResult<VendorCreditListRow>;
 
 export async function getVendorCreditsWorkspace(
   rawQuery: unknown
@@ -344,7 +344,6 @@ export interface ExportOptions {
   pageSize?: number;
 }
 
-export const EXPORT_COLUMN_IDS = VENDOR_CREDIT_COLUMNS.map((c) => c.id);
 
 function getExportColumns(includeAll: boolean): typeof VENDOR_CREDIT_COLUMNS {
   if (includeAll) return VENDOR_CREDIT_COLUMNS;

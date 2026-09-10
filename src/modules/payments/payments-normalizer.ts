@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { SOURCE, PAYMENTS_ENTITY_TYPE } from '@/modules/integrations/zoho/payments-sync';
 
-export const CURRENT_PAYMENT_NORMALIZER_VERSION = 1;
+const CURRENT_PAYMENT_NORMALIZER_VERSION = 1;
 
 export const NORMALIZATION_ERROR_CODE = {
   SNAPSHOT_SHAPE_INVALID: 'SNAPSHOT_SHAPE_INVALID',

@@ -239,7 +239,7 @@ export async function isAiEnabled(): Promise<boolean> {
 }
 
 /** Invalidates the in-memory cache so the next read hits the DB. */
-export function invalidateAiConfigCache(): void {
+function invalidateAiConfigCache(): void {
   cache.clear();
 }
 

@@ -137,10 +137,6 @@ export const VENDOR_CREDIT_DEFAULT_COLUMN_ORDER: string[] = [...VENDOR_CREDIT_CO
   .sort((a, b) => a.priority - b.priority)
   .map((c) => c.id);
 
-export const VENDOR_CREDIT_DEFAULT_VISIBLE_COLUMNS: string[] = VENDOR_CREDIT_COLUMNS.filter(
-  (c) => c.defaultVisible
-).map((c) => c.id);
-
 export const VENDOR_CREDIT_SORTABLE_FIELDS = new Set(
   VENDOR_CREDIT_COLUMNS.filter((c) => c.sortable).map((c) => c.field)
 );

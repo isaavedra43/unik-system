@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { SOURCE, CONTACTS_ENTITY_TYPE } from '@/modules/integrations/zoho/contacts-sync';
 
-export const CURRENT_CONTACT_NORMALIZER_VERSION = 2;
+const CURRENT_CONTACT_NORMALIZER_VERSION = 2;
 
 export const NORMALIZATION_ERROR_CODE = {
   SNAPSHOT_SHAPE_INVALID: 'SNAPSHOT_SHAPE_INVALID',

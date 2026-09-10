@@ -7,7 +7,7 @@ const billIdSchema = z
   .max(30)
   .regex(/^\d+$/, 'billId must be numeric');
 
-export interface ListBillsOptions {
+interface ListBillsOptions {
   page?: number;
   perPage?: number;
   /** Column to sort by, e.g. 'last_modified_time', 'created_time'. */

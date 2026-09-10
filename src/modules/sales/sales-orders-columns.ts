@@ -411,10 +411,6 @@ export const SALES_ORDER_DEFAULT_COLUMN_ORDER: string[] = SALES_ORDER_COLUMNS.so
   (a, b) => a.priority - b.priority
 ).map((c) => c.id);
 
-export const SALES_ORDER_DEFAULT_VISIBLE_COLUMNS: string[] = SALES_ORDER_COLUMNS.filter(
-  (c) => c.defaultVisible
-).map((c) => c.id);
-
 export const SALES_ORDER_SORTABLE_FIELDS = new Set(
   SALES_ORDER_COLUMNS.filter((c) => c.sortable).map((c) => c.field)
 );

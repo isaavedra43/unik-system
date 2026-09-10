@@ -1,6 +1,6 @@
 import { Prisma } from '@prisma/client';
 
-export interface PackageItemListRow {
+interface PackageItemListRow {
   id: string;
   name: string | null;
   sku: string | null;

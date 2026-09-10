@@ -22,7 +22,7 @@ export interface ExcelColumn {
   format?: string;
 }
 
-export interface ExcelReportOptions {
+interface ExcelReportOptions {
   title: string;
   subtitle?: string;
   author?: string;

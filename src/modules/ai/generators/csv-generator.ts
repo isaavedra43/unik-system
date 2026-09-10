@@ -7,7 +7,7 @@ import fs from 'fs';
  * and optional metadata header.
  */
 
-export interface CsvReportOptions {
+interface CsvReportOptions {
   title?: string;
   columns: Array<{ header: string; key: string; format?: (value: unknown) => string }>;
   rows: Record<string, unknown>[];

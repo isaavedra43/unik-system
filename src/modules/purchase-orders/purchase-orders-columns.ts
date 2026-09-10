@@ -144,10 +144,6 @@ export const PURCHASE_ORDER_DEFAULT_COLUMN_ORDER: string[] = [...PURCHASE_ORDER_
   .sort((a, b) => a.priority - b.priority)
   .map((c) => c.id);
 
-export const PURCHASE_ORDER_DEFAULT_VISIBLE_COLUMNS: string[] = PURCHASE_ORDER_COLUMNS.filter(
-  (c) => c.defaultVisible
-).map((c) => c.id);
-
 export const PURCHASE_ORDER_SORTABLE_FIELDS = new Set(
   PURCHASE_ORDER_COLUMNS.filter((c) => c.sortable).map((c) => c.field)
 );

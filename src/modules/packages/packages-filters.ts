@@ -67,8 +67,7 @@ const dateFilterSchema = z.object({
   shortcut: z.enum(DATE_SHORTCUTS).optional(),
 });
 
-export const packageFilterRuleSchema = z.union([textFilterSchema, selectFilterSchema, numberFilterSchema, dateFilterSchema]);
-export type PackageFilterRule = z.infer<typeof packageFilterRuleSchema>;
+const packageFilterRuleSchema = z.union([textFilterSchema, selectFilterSchema, numberFilterSchema, dateFilterSchema]);
 
 export const packageFilterGroupSchema = z.object({
   logic: z.enum(['AND', 'OR']).default('AND'),
@@ -76,12 +75,11 @@ export const packageFilterGroupSchema = z.object({
 });
 export type PackageFilterGroup = z.infer<typeof packageFilterGroupSchema>;
 
-export const packageSortRuleSchema = z.object({
+const packageSortRuleSchema = z.object({
   field: z.string().refine((f) => PACKAGE_SORTABLE_FIELDS.has(f)),
   direction: z.enum(['asc', 'desc']),
 });
-export type PackageSortRule = z.infer<typeof packageSortRuleSchema>;
-export const packageSortSchema = z.array(packageSortRuleSchema).default([]);
+const packageSortSchema = z.array(packageSortRuleSchema).default([]);
 export type PackageSort = z.infer<typeof packageSortSchema>;
 
 export const packageQueryStateSchema = z.object({

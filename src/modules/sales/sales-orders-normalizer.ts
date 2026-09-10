@@ -4,7 +4,7 @@ import { prisma } from '@/lib/prisma';
 import { ENTITY_TYPE, SOURCE } from '@/modules/integrations/zoho/sales-orders-sync';
 import { recordSalesOrderChange } from './sales-orders-change-events';
 
-export const CURRENT_SALES_ORDER_NORMALIZER_VERSION = 2;
+const CURRENT_SALES_ORDER_NORMALIZER_VERSION = 2;
 
 export const NORMALIZATION_ERROR_CODE = {
   SNAPSHOT_SHAPE_INVALID: 'SNAPSHOT_SHAPE_INVALID',

@@ -331,7 +331,6 @@ export interface ExportOptions {
   pageSize?: number;
 }
 
-export const EXPORT_COLUMN_IDS = CONTACT_COLUMNS.map((c) => c.id);
 
 function getExportColumns(includeAll: boolean): typeof CONTACT_COLUMNS {
   if (includeAll) return CONTACT_COLUMNS;

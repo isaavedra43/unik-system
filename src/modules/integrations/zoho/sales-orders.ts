@@ -3,7 +3,7 @@ import { zohoGet } from './client';
 
 const salesOrderIdSchema = z.string().min(1).max(30).regex(/^\d+$/, 'salesOrderId must be numeric');
 
-export interface ListSalesOrdersOptions {
+interface ListSalesOrdersOptions {
   page?: number;
   perPage?: number;
   /** Column to sort by, e.g. 'last_modified_time', 'created_time'. */

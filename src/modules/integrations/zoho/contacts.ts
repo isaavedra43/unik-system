@@ -7,7 +7,7 @@ const contactIdSchema = z
   .max(30)
   .regex(/^\d+$/, 'contactId must be numeric');
 
-export interface ListContactsOptions {
+interface ListContactsOptions {
   page?: number;
   perPage?: number;
   /** Column to sort by, e.g. 'last_modified_time', 'created_time'. */

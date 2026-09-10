@@ -7,14 +7,14 @@
  * The SVG is stored inline in the database and rendered in the chat.
  */
 
-export type ChartType = 'bar' | 'horizontal-bar' | 'line' | 'pie' | 'doughnut';
+type ChartType = 'bar' | 'horizontal-bar' | 'line' | 'pie' | 'doughnut';
 
-export interface ChartSeries {
+interface ChartSeries {
   label: string;
   values: number[];
 }
 
-export interface ChartOptions {
+interface ChartOptions {
   type: ChartType;
   title: string;
   subtitle?: string;

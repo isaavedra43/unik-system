@@ -9,7 +9,7 @@
  *   use normal locale formatting.
  */
 
-export type StatusCategory = 'order' | 'payment' | 'invoice' | 'shipping';
+type StatusCategory = 'order' | 'payment' | 'invoice' | 'shipping';
 
 export interface SalesOrderStatusConfig {
   raw: string;

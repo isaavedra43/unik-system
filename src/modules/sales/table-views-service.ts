@@ -83,7 +83,7 @@ export async function getTableView(userId: string, viewId: string): Promise<Tabl
   return formatRow(row, userId);
 }
 
-export interface CreateTableViewInput {
+interface CreateTableViewInput {
   tableKey: string;
   name: string;
   visibility: 'private' | 'shared';

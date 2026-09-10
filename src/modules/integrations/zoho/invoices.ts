@@ -7,7 +7,7 @@ const invoiceIdSchema = z
   .max(30)
   .regex(/^\d+$/, 'invoiceId must be numeric');
 
-export interface ListInvoicesOptions {
+interface ListInvoicesOptions {
   page?: number;
   perPage?: number;
   /** Column to sort by, e.g. 'last_modified_time', 'created_time'. */

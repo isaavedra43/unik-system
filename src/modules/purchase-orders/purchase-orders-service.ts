@@ -365,7 +365,6 @@ export interface ExportOptions {
   pageSize?: number;
 }
 
-export const EXPORT_COLUMN_IDS = PURCHASE_ORDER_COLUMNS.map((c) => c.id);
 
 function getExportColumns(
   includeAll: boolean

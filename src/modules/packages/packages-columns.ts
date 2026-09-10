@@ -1,6 +1,6 @@
 export const PACKAGES_TABLE_KEY = 'packages';
 
-export interface PackageColumnDefinition {
+interface PackageColumnDefinition {
   id: string;
   label: string;
   field: string;
@@ -137,14 +137,6 @@ export const PACKAGE_COLUMNS: PackageColumnDefinition[] = [
 export const PACKAGE_COLUMN_MAP: Record<string, PackageColumnDefinition> = Object.fromEntries(
   PACKAGE_COLUMNS.map((c) => [c.id, c])
 );
-
-export const PACKAGE_DEFAULT_COLUMN_ORDER: string[] = PACKAGE_COLUMNS.sort(
-  (a, b) => a.priority - b.priority
-).map((c) => c.id);
-
-export const PACKAGE_DEFAULT_VISIBLE_COLUMNS: string[] = PACKAGE_COLUMNS.filter(
-  (c) => c.defaultVisible
-).map((c) => c.id);
 
 export const PACKAGE_SORTABLE_FIELDS = new Set(
   PACKAGE_COLUMNS.filter((c) => c.sortable).map((c) => c.field)

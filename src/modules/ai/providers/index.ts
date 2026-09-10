@@ -24,11 +24,6 @@ export async function getActiveProvider(): Promise<AiProvider> {
   return REGISTRY[id];
 }
 
-/** Returns all registered providers (for admin UI). */
-export function getAllProviders(): AiProvider[] {
-  return PROVIDER_IDS.map((id) => REGISTRY[id]);
-}
-
 export { PROVIDER_IDS, PROVIDER_LABELS };
 export type { AiProvider, ProviderId };
 export { openaiProvider };

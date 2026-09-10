@@ -7,7 +7,7 @@ const paymentIdSchema = z
   .max(30)
   .regex(/^\d+$/, 'paymentId must be numeric');
 
-export interface ListCustomerPaymentsOptions {
+interface ListCustomerPaymentsOptions {
   page?: number;
   perPage?: number;
   /** Column to sort by, e.g. 'last_modified_time', 'created_time'. */

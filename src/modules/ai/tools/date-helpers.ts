@@ -74,7 +74,7 @@ export const DATE_SHORTCUTS = [
   'all',
 ] as const;
 
-export type DateRangeShortcut = (typeof DATE_SHORTCUTS)[number];
+type DateRangeShortcut = (typeof DATE_SHORTCUTS)[number];
 
 /**
  * Simple string enum schema for date range — compatible with OpenAI

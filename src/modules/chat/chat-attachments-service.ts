@@ -45,7 +45,7 @@ const ALLOWED_MIME_TYPES = new Set([
   'application/zip',
 ]);
 
-export class ChatAttachmentError extends Error {
+class ChatAttachmentError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'ChatAttachmentError';
@@ -71,7 +71,7 @@ function getMaxSizeForMime(mimeType: string): number {
   return MAX_DOC_BYTES;
 }
 
-export interface SaveAttachmentInput {
+interface SaveAttachmentInput {
   buffer: Buffer;
   fileName: string;
   mimeType: string;

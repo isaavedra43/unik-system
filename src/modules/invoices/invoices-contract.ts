@@ -1,6 +1,6 @@
 import { Prisma } from '@prisma/client';
 
-export interface InvoiceItemListRow {
+interface InvoiceItemListRow {
   id: string; name: string | null; description: string | null;
   quantity: string | null; rate: string | null; unit: string | null; lineTotal: string | null;
   zohoSalesOrderId: string | null;

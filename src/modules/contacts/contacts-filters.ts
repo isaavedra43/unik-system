@@ -119,7 +119,7 @@ const booleanFilterSchema = z.object({
   value: z.boolean().optional(),
 });
 
-export const contactFilterRuleSchema = z.union([
+const contactFilterRuleSchema = z.union([
   textFilterSchema,
   selectFilterSchema,
   numberFilterSchema,
@@ -127,7 +127,6 @@ export const contactFilterRuleSchema = z.union([
   booleanFilterSchema,
 ]);
 
-export type ContactFilterRule = z.infer<typeof contactFilterRuleSchema>;
 
 export const contactFilterGroupSchema = z.object({
   logic: z.enum(['AND', 'OR']).default('AND'),
@@ -136,14 +135,13 @@ export const contactFilterGroupSchema = z.object({
 
 export type ContactFilterGroup = z.infer<typeof contactFilterGroupSchema>;
 
-export const contactSortRuleSchema = z.object({
+const contactSortRuleSchema = z.object({
   field: z.string().refine((f) => CONTACT_SORTABLE_FIELDS.has(f)),
   direction: z.enum(['asc', 'desc']),
 });
 
-export type ContactSortRule = z.infer<typeof contactSortRuleSchema>;
 
-export const contactSortSchema = z.array(contactSortRuleSchema).default([]);
+const contactSortSchema = z.array(contactSortRuleSchema).default([]);
 
 export type ContactSort = z.infer<typeof contactSortSchema>;
 

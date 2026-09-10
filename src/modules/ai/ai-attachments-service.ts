@@ -37,7 +37,7 @@ function getExtensionFromMime(mimeType: string): string {
   return map[mimeType] ?? 'bin';
 }
 
-export interface CreateAttachmentInput {
+interface CreateAttachmentInput {
   conversationId: string;
   messageId?: string;
   fileName: string;

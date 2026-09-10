@@ -322,7 +322,6 @@ export interface ExportOptions {
   pageSize?: number;
 }
 
-export const EXPORT_COLUMN_IDS = PRODUCT_COLUMNS.map((c) => c.id);
 
 function getExportColumns(includeAll: boolean): typeof PRODUCT_COLUMNS {
   if (includeAll) return PRODUCT_COLUMNS;

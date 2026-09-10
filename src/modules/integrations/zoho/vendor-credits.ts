@@ -7,7 +7,7 @@ const vendorCreditIdSchema = z
   .max(30)
   .regex(/^\d+$/, 'vendorCreditId must be numeric');
 
-export interface ListVendorCreditsOptions {
+interface ListVendorCreditsOptions {
   page?: number;
   perPage?: number;
   /** Column to sort by, e.g. 'last_modified_time', 'created_time'. */

@@ -1,6 +1,6 @@
 export const INVOICES_TABLE_KEY = 'invoices';
 
-export interface InvoiceColumnDefinition {
+interface InvoiceColumnDefinition {
   id: string; label: string; field: string;
   type: 'text' | 'date' | 'number' | 'currency' | 'status';
   sortable: boolean; filterable: boolean; defaultVisible: boolean;
@@ -26,6 +26,5 @@ export const INVOICE_COLUMN_MAP: Record<string, InvoiceColumnDefinition> = Objec
 );
 
 export const INVOICE_DEFAULT_COLUMN_ORDER: string[] = INVOICE_COLUMNS.sort((a, b) => a.priority - b.priority).map((c) => c.id);
-export const INVOICE_DEFAULT_VISIBLE_COLUMNS: string[] = INVOICE_COLUMNS.filter((c) => c.defaultVisible).map((c) => c.id);
 export const INVOICE_SORTABLE_FIELDS = new Set(INVOICE_COLUMNS.filter((c) => c.sortable).map((c) => c.field));
 export const INVOICE_FILTERABLE_FIELDS = new Set(INVOICE_COLUMNS.filter((c) => c.filterable).map((c) => c.field));
