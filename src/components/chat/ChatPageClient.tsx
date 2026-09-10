@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { Menu, Search, Bookmark, Pin, Calendar, BarChart3, Megaphone } from 'lucide-react';
+import { Menu, Search, Bookmark, Pin, Calendar, BarChart3, Megaphone, MoreVertical } from 'lucide-react';
 import { Button } from '@/components/shadcn/button';
 import {
   Sheet, SheetContent, SheetHeader, SheetTitle,
@@ -9,7 +9,6 @@ import {
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/shadcn/dropdown-menu';
-import { MoreVertical } from 'lucide-react';
 import type { CurrentUser } from '@/modules/auth/authorization';
 import { ChatSidebar } from './ChatSidebar';
 import { ChatConversation } from './ChatConversation';
@@ -118,16 +117,24 @@ export function ChatPageClient({ user }: ChatPageClientProps) {
   const handleRefresh = () => setRefreshKey((k) => k + 1);
   const handleBack = () => setActiveChannelId(null);
 
+  const globalActions = {
+    onSearchMessages: () => setShowSearch(true),
+    onShowBookmarks: () => setShowBookmarks(true),
+    onShowCalendar: () => setShowCalendar(true),
+    onShowBroadcast: () => setShowBroadcast(true),
+    onShowStats: () => setShowStats(true),
+  };
+
   return (
     <div className="chat-page">
-      {/* Compact topbar */}
-      <div className="chat-topbar flex items-center gap-1 px-3 py-2 border-b border-border bg-background">
+      {/* Mobile-only topbar (global actions live in sidebar header on desktop) */}
+      <div className="chat-topbar flex items-center gap-1 px-3 py-2 border-b border-border bg-background md:hidden">
         <Button
           variant="ghost"
           size="sm"
           onClick={() => setSidebarOpen(true)}
           aria-label="Ver conversaciones"
-          className="md:hidden relative"
+          className="relative"
         >
           <Menu size={18} />
           {totalUnread > 0 && (
@@ -151,20 +158,9 @@ export function ChatPageClient({ user }: ChatPageClientProps) {
               <Pin size={18} />
             </Button>
           )}
-          <Button variant="ghost" size="icon-sm" onClick={() => setShowCalendar(true)} aria-label="Calendario" className="hidden sm:inline-flex">
-            <Calendar size={18} />
-          </Button>
-          <Button variant="ghost" size="icon-sm" onClick={() => setShowBroadcast(true)} aria-label="Difundir mensaje" className="hidden sm:inline-flex">
-            <Megaphone size={18} />
-          </Button>
-          <Button variant="ghost" size="icon-sm" onClick={() => setShowStats(true)} aria-label="Mis estadísticas" className="hidden sm:inline-flex">
-            <BarChart3 size={18} />
-          </Button>
-
-          {/* Overflow menu for small screens */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon-sm" aria-label="Más opciones" className="sm:hidden">
+              <Button variant="ghost" size="icon-sm" aria-label="Más opciones">
                 <MoreVertical size={18} />
               </Button>
             </DropdownMenuTrigger>
@@ -184,13 +180,14 @@ export function ChatPageClient({ user }: ChatPageClientProps) {
       </div>
 
       <div className="chat-page-body">
-        {/* Desktop sidebar */}
+        {/* Desktop sidebar with integrated global actions */}
         <div className="chat-sidebar-wrapper hidden md:flex">
           <ChatSidebar
             activeId={activeChannelId}
             inbox={inbox}
             onSelect={handleSelectChannel}
             onChannelCreated={handleChannelCreated}
+            globalActions={globalActions}
           />
         </div>
 

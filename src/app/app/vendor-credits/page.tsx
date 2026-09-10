@@ -1,3 +1,4 @@
+import { Suspense } from 'react';
 import { requirePermission } from '@/modules/auth/authorization';
 import { getVendorCreditsWorkspace } from '@/modules/vendor-credits/vendor-credits-service';
 import { SimpleListWorkspace, type SimpleListColumn } from '@/components/common/SimpleListWorkspace';
@@ -28,17 +29,19 @@ export default async function VendorCreditsPage({ searchParams }: { searchParams
   ];
 
   return (
-    <SimpleListWorkspace
-      rows={result.rows}
-      total={result.total}
-      page={result.page}
-      pageSize={result.pageSize}
-      totalPages={result.totalPages}
-      search={params.search ?? ''}
-      basePath="/app/vendor-credits"
-      entityLabel="Crédito de Proveedor"
-      entityLabelPlural="Créditos de Proveedor"
-      columns={columns}
-    />
+    <Suspense fallback={<div className="app-content p-8 text-center text-muted-foreground">Cargando...</div>}>
+      <SimpleListWorkspace
+        rows={result.rows}
+        total={result.total}
+        page={result.page}
+        pageSize={result.pageSize}
+        totalPages={result.totalPages}
+        search={params.search ?? ''}
+        basePath="/app/vendor-credits"
+        entityLabel="Crédito de Proveedor"
+        entityLabelPlural="Créditos de Proveedor"
+        columns={columns}
+      />
+    </Suspense>
   );
 }

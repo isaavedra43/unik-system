@@ -1,3 +1,4 @@
+import { Suspense } from 'react';
 import { requirePermission } from '@/modules/auth/authorization';
 import { getPurchaseOrdersWorkspace } from '@/modules/purchase-orders/purchase-orders-service';
 import { SimpleListWorkspace, type SimpleListColumn } from '@/components/common/SimpleListWorkspace';
@@ -28,17 +29,19 @@ export default async function PurchaseOrdersPage({ searchParams }: { searchParam
   ];
 
   return (
-    <SimpleListWorkspace
-      rows={result.rows}
-      total={result.total}
-      page={result.page}
-      pageSize={result.pageSize}
-      totalPages={result.totalPages}
-      search={params.search ?? ''}
-      basePath="/app/purchase-orders"
-      entityLabel="Orden de Compra"
-      entityLabelPlural="Órdenes de Compra"
-      columns={columns}
-    />
+    <Suspense fallback={<div className="app-content p-8 text-center text-muted-foreground">Cargando...</div>}>
+      <SimpleListWorkspace
+        rows={result.rows}
+        total={result.total}
+        page={result.page}
+        pageSize={result.pageSize}
+        totalPages={result.totalPages}
+        search={params.search ?? ''}
+        basePath="/app/purchase-orders"
+        entityLabel="Orden de Compra"
+        entityLabelPlural="Órdenes de Compra"
+        columns={columns}
+      />
+    </Suspense>
   );
 }

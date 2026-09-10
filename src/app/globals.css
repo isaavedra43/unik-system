@@ -7036,12 +7036,12 @@ textarea.input {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  background: var(--unik-surface);
+  background: var(--unik-panel, var(--unik-surface-pressed));
 }
 
 /* Sidebar */
 .chat-sidebar {
-  width: 300px;
+  width: clamp(280px, 22vw, 360px);
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
@@ -7119,8 +7119,8 @@ textarea.input {
 .chat-sidebar-item {
   display: flex;
   align-items: flex-start;
-  gap: var(--unik-space-3);
-  padding: var(--unik-space-2) var(--unik-space-3);
+  gap: var(--unik-space-2);
+  padding: 6px 10px;
   border-radius: var(--unik-radius-md);
   cursor: pointer;
   transition: background var(--unik-transition);
@@ -7129,7 +7129,8 @@ textarea.input {
   width: 100%;
   text-align: left;
   color: var(--unik-text);
-  margin-bottom: 2px;
+  margin-bottom: 1px;
+  border-left: 2px solid transparent;
 }
 
 .chat-sidebar-item:hover {
@@ -7138,17 +7139,18 @@ textarea.input {
 
 .chat-sidebar-item.active {
   background: var(--unik-brand-subtle);
+  border-left-color: var(--unik-brand);
 }
 
 .chat-sidebar-avatar {
-  width: 40px;
-  height: 40px;
+  width: 36px;
+  height: 36px;
   border-radius: var(--unik-radius-full);
   background: var(--unik-surface-pressed);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: var(--unik-text-sm);
+  font-size: var(--unik-text-xs);
   font-weight: var(--unik-weight-semibold);
   color: var(--unik-text-secondary);
   flex-shrink: 0;
@@ -7362,11 +7364,11 @@ textarea.input {
   display: flex;
   align-items: center;
   gap: var(--unik-space-3);
-  padding: var(--unik-space-3) var(--unik-space-4);
+  padding: 10px clamp(1rem, 2vw, 2rem);
   border-bottom: 1px solid var(--unik-border);
   background: var(--unik-surface);
   flex-shrink: 0;
-  min-height: 60px;
+  min-height: 52px;
 }
 
 .chat-back-btn {
@@ -7381,14 +7383,14 @@ textarea.input {
 }
 
 .chat-conversation-avatar {
-  width: 40px;
-  height: 40px;
+  width: 36px;
+  height: 36px;
   border-radius: var(--unik-radius-full);
   background: var(--unik-surface-pressed);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: var(--unik-text-sm);
+  font-size: var(--unik-text-xs);
   font-weight: var(--unik-weight-semibold);
   color: var(--unik-text-secondary);
   flex-shrink: 0;
@@ -7437,11 +7439,14 @@ textarea.input {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: var(--unik-space-4);
+  padding: var(--unik-space-4) clamp(1rem, 3vw, 3rem);
   display: flex;
   flex-direction: column;
   gap: 2px;
   scrollbar-width: thin;
+  max-width: 960px;
+  margin: 0 auto;
+  width: 100%;
 }
 
 .chat-messages-loading {
@@ -7542,7 +7547,7 @@ textarea.input {
   align-items: flex-end;
   gap: var(--unik-space-2);
   position: relative;
-  max-width: 75%;
+  max-width: min(75%, 520px);
   align-self: flex-start;
 }
 
@@ -8146,9 +8151,12 @@ textarea.input {
 .chat-input-wrapper {
   border-top: 1px solid var(--unik-border);
   background: var(--unik-surface);
-  padding: var(--unik-space-2) var(--unik-space-3);
+  padding: var(--unik-space-2) clamp(1rem, 3vw, 3rem);
   flex-shrink: 0;
   position: relative;
+  max-width: 960px;
+  margin: 0 auto;
+  width: 100%;
 }
 
 .chat-input-wrapper.dragging {

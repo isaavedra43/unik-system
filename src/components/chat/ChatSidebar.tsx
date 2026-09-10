@@ -1,7 +1,10 @@
 'use client';
 
 import React, { useState, useMemo } from 'react';
-import { Plus, Search, Users, MessageCircle, ChevronDown, ChevronRight, Pin } from 'lucide-react';
+import {
+  Plus, Search, Users, MessageCircle, ChevronDown, ChevronRight,
+  Bookmark, Calendar, BarChart3, Megaphone, Search as SearchIcon,
+} from 'lucide-react';
 import { ChatNewDialog } from './ChatNewDialog';
 import { Input } from '@/components/shadcn/input';
 import { Button } from '@/components/shadcn/button';
@@ -10,11 +13,20 @@ import { ScrollArea } from '@/components/shadcn/scroll-area';
 import { cn } from '@/lib/utils';
 import type { ChatInboxItem } from '@/modules/chat/chat-events';
 
+export interface ChatSidebarGlobalActions {
+  onSearchMessages?: () => void;
+  onShowBookmarks?: () => void;
+  onShowCalendar?: () => void;
+  onShowBroadcast?: () => void;
+  onShowStats?: () => void;
+}
+
 export interface ChatSidebarProps {
   activeId: string | null;
   inbox: ChatInboxItem[];
   onSelect: (id: string | null) => void;
   onChannelCreated: (id: string) => void;
+  globalActions?: ChatSidebarGlobalActions;
 }
 
 function formatTime(iso: string): string {
@@ -144,7 +156,7 @@ function Section({
   );
 }
 
-export function ChatSidebar({ activeId, inbox, onSelect, onChannelCreated }: ChatSidebarProps) {
+export function ChatSidebar({ activeId, inbox, onSelect, onChannelCreated, globalActions }: ChatSidebarProps) {
   const [search, setSearch] = useState('');
   const [showNew, setShowNew] = useState(false);
 
@@ -190,6 +202,25 @@ export function ChatSidebar({ activeId, inbox, onSelect, onChannelCreated }: Cha
             aria-label="Buscar conversación"
           />
         </div>
+        {globalActions && (
+          <div className="hidden md:flex items-center justify-center gap-0.5 pt-1 border-t border-border">
+            <Button variant="ghost" size="icon-sm" onClick={globalActions.onSearchMessages} aria-label="Buscar mensajes" title="Buscar mensajes">
+              <SearchIcon size={16} />
+            </Button>
+            <Button variant="ghost" size="icon-sm" onClick={globalActions.onShowBookmarks} aria-label="Favoritos" title="Favoritos">
+              <Bookmark size={16} />
+            </Button>
+            <Button variant="ghost" size="icon-sm" onClick={globalActions.onShowCalendar} aria-label="Calendario" title="Calendario">
+              <Calendar size={16} />
+            </Button>
+            <Button variant="ghost" size="icon-sm" onClick={globalActions.onShowBroadcast} aria-label="Difundir" title="Difundir mensaje">
+              <Megaphone size={16} />
+            </Button>
+            <Button variant="ghost" size="icon-sm" onClick={globalActions.onShowStats} aria-label="Estadísticas" title="Mis estadísticas">
+              <BarChart3 size={16} />
+            </Button>
+          </div>
+        )}
       </div>
 
       <ScrollArea className="flex-1">

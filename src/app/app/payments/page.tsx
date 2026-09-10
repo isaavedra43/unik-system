@@ -1,3 +1,4 @@
+import { Suspense } from 'react';
 import { requirePermission } from '@/modules/auth/authorization';
 import { getPaymentsWorkspace } from '@/modules/payments/payments-service';
 import { SimpleListWorkspace, type SimpleListColumn } from '@/components/common/SimpleListWorkspace';
@@ -28,17 +29,19 @@ export default async function PaymentsPage({ searchParams }: { searchParams: Pro
   ];
 
   return (
-    <SimpleListWorkspace
-      rows={result.rows}
-      total={result.total}
-      page={result.page}
-      pageSize={result.pageSize}
-      totalPages={result.totalPages}
-      search={params.search ?? ''}
-      basePath="/app/payments"
-      entityLabel="Pago"
-      entityLabelPlural="Pagos"
-      columns={columns}
-    />
+    <Suspense fallback={<div className="app-content p-8 text-center text-muted-foreground">Cargando...</div>}>
+      <SimpleListWorkspace
+        rows={result.rows}
+        total={result.total}
+        page={result.page}
+        pageSize={result.pageSize}
+        totalPages={result.totalPages}
+        search={params.search ?? ''}
+        basePath="/app/payments"
+        entityLabel="Pago"
+        entityLabelPlural="Pagos"
+        columns={columns}
+      />
+    </Suspense>
   );
 }

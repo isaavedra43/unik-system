@@ -1,3 +1,4 @@
+import { Suspense } from 'react';
 import { requirePermission } from '@/modules/auth/authorization';
 import { getBillsWorkspace } from '@/modules/bills/bills-service';
 import { SimpleListWorkspace, type SimpleListColumn } from '@/components/common/SimpleListWorkspace';
@@ -28,17 +29,19 @@ export default async function BillsPage({ searchParams }: { searchParams: Promis
   ];
 
   return (
-    <SimpleListWorkspace
-      rows={result.rows}
-      total={result.total}
-      page={result.page}
-      pageSize={result.pageSize}
-      totalPages={result.totalPages}
-      search={params.search ?? ''}
-      basePath="/app/bills"
-      entityLabel="Bill"
-      entityLabelPlural="Bills"
-      columns={columns}
-    />
+    <Suspense fallback={<div className="app-content p-8 text-center text-muted-foreground">Cargando...</div>}>
+      <SimpleListWorkspace
+        rows={result.rows}
+        total={result.total}
+        page={result.page}
+        pageSize={result.pageSize}
+        totalPages={result.totalPages}
+        search={params.search ?? ''}
+        basePath="/app/bills"
+        entityLabel="Bill"
+        entityLabelPlural="Bills"
+        columns={columns}
+      />
+    </Suspense>
   );
 }
