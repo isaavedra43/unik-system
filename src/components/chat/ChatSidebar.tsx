@@ -203,7 +203,7 @@ export function ChatSidebar({ activeId, inbox, onSelect, onChannelCreated, globa
           />
         </div>
         {globalActions && (
-          <div className="hidden md:flex items-center justify-center gap-0.5 pt-1 border-t border-border">
+          <div className="flex items-center justify-center gap-0.5 pt-1 border-t border-border">
             <Button variant="ghost" size="icon-sm" onClick={globalActions.onSearchMessages} aria-label="Buscar mensajes" title="Buscar mensajes">
               <SearchIcon size={16} />
             </Button>
