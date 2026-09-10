@@ -1,5 +1,6 @@
 'use client';
 
+import { Suspense } from 'react';
 import { SimpleListWorkspace, type SimpleListColumn } from '@/components/common/SimpleListWorkspace';
 import type { PaymentListRow } from '@/modules/payments/payments-contract';
 
@@ -12,7 +13,7 @@ interface PaymentsListProps {
   search: string;
 }
 
-export function PaymentsList({ rows, total, page, pageSize, totalPages, search }: PaymentsListProps) {
+export function PaymentsList(props: PaymentsListProps) {
   const columns: SimpleListColumn<PaymentListRow>[] = [
     { key: 'paymentNumber', label: 'Folio', href: (row) => `/app/payments/${row.id}` },
     { key: 'paymentMode', label: 'Modo' },
@@ -24,17 +25,15 @@ export function PaymentsList({ rows, total, page, pageSize, totalPages, search }
   ];
 
   return (
-    <SimpleListWorkspace
-      rows={rows}
-      total={total}
-      page={page}
-      pageSize={pageSize}
-      totalPages={totalPages}
-      search={search}
-      basePath="/app/payments"
-      entityLabel="Pago"
-      entityLabelPlural="Pagos"
-      columns={columns}
-    />
+    <Suspense fallback={<div className="app-content p-8 text-center text-muted-foreground">Cargando...</div>}>
+      <SimpleListWorkspace
+        {...props}
+        basePath="/app/payments"
+        entityLabel="Pago"
+        entityLabelPlural="Pagos"
+        columns={columns}
+        syncEnabled
+      />
+    </Suspense>
   );
 }

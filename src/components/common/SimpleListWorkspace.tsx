@@ -2,8 +2,8 @@
 
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { ArrowLeft, Search } from 'lucide-react';
-import { useState, useTransition } from 'react';
+import { ArrowLeft, Search, RefreshCw } from 'lucide-react';
+import { useState, useTransition, useCallback } from 'react';
 
 export interface SimpleListColumn<T> {
   key: keyof T | string;
@@ -25,16 +25,41 @@ interface SimpleListWorkspaceProps<T> {
   entityLabelPlural: string;
   columns: SimpleListColumn<T>[];
   emptyMessage?: string;
+  syncEnabled?: boolean;
 }
 
 export function SimpleListWorkspace<T extends { id: string }>({
   rows, total, page, pageSize, totalPages, search, basePath,
-  entityLabel, entityLabelPlural, columns, emptyMessage,
+  entityLabel, entityLabelPlural, columns, emptyMessage, syncEnabled,
 }: SimpleListWorkspaceProps<T>) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [searchValue, setSearchValue] = useState(search);
   const [isPending, startTransition] = useTransition();
+  const [syncing, setSyncing] = useState(false);
+
+  const handleSync = useCallback(async () => {
+    setSyncing(true);
+    try {
+      await fetch(`${basePath}/sync`, { method: 'POST' });
+      const poll = setInterval(async () => {
+        try {
+          const res = await fetch(`${basePath}/sync/status`);
+          const status = await res.json();
+          if (!status.active_run) {
+            clearInterval(poll);
+            setSyncing(false);
+            router.refresh();
+          }
+        } catch {
+          clearInterval(poll);
+          setSyncing(false);
+        }
+      }, 2000);
+    } catch {
+      setSyncing(false);
+    }
+  }, [basePath, router]);
 
   const handleSearch = (value: string) => {
     setSearchValue(value);
@@ -72,6 +97,18 @@ export function SimpleListWorkspace<T extends { id: string }>({
             {total} {total === 1 ? entityLabel.toLowerCase() : entityLabelPlural.toLowerCase()}
           </p>
         </div>
+        {syncEnabled && (
+          <button
+            onClick={handleSync}
+            disabled={syncing}
+            className="btn btn-secondary btn-sm"
+            style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}
+            aria-label={`Sincronizar ${entityLabelPlural.toLowerCase()}`}
+          >
+            <RefreshCw size={16} className={syncing ? 'animate-spin' : ''} />
+            {syncing ? 'Sincronizando…' : 'Sincronizar'}
+          </button>
+        )}
       </div>
 
       <div className="card" style={{ marginBottom: '1rem' }}>

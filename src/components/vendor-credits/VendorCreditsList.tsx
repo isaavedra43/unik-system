@@ -1,5 +1,6 @@
 'use client';
 
+import { Suspense } from 'react';
 import { SimpleListWorkspace, type SimpleListColumn } from '@/components/common/SimpleListWorkspace';
 import type { VendorCreditListRow } from '@/modules/vendor-credits/vendor-credits-contract';
 
@@ -12,7 +13,7 @@ interface VendorCreditsListProps {
   search: string;
 }
 
-export function VendorCreditsList({ rows, total, page, pageSize, totalPages, search }: VendorCreditsListProps) {
+export function VendorCreditsList(props: VendorCreditsListProps) {
   const columns: SimpleListColumn<VendorCreditListRow>[] = [
     { key: 'vendorCreditNumber', label: 'Folio', href: (row) => `/app/vendor-credits/${row.id}` },
     { key: 'status', label: 'Estado' },
@@ -24,17 +25,15 @@ export function VendorCreditsList({ rows, total, page, pageSize, totalPages, sea
   ];
 
   return (
-    <SimpleListWorkspace
-      rows={rows}
-      total={total}
-      page={page}
-      pageSize={pageSize}
-      totalPages={totalPages}
-      search={search}
-      basePath="/app/vendor-credits"
-      entityLabel="Crédito de Proveedor"
-      entityLabelPlural="Créditos de Proveedor"
-      columns={columns}
-    />
+    <Suspense fallback={<div className="app-content p-8 text-center text-muted-foreground">Cargando...</div>}>
+      <SimpleListWorkspace
+        {...props}
+        basePath="/app/vendor-credits"
+        entityLabel="Crédito de Proveedor"
+        entityLabelPlural="Créditos de Proveedor"
+        columns={columns}
+        syncEnabled
+      />
+    </Suspense>
   );
 }

@@ -1,5 +1,6 @@
 'use client';
 
+import { Suspense } from 'react';
 import { SimpleListWorkspace, type SimpleListColumn } from '@/components/common/SimpleListWorkspace';
 import type { BillListRow } from '@/modules/bills/bills-contract';
 
@@ -12,7 +13,7 @@ interface BillsListProps {
   search: string;
 }
 
-export function BillsList({ rows, total, page, pageSize, totalPages, search }: BillsListProps) {
+export function BillsList(props: BillsListProps) {
   const columns: SimpleListColumn<BillListRow>[] = [
     { key: 'billNumber', label: 'Folio', href: (row) => `/app/bills/${row.id}` },
     { key: 'status', label: 'Estado' },
@@ -24,17 +25,15 @@ export function BillsList({ rows, total, page, pageSize, totalPages, search }: B
   ];
 
   return (
-    <SimpleListWorkspace
-      rows={rows}
-      total={total}
-      page={page}
-      pageSize={pageSize}
-      totalPages={totalPages}
-      search={search}
-      basePath="/app/bills"
-      entityLabel="Bill"
-      entityLabelPlural="Bills"
-      columns={columns}
-    />
+    <Suspense fallback={<div className="app-content p-8 text-center text-muted-foreground">Cargando...</div>}>
+      <SimpleListWorkspace
+        {...props}
+        basePath="/app/bills"
+        entityLabel="Bill"
+        entityLabelPlural="Bills"
+        columns={columns}
+        syncEnabled
+      />
+    </Suspense>
   );
 }

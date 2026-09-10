@@ -1,5 +1,6 @@
 'use client';
 
+import { Suspense } from 'react';
 import { SimpleListWorkspace, type SimpleListColumn } from '@/components/common/SimpleListWorkspace';
 import type { PurchaseOrderListRow } from '@/modules/purchase-orders/purchase-orders-contract';
 
@@ -12,7 +13,7 @@ interface PurchaseOrdersListProps {
   search: string;
 }
 
-export function PurchaseOrdersList({ rows, total, page, pageSize, totalPages, search }: PurchaseOrdersListProps) {
+export function PurchaseOrdersList(props: PurchaseOrdersListProps) {
   const columns: SimpleListColumn<PurchaseOrderListRow>[] = [
     { key: 'purchaseOrderNumber', label: 'Folio', href: (row) => `/app/purchase-orders/${row.id}` },
     { key: 'status', label: 'Estado' },
@@ -24,17 +25,15 @@ export function PurchaseOrdersList({ rows, total, page, pageSize, totalPages, se
   ];
 
   return (
-    <SimpleListWorkspace
-      rows={rows}
-      total={total}
-      page={page}
-      pageSize={pageSize}
-      totalPages={totalPages}
-      search={search}
-      basePath="/app/purchase-orders"
-      entityLabel="Orden de Compra"
-      entityLabelPlural="Órdenes de Compra"
-      columns={columns}
-    />
+    <Suspense fallback={<div className="app-content p-8 text-center text-muted-foreground">Cargando...</div>}>
+      <SimpleListWorkspace
+        {...props}
+        basePath="/app/purchase-orders"
+        entityLabel="Orden de Compra"
+        entityLabelPlural="Órdenes de Compra"
+        columns={columns}
+        syncEnabled
+      />
+    </Suspense>
   );
 }
