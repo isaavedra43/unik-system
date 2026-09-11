@@ -48,7 +48,8 @@ registerTool({
     '"paquetes del cliente X" → queryPackages(customer="X"). ' +
     '"paquetes con tracking" → queryPackages(dateRange="this_month"). ' +
     '"paquetes por transportista" → queryPackages(dateRange="this_month", groupBy="carrier"). ' +
-    '"paquetes por cliente de esta semana" → queryPackages(dateRange="this_week", groupBy="customer").',
+    '"paquetes por cliente de esta semana" → queryPackages(dateRange="this_week", groupBy="customer"). ' +
+    'PATRONES: "envíos abiertos" = status="open" • "envíos entregados" = status="delivered" • "envíos por DHL" = carrier="DHL" • "paquetes sin enviar" = status="open".',
   category: 'packages',
   requiredPermission: 'packages.view',
   enabledByDefault: true,

@@ -26,6 +26,7 @@ export default async function ChangePasswordPage() {
           style={{ width: 120, height: 120, top: '40%', right: '20%' }}
         />
         <div className="auth-hero-inner">
+          <span className="auth-hero-mark">U</span>
           <h2 className="auth-hero-title">Actualiza tu acceso</h2>
           <p className="auth-hero-blurb">Es un paso único que mantiene tu cuenta protegida.</p>
         </div>
@@ -34,6 +35,7 @@ export default async function ChangePasswordPage() {
       <div className="auth-form-wrap">
         <div className="auth-card">
           <div className="auth-brand">
+            <span className="auth-brand-mark">U</span>
             <strong>UNIK System</strong>
             <p>Cambio de contraseña requerido</p>
           </div>

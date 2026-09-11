@@ -47,7 +47,8 @@ registerTool({
     '"facturas abiertas" → queryInvoices(status="open"). ' +
     '"facturas del cliente X" → queryInvoices(customer="X"). ' +
     '"facturas con detalle de productos" → queryInvoices(dateRange="this_month", includeItems=true). ' +
-    '"facturas por cliente de este mes" → queryInvoices(dateRange="this_month", groupBy="customer").',
+    '"facturas por cliente de este mes" → queryInvoices(dateRange="this_month", groupBy="customer"). ' +
+    'PATRONES: "facturas sin cobrar" = status="open" • "facturas vencidas" = status="overdue" • "facturas cerradas" = status="closed" • "facturas no enviadas" = status="draft".',
   category: 'invoices',
   requiredPermission: 'invoices.view',
   enabledByDefault: true,

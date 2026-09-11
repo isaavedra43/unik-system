@@ -1204,11 +1204,27 @@ textarea.input {
    ===================================================== */
 
 .auth-page {
+  position: relative;
   min-height: 100vh;
+  min-height: 100dvh;
   display: flex;
   align-items: stretch;
   justify-content: center;
   background: var(--unik-bg);
+  overflow: hidden;
+}
+
+/* Ambient backdrop behind the whole page — visible on every breakpoint,
+   so mobile isn't left with a flat, lifeless background. */
+.auth-page::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background:
+    radial-gradient(560px circle at 12% 8%, color-mix(in oklch, var(--unik-brand) 16%, transparent), transparent 60%),
+    radial-gradient(680px circle at 88% 92%, color-mix(in oklch, var(--unik-brand) 10%, transparent), transparent 60%);
+  pointer-events: none;
 }
 
 .auth-hero {
@@ -1221,18 +1237,72 @@ textarea.input {
   align-items: center;
   position: relative;
   overflow: hidden;
+  isolation: isolate;
+}
+
+/* Layered mesh-gradient + fine grid, animated with a slow drift so the
+   hero reads as alive rather than a static brand-color rectangle. */
+.auth-hero::before {
+  content: '';
+  position: absolute;
+  inset: -10%;
+  z-index: 0;
+  background:
+    radial-gradient(38% 46% at 22% 24%, rgba(255, 255, 255, 0.16), transparent 70%),
+    radial-gradient(32% 40% at 82% 18%, rgba(255, 255, 255, 0.1), transparent 70%),
+    radial-gradient(46% 52% at 68% 88%, rgba(0, 0, 0, 0.22), transparent 72%);
+  animation: auth-mesh-drift 22s ease-in-out infinite alternate;
+}
+
+.auth-hero::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
+  background-size: 42px 42px;
+  mask-image: radial-gradient(ellipse 80% 70% at 50% 40%, #000 40%, transparent 88%);
+}
+
+@keyframes auth-mesh-drift {
+  0% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  100% {
+    transform: translate3d(-2%, 2%, 0) scale(1.06);
+  }
 }
 
 .auth-hero-inner {
   max-width: 480px;
   position: relative;
   z-index: 2;
+  animation: auth-rise 700ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.auth-hero-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  margin-bottom: var(--unik-space-6);
+  border-radius: var(--unik-radius-lg);
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  font-size: var(--unik-text-lg);
+  font-weight: var(--unik-weight-bold);
+  letter-spacing: 0.02em;
+  backdrop-filter: blur(6px);
 }
 
 .auth-hero-title {
-  font-size: var(--unik-text-2xl);
+  font-size: clamp(1.75rem, 1.4rem + 1.3vw, 2.5rem);
   font-weight: var(--unik-weight-bold);
-  letter-spacing: 0.04em;
+  letter-spacing: -0.01em;
+  line-height: 1.15;
   margin-bottom: var(--unik-space-4);
 }
 
@@ -1245,8 +1315,39 @@ textarea.input {
 
 .auth-hero-blurb {
   font-size: var(--unik-text-base);
-  opacity: 0.85;
-  max-width: 360px;
+  line-height: 1.6;
+  opacity: 0.82;
+  max-width: 380px;
+  margin-bottom: var(--unik-space-8);
+}
+
+.auth-hero-features {
+  display: flex;
+  flex-direction: column;
+  gap: var(--unik-space-3);
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.auth-hero-features li {
+  display: flex;
+  align-items: center;
+  gap: var(--unik-space-3);
+  font-size: var(--unik-text-sm);
+  opacity: 0.9;
+}
+
+.auth-hero-features .auth-feature-dot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--unik-radius-full);
+  background: rgba(255, 255, 255, 0.14);
+  border: 1px solid rgba(255, 255, 255, 0.2);
 }
 
 .auth-hero-shape {
@@ -1256,6 +1357,8 @@ textarea.input {
 }
 
 .auth-form-wrap {
+  position: relative;
+  z-index: 1;
   flex: 1;
   display: flex;
   align-items: center;
@@ -1265,12 +1368,50 @@ textarea.input {
 
 .auth-card {
   width: 100%;
-  max-width: 400px;
-  background: var(--unik-surface);
+  max-width: 408px;
+  position: relative;
+  background: color-mix(in oklch, var(--unik-surface) 92%, transparent);
   border: 1px solid var(--unik-border);
   border-radius: var(--unik-radius-xl);
   padding: var(--unik-space-10);
-  box-shadow: var(--unik-shadow-md);
+  box-shadow: var(--unik-shadow-lg);
+  backdrop-filter: blur(20px) saturate(1.1);
+  animation: auth-rise 550ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation-delay: 80ms;
+}
+
+.auth-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: var(--unik-space-6);
+  right: var(--unik-space-6);
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in oklch, var(--unik-brand) 55%, transparent),
+    transparent
+  );
+}
+
+@keyframes auth-rise {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .auth-hero::before,
+  .auth-hero-inner,
+  .auth-card {
+    animation: none;
+  }
 }
 
 .auth-brand {
@@ -1278,11 +1419,26 @@ textarea.input {
   margin-bottom: var(--unik-space-8);
 }
 
+.auth-brand-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  margin-bottom: var(--unik-space-4);
+  border-radius: var(--unik-radius-lg);
+  background: var(--unik-brand);
+  color: var(--unik-text-inverse);
+  font-size: var(--unik-text-md);
+  font-weight: var(--unik-weight-bold);
+  box-shadow: var(--unik-shadow-md);
+}
+
 .auth-brand strong {
   display: block;
   font-size: var(--unik-text-xl);
   font-weight: var(--unik-weight-bold);
-  letter-spacing: 0.05em;
+  letter-spacing: 0.02em;
   color: var(--unik-text);
 }
 
@@ -1290,6 +1446,211 @@ textarea.input {
   color: var(--unik-text-muted);
   font-size: var(--unik-text-sm);
   margin-top: var(--unik-space-1);
+}
+
+.auth-footnote {
+  margin-top: var(--unik-space-6);
+  text-align: center;
+  font-size: var(--unik-text-xs);
+  color: var(--unik-text-muted);
+}
+
+/* -----------------------------------------------------
+   Auth micro-interactions — scoped to .auth-page only,
+   deliberately restrained: slow loops, small deltas.
+   ----------------------------------------------------- */
+
+/* Background blobs drift gently instead of sitting static */
+.auth-hero-shape {
+  animation: auth-float 12s ease-in-out infinite;
+}
+
+.auth-hero-shape:nth-child(2) {
+  animation-duration: 15s;
+  animation-delay: -3s;
+}
+
+.auth-hero-shape:nth-child(3) {
+  animation-duration: 9s;
+  animation-delay: -6s;
+}
+
+@keyframes auth-float {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0);
+  }
+  50% {
+    transform: translate3d(0, -14px, 0);
+  }
+}
+
+/* Logo marks breathe subtly so the page never feels frozen */
+.auth-hero-mark,
+.auth-brand-mark {
+  animation: auth-breathe 4.5s ease-in-out infinite;
+}
+
+@keyframes auth-breathe {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.05);
+  }
+}
+
+/* Hero feature rows stagger in after the panel rises */
+.auth-hero-features li {
+  opacity: 0;
+  animation: auth-feature-in 500ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.auth-hero-features li:nth-child(1) {
+  animation-delay: 420ms;
+}
+.auth-hero-features li:nth-child(2) {
+  animation-delay: 520ms;
+}
+.auth-hero-features li:nth-child(3) {
+  animation-delay: 620ms;
+}
+
+@keyframes auth-feature-in {
+  from {
+    opacity: 0;
+    transform: translateX(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* Form fields cascade in right after the card, so the eye has
+   somewhere to land instead of everything popping at once */
+.auth-card .form-field,
+.auth-card .btn {
+  opacity: 0;
+  animation: auth-field-in 480ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.auth-card .form-field:nth-of-type(1) {
+  animation-delay: 220ms;
+}
+.auth-card .form-field:nth-of-type(2) {
+  animation-delay: 300ms;
+}
+.auth-card .btn {
+  animation-delay: 380ms;
+}
+
+@keyframes auth-field-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Inputs: focus lifts slightly and the glow eases in, instead of
+   snapping straight to the ring */
+.auth-card .input {
+  transition:
+    border-color var(--unik-transition),
+    box-shadow 200ms ease,
+    transform 150ms ease;
+}
+
+.auth-card .input:focus {
+  transform: translateY(-1px);
+}
+
+/* Primary button: soft lift on hover + a single light sweep,
+   a press state that settles rather than just recoloring */
+.auth-card .btn-primary {
+  position: relative;
+  overflow: hidden;
+  transition:
+    background var(--unik-transition),
+    box-shadow 200ms ease,
+    transform 150ms ease;
+}
+
+.auth-card .btn-primary:hover:not(:disabled) {
+  box-shadow: var(--unik-shadow-md);
+  transform: translateY(-1px);
+}
+
+.auth-card .btn-primary:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.auth-card .btn-primary::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    115deg,
+    transparent 20%,
+    rgba(255, 255, 255, 0.16) 35%,
+    transparent 50%
+  );
+  transform: translateX(-120%);
+}
+
+.auth-card .btn-primary:hover:not(:disabled)::after {
+  transform: translateX(120%);
+  transition: transform 650ms ease;
+}
+
+/* Password visibility toggle: small deliberate flip instead of an
+   instant icon swap */
+.auth-card .icon-btn {
+  transition:
+    color var(--unik-transition),
+    transform 150ms ease;
+}
+
+.auth-card .icon-btn:hover {
+  transform: scale(1.08);
+}
+
+.auth-card .icon-btn:active {
+  transform: scale(0.94);
+}
+
+/* Alert entrance so validation errors announce themselves calmly */
+.auth-card .alert {
+  animation: auth-field-in 320ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .auth-hero-shape,
+  .auth-hero-mark,
+  .auth-brand-mark,
+  .auth-hero-features li,
+  .auth-card .form-field,
+  .auth-card .btn,
+  .auth-card .alert {
+    animation: none;
+    opacity: 1;
+  }
+
+  .auth-card .input:focus,
+  .auth-card .btn-primary:hover:not(:disabled),
+  .auth-card .icon-btn:hover,
+  .auth-card .icon-btn:active {
+    transform: none;
+  }
+
+  .auth-card .btn-primary::after {
+    display: none;
+  }
 }
 
 /* =====================================================

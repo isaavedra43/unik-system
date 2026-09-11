@@ -46,7 +46,10 @@ registerTool({
     '"órdenes de compra al proveedor X" → queryPurchaseOrders(vendor="X"). ' +
     '"órdenes de compra abiertas" → queryPurchaseOrders(status="open"). ' +
     '"qué material le pedí al proveedor X esta semana" → queryPurchaseOrders(dateRange="this_week", vendor="X", includeItems=true). ' +
-    '"órdenes de compra por proveedor de este mes" → queryPurchaseOrders(dateRange="this_month", groupBy="vendor").',
+    '"órdenes de compra por proveedor de este mes" → queryPurchaseOrders(dateRange="this_month", groupBy="vendor"). ' +
+    'PATRONES CRÍTICOS: ' +
+    '"compras pendientes" = status="open" • "compras cerradas" = status="closed" • "qué pedidos tengo abiertos" = status="open" • "material sin llegar" = status="open" con agrupación o fecha. ' +
+    'NOTA: status=open para "abiertas", status=closed para "entregadas/cerradas".',
   category: 'purchases',
   requiredPermission: 'purchase_orders.view',
   enabledByDefault: true,

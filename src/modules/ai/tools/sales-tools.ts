@@ -60,11 +60,18 @@ registerTool({
     '"ventas del producto silla de hoy" → querySalesOrders(dateRange="today", product="silla"). ' +
     '"ventas de hoy con detalle de productos" → querySalesOrders(dateRange="today", includeItems=true). ' +
     '"ventas de hoy en efectivo a pie de obra" → querySalesOrders(dateRange="today", paymentMethods=["EFECTIVO"], deliveryMethod="A PIE DE OBRA"). ' +
-    '"pendientes de entrega de hoy" → querySalesOrders(dateRange="today", subStatus="Pendiente"). ' +
+    '"pendientes de entrega de hoy" → querySalesOrders(dateRange="today", shippedStatus="Pendiente"). ' +
     '"no pagadas de hoy" → querySalesOrders(dateRange="today", paidStatus="Pendiente"). ' +
     '"parcialmente pagadas de hoy" → querySalesOrders(dateRange="today", paidStatus="Parcial"). ' +
-    '"ventas por enviar de la semana" → querySalesOrders(dateRange="this_week", subStatus="Pendiente"). ' +
-    '"ventas no entregadas de ayer" → querySalesOrders(dateRange="yesterday", subStatus="Pendiente").',
+    '"ventas por enviar de la semana" → querySalesOrders(dateRange="this_week", shippedStatus="Pendiente"). ' +
+    '"ventas no entregadas de ayer" → querySalesOrders(dateRange="yesterday", shippedStatus="Pendiente"). ' +
+    'ENTREGAS ABIERTAS (CRÍTICOS): ' +
+    '"entregas abiertas semana" → querySalesOrders(dateRange="this_week", shippedStatus="Pendiente", includeShippingAddress=true). ' +
+    '"entregas abiertas a pie de obra" → querySalesOrders(deliveryMethod="A PIE DE OBRA", shippedStatus="Pendiente", includeShippingAddress=true). ' +
+    '"entregas abiertas semana a pie de obra" → querySalesOrders(dateRange="this_week", deliveryMethod="A PIE DE OBRA", shippedStatus="Pendiente", includeShippingAddress=true, includeItems=true). ' +
+    '"venta no he entregado" → querySalesOrders(shippedStatus="Pendiente", includeShippingAddress=true). ' +
+    '"ordenes pendientes de entrega" → querySalesOrders(shippedStatus="Pendiente"). ' +
+    'NOTA: Para entregas SIEMPRE usa shippedStatus, NO subStatus. deliveryMethod = CÓMO se entrega ("A PIE DE OBRA"). shippedStatus = ESTADO de la entrega ("Pendiente" o "Enviado").',
   category: 'sales',
   requiredPermission: 'sales_orders.view',
   enabledByDefault: true,

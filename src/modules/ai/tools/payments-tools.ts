@@ -45,7 +45,8 @@ registerTool({
     '"pagos en efectivo de hoy" → queryPayments(dateRange="today", paymentMode="EFECTIVO"). ' +
     '"pagos del cliente X" → queryPayments(customer="X"). ' +
     '"pagos por método de pago de este mes" → queryPayments(dateRange="this_month", groupBy="paymentMode"). ' +
-    '"pagos por cliente de esta semana" → queryPayments(dateRange="this_week", groupBy="customer").',
+    '"pagos por cliente de esta semana" → queryPayments(dateRange="this_week", groupBy="customer"). ' +
+    'PATRONES: "me pagaron esta semana" = dateRange="this_week" • "pagos por cliente" = groupBy="customer" • "pagos en transferencia hoy" = dateRange="today", paymentMode="TRANSFERENCIA".',
   category: 'payments',
   requiredPermission: 'payments.view',
   enabledByDefault: true,
