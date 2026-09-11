@@ -149,8 +149,43 @@ export async function getInvoicesWorkspace(rawQuery: unknown): Promise<InvoicesL
     prisma.invoice.findMany({ where, orderBy, take: query.page_size, skip, select: LIST_SELECT }),
     prisma.invoice.count({ where }),
   ]);
+
+  // Batch lookup related sales order statuses through invoice items
+  const invoiceIds = invoices.map((inv) => inv.id);
+  const itemsWithSoId = invoiceIds.length > 0
+    ? await prisma.invoiceItem.findMany({
+        where: { invoiceId: { in: invoiceIds }, zohoSalesOrderId: { not: null } },
+        select: { invoiceId: true, zohoSalesOrderId: true },
+        distinct: ['invoiceId'],
+      })
+    : [];
+  const invoiceToSoId = new Map<string, string>();
+  for (const item of itemsWithSoId) {
+    if (item.zohoSalesOrderId) invoiceToSoId.set(item.invoiceId, item.zohoSalesOrderId);
+  }
+  const salesOrderIds = [...new Set(invoiceToSoId.values())];
+  const salesOrderStatusMap = new Map<string, string | null>();
+  if (salesOrderIds.length > 0) {
+    const salesOrders = await prisma.salesOrder.findMany({
+      where: { zohoSalesOrderId: { in: salesOrderIds } },
+      select: { zohoSalesOrderId: true, status: true },
+    });
+    for (const so of salesOrders) {
+      salesOrderStatusMap.set(so.zohoSalesOrderId, so.status);
+    }
+  }
+
+  const rows = invoices.map((inv) =>
+    toInvoiceListRow({
+      ...inv,
+      salesOrderStatus: invoiceToSoId.has(inv.id)
+        ? (salesOrderStatusMap.get(invoiceToSoId.get(inv.id)!) ?? null)
+        : null,
+    })
+  );
+
   const totalPages = Math.ceil(total / query.page_size);
-  return { data: invoices.map(toInvoiceListRow), pagination: { page: query.page, page_size: query.page_size, total, total_pages: totalPages }, aggregates: { count: total } };
+  return { data: rows, pagination: { page: query.page, page_size: query.page_size, total, total_pages: totalPages }, aggregates: { count: total } };
 }
 
 export async function getInvoiceById(id: string): Promise<InvoiceDetail | null> {

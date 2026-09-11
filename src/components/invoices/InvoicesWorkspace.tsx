@@ -19,6 +19,7 @@ import {
   getInvoiceStatusLabel,
   getInvoiceStatusOptions,
 } from '@/modules/invoices/invoices-helpers';
+import { getSalesOrderStatusConfig } from '@/modules/sales/sales-orders-helpers';
 import { InvoicePreviewDrawer } from './InvoicePreviewDrawer';
 import { CurrentUser } from '@/modules/auth/authorization';
 import type {
@@ -65,8 +66,19 @@ export interface InvoicesWorkspaceProps {
   exportAction: ExportAction;
 }
 
-function StatusCell({ value, label }: { value: string | null; label: string }) {
-  const config = getInvoiceStatusConfig(value);
+function StatusCell({
+  value,
+  label,
+  category,
+}: {
+  value: string | null;
+  label: string;
+  category?: 'invoice' | 'sales_order';
+}) {
+  const config =
+    category === 'sales_order'
+      ? getSalesOrderStatusConfig(value, 'order')
+      : getInvoiceStatusConfig(value);
   if (!value) {
     return (
       <span className="so-status-cell">
@@ -93,7 +105,13 @@ function renderCell(row: InvoiceListRow, column: EntityColumnDefinition): React.
     return formatDateOnly(value as string | Date);
   }
   if (column.formatter === 'statusDot') {
-    return <StatusCell value={value as string | null} label={column.label} />;
+    return (
+      <StatusCell
+        value={value as string | null}
+        label={column.label}
+        category={(column as { statusCategory?: 'invoice' | 'sales_order' }).statusCategory}
+      />
+    );
   }
   return String(value);
 }

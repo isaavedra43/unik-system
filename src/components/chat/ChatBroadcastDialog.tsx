@@ -18,13 +18,22 @@ import { cn } from '@/lib/utils';
 
 interface Channel {
   id: string;
-  name: string;
+  name: string | null;
   type: string;
+  members?: { name: string; userId: string }[];
 }
 
 export interface ChatBroadcastDialogProps {
   onClose: () => void;
   onSent: () => void;
+}
+
+function getChannelDisplayName(c: Channel): string {
+  if (c.name) return c.name;
+  if (c.type === 'group') return 'Grupo';
+  // DM — derive name from the other member
+  const otherMember = c.members?.[0];
+  return otherMember?.name ?? 'Chat';
 }
 
 export function ChatBroadcastDialog({ onClose, onSent }: ChatBroadcastDialogProps) {
@@ -114,6 +123,7 @@ export function ChatBroadcastDialog({ onClose, onSent }: ChatBroadcastDialogProp
                 <div className="flex flex-col gap-1 pr-3">
                   {channels.map((c) => {
                     const isSelected = selected.has(c.id);
+                    const displayName = getChannelDisplayName(c);
                     return (
                       <button
                         key={c.id}
@@ -130,12 +140,12 @@ export function ChatBroadcastDialog({ onClose, onSent }: ChatBroadcastDialogProp
                             {c.type === 'group' ? (
                               <Users size={14} />
                             ) : (
-                              c.name.slice(0, 2).toUpperCase()
+                              displayName.slice(0, 2).toUpperCase()
                             )}
                           </AvatarFallback>
                         </Avatar>
                         <span className="flex-1 text-sm font-medium text-foreground truncate">
-                          {c.name}
+                          {displayName}
                         </span>
                         {isSelected && <Check size={18} className="text-primary shrink-0" />}
                       </button>

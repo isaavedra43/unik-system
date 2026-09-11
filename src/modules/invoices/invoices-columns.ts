@@ -7,11 +7,13 @@ interface InvoiceColumnDefinition {
   defaultWidth: number; minWidth: number; maxWidth: number;
   align: 'left' | 'right' | 'center'; priority: number;
   formatter?: 'date' | 'currency' | 'statusDot';
+  statusCategory?: 'invoice' | 'sales_order';
 }
 
 export const INVOICE_COLUMNS: InvoiceColumnDefinition[] = [
   { id: 'invoiceNumber', label: 'Factura', field: 'invoiceNumber', type: 'text', sortable: true, filterable: true, defaultVisible: true, defaultWidth: 140, minWidth: 100, maxWidth: 200, align: 'left', priority: 1 },
-  { id: 'status', label: 'Estado', field: 'status', type: 'status', sortable: true, filterable: true, defaultVisible: true, defaultWidth: 120, minWidth: 90, maxWidth: 160, align: 'left', priority: 2, formatter: 'statusDot' },
+  { id: 'status', label: 'Estado', field: 'status', type: 'status', sortable: true, filterable: true, defaultVisible: true, defaultWidth: 120, minWidth: 90, maxWidth: 160, align: 'left', priority: 2, formatter: 'statusDot', statusCategory: 'invoice' },
+  { id: 'salesOrderStatus', label: 'Estado OV', field: 'salesOrderStatus', type: 'status', sortable: false, filterable: false, defaultVisible: true, defaultWidth: 130, minWidth: 90, maxWidth: 170, align: 'left', priority: 2.5, formatter: 'statusDot', statusCategory: 'sales_order' },
   { id: 'date', label: 'Fecha', field: 'date', type: 'date', sortable: true, filterable: true, defaultVisible: true, defaultWidth: 130, minWidth: 100, maxWidth: 180, align: 'left', priority: 3, formatter: 'date' },
   { id: 'dueDate', label: 'Vencimiento', field: 'dueDate', type: 'date', sortable: true, filterable: true, defaultVisible: true, defaultWidth: 130, minWidth: 100, maxWidth: 180, align: 'left', priority: 4, formatter: 'date' },
   { id: 'customerName', label: 'Cliente', field: 'customerName', type: 'text', sortable: true, filterable: true, defaultVisible: true, defaultWidth: 180, minWidth: 100, maxWidth: 280, align: 'left', priority: 5 },

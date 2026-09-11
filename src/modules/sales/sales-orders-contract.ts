@@ -44,6 +44,8 @@ export interface SalesOrderListRow {
   saleMadeInWarehouse: boolean | null;
   sourceRemoteModifiedAt: string | null;
   shippingAddress: string | null;
+  /** Transportista asignado al paquete relacionado (desde Zoho Inventory). */
+  carrier: string | null;
 }
 
 interface SalesOrderDetailItem {
@@ -172,6 +174,8 @@ export function toSalesOrderListRow(order: {
   sourceRemoteModifiedAt: Date;
   shippingAddressLine1: string | null;
   shippingAddressLine2: string | null;
+  /** Transportista del paquete relacionado (lookup externo). */
+  carrier?: string | null;
 }): SalesOrderListRow {
   return {
     id: order.id,
@@ -211,6 +215,7 @@ export function toSalesOrderListRow(order: {
       [order.shippingAddressLine1, order.shippingAddressLine2]
         .filter(Boolean)
         .join(', ') || null,
+    carrier: order.carrier ?? null,
   };
 }
 

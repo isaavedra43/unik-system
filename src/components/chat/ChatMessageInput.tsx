@@ -45,7 +45,7 @@ export interface ChatMessageInputProps {
       priority?: 'normal' | 'urgent';
       threadId?: string;
     }
-  ) => void;
+  ) => Promise<boolean>;
   onTyping: (isTyping: boolean, preview?: string) => void;
   replyTo: ChatMessageDTO | null;
   onCancelReply: () => void;
@@ -77,6 +77,7 @@ export function ChatMessageInput({
   const [pendingUploads, setPendingUploads] = useState<PendingUpload[]>([]);
   const [completedAttachmentIds, setCompletedAttachmentIds] = useState<string[]>([]);
   const [isDragging, setIsDragging] = useState(false);
+  const [isSending, setIsSending] = useState(false);
   const [showLocationPicker, setShowLocationPicker] = useState(false);
   const [showPollCreator, setShowPollCreator] = useState(false);
   const [showEventCreator, setShowEventCreator] = useState(false);
@@ -92,6 +93,39 @@ export function ChatMessageInput({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isTypingRef = useRef(false);
+
+  // Draft persistence — save/restore text per channel via localStorage
+  const draftKey = `chat-draft:${channelId}`;
+  useEffect(() => {
+    // Restore draft on channel switch
+    try {
+      const saved = localStorage.getItem(draftKey);
+      if (saved) setText(saved);
+    } catch {
+      // localStorage unavailable
+    }
+    return () => {
+      // Clear local typing state when leaving channel
+      isTypingRef.current = false;
+    };
+  }, [draftKey]);
+
+  useEffect(() => {
+    // Save draft on text change (debounced via microtask)
+    if (text) {
+      try {
+        localStorage.setItem(draftKey, text);
+      } catch {
+        // localStorage unavailable or quota exceeded
+      }
+    } else {
+      try {
+        localStorage.removeItem(draftKey);
+      } catch {
+        // ignore
+      }
+    }
+  }, [text, draftKey]);
 
   // Auto-resize textarea
   useEffect(() => {
@@ -159,20 +193,40 @@ export function ChatMessageInput({
     }, 0);
   };
 
-  const handleSend = () => {
+  const handleSend = async () => {
     const trimmed = text.trim();
     if (!trimmed && completedAttachmentIds.length === 0) return;
-    onSend(trimmed, completedAttachmentIds.length > 0 ? completedAttachmentIds : undefined, {
-      priority: isUrgent ? 'urgent' : 'normal',
-      threadId: threadId ?? undefined,
-    });
-    setText('');
-    setCompletedAttachmentIds([]);
-    setIsUrgent(false);
-    setSlashQuery(null);
-    sendTyping(false);
-    if (textareaRef.current) {
-      textareaRef.current.style.height = 'auto';
+    if (isSending) return; // prevent duplicate submissions
+
+    setIsSending(true);
+    try {
+      const success = await onSend(
+        trimmed,
+        completedAttachmentIds.length > 0 ? completedAttachmentIds : undefined,
+        {
+          priority: isUrgent ? 'urgent' : 'normal',
+          threadId: threadId ?? undefined,
+        }
+      );
+      if (success) {
+        setText('');
+        setCompletedAttachmentIds([]);
+        setIsUrgent(false);
+        setSlashQuery(null);
+        sendTyping(false);
+        // Clear draft from localStorage
+        try {
+          localStorage.removeItem(draftKey);
+        } catch {
+          // ignore
+        }
+        if (textareaRef.current) {
+          textareaRef.current.style.height = 'auto';
+        }
+      }
+      // On failure: keep text and attachments so user can retry
+    } finally {
+      setIsSending(false);
     }
   };
 
@@ -652,10 +706,11 @@ export function ChatMessageInput({
           type="button"
           className="chat-input-send"
           onClick={handleSend}
-          disabled={!text.trim() && completedAttachmentIds.length === 0}
-          aria-label="Enviar"
+          disabled={isSending || (!text.trim() && completedAttachmentIds.length === 0)}
+          aria-label={isSending ? 'Enviando…' : 'Enviar'}
+          aria-busy={isSending}
         >
-          <Send size={20} />
+          <Send size={20} className={isSending ? 'chat-send-spin' : ''} />
         </button>
       </div>
 

@@ -14,6 +14,7 @@ interface PackageColumnDefinition {
   align: 'left' | 'right' | 'center';
   priority: number;
   formatter?: 'date' | 'currency' | 'statusDot';
+  statusCategory?: 'package' | 'sales_order';
 }
 
 export const PACKAGE_COLUMNS: PackageColumnDefinition[] = [
@@ -45,6 +46,23 @@ export const PACKAGE_COLUMNS: PackageColumnDefinition[] = [
     align: 'left',
     priority: 2,
     formatter: 'statusDot',
+    statusCategory: 'package',
+  },
+  {
+    id: 'salesOrderStatus',
+    label: 'Estado OV',
+    field: 'salesOrderStatus',
+    type: 'status',
+    sortable: false,
+    filterable: false,
+    defaultVisible: true,
+    defaultWidth: 130,
+    minWidth: 90,
+    maxWidth: 170,
+    align: 'left',
+    priority: 2.5,
+    formatter: 'statusDot',
+    statusCategory: 'sales_order',
   },
   {
     id: 'date',

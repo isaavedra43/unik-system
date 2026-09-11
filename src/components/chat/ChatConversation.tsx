@@ -43,6 +43,9 @@ export function ChatConversation({ channelId, user, onRefresh, onBack, onIncomin
   } | null>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
   const oldestMessageDate = useRef<string | null>(null);
+  // Timestamp of when the conversation was first opened — used to show
+  // a "new messages" separator for messages that arrive after opening.
+  const firstOpenAtRef = useRef<string | null>(null);
 
   // Load channel info
   useEffect(() => {
@@ -76,6 +79,11 @@ export function ChatConversation({ channelId, user, onRefresh, onBack, onIncomin
         setHasMore(data.hasMore);
         if (data.messages.length > 0) {
           oldestMessageDate.current = data.messages[0].createdAt;
+          // Record the timestamp of the most recent message at load time.
+          // Messages arriving after this (via SSE) will show a "new" separator.
+          firstOpenAtRef.current = data.messages[data.messages.length - 1].createdAt;
+        } else {
+          firstOpenAtRef.current = new Date().toISOString();
         }
       } else if (res.status === 403) {
         setError('No tienes acceso a este canal');
@@ -244,7 +252,7 @@ export function ChatConversation({ channelId, user, onRefresh, onBack, onIncomin
     }
   }, [channelId, hasMore, loadingMore]);
 
-  // Send message
+  // Send message — returns true on success, false on failure
   const handleSend = useCallback(
     async (
       content: string,
@@ -267,7 +275,7 @@ export function ChatConversation({ channelId, user, onRefresh, onBack, onIncomin
         priority?: 'normal' | 'urgent';
         threadId?: string;
       }
-    ) => {
+    ): Promise<boolean> => {
       try {
         const res = await fetch(`/app/chat/api/channels/${channelId}/messages`, {
           method: 'POST',
@@ -291,9 +299,27 @@ export function ChatConversation({ channelId, user, onRefresh, onBack, onIncomin
           });
           setReplyTo(null);
           onRefresh();
+          return true;
         }
-      } catch {
-        // silent
+        // Non-OK response — surface the error
+        let errorMsg = 'No se pudo enviar el mensaje';
+        try {
+          const errData = await res.json();
+          if (errData?.error) errorMsg = errData.error;
+        } catch {
+          // response body not JSON
+        }
+        if (res.status === 401) errorMsg = 'Tu sesión ha expirado. Vuelve a iniciar sesión.';
+        else if (res.status === 403) errorMsg = 'No tienes permiso para usar el chat.';
+        toast.error(errorMsg);
+        return false;
+      } catch (err) {
+        // Network error or exception
+        toast.error(
+          'Error de red al enviar el mensaje. Revisa tu conexión e inténtalo de nuevo.',
+          { description: err instanceof Error ? err.message : undefined }
+        );
+        return false;
       }
     },
     [channelId, replyTo, onRefresh]
@@ -558,6 +584,7 @@ export function ChatConversation({ channelId, user, onRefresh, onBack, onIncomin
         channelId={channelId}
         isGroup={channel?.type === 'group'}
         typingText={typingText}
+        firstOpenAt={firstOpenAtRef.current}
       />
 
       {/* Input */}

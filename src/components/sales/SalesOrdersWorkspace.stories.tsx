@@ -66,6 +66,7 @@ const mockData = {
       saleMadeInWarehouse: true,
       shippingAddress: null,
       sourceRemoteModifiedAt: '2026-09-01T12:00:00.000Z',
+      carrier: 'Fabian',
     },
     {
       id: '2',
@@ -96,6 +97,7 @@ const mockData = {
       saleMadeInWarehouse: false,
       shippingAddress: null,
       sourceRemoteModifiedAt: '2026-09-02T10:00:00.000Z',
+      carrier: null,
     },
   ],
   pagination: { page: 1, page_size: 50, total: 2, total_pages: 1 },

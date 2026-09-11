@@ -35,6 +35,7 @@ const LIST_SELECT = {
   total: true,
   balance: true,
   currencyCode: true,
+  zohoPurchaseOrderId: true,
   sourceRemoteModifiedAt: true,
 } satisfies Prisma.BillSelect;
 
@@ -284,10 +285,30 @@ export async function getBillsWorkspace(
       prisma.bill.count({ where }),
     ]);
 
+    // Batch lookup related purchase order statuses
+    const poIds = [...new Set(bills.map((b) => b.zohoPurchaseOrderId).filter(Boolean))] as string[];
+    const poStatusMap = new Map<string, string | null>();
+    if (poIds.length > 0) {
+      const purchaseOrders = await prisma.purchaseOrder.findMany({
+        where: { zohoPurchaseOrderId: { in: poIds } },
+        select: { zohoPurchaseOrderId: true, status: true },
+      });
+      for (const po of purchaseOrders) {
+        poStatusMap.set(po.zohoPurchaseOrderId, po.status);
+      }
+    }
+
+    const rows = bills.map((b) =>
+      toBillListRow({
+        ...b,
+        purchaseOrderStatus: b.zohoPurchaseOrderId ? (poStatusMap.get(b.zohoPurchaseOrderId) ?? null) : null,
+      })
+    );
+
     const totalPages = Math.ceil(total / query.page_size);
 
     return {
-      data: bills.map(toBillListRow),
+      data: rows,
       pagination: {
         page: query.page,
         page_size: query.page_size,

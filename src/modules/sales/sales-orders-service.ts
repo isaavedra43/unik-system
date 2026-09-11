@@ -42,6 +42,7 @@ export type { SalesOrderListRow, SalesOrderDetail };
 
 const LIST_SELECT = {
   id: true,
+  zohoSalesOrderId: true,
   salesOrderNumber: true,
   referenceNumber: true,
   orderDate: true,
@@ -278,6 +279,37 @@ function buildWhere(query: SalesOrderQueryState): Prisma.SalesOrderWhereInput {
 }
 
 // ---------------------------------------------------------------------------
+// Carrier lookup — batch fetch transportista from related packages
+// ---------------------------------------------------------------------------
+
+/**
+ * Batch-lookup the carrier (transportista) for a set of sales orders by
+ * joining with the Package table via zohoSalesOrderId. Returns a map
+ * keyed by zohoSalesOrderId → carrier name. When multiple packages exist
+ * for the same order, the most recent one (by package date) wins.
+ */
+async function batchLookupCarriers<T extends { zohoSalesOrderId: string | null }>(
+  orders: T[]
+): Promise<Map<string, string>> {
+  const zohoIds = orders
+    .map((o) => o.zohoSalesOrderId)
+    .filter((id): id is string => Boolean(id));
+  const carrierByZohoId = new Map<string, string>();
+  if (zohoIds.length === 0) return carrierByZohoId;
+  const packages = await prisma.package.findMany({
+    where: { zohoSalesOrderId: { in: zohoIds } },
+    select: { zohoSalesOrderId: true, carrier: true, date: true },
+    orderBy: { date: 'desc' },
+  });
+  for (const pkg of packages) {
+    if (pkg.zohoSalesOrderId && pkg.carrier && !carrierByZohoId.has(pkg.zohoSalesOrderId)) {
+      carrierByZohoId.set(pkg.zohoSalesOrderId, pkg.carrier);
+    }
+  }
+  return carrierByZohoId;
+}
+
+// ---------------------------------------------------------------------------
 // Public query functions
 // ---------------------------------------------------------------------------
 
@@ -320,8 +352,16 @@ export async function getSalesOrdersWorkspace(rawQuery: unknown): Promise<SalesO
 
   const totalPages = Math.ceil(total / query.page_size);
 
+  const carrierByZohoId = await batchLookupCarriers(orders);
+  const rows = orders.map((o) =>
+    toSalesOrderListRow({
+      ...o,
+      carrier: o.zohoSalesOrderId ? (carrierByZohoId.get(o.zohoSalesOrderId) ?? null) : null,
+    })
+  );
+
   return {
-    data: orders.map(toSalesOrderListRow),
+    data: rows,
     pagination: {
       page: query.page,
       page_size: query.page_size,
@@ -381,6 +421,38 @@ function formatExportValue(row: SalesOrderListRow, columnId: string): string {
   return String(value);
 }
 
+type SalesOrderListEntity = {
+  id: string;
+  zohoSalesOrderId: string | null;
+  salesOrderNumber: string | null;
+  referenceNumber: string | null;
+  orderDate: Date | null;
+  customerName: string | null;
+  customerPhone: string | null;
+  salespersonName: string | null;
+  paymentMethod: string | null;
+  deliveryMethod: string | null;
+  locationName: string | null;
+  branchName: string | null;
+  status: string | null;
+  subStatus: string | null;
+  paidStatus: string | null;
+  invoicedStatus: string | null;
+  shippedStatus: string | null;
+  currencyCode: string | null;
+  subtotal: Prisma.Decimal | null;
+  discountTotal: Prisma.Decimal | null;
+  taxTotal: Prisma.Decimal | null;
+  shippingCharge: Prisma.Decimal | null;
+  adjustment: Prisma.Decimal | null;
+  total: Prisma.Decimal | null;
+  balance: Prisma.Decimal | null;
+  saleMadeInWarehouse: boolean | null;
+  sourceRemoteModifiedAt: Date;
+  shippingAddressLine1: string | null;
+  shippingAddressLine2: string | null;
+};
+
 export async function getSalesOrdersForExport(
   rawQuery: unknown,
   options: ExportOptions
@@ -389,36 +461,41 @@ export async function getSalesOrdersForExport(
   const where = buildWhere(query);
   const orderBy = buildSortOrderBy(query.sort);
 
-  let rows: SalesOrderListRow[];
+  let orders: SalesOrderListEntity[];
 
   if (options.scope === 'selected' && options.selectedIds && options.selectedIds.length > 0) {
     const selectedWhere = { ...where, id: { in: options.selectedIds } };
-    const orders = await prisma.salesOrder.findMany({
+    orders = await prisma.salesOrder.findMany({
       where: selectedWhere,
       orderBy,
       take: Math.min(options.selectedIds.length, MAX_EXPORT_ROWS),
       select: LIST_SELECT,
     });
-    rows = orders.map(toSalesOrderListRow);
   } else if (options.scope === 'current_page') {
     const skip = ((options.page ?? query.page) - MIN_PAGE) * (options.pageSize ?? query.page_size);
-    const orders = await prisma.salesOrder.findMany({
+    orders = await prisma.salesOrder.findMany({
       where,
       orderBy,
       take: options.pageSize ?? query.page_size,
       skip,
       select: LIST_SELECT,
     });
-    rows = orders.map(toSalesOrderListRow);
   } else {
-    const orders = await prisma.salesOrder.findMany({
+    orders = await prisma.salesOrder.findMany({
       where,
       orderBy,
       take: MAX_EXPORT_ROWS,
       select: LIST_SELECT,
     });
-    rows = orders.map(toSalesOrderListRow);
   }
+
+  const carrierByZohoId = await batchLookupCarriers(orders);
+  const rows = orders.map((o) =>
+    toSalesOrderListRow({
+      ...o,
+      carrier: o.zohoSalesOrderId ? (carrierByZohoId.get(o.zohoSalesOrderId) ?? null) : null,
+    })
+  );
 
   const columns = getExportColumns(options.includeAllColumns ?? false);
   return { rows, columns };

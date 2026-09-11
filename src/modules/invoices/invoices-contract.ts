@@ -15,6 +15,7 @@ export interface InvoiceListRow {
   id: string; invoiceNumber: string | null; status: string | null;
   date: string | null; dueDate: string | null; customerName: string | null;
   total: string | null; balance: string | null; currencyCode: string | null;
+  salesOrderStatus: string | null;
   sourceRemoteModifiedAt: string | null;
 }
 
@@ -57,12 +58,14 @@ export function toInvoiceListRow(inv: {
   date: Date | null; dueDate: Date | null; customerName: string | null;
   total: Prisma.Decimal | null; balance: Prisma.Decimal | null; currencyCode: string | null;
   sourceRemoteModifiedAt: Date;
+  salesOrderStatus?: string | null;
 }): InvoiceListRow {
   return {
     id: inv.id, invoiceNumber: inv.invoiceNumber, status: inv.status,
     date: inv.date?.toISOString() ?? null, dueDate: inv.dueDate?.toISOString() ?? null,
     customerName: inv.customerName, total: dec(inv.total), balance: dec(inv.balance),
-    currencyCode: inv.currencyCode, sourceRemoteModifiedAt: inv.sourceRemoteModifiedAt.toISOString(),
+    currencyCode: inv.currencyCode, salesOrderStatus: inv.salesOrderStatus ?? null,
+    sourceRemoteModifiedAt: inv.sourceRemoteModifiedAt.toISOString(),
   };
 }
 

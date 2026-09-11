@@ -202,9 +202,29 @@ export async function getPackagesWorkspace(rawQuery: unknown): Promise<PackagesL
     prisma.package.count({ where }),
   ]);
 
+  // Batch lookup related sales order statuses
+  const salesOrderIds = [...new Set(packages.map((p) => p.zohoSalesOrderId).filter(Boolean))] as string[];
+  const salesOrderStatusMap = new Map<string, string | null>();
+  if (salesOrderIds.length > 0) {
+    const salesOrders = await prisma.salesOrder.findMany({
+      where: { zohoSalesOrderId: { in: salesOrderIds } },
+      select: { zohoSalesOrderId: true, status: true },
+    });
+    for (const so of salesOrders) {
+      salesOrderStatusMap.set(so.zohoSalesOrderId, so.status);
+    }
+  }
+
+  const rows = packages.map((p) =>
+    toPackageListRow({
+      ...p,
+      salesOrderStatus: p.zohoSalesOrderId ? (salesOrderStatusMap.get(p.zohoSalesOrderId) ?? null) : null,
+    })
+  );
+
   const totalPages = Math.ceil(total / query.page_size);
   return {
-    data: packages.map(toPackageListRow),
+    data: rows,
     pagination: { page: query.page, page_size: query.page_size, total, total_pages: totalPages },
     aggregates: { count: total },
   };

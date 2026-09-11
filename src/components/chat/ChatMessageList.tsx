@@ -32,6 +32,9 @@ export interface ChatMessageListProps {
   channelId: string;
   isGroup?: boolean;
   typingText?: string;
+  /** ISO timestamp of when the conversation was first opened.
+   * Messages from other users after this time show a "new messages" separator. */
+  firstOpenAt?: string | null;
 }
 
 interface DateGroup {
@@ -56,6 +59,7 @@ export function ChatMessageList({
   currentUserId, onReply, onReaction, onRemoveReaction, onEdit, onDelete,
   onForward, onBookmark, onUnbookmark, onPin, onUnpin, onTranslate,
   onVotePoll, onRsvpEvent, onOpenThread, channelId, isGroup = true, typingText,
+  firstOpenAt,
 }: ChatMessageListProps) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -199,31 +203,46 @@ export function ChatMessageList({
                   prevMsg.senderId !== msg.senderId ||
                   new Date(msg.createdAt).getTime() - new Date(prevMsg.createdAt).getTime() >
                     5 * 60 * 1000;
+                // Show "new messages" separator before the first message from
+                // another user that arrived after the conversation was opened.
+                const showNewSeparator =
+                  !!firstOpenAt &&
+                  msg.senderId !== currentUserId &&
+                  msg.createdAt > firstOpenAt &&
+                  !group.messages.slice(0, mi).some(
+                    (m) => m.senderId !== currentUserId && m.createdAt > firstOpenAt
+                  );
                 return (
-                  <ChatMessage
-                    key={msg.id}
-                    message={msg}
-                    isOwn={msg.senderId === currentUserId}
-                    showAvatar={showAvatar}
-                    senderName={msg.senderName}
-                    onReply={() => onReply(msg)}
-                    onReaction={onReaction}
-                    onRemoveReaction={onRemoveReaction}
-                    onEdit={onEdit}
-                    onDelete={onDelete}
-                    onForward={onForward}
-                    onBookmark={onBookmark}
-                    onUnbookmark={onUnbookmark}
-                    onPin={onPin}
-                    onUnpin={onUnpin}
-                    onTranslate={onTranslate}
-                    onVotePoll={onVotePoll}
-                    onRsvpEvent={onRsvpEvent}
-                    onOpenThread={onOpenThread}
-                    channelId={channelId}
-                    currentUserId={currentUserId}
-                    isGroup={isGroup}
-                  />
+                  <React.Fragment key={msg.id}>
+                    {showNewSeparator && (
+                      <div className="chat-unread-separator" role="separator" aria-label="Mensajes nuevos">
+                        <span>Mensajes nuevos</span>
+                      </div>
+                    )}
+                    <ChatMessage
+                      message={msg}
+                      isOwn={msg.senderId === currentUserId}
+                      showAvatar={showAvatar}
+                      senderName={msg.senderName}
+                      onReply={() => onReply(msg)}
+                      onReaction={onReaction}
+                      onRemoveReaction={onRemoveReaction}
+                      onEdit={onEdit}
+                      onDelete={onDelete}
+                      onForward={onForward}
+                      onBookmark={onBookmark}
+                      onUnbookmark={onUnbookmark}
+                      onPin={onPin}
+                      onUnpin={onUnpin}
+                      onTranslate={onTranslate}
+                      onVotePoll={onVotePoll}
+                      onRsvpEvent={onRsvpEvent}
+                      onOpenThread={onOpenThread}
+                      channelId={channelId}
+                      currentUserId={currentUserId}
+                      isGroup={isGroup}
+                    />
+                  </React.Fragment>
                 );
               })}
             </div>

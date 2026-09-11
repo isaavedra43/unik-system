@@ -16,7 +16,9 @@ import {
   Languages,
   AlertCircle,
   MessageSquareText,
+  Copy,
 } from 'lucide-react';
+import { toast } from 'sonner';
 import type { ChatMessageDTO } from '@/modules/chat/chat-events';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
@@ -133,6 +135,34 @@ export function ChatMessage({
       onEdit(message.id, trimmed);
     }
     setEditing(false);
+  };
+
+  const handleCopy = async () => {
+    const textToCopy = message.content ?? '';
+    if (!textToCopy) {
+      toast.error('No hay texto para copiar');
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(textToCopy);
+      toast.success('Mensaje copiado al portapapeles');
+    } catch {
+      // Fallback for browsers without clipboard API
+      try {
+        const textarea = document.createElement('textarea');
+        textarea.value = textToCopy;
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+        toast.success('Mensaje copiado al portapapeles');
+      } catch {
+        toast.error('No se pudo copiar el mensaje');
+      }
+    }
+    setShowMoreActions(false);
   };
 
   // Group reactions by emoji
@@ -378,6 +408,11 @@ export function ChatMessage({
               {canEdit && (
                 <DropdownMenuItem onClick={() => { setEditing(true); setShowMoreActions(false); }}>
                   <Pencil size={14} /> Editar
+                </DropdownMenuItem>
+              )}
+              {message.content && (
+                <DropdownMenuItem onClick={handleCopy}>
+                  <Copy size={14} /> Copiar
                 </DropdownMenuItem>
               )}
               <DropdownMenuItem onClick={() => {

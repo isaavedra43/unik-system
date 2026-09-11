@@ -15,6 +15,7 @@ import {
   getPackageStatusLabel,
   getPackageStatusOptions,
 } from '@/modules/packages/packages-helpers';
+import { getSalesOrderStatusConfig } from '@/modules/sales/sales-orders-helpers';
 import { PackagePreviewDrawer } from './PackagePreviewDrawer';
 import { CurrentUser } from '@/modules/auth/authorization';
 import type {
@@ -65,8 +66,19 @@ const defaultColumnOrder = [...PACKAGE_COLUMNS]
   .sort((a, b) => a.priority - b.priority)
   .map((c) => c.id);
 
-function StatusCell({ value, label }: { value: string | null; label: string }) {
-  const config = getPackageStatusConfig(value);
+function StatusCell({
+  value,
+  label,
+  category,
+}: {
+  value: string | null;
+  label: string;
+  category?: 'package' | 'sales_order';
+}) {
+  const config =
+    category === 'sales_order'
+      ? getSalesOrderStatusConfig(value, 'order')
+      : getPackageStatusConfig(value);
   if (!value) {
     return (
       <span className="so-status-cell">
@@ -99,7 +111,13 @@ function renderCell(row: PackageListRow, column: EntityColumnDefinition): React.
     return formatDateOnly(value as string | Date | null);
   }
   if (column.formatter === 'statusDot') {
-    return <StatusCell value={value as string | null} label={column.label} />;
+    return (
+      <StatusCell
+        value={value as string | null}
+        label={column.label}
+        category={(column as { statusCategory?: 'package' | 'sales_order' }).statusCategory}
+      />
+    );
   }
   if (value === null || value === undefined) return '—';
   return String(value);

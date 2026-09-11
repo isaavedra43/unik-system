@@ -16,6 +16,7 @@ import {
   getBillStatusLabel,
   getBillStatusOptions,
 } from '@/modules/bills/bills-helpers';
+import { getPurchaseOrderStatusConfig } from '@/modules/purchase-orders/purchase-orders-helpers';
 import { BillPreviewDrawer } from './BillPreviewDrawer';
 import type { EntityColumnDefinition } from '@/modules/shared/entity-workspace-types';
 
@@ -42,7 +43,10 @@ export function BillsWorkspace(props: BillsWorkspaceProps) {
         return formatCurrency(value as string | number, row.currencyCode);
       if (column.formatter === 'date') return formatDateOnly(value as string | Date);
       if (column.formatter === 'statusDot') {
-        const config = getBillStatusConfig(value as string | null);
+        const config =
+          column.statusCategory === 'purchase_order'
+            ? getPurchaseOrderStatusConfig(value as string | null)
+            : getBillStatusConfig(value as string | null);
         return (
           <span className="inline-flex items-center gap-1.5">
             <span

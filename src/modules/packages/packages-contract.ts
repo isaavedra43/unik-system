@@ -23,6 +23,7 @@ export interface PackageListRow {
   trackingNumber: string | null;
   customerName: string | null;
   zohoSalesOrderId: string | null;
+  salesOrderStatus: string | null;
   sourceRemoteModifiedAt: string | null;
 }
 
@@ -83,6 +84,7 @@ export function toPackageListRow(pkg: {
   customerName: string | null;
   zohoSalesOrderId: string | null;
   sourceRemoteModifiedAt: Date;
+  salesOrderStatus?: string | null;
 }): PackageListRow {
   return {
     id: pkg.id,
@@ -93,6 +95,7 @@ export function toPackageListRow(pkg: {
     trackingNumber: pkg.trackingNumber,
     customerName: pkg.customerName,
     zohoSalesOrderId: pkg.zohoSalesOrderId,
+    salesOrderStatus: pkg.salesOrderStatus ?? null,
     sourceRemoteModifiedAt: pkg.sourceRemoteModifiedAt.toISOString(),
   };
 }

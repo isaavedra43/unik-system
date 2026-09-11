@@ -12979,6 +12979,35 @@ textarea.input {
   text-transform: capitalize;
 }
 
+.chat-page .chat-unread-separator {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: var(--unik-space-3) 0 var(--unik-space-2);
+  gap: var(--unik-space-2);
+}
+
+.chat-page .chat-unread-separator::before,
+.chat-page .chat-unread-separator::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--unik-primary);
+  opacity: 0.4;
+}
+
+.chat-page .chat-unread-separator span {
+  padding: 2px 12px;
+  border-radius: var(--unik-radius-full);
+  background: color-mix(in oklch, var(--unik-primary) 12%, transparent);
+  font-size: 11px;
+  font-weight: var(--unik-weight-semibold);
+  color: var(--unik-primary);
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
 .chat-page .chat-load-more {
   padding: var(--unik-space-3) 0 0;
   text-align: center;
@@ -13788,6 +13817,15 @@ textarea.input {
 .chat-page .chat-input-send:focus-visible {
   outline: none;
   box-shadow: var(--unik-shadow-focus);
+}
+
+.chat-page .chat-send-spin {
+  animation: chat-send-spin 0.8s linear infinite;
+}
+
+@keyframes chat-send-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 .chat-page .chat-input-hint {

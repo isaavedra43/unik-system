@@ -15,6 +15,7 @@ export interface BillListRow {
   total: string | null;
   balance: string | null;
   currencyCode: string | null;
+  purchaseOrderStatus: string | null;
   sourceRemoteModifiedAt: string | null;
 }
 
@@ -62,6 +63,7 @@ export function toBillListRow(b: {
   balance: Prisma.Decimal | null;
   currencyCode: string | null;
   sourceRemoteModifiedAt: Date;
+  purchaseOrderStatus?: string | null;
 }): BillListRow {
   return {
     id: b.id,
@@ -73,6 +75,7 @@ export function toBillListRow(b: {
     total: dec(b.total),
     balance: dec(b.balance),
     currencyCode: b.currencyCode,
+    purchaseOrderStatus: b.purchaseOrderStatus ?? null,
     sourceRemoteModifiedAt: b.sourceRemoteModifiedAt.toISOString(),
   };
 }

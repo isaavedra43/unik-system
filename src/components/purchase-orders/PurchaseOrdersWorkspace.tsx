@@ -34,6 +34,7 @@ import {
   getPurchaseOrderStatusLabel,
   getPurchaseOrderStatusOptions,
 } from '@/modules/purchase-orders/purchase-orders-helpers';
+import { getBillStatusConfig } from '@/modules/bills/bills-helpers';
 
 export interface PurchaseOrdersWorkspaceProps {
   user: CurrentUser;
@@ -83,7 +84,10 @@ function renderCell(
     return formatDateOnly(value as string | null);
   }
   if (column.formatter === 'statusDot') {
-    const config = getPurchaseOrderStatusConfig(value as string | null);
+    const config =
+      column.statusCategory === 'bill'
+        ? getBillStatusConfig(value as string | null)
+        : getPurchaseOrderStatusConfig(value as string | null);
     if (!value) {
       return (
         <span className="so-status-cell">
