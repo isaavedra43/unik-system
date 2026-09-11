@@ -101,8 +101,8 @@ export function ChatPageClient({ user }: ChatPageClientProps) {
       }
     };
 
-    // Poll every 1.5 seconds for fast notification
-    const interval = setInterval(pollIncomingCalls, 1500);
+    // Poll every 1 second for fast notification
+    const interval = setInterval(pollIncomingCalls, 1000);
     // Also poll immediately on mount
     pollIncomingCalls();
 

@@ -31,6 +31,7 @@ export interface ChatMessageListProps {
   onOpenThread?: (threadId: string, rootMessage: ChatMessageDTO) => void;
   channelId: string;
   isGroup?: boolean;
+  typingText?: string;
 }
 
 interface DateGroup {
@@ -54,7 +55,7 @@ export function ChatMessageList({
   messages, loading, error, hasMore, loadingMore, onLoadMore,
   currentUserId, onReply, onReaction, onRemoveReaction, onEdit, onDelete,
   onForward, onBookmark, onUnbookmark, onPin, onUnpin, onTranslate,
-  onVotePoll, onRsvpEvent, onOpenThread, channelId, isGroup = true,
+  onVotePoll, onRsvpEvent, onOpenThread, channelId, isGroup = true, typingText,
 }: ChatMessageListProps) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -95,6 +96,13 @@ export function ChatMessageList({
       setShowScrollBtn(true);
     }
   }, [messages, scrollToBottom]);
+
+  // Keep the typing bubble in view when the reader is already at the bottom
+  useEffect(() => {
+    if (typingText && wasAtBottomRef.current) {
+      scrollToBottom('smooth');
+    }
+  }, [typingText, scrollToBottom]);
 
   const handleScroll = useCallback(() => {
     const el = viewportRef.current;
@@ -220,6 +228,23 @@ export function ChatMessageList({
               })}
             </div>
           ))}
+          {typingText && (
+            <div className="chat-msg-wrapper with-avatar chat-typing-row" aria-live="polite">
+              {isGroup && (
+                <div className="chat-msg-avatar" aria-hidden="true">
+                  {typingText.slice(0, 2).toUpperCase()}
+                </div>
+              )}
+              <div className="chat-msg-content">
+                {isGroup && <div className="chat-msg-sender">{typingText}</div>}
+                <div className="chat-msg-bubble other chat-typing-bubble" aria-label={`${typingText} está escribiendo`}>
+                  <span />
+                  <span />
+                  <span />
+                </div>
+              </div>
+            </div>
+          )}
           <div ref={bottomRef} />
         </div>
       </ScrollArea>

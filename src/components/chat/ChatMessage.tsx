@@ -185,10 +185,18 @@ export function ChatMessage({
           type="button"
           className={cn('chat-msg-read', message.readBy.length > 0 && 'seen')}
           onClick={() => setShowReaders(true)}
-          aria-label="Ver lecturas"
-          title="Visto por"
+          aria-label={message.readBy.length > 0 ? 'Visto — ver detalle' : 'Enviado — ver detalle'}
+          title={
+            message.readBy.length > 0
+              ? `Visto por ${message.readBy.length} · Enviado ${formatTime(message.createdAt)}`
+              : `Enviado ${formatTime(message.createdAt)} · aún no visto`
+          }
         >
-          {message.readBy.length > 0 ? <CheckCheck size={14} /> : <Check size={14} />}
+          {message.readBy.length > 0 ? (
+            <CheckCheck key="seen" size={14} />
+          ) : (
+            <Check key="sent" size={14} />
+          )}
         </button>
       )}
     </div>
@@ -414,7 +422,11 @@ export function ChatMessage({
 
       {/* Read receipts dialog */}
       {showReaders && (
-        <ChatReadReceiptsDialog messageId={message.id} onClose={() => setShowReaders(false)} />
+        <ChatReadReceiptsDialog
+          messageId={message.id}
+          sentAt={message.createdAt}
+          onClose={() => setShowReaders(false)}
+        />
       )}
     </div>
   );

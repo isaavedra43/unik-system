@@ -13835,6 +13835,257 @@ textarea.input {
   }
 }
 
+/* ---------- Layout fix: sidebar must fill the column ---------- */
+
+.chat-page .chat-sidebar-wrapper {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  min-height: 0;
+  height: 100%;
+}
+
+.chat-page .chat-sidebar {
+  flex: 1;
+  height: 100%;
+  min-height: 0;
+}
+
+/* ---------- Typing bubble (WhatsApp-style, inside the thread) ---------- */
+
+.chat-page .chat-typing-row {
+  animation: chat-msg-in 240ms var(--chat-ease) both;
+}
+
+.chat-page .chat-typing-bubble {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 36px;
+  padding: 0 14px;
+}
+
+.chat-page .chat-typing-bubble span {
+  width: 7px;
+  height: 7px;
+  border-radius: var(--unik-radius-full);
+  background: var(--unik-text-muted);
+  animation: chat-typing-dot 1.3s ease-in-out infinite;
+}
+
+.chat-page .chat-typing-bubble span:nth-child(2) {
+  animation-delay: 0.18s;
+}
+
+.chat-page .chat-typing-bubble span:nth-child(3) {
+  animation-delay: 0.36s;
+}
+
+@keyframes chat-typing-dot {
+  0%,
+  60%,
+  100% {
+    transform: translateY(0) scale(0.85);
+    opacity: 0.4;
+  }
+  30% {
+    transform: translateY(-4px) scale(1);
+    opacity: 1;
+  }
+}
+
+/* ---------- Read receipts: seen transition + dialog ---------- */
+
+.chat-page .chat-msg-meta .chat-msg-read svg {
+  animation: chat-check-in 260ms var(--chat-ease) both;
+}
+
+.chat-page .chat-msg-meta .chat-msg-read.seen svg {
+  animation: chat-seen-in 420ms var(--chat-ease) both;
+}
+
+@keyframes chat-check-in {
+  from {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes chat-seen-in {
+  0% {
+    transform: scale(0.7);
+    filter: brightness(1.6);
+  }
+  55% {
+    transform: scale(1.25);
+    filter: brightness(1.6);
+  }
+  100% {
+    transform: scale(1);
+    filter: none;
+  }
+}
+
+.chat-receipt-sent {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 4px;
+  padding: 8px;
+  border-radius: var(--unik-radius-md);
+  background: var(--unik-surface-hover);
+}
+
+.chat-receipt-sent-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--unik-radius-full);
+  background: var(--unik-brand-subtle);
+  color: var(--unik-brand-text);
+}
+
+.chat-receipt-seen-icon {
+  color: var(--unik-info);
+}
+
+/* ---------- Micro-interactions (subtle, WhatsApp-like) ---------- */
+
+/* Sidebar items: gentle press + active indicator that slides in */
+.chat-page .chat-sidebar-item {
+  position: relative;
+  transition:
+    background var(--unik-transition),
+    transform 140ms var(--chat-ease);
+}
+
+.chat-page .chat-sidebar-item:active {
+  transform: scale(0.985);
+}
+
+.chat-page .chat-sidebar-item::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 3px;
+  height: 0;
+  border-radius: 0 3px 3px 0;
+  background: var(--unik-brand);
+  transform: translateY(-50%);
+  transition: height 220ms var(--chat-ease);
+}
+
+.chat-page .chat-sidebar-item.active::before {
+  height: 55%;
+}
+
+/* Unread badge breathes softly so it draws the eye without shouting */
+.chat-page .chat-sidebar-item.unread:not(.active) .chat-sidebar-badge {
+  animation:
+    chat-pop-in 320ms var(--chat-ease) both,
+    chat-badge-breathe 2.8s ease-in-out 600ms infinite;
+}
+
+@keyframes chat-badge-breathe {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in oklch, var(--unik-brand) 35%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 4px color-mix(in oklch, var(--unik-brand) 0%, transparent);
+  }
+}
+
+/* Presence dot ripples once when it appears */
+.chat-page .chat-presence,
+.chat-page .chat-status-dot.online {
+  animation: chat-presence-in 600ms var(--chat-ease) both;
+}
+
+@keyframes chat-presence-in {
+  0% {
+    transform: scale(0.4);
+    opacity: 0;
+  }
+  60% {
+    transform: scale(1.25);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+/* Header subtitle crossfades between status and "typing" */
+.chat-page .chat-conversation-subtitle > * {
+  animation: chat-fade-up 220ms var(--chat-ease) both;
+}
+
+/* Date separators settle in */
+.chat-page .chat-date-separator span {
+  animation: chat-fade-up 320ms var(--chat-ease) both;
+}
+
+/* Composer: icon buttons and send button pop as the text state changes */
+.chat-page .chat-input-row > .chat-input-btn {
+  animation: chat-pop-in 220ms var(--chat-ease) both;
+}
+
+.chat-page .chat-input-send:not(:disabled) svg {
+  animation: chat-send-ready 260ms var(--chat-ease) both;
+}
+
+@keyframes chat-send-ready {
+  0% {
+    transform: scale(0.7) rotate(-20deg);
+    opacity: 0.4;
+  }
+  100% {
+    transform: none;
+    opacity: 1;
+  }
+}
+
+/* Quick action row: small press feedback */
+.chat-page .chat-quick-action:active svg {
+  transform: scale(0.9);
+}
+
+/* Reaction chips: press feedback */
+.chat-page .chat-msg-reaction:active {
+  transform: scale(0.94);
+}
+
+/* Attachments in bubbles fade in */
+.chat-page .chat-msg-attachments > * {
+  animation: chat-fade-up 260ms var(--chat-ease) both;
+}
+
+/* Hover-toolbar buttons stagger in */
+.chat-page .chat-msg-actions button {
+  animation: chat-pop-in 180ms var(--chat-ease) both;
+}
+
+.chat-page .chat-msg-actions button:nth-child(2) {
+  animation-delay: 20ms;
+}
+.chat-page .chat-msg-actions button:nth-child(3) {
+  animation-delay: 40ms;
+}
+.chat-page .chat-msg-actions button:nth-child(4) {
+  animation-delay: 60ms;
+}
+.chat-page .chat-msg-actions button:nth-child(5) {
+  animation-delay: 80ms;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .chat-page *,
   .chat-page *::before,

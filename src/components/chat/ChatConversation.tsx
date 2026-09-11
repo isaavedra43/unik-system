@@ -557,6 +557,7 @@ export function ChatConversation({ channelId, user, onRefresh, onBack, onIncomin
         onOpenThread={(threadId, rootMessage) => setActiveThread({ threadId, rootMessage })}
         channelId={channelId}
         isGroup={channel?.type === 'group'}
+        typingText={typingText}
       />
 
       {/* Input */}

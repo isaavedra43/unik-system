@@ -28,11 +28,45 @@ interface CallState {
   error: string | null;
 }
 
+// =====================================================
+// ICE servers — STUN + TURN for reliable NAT traversal
+// STUN servers discover public IP addresses.
+// TURN servers relay traffic when direct P2P fails
+// (symmetric NAT, restrictive firewalls, etc.).
+// Without TURN, WebRTC connections fail in many
+// real-world network configurations.
+// =====================================================
 const ICE_SERVERS: RTCIceServer[] = [
+  // Google STUN servers (fast, reliable for discovery)
   { urls: 'stun:stun.l.google.com:19302' },
   { urls: 'stun:stun1.l.google.com:19302' },
   { urls: 'stun:stun2.l.google.com:19302' },
+  // OpenRelay free TURN servers (relay fallback for NAT)
+  {
+    urls: 'turn:openrelay.metered.ca:80',
+    username: 'openrelayproject',
+    credential: 'openrelayproject',
+  },
+  {
+    urls: 'turn:openrelay.metered.ca:443',
+    username: 'openrelayproject',
+    credential: 'openrelayproject',
+  },
+  {
+    urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+    username: 'openrelayproject',
+    credential: 'openrelayproject',
+  },
 ];
+
+const RTC_CONFIG: RTCConfiguration = {
+  iceServers: ICE_SERVERS,
+  iceCandidatePoolSize: 10,
+  bundlePolicy: 'max-bundle',
+};
+
+// Connection timeout: if WebRTC doesn't connect within 30s, show error
+const CONNECTION_TIMEOUT_MS = 30_000;
 
 export function ChatCallDialog({
   channelId,
@@ -59,10 +93,21 @@ export function ChatCallDialog({
   const durationTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const signalPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const callStatusPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const connectionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const calleeUserIdRef = useRef<string | null>(null);
   const callerUserIdRef = useRef<string | null>(null);
   const remoteDescriptionSetRef = useRef(false);
   const pendingIceCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
+  const callIdRef = useRef<string | null>(null);
+  const roleRef = useRef(role);
+  const restartAttemptedRef = useRef(false);
+
+  const log = useCallback((...args: unknown[]) => {
+    if (typeof window !== 'undefined' && (window as unknown as Record<string, unknown>).DEV_CALL_DEBUG) {
+      // eslint-disable-next-line no-console
+      console.log('[ChatCall]', ...args);
+    }
+  }, []);
 
   const cleanup = useCallback(() => {
     if (durationTimerRef.current) {
@@ -77,6 +122,10 @@ export function ChatCallDialog({
       clearInterval(callStatusPollRef.current);
       callStatusPollRef.current = null;
     }
+    if (connectionTimeoutRef.current) {
+      clearTimeout(connectionTimeoutRef.current);
+      connectionTimeoutRef.current = null;
+    }
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach((t) => t.stop());
       localStreamRef.current = null;
@@ -85,6 +134,8 @@ export function ChatCallDialog({
       pcRef.current.close();
       pcRef.current = null;
     }
+    remoteDescriptionSetRef.current = false;
+    pendingIceCandidatesRef.current = [];
   }, []);
 
   useEffect(() => {
@@ -107,11 +158,11 @@ export function ChatCallDialog({
             signal: JSON.stringify(signal),
           }),
         });
-      } catch {
-        // silent
+      } catch (err) {
+        log('sendSignal error:', err);
       }
     },
-    []
+    [log]
   );
 
   const pollSignals = useCallback(async (callId: string) => {
@@ -127,9 +178,10 @@ export function ChatCallDialog({
         try {
           const signalData = JSON.parse(sig.signal);
 
-          if (sig.signalType === 'offer' && role === 'callee') {
+          if (sig.signalType === 'offer' && roleRef.current === 'callee') {
             // Callee receives offer
             if (!remoteDescriptionSetRef.current && pcRef.current.signalingState === 'stable') {
+              log('callee: setting remote description from offer');
               await pcRef.current.setRemoteDescription(new RTCSessionDescription(signalData));
               remoteDescriptionSetRef.current = true;
 
@@ -146,15 +198,17 @@ export function ChatCallDialog({
               // Create and send answer
               const answer = await pcRef.current.createAnswer();
               await pcRef.current.setLocalDescription(answer);
+              log('callee: sending answer');
 
               const callerId = callerUserIdRef.current;
               if (callerId) {
                 await sendSignal(callId, callerId, 'answer', answer);
               }
             }
-          } else if (sig.signalType === 'answer' && role === 'caller') {
+          } else if (sig.signalType === 'answer' && roleRef.current === 'caller') {
             // Caller receives answer
             if (!remoteDescriptionSetRef.current && pcRef.current.signalingState === 'have-local-offer') {
+              log('caller: setting remote description from answer');
               await pcRef.current.setRemoteDescription(new RTCSessionDescription(signalData));
               remoteDescriptionSetRef.current = true;
 
@@ -181,14 +235,14 @@ export function ChatCallDialog({
               pendingIceCandidatesRef.current.push(signalData);
             }
           }
-        } catch {
-          // ignore parse errors
+        } catch (err) {
+          log('pollSignals: error processing signal:', err);
         }
       }
-    } catch {
-      // silent
+    } catch (err) {
+      log('pollSignals fetch error:', err);
     }
-  }, [role, sendSignal]);
+  }, [sendSignal, log]);
 
   // =====================================================
   // Poll call status (detect when the other party hangs up)
@@ -205,6 +259,7 @@ export function ChatCallDialog({
 
       // If the call has ended/missed/declined, close the dialog
       if (call.status === 'ended' || call.status === 'missed' || call.status === 'declined') {
+        log('call status changed to', call.status);
         cleanup();
         setCallState((prev) => ({
           ...prev,
@@ -215,7 +270,25 @@ export function ChatCallDialog({
     } catch {
       // silent
     }
-  }, [cleanup, onClose]);
+  }, [cleanup, onClose, log]);
+
+  // =====================================================
+  // Start connection timeout
+  // =====================================================
+
+  const startConnectionTimeout = useCallback(() => {
+    if (connectionTimeoutRef.current) clearTimeout(connectionTimeoutRef.current);
+    connectionTimeoutRef.current = setTimeout(() => {
+      if (pcRef.current && pcRef.current.connectionState !== 'connected') {
+        log('connection timeout reached, state:', pcRef.current.connectionState);
+        setCallState((prev) => ({
+          ...prev,
+          status: 'failed',
+          error: 'Tiempo de conexión agotado. Verifica tu red o firewall.',
+        }));
+      }
+    }, CONNECTION_TIMEOUT_MS);
+  }, [log]);
 
   // =====================================================
   // Create RTCPeerConnection and setup handlers
@@ -223,7 +296,8 @@ export function ChatCallDialog({
 
   const createPeerConnection = useCallback(
     (callId: string, localStream: MediaStream) => {
-      const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+      log('creating RTCPeerConnection with ICE servers');
+      const pc = new RTCPeerConnection(RTC_CONFIG);
       pcRef.current = pc;
 
       // Add local tracks
@@ -238,9 +312,14 @@ export function ChatCallDialog({
         remoteVideoRef.current.srcObject = remoteStream;
       }
       pc.ontrack = (event) => {
+        log('ontrack received, kind:', event.track.kind);
         event.streams[0]?.getTracks().forEach((track) => {
           remoteStream.addTrack(track);
         });
+        // Also handle single track case (some browsers)
+        if (event.streams[0] === undefined) {
+          remoteStream.addTrack(event.track);
+        }
         if (remoteVideoRef.current) {
           remoteVideoRef.current.srcObject = remoteStream;
         }
@@ -253,16 +332,66 @@ export function ChatCallDialog({
       // Send ICE candidates to the other party
       pc.onicecandidate = async (event) => {
         if (event.candidate) {
-          const targetId = role === 'caller' ? calleeUserIdRef.current : callerUserIdRef.current;
+          const targetId = roleRef.current === 'caller' ? calleeUserIdRef.current : callerUserIdRef.current;
           if (targetId) {
             await sendSignal(callId, targetId, 'ice', event.candidate);
+          } else {
+            log('onicecandidate: no target user ID set!');
+          }
+        } else {
+          log('ICE gathering complete');
+        }
+      };
+
+      // ICE gathering state changes
+      pc.onicegatheringstatechange = () => {
+        log('ICE gathering state:', pc.iceGatheringState);
+      };
+
+      // ICE connection state changes
+      pc.oniceconnectionstatechange = () => {
+        log('ICE connection state:', pc.iceConnectionState);
+        if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
+          if (connectionTimeoutRef.current) {
+            clearTimeout(connectionTimeoutRef.current);
+            connectionTimeoutRef.current = null;
+          }
+          setCallState((prev) => ({ ...prev, status: 'active' }));
+          if (!durationTimerRef.current) {
+            durationTimerRef.current = setInterval(() => {
+              setDuration((d) => d + 1);
+            }, 1000);
+          }
+        } else if (pc.iceConnectionState === 'disconnected') {
+          setCallState((prev) => ({ ...prev, status: 'connecting' }));
+        } else if (pc.iceConnectionState === 'failed') {
+          // Attempt ICE restart once before giving up
+          if (!restartAttemptedRef.current && roleRef.current === 'caller') {
+            restartAttemptedRef.current = true;
+            log('ICE failed — attempting restart');
+            try {
+              pc.restartIce();
+            } catch {
+              // restartIce not supported, will fall through to failed state
+            }
+          } else {
+            setCallState((prev) => ({
+              ...prev,
+              status: 'failed',
+              error: 'Conexión fallida. Posible firewall o NAT restrictivo.',
+            }));
           }
         }
       };
 
-      // Connection state changes
+      // Peer connection state changes
       pc.onconnectionstatechange = () => {
+        log('PC connection state:', pc.connectionState);
         if (pc.connectionState === 'connected') {
+          if (connectionTimeoutRef.current) {
+            clearTimeout(connectionTimeoutRef.current);
+            connectionTimeoutRef.current = null;
+          }
           setCallState((prev) => ({ ...prev, status: 'active' }));
           if (!durationTimerRef.current) {
             durationTimerRef.current = setInterval(() => {
@@ -272,28 +401,32 @@ export function ChatCallDialog({
         } else if (pc.connectionState === 'disconnected') {
           setCallState((prev) => ({ ...prev, status: 'connecting' }));
         } else if (pc.connectionState === 'failed') {
-          setCallState((prev) => ({
-            ...prev,
-            status: 'failed',
-            error: 'Conexión WebRTC fallida',
-          }));
-        }
-      };
-
-      pc.oniceconnectionstatechange = () => {
-        if (pc.iceConnectionState === 'connected') {
-          setCallState((prev) => ({ ...prev, status: 'active' }));
-          if (!durationTimerRef.current) {
-            durationTimerRef.current = setInterval(() => {
-              setDuration((d) => d + 1);
-            }, 1000);
+          if (!restartAttemptedRef.current && roleRef.current === 'caller') {
+            restartAttemptedRef.current = true;
+            log('PC failed — attempting ICE restart');
+            try {
+              pc.restartIce();
+            } catch {
+              // fall through
+            }
+          } else {
+            setCallState((prev) => ({
+              ...prev,
+              status: 'failed',
+              error: 'Conexión WebRTC fallida. Verifica red y permisos.',
+            }));
           }
         }
       };
 
+      // Signaling state changes
+      pc.onsignalingstatechange = () => {
+        log('signaling state:', pc.signalingState);
+      };
+
       return pc;
     },
-    [role, sendSignal]
+    [sendSignal, log]
   );
 
   // =====================================================
@@ -302,10 +435,15 @@ export function ChatCallDialog({
 
   const startCallAsCaller = useCallback(async () => {
     try {
+      log('caller: starting call');
       // Get local media
       const constraints: MediaStreamConstraints = {
-        audio: true,
-        video: type === 'video',
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+        video: type === 'video' ? { width: { ideal: 1280 }, height: { ideal: 720 } } : false,
       };
       const localStream = await navigator.mediaDevices.getUserMedia(constraints);
       localStreamRef.current = localStream;
@@ -314,8 +452,6 @@ export function ChatCallDialog({
       }
 
       // Use existing call data if the call was already created by the parent
-      // (ChatConversation.startCall already called the API). Only create a
-      // new call if we don't have one yet.
       let callId: string;
       if (callData?.id) {
         callId = callData.id;
@@ -339,39 +475,61 @@ export function ChatCallDialog({
         callId = data.data.id;
       }
 
+      callIdRef.current = callId;
       const calleeUserId = participants[0]?.userId;
       calleeUserIdRef.current = calleeUserId ?? null;
+
+      if (!calleeUserId) {
+        throw new Error('No se encontró el usuario destino');
+      }
 
       setCallState({ status: 'ringing', callId, error: null });
 
       // Create RTCPeerConnection
       const pc = createPeerConnection(callId, localStream);
 
-      // Create offer
-      const offer = await pc.createOffer({
-        offerToReceiveAudio: true,
-        offerToReceiveVideo: type === 'video',
-      });
+      // Create offer — modern WebRTC: tracks are already added,
+      // no need for deprecated offerToReceiveAudio/Video options
+      const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
+      log('caller: offer created and set as local description');
 
       // Send offer to callee
-      if (calleeUserId) {
-        await sendSignal(callId, calleeUserId, 'offer', offer);
-      }
+      await sendSignal(callId, calleeUserId, 'offer', offer);
 
       // Start polling for signals (answer + ice from callee)
       signalPollRef.current = setInterval(() => pollSignals(callId), 300);
 
       // Start polling for call status (detect when callee accepts/declines/ends)
       callStatusPollRef.current = setInterval(() => pollCallStatus(callId), 1000);
+
+      // Start connection timeout
+      startConnectionTimeout();
     } catch (err) {
-      setCallState((prev) => ({
-        ...prev,
-        status: 'failed',
-        error: err instanceof Error ? err.message : 'Error desconocido',
-      }));
+      log('caller: error starting call:', err);
+      const msg = err instanceof Error ? err.message : 'Error desconocido';
+      // Provide more helpful messages for common errors
+      if (msg.includes('Permission') || msg.includes('NotAllowed')) {
+        setCallState((prev) => ({
+          ...prev,
+          status: 'failed',
+          error: 'Permiso de micrófono/cámara denegado. Autoriza el acceso en el navegador.',
+        }));
+      } else if (msg.includes('NotFound') || msg.includes('DevicesNotFound')) {
+        setCallState((prev) => ({
+          ...prev,
+          status: 'failed',
+          error: 'No se encontró micrófono o cámara en el dispositivo.',
+        }));
+      } else {
+        setCallState((prev) => ({
+          ...prev,
+          status: 'failed',
+          error: msg,
+        }));
+      }
     }
-  }, [channelId, type, participants, callData, createPeerConnection, sendSignal, pollSignals, pollCallStatus]);
+  }, [channelId, type, participants, callData, createPeerConnection, sendSignal, pollSignals, pollCallStatus, startConnectionTimeout, log]);
 
   // =====================================================
   // CALLEE: join existing call
@@ -382,7 +540,9 @@ export function ChatCallDialog({
 
     const callId = callData.id;
     const callerId = callData.callerId;
+    callIdRef.current = callId;
     callerUserIdRef.current = callerId;
+    log('callee: joining call', callId, 'caller:', callerId);
 
     try {
       // Accept call via API
@@ -390,10 +550,14 @@ export function ChatCallDialog({
         method: 'POST',
       }).catch(() => {});
 
-      // Get local media
+      // Get local media with professional constraints
       const constraints: MediaStreamConstraints = {
-        audio: true,
-        video: callData.type === 'video',
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+        video: callData.type === 'video' ? { width: { ideal: 1280 }, height: { ideal: 720 } } : false,
       };
       const localStream = await navigator.mediaDevices.getUserMedia(constraints);
       localStreamRef.current = localStream;
@@ -412,14 +576,33 @@ export function ChatCallDialog({
 
       // Start polling for call status (detect when caller hangs up)
       callStatusPollRef.current = setInterval(() => pollCallStatus(callId), 1000);
+
+      // Start connection timeout
+      startConnectionTimeout();
     } catch (err) {
-      setCallState((prev) => ({
-        ...prev,
-        status: 'failed',
-        error: err instanceof Error ? err.message : 'Error desconocido',
-      }));
+      log('callee: error joining call:', err);
+      const msg = err instanceof Error ? err.message : 'Error desconocido';
+      if (msg.includes('Permission') || msg.includes('NotAllowed')) {
+        setCallState((prev) => ({
+          ...prev,
+          status: 'failed',
+          error: 'Permiso de micrófono/cámara denegado. Autoriza el acceso en el navegador.',
+        }));
+      } else if (msg.includes('NotFound') || msg.includes('DevicesNotFound')) {
+        setCallState((prev) => ({
+          ...prev,
+          status: 'failed',
+          error: 'No se encontró micrófono o cámara en el dispositivo.',
+        }));
+      } else {
+        setCallState((prev) => ({
+          ...prev,
+          status: 'failed',
+          error: msg,
+        }));
+      }
     }
-  }, [callData, createPeerConnection, pollSignals, pollCallStatus]);
+  }, [callData, createPeerConnection, pollSignals, pollCallStatus, startConnectionTimeout, log]);
 
   // =====================================================
   // Start call on mount
@@ -435,15 +618,16 @@ export function ChatCallDialog({
   }, []);
 
   const handleHangUp = useCallback(async () => {
-    if (callState.callId) {
-      await fetch(`/app/chat/api/calls/${callState.callId}/end`, {
+    const callId = callIdRef.current;
+    if (callId) {
+      await fetch(`/app/chat/api/calls/${callId}/end`, {
         method: 'POST',
       }).catch(() => {});
     }
     cleanup();
     setCallState((prev) => ({ ...prev, status: 'ended' }));
     setTimeout(onClose, 800);
-  }, [callState.callId, cleanup, onClose]);
+  }, [cleanup, onClose]);
 
   const toggleMute = useCallback(() => {
     if (localStreamRef.current) {

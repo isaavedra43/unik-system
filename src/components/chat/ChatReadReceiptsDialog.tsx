@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { CheckCheck, Loader2 } from 'lucide-react';
+import { Check, CheckCheck, Loader2 } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -15,6 +15,7 @@ import { cn } from '@/lib/utils';
 
 export interface ChatReadReceiptsDialogProps {
   messageId: string;
+  sentAt?: string;
   onClose: () => void;
 }
 
@@ -24,7 +25,7 @@ interface Reader {
   readAt: string;
 }
 
-export function ChatReadReceiptsDialog({ messageId, onClose }: ChatReadReceiptsDialogProps) {
+export function ChatReadReceiptsDialog({ messageId, sentAt, onClose }: ChatReadReceiptsDialogProps) {
   const [readers, setReaders] = useState<Reader[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -66,13 +67,24 @@ export function ChatReadReceiptsDialog({ messageId, onClose }: ChatReadReceiptsD
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <CheckCheck size={18} /> Leído por
+            <CheckCheck size={18} /> Detalles del mensaje
           </DialogTitle>
-          <DialogDescription>Quienes han visto este mensaje</DialogDescription>
+          <DialogDescription>Entrega y lectura de este mensaje</DialogDescription>
         </DialogHeader>
 
         <ScrollArea className="max-h-[50vh]">
           <div className="flex flex-col gap-1 pr-3">
+            {sentAt && (
+              <div className="chat-receipt-sent">
+                <span className="chat-receipt-sent-icon" aria-hidden="true">
+                  <Check size={14} />
+                </span>
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-medium text-foreground">Enviado</div>
+                  <div className="text-xs text-muted-foreground">{formatTime(sentAt)}</div>
+                </div>
+              </div>
+            )}
             {loading && (
               <div className="flex items-center justify-center gap-2 py-8 text-sm text-muted-foreground">
                 <Loader2 size={20} className="animate-spin" /> Cargando...
@@ -104,10 +116,10 @@ export function ChatReadReceiptsDialog({ messageId, onClose }: ChatReadReceiptsD
                 <div className="flex-1 min-w-0">
                   <div className="text-sm font-medium text-foreground truncate">{r.name}</div>
                   <div className="text-xs text-muted-foreground">
-                    Leído a las {formatTime(r.readAt)}
+                    Visto · {formatTime(r.readAt)}
                   </div>
                 </div>
-                <CheckCheck size={16} className="text-info shrink-0" />
+                <CheckCheck size={16} className="chat-receipt-seen-icon shrink-0" />
               </div>
             ))}
           </div>
