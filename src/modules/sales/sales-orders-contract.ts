@@ -1,4 +1,11 @@
 import { Prisma } from '@prisma/client';
+import { getTicketStatus } from './sales-orders-helpers';
+import type {
+  RelatedInvoiceSummary,
+  RelatedPackageSummary,
+  RelatedPaymentSummary,
+  RelatedContactSummary,
+} from '@/modules/cross-module/relationships-service';
 
 /**
  * Canonical camelCase DTOs for the Sales Orders workspace and detail pages.
@@ -18,6 +25,7 @@ export interface SalesOrderListRow {
   salespersonName: string | null;
   status: string | null;
   subStatus: string | null;
+  ticketStatus: string;
   paidStatus: string | null;
   invoicedStatus: string | null;
   shippedStatus: string | null;
@@ -67,6 +75,7 @@ export interface SalesOrderDetail {
   createdTime: string | null;
   status: string | null;
   subStatus: string | null;
+  ticketStatus: string;
   paidStatus: string | null;
   invoicedStatus: string | null;
   shippedStatus: string | null;
@@ -114,6 +123,11 @@ export interface SalesOrderDetail {
     sourceRemoteModifiedAt: string | null;
     createdAt: string;
   }[];
+  /** Cross-module relations added by the API route. */
+  relatedInvoices?: RelatedInvoiceSummary[];
+  relatedPackages?: RelatedPackageSummary[];
+  relatedPayments?: RelatedPaymentSummary[];
+  relatedContact?: RelatedContactSummary | null;
 }
 
 function decimalToString(value: Prisma.Decimal | null | undefined): string | null {
@@ -173,6 +187,13 @@ export function toSalesOrderListRow(order: {
     branchName: order.branchName,
     status: order.status,
     subStatus: order.subStatus,
+    ticketStatus: getTicketStatus({
+      status: order.status,
+      subStatus: order.subStatus,
+      paidStatus: order.paidStatus,
+      invoicedStatus: order.invoicedStatus,
+      shippedStatus: order.shippedStatus,
+    }).raw,
     paidStatus: order.paidStatus,
     invoicedStatus: order.invoicedStatus,
     shippedStatus: order.shippedStatus,
@@ -272,6 +293,13 @@ export function toSalesOrderDetail(
     createdTime: order.createdTime?.toISOString() ?? null,
     status: order.status,
     subStatus: order.subStatus,
+    ticketStatus: getTicketStatus({
+      status: order.status,
+      subStatus: order.subStatus,
+      paidStatus: order.paidStatus,
+      invoicedStatus: order.invoicedStatus,
+      shippedStatus: order.shippedStatus,
+    }).raw,
     paidStatus: order.paidStatus,
     invoicedStatus: order.invoicedStatus,
     shippedStatus: order.shippedStatus,

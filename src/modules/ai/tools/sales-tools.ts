@@ -22,6 +22,8 @@ import {
   perFilterMatchCounts,
   type SalesOrderFilterArgs,
 } from './sales-order-ai-filters';
+import { getSalesOrderRelations } from '@/modules/cross-module/relationships-service';
+import { getTicketStatus } from '@/modules/sales/sales-orders-helpers';
 
 /* ------------------------------------------------------------------ */
 /* Helpers                                                            */
@@ -841,6 +843,81 @@ registerTool({
           location: it.locationName,
         })),
       },
+    };
+  },
+});
+
+// 4b. getSalesOrderFullFile — Full file with all cross-module relations
+registerTool({
+  name: 'getSalesOrderFullFile',
+  description: 'Expediente completo de una orden de venta: incluye la orden, sus items, facturas relacionadas, paquetes relacionados, pagos relacionados y datos del cliente. Útil para responder "¿en qué estado está este ticket?" o "¿qué falta por hacer?".',
+  category: 'sales',
+  requiredPermission: 'sales_orders.view',
+  enabledByDefault: true,
+  parameters: z.object({
+    salesOrderNumber: z.string().min(1).describe('Número de la orden (ej: OV-23282) o ID interno.'),
+  }),
+  execute: async (_actor, rawArgs) => {
+    const args = rawArgs as { salesOrderNumber: string };
+    const order = await prisma.salesOrder.findFirst({
+      where: {
+        OR: [
+          { salesOrderNumber: { equals: args.salesOrderNumber, mode: 'insensitive' } },
+          { id: args.salesOrderNumber },
+        ],
+      },
+      include: { items: true },
+    });
+    if (!order) return { found: false, searchedNumber: args.salesOrderNumber };
+
+    const relations = await getSalesOrderRelations(order.zohoSalesOrderId, order.zohoCustomerId);
+    const ticketStatus = getTicketStatus({
+      status: order.status,
+      subStatus: order.subStatus,
+      paidStatus: order.paidStatus,
+      invoicedStatus: order.invoicedStatus,
+      shippedStatus: order.shippedStatus,
+    });
+
+    return {
+      found: true,
+      order: {
+        id: order.id,
+        number: order.salesOrderNumber,
+        customer: order.customerName,
+        email: order.customerEmail,
+        phone: order.customerPhone,
+        salesperson: order.salespersonName,
+        status: order.status,
+        subStatus: order.subStatus,
+        ticketStatus: ticketStatus.label,
+        paidStatus: order.paidStatus,
+        invoicedStatus: order.invoicedStatus,
+        shippedStatus: order.shippedStatus,
+        paymentMethod: order.paymentMethod,
+        deliveryMethod: order.deliveryMethod,
+        location: order.locationName,
+        branch: order.branchName,
+        orderDate: formatDate(order.orderDate),
+        subtotal: decimalToString(order.subtotal),
+        discountTotal: decimalToString(order.discountTotal),
+        taxTotal: decimalToString(order.taxTotal),
+        shippingCharge: decimalToString(order.shippingCharge),
+        adjustment: decimalToString(order.adjustment),
+        total: decimalToString(order.total),
+        balance: decimalToString(order.balance),
+        items: order.items.map((it) => ({
+          sku: it.sku,
+          name: it.name,
+          quantity: decimalToString(it.quantity),
+          rate: decimalToString(it.rate),
+          lineTotal: decimalToString(it.lineTotal),
+        })),
+      },
+      relatedInvoices: relations.invoices,
+      relatedPackages: relations.packages,
+      relatedPayments: relations.payments,
+      relatedContact: relations.contact,
     };
   },
 });

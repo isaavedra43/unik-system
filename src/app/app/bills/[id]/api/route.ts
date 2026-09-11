@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getCurrentSession, hasPermission } from '@/modules/auth/authorization';
 import { getBillById } from '@/modules/bills/bills-service';
+import { getBillRelations } from '@/modules/cross-module/relationships-service';
 
 export const runtime = 'nodejs';
 
@@ -23,5 +24,11 @@ export async function GET(
     return NextResponse.json({ error: 'No encontrado' }, { status: 404 });
   }
 
-  return NextResponse.json(bill);
+  const relations = await getBillRelations(bill.zohoPurchaseOrderId, bill.zohoVendorId);
+  return NextResponse.json({
+    ...bill,
+    relatedPurchaseOrder: relations.purchaseOrder,
+    relatedContact: relations.contact,
+    relatedVendorCredits: relations.vendorCredits,
+  });
 }

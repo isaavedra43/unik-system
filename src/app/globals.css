@@ -15351,3 +15351,157 @@ textarea.input {
   box-shadow: var(--unik-shadow-sm);
   border-radius: var(--unik-radius-md);
 }
+
+/* ============================================================
+   Ticket lifecycle bar — visual progress of the sales order
+   ============================================================ */
+.ticket-lifecycle-bar {
+  display: flex;
+  align-items: flex-start;
+  gap: 0;
+  width: 100%;
+  overflow-x: auto;
+  padding: 0.5rem 0;
+}
+
+.ticket-lifecycle-step-wrapper {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+}
+
+.ticket-lifecycle-step {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+  flex-shrink: 0;
+  min-width: 60px;
+}
+
+.ticket-lifecycle-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid var(--unik-border);
+  background: var(--unik-surface);
+  flex-shrink: 0;
+  transition: all 0.2s ease;
+}
+
+.ticket-lifecycle-label {
+  font-size: 0.6875rem;
+  color: var(--unik-text-muted);
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 80px;
+}
+
+.ticket-lifecycle-connector {
+  flex: 1;
+  height: 2px;
+  background: var(--unik-border);
+  margin-top: 6px;
+  min-width: 8px;
+}
+
+/* Done state */
+.ticket-lifecycle-done .ticket-lifecycle-dot {
+  background: var(--unik-success, #10b981);
+  border-color: var(--unik-success, #10b981);
+}
+.ticket-lifecycle-done .ticket-lifecycle-label {
+  color: var(--unik-text);
+  font-weight: 600;
+}
+.ticket-lifecycle-connector-done {
+  background: var(--unik-success, #10b981);
+}
+
+/* Current state */
+.ticket-lifecycle-current .ticket-lifecycle-dot {
+  background: var(--unik-brand, #3b82f6);
+  border-color: var(--unik-brand, #3b82f6);
+  box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.2);
+}
+.ticket-lifecycle-current .ticket-lifecycle-label {
+  color: var(--unik-brand, #3b82f6);
+  font-weight: 600;
+}
+
+/* Partial state */
+.ticket-lifecycle-partial .ticket-lifecycle-dot {
+  background: conic-gradient(var(--unik-warning, #f59e0b) 50%, var(--unik-surface) 50%);
+  border-color: var(--unik-warning, #f59e0b);
+}
+.ticket-lifecycle-partial .ticket-lifecycle-label {
+  color: var(--unik-warning, #f59e0b);
+  font-weight: 600;
+}
+.ticket-lifecycle-connector-partial {
+  background: var(--unik-warning, #f59e0b);
+}
+
+/* Pending state */
+.ticket-lifecycle-pending .ticket-lifecycle-dot {
+  background: var(--unik-surface);
+  border-color: var(--unik-border);
+}
+.ticket-lifecycle-pending .ticket-lifecycle-label {
+  color: var(--unik-text-muted);
+}
+
+/* Responsive: vertical on mobile */
+@media (max-width: 640px) {
+  .ticket-lifecycle-bar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0;
+  }
+  .ticket-lifecycle-step-wrapper {
+    flex-direction: row;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .ticket-lifecycle-step {
+    flex-direction: row;
+    gap: 0.5rem;
+    min-width: auto;
+  }
+  .ticket-lifecycle-connector {
+    width: 2px;
+    height: 16px;
+    margin: 0 0 0 6px;
+    flex: none;
+  }
+}
+
+/* ============================================================
+   Related tables — compact clickable tables in drawers
+   ============================================================ */
+.so-related-table {
+  cursor: pointer;
+}
+
+.so-related-table tbody tr {
+  transition: background 0.15s ease;
+}
+
+.so-related-table tbody tr:hover {
+  background: var(--unik-surface-hover, rgba(0, 0, 0, 0.03));
+}
+
+.so-related-table tbody tr td {
+  font-size: 0.8125rem;
+  padding: 0.5rem 0.75rem;
+}
+
+/* Status strip responsive: wrap on small screens */
+@media (max-width: 640px) {
+  .so-status-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

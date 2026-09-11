@@ -520,3 +520,240 @@ export async function getBillsByPurchaseOrderZohoId(
     throw error;
   }
 }
+
+// ---------------------------------------------------------------------------
+// Sales Order → Payments (by customer, since Zoho doesn't link payments→SO directly)
+// ---------------------------------------------------------------------------
+
+export async function getPaymentsBySalesOrderZohoId(
+  zohoCustomerId: string,
+  limit = 10
+): Promise<RelatedPaymentSummary[]> {
+  try {
+    if (!zohoCustomerId) return [];
+    const payments = await prisma.customerPayment.findMany({
+      where: { zohoCustomerId },
+      orderBy: { date: 'desc' },
+      take: Math.max(1, Math.min(limit, 50)),
+      select: { id: true, paymentNumber: true, paymentMode: true, status: true, date: true, amount: true, currencyCode: true },
+    });
+    return payments.map((p) => ({
+      id: p.id, paymentNumber: p.paymentNumber, paymentMode: p.paymentMode, status: p.status,
+      date: p.date?.toISOString() ?? null, amount: p.amount?.toString() ?? null, currencyCode: p.currencyCode,
+    }));
+  } catch (error) {
+    if (isPrismaTableError(error)) return [];
+    throw error;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Sales Order → All relations in one call
+// ---------------------------------------------------------------------------
+
+export interface SalesOrderRelations {
+  invoices: RelatedInvoiceSummary[];
+  packages: RelatedPackageSummary[];
+  payments: RelatedPaymentSummary[];
+  contact: RelatedContactSummary | null;
+}
+
+export async function getSalesOrderRelations(
+  zohoSalesOrderId: string,
+  zohoCustomerId: string | null
+): Promise<SalesOrderRelations> {
+  const [invoices, packages, payments, contact] = await Promise.all([
+    getInvoicesBySalesOrderZohoId(zohoSalesOrderId),
+    getPackagesBySalesOrderZohoId(zohoSalesOrderId),
+    zohoCustomerId ? getPaymentsBySalesOrderZohoId(zohoCustomerId) : Promise.resolve([]),
+    zohoCustomerId ? getContactByZohoId(zohoCustomerId) : Promise.resolve(null),
+  ]);
+  return { invoices, packages, payments, contact };
+}
+
+// ---------------------------------------------------------------------------
+// Sales Order summary by Zoho ID (for Package/Invoice detail pages)
+// ---------------------------------------------------------------------------
+
+export async function getSalesOrderSummaryByZohoId(
+  zohoSalesOrderId: string
+): Promise<RelatedSalesOrderSummary | null> {
+  if (!zohoSalesOrderId) return null;
+  const so = await prisma.salesOrder.findFirst({
+    where: { zohoSalesOrderId },
+    select: { id: true, salesOrderNumber: true, status: true, orderDate: true, total: true },
+  });
+  if (!so) return null;
+  return {
+    id: so.id,
+    salesOrderNumber: so.salesOrderNumber,
+    status: so.status,
+    date: so.orderDate?.toISOString() ?? null,
+    total: so.total?.toString() ?? null,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Invoice → All relations in one call
+// ---------------------------------------------------------------------------
+
+export interface InvoiceRelations {
+  salesOrders: RelatedSalesOrderSummary[];
+  payments: RelatedPaymentSummary[];
+  contact: RelatedContactSummary | null;
+}
+
+export async function getInvoiceRelations(
+  invoiceId: string,
+  zohoCustomerId: string | null
+): Promise<InvoiceRelations> {
+  const [salesOrders, payments, contact] = await Promise.all([
+    getRelatedSalesOrdersByInvoice(invoiceId),
+    zohoCustomerId ? getPaymentsByContactZohoId(zohoCustomerId) : Promise.resolve([]),
+    zohoCustomerId ? getContactByZohoId(zohoCustomerId) : Promise.resolve(null),
+  ]);
+  return { salesOrders, payments, contact };
+}
+
+// ---------------------------------------------------------------------------
+// Package → All relations in one call
+// ---------------------------------------------------------------------------
+
+export interface PackageRelations {
+  salesOrder: RelatedSalesOrderSummary | null;
+  contact: RelatedContactSummary | null;
+}
+
+export async function getPackageRelations(
+  zohoSalesOrderId: string | null,
+  zohoCustomerId: string | null
+): Promise<PackageRelations> {
+  const [salesOrder, contact] = await Promise.all([
+    zohoSalesOrderId ? getSalesOrderSummaryByZohoId(zohoSalesOrderId) : Promise.resolve(null),
+    zohoCustomerId ? getContactByZohoId(zohoCustomerId) : Promise.resolve(null),
+  ]);
+  return { salesOrder, contact };
+}
+
+// ---------------------------------------------------------------------------
+// Payment → All relations in one call
+// ---------------------------------------------------------------------------
+
+export interface PaymentRelations {
+  contact: RelatedContactSummary | null;
+  invoices: RelatedInvoiceSummary[];
+  salesOrders: RelatedSalesOrderSummary[];
+}
+
+export async function getPaymentRelations(
+  zohoCustomerId: string | null
+): Promise<PaymentRelations> {
+  if (!zohoCustomerId) {
+    return { contact: null, invoices: [], salesOrders: [] };
+  }
+  const [contact, invoices, salesOrders] = await Promise.all([
+    getContactByZohoId(zohoCustomerId),
+    getInvoicesByContactZohoId(zohoCustomerId),
+    getSalesOrdersByContactZohoId(zohoCustomerId),
+  ]);
+  return { contact, invoices, salesOrders };
+}
+
+// ---------------------------------------------------------------------------
+// Purchase Order summary by Zoho ID (for Bill detail page)
+// ---------------------------------------------------------------------------
+
+export interface RelatedPurchaseOrderDetail {
+  id: string;
+  purchaseOrderNumber: string | null;
+  status: string | null;
+  date: string | null;
+  total: string | null;
+}
+
+export async function getPurchaseOrderSummaryByZohoId(
+  zohoPurchaseOrderId: string
+): Promise<RelatedPurchaseOrderDetail | null> {
+  if (!zohoPurchaseOrderId) return null;
+  try {
+    const po = await prisma.purchaseOrder.findFirst({
+      where: { zohoPurchaseOrderId },
+      select: { id: true, purchaseOrderNumber: true, status: true, date: true, total: true },
+    });
+    if (!po) return null;
+    return {
+      id: po.id,
+      purchaseOrderNumber: po.purchaseOrderNumber,
+      status: po.status,
+      date: po.date?.toISOString() ?? null,
+      total: po.total?.toString() ?? null,
+    };
+  } catch (error) {
+    if (isPrismaTableError(error)) return null;
+    throw error;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Purchase Order → All relations in one call
+// ---------------------------------------------------------------------------
+
+export interface PurchaseOrderRelations {
+  bills: RelatedBillSummary[];
+  contact: RelatedContactSummary | null;
+}
+
+export async function getPurchaseOrderRelations(
+  zohoPurchaseOrderId: string,
+  zohoVendorId: string | null
+): Promise<PurchaseOrderRelations> {
+  const [bills, contact] = await Promise.all([
+    getBillsByPurchaseOrderZohoId(zohoPurchaseOrderId),
+    zohoVendorId ? getContactByZohoId(zohoVendorId) : Promise.resolve(null),
+  ]);
+  return { bills, contact };
+}
+
+// ---------------------------------------------------------------------------
+// Bill → All relations in one call
+// ---------------------------------------------------------------------------
+
+export interface BillRelations {
+  purchaseOrder: RelatedPurchaseOrderDetail | null;
+  contact: RelatedContactSummary | null;
+  vendorCredits: RelatedVendorCreditSummary[];
+}
+
+export async function getBillRelations(
+  zohoPurchaseOrderId: string | null,
+  zohoVendorId: string | null
+): Promise<BillRelations> {
+  const [purchaseOrder, contact, vendorCredits] = await Promise.all([
+    zohoPurchaseOrderId ? getPurchaseOrderSummaryByZohoId(zohoPurchaseOrderId) : Promise.resolve(null),
+    zohoVendorId ? getContactByZohoId(zohoVendorId) : Promise.resolve(null),
+    zohoVendorId ? getVendorCreditsByVendorZohoId(zohoVendorId) : Promise.resolve([]),
+  ]);
+  return { purchaseOrder, contact, vendorCredits };
+}
+
+// ---------------------------------------------------------------------------
+// VendorCredit → All relations in one call
+// ---------------------------------------------------------------------------
+
+export interface VendorCreditRelations {
+  contact: RelatedContactSummary | null;
+  bills: RelatedBillSummary[];
+}
+
+export async function getVendorCreditRelations(
+  zohoVendorId: string | null
+): Promise<VendorCreditRelations> {
+  if (!zohoVendorId) {
+    return { contact: null, bills: [] };
+  }
+  const [contact, bills] = await Promise.all([
+    getContactByZohoId(zohoVendorId),
+    getBillsByVendorZohoId(zohoVendorId),
+  ]);
+  return { contact, bills };
+}

@@ -353,7 +353,7 @@ function SortableHeader({
 
 function getStatusDotColor(
   status: string | null,
-  category?: 'order' | 'payment' | 'invoice' | 'shipping'
+  category?: 'order' | 'payment' | 'invoice' | 'shipping' | 'sub_status' | 'ticket'
 ): string {
   const config = getSalesOrderStatusConfig(status, category);
   return `so-status-dot-${config.tone}`;
@@ -366,7 +366,7 @@ function StatusCell({
 }: {
   value: string | null;
   label: string;
-  category?: 'order' | 'payment' | 'invoice' | 'shipping';
+  category?: 'order' | 'payment' | 'invoice' | 'shipping' | 'sub_status' | 'ticket';
 }) {
   const config = getSalesOrderStatusConfig(value, category);
   if (!value) {

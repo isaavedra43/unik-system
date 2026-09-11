@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getCurrentSession } from '@/modules/auth/authorization';
 import { getPurchaseOrderById } from '@/modules/purchase-orders/purchase-orders-service';
+import { getPurchaseOrderRelations } from '@/modules/cross-module/relationships-service';
 
 export const runtime = 'nodejs';
 
@@ -22,5 +23,10 @@ export async function GET(
     return NextResponse.json({ error: 'Orden de compra no encontrada' }, { status: 404 });
   }
 
-  return NextResponse.json(purchaseOrder);
+  const relations = await getPurchaseOrderRelations(purchaseOrder.zohoPurchaseOrderId, purchaseOrder.zohoVendorId);
+  return NextResponse.json({
+    ...purchaseOrder,
+    relatedBills: relations.bills,
+    relatedContact: relations.contact,
+  });
 }

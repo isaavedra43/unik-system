@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Bell, BellRing, ExternalLink, X } from 'lucide-react';
 import { toast } from 'sonner';
@@ -328,6 +329,99 @@ export function InvoicePreviewDrawer({
                       </tbody>
                     </table>
                   </div>
+                </div>
+              ) : null}
+
+              {/* Related sales orders */}
+              {invoice.relatedSalesOrders && invoice.relatedSalesOrders.length > 0 ? (
+                <div className="so-detail-section">
+                  <h3 className="so-detail-section-title">Órdenes de venta ({invoice.relatedSalesOrders.length})</h3>
+                  <div className="table-wrap">
+                    <table className="table so-table-compact so-related-table">
+                      <thead>
+                        <tr>
+                          <th>Orden</th>
+                          <th>Estado</th>
+                          <th>Fecha</th>
+                          <th style={{ textAlign: 'right' }}>Total</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {invoice.relatedSalesOrders.map((so) => (
+                          <tr
+                            key={so.id}
+                            onClick={() => router.push(`/app/sales/orders/${so.id}`)}
+                            style={{ cursor: 'pointer' }}
+                          >
+                            <td>{so.salesOrderNumber ?? '—'}</td>
+                            <td>{so.status ?? '—'}</td>
+                            <td>{formatDateOnly(so.date)}</td>
+                            <td style={{ textAlign: 'right' }}>{formatCurrency(so.total, invoice.currencyCode)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ) : null}
+
+              {/* Related payments */}
+              {invoice.relatedPayments && invoice.relatedPayments.length > 0 ? (
+                <div className="so-detail-section">
+                  <h3 className="so-detail-section-title">Pagos ({invoice.relatedPayments.length})</h3>
+                  <div className="table-wrap">
+                    <table className="table so-table-compact so-related-table">
+                      <thead>
+                        <tr>
+                          <th>Folio</th>
+                          <th>Modo</th>
+                          <th>Fecha</th>
+                          <th style={{ textAlign: 'right' }}>Monto</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {invoice.relatedPayments.map((pay) => (
+                          <tr
+                            key={pay.id}
+                            onClick={() => router.push(`/app/payments/${pay.id}`)}
+                            style={{ cursor: 'pointer' }}
+                          >
+                            <td>{pay.paymentNumber ?? '—'}</td>
+                            <td>{pay.paymentMode ?? '—'}</td>
+                            <td>{formatDateOnly(pay.date)}</td>
+                            <td style={{ textAlign: 'right' }}>{formatCurrency(pay.amount, pay.currencyCode)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ) : null}
+
+              {/* Related contact */}
+              {invoice.relatedContact ? (
+                <div className="so-detail-section">
+                  <h3 className="so-detail-section-title">Cliente</h3>
+                  <div className="so-detail-grid">
+                    <Field label="Nombre" value={invoice.relatedContact.contactName} />
+                    <Field label="Empresa" value={invoice.relatedContact.companyName} />
+                    <Field label="Tipo" value={invoice.relatedContact.contactType} />
+                  </div>
+                  {invoice.relatedContact.id ? (
+                    <Link
+                      href={`/app/contacts/customers/${invoice.relatedContact.id}`}
+                      style={{
+                        fontSize: '0.875rem',
+                        color: 'var(--unik-accent)',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '0.25rem',
+                        marginTop: '0.5rem',
+                      }}
+                    >
+                      <ExternalLink size={12} /> Ver cliente
+                    </Link>
+                  ) : null}
                 </div>
               ) : null}
 

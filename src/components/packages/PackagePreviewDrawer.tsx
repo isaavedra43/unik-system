@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Bell, BellRing, ExternalLink, X } from 'lucide-react';
 import { toast } from 'sonner';
@@ -255,6 +256,59 @@ export function PackagePreviewDrawer({
                       </tbody>
                     </table>
                   </div>
+                </div>
+              ) : null}
+
+              {/* Related sales order */}
+              {pkg.relatedSalesOrder ? (
+                <div className="so-detail-section">
+                  <h3 className="so-detail-section-title">Orden de venta</h3>
+                  <div className="so-detail-grid">
+                    <Field label="Folio" value={pkg.relatedSalesOrder.salesOrderNumber} />
+                    <Field label="Estado" value={pkg.relatedSalesOrder.status} />
+                    <Field label="Fecha" value={formatDateOnly(pkg.relatedSalesOrder.date)} />
+                    <Field label="Total" value={formatCurrency(pkg.relatedSalesOrder.total)} />
+                  </div>
+                  <Link
+                    href={`/app/sales/orders/${pkg.relatedSalesOrder.id}`}
+                    style={{
+                      fontSize: '0.875rem',
+                      color: 'var(--unik-accent)',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.25rem',
+                      marginTop: '0.5rem',
+                    }}
+                  >
+                    <ExternalLink size={12} /> Ver orden de venta
+                  </Link>
+                </div>
+              ) : null}
+
+              {/* Related contact */}
+              {pkg.relatedContact ? (
+                <div className="so-detail-section">
+                  <h3 className="so-detail-section-title">Cliente</h3>
+                  <div className="so-detail-grid">
+                    <Field label="Nombre" value={pkg.relatedContact.contactName} />
+                    <Field label="Empresa" value={pkg.relatedContact.companyName} />
+                    <Field label="Tipo" value={pkg.relatedContact.contactType} />
+                  </div>
+                  {pkg.relatedContact.id ? (
+                    <Link
+                      href={`/app/contacts/customers/${pkg.relatedContact.id}`}
+                      style={{
+                        fontSize: '0.875rem',
+                        color: 'var(--unik-accent)',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '0.25rem',
+                        marginTop: '0.5rem',
+                      }}
+                    >
+                      <ExternalLink size={12} /> Ver cliente
+                    </Link>
+                  ) : null}
                 </div>
               ) : null}
 

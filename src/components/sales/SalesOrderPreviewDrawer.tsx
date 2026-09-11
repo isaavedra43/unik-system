@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Bell, BellRing, ExternalLink, X } from 'lucide-react';
 import { toast } from 'sonner';
@@ -12,6 +13,8 @@ import {
   formatDateTime,
   formatQuantity,
   getSalesOrderStatusConfig,
+  getTicketStatus,
+  getTicketLifecycleSteps,
 } from '@/modules/sales/sales-orders-helpers';
 
 interface PreviewDrawerProps {
@@ -199,10 +202,22 @@ export function SalesOrderPreviewDrawer({
                 <h3 className="so-detail-section-title">Estados</h3>
                 <div className="so-status-strip">
                   <StatusTile
+                    label="Ticket"
+                    value={getTicketStatus(order).label}
+                    tone={getTicketStatus(order).tone}
+                  />
+                  <StatusTile
                     label="Orden"
                     value={getSalesOrderStatusConfig(order.status, 'order').label}
                     tone={getSalesOrderStatusConfig(order.status, 'order').tone}
                   />
+                  {order.subStatus ? (
+                    <StatusTile
+                      label="Sub-estado"
+                      value={getSalesOrderStatusConfig(order.subStatus, 'sub_status').label}
+                      tone={getSalesOrderStatusConfig(order.subStatus, 'sub_status').tone}
+                    />
+                  ) : null}
                   <StatusTile
                     label="Pago"
                     value={getSalesOrderStatusConfig(order.paidStatus, 'payment').label}
@@ -218,6 +233,24 @@ export function SalesOrderPreviewDrawer({
                     value={getSalesOrderStatusConfig(order.shippedStatus, 'shipping').label}
                     tone={getSalesOrderStatusConfig(order.shippedStatus, 'shipping').tone}
                   />
+                </div>
+              </div>
+
+              {/* Lifecycle bar */}
+              <div className="so-detail-section">
+                <h3 className="so-detail-section-title">Ciclo de vida</h3>
+                <div className="ticket-lifecycle-bar">
+                  {getTicketLifecycleSteps(order).map((step, idx) => (
+                    <React.Fragment key={step.label}>
+                      <div className={`ticket-lifecycle-step ticket-lifecycle-${step.status}`}>
+                        <span className="ticket-lifecycle-dot" />
+                        <span className="ticket-lifecycle-label">{step.label}</span>
+                      </div>
+                      {idx < 6 ? (
+                        <div className={`ticket-lifecycle-connector ticket-lifecycle-connector-${step.status}`} />
+                      ) : null}
+                    </React.Fragment>
+                  ))}
                 </div>
               </div>
 
@@ -347,6 +380,136 @@ export function SalesOrderPreviewDrawer({
                       </tbody>
                     </table>
                   </div>
+                </div>
+              ) : null}
+
+              {/* Related invoices */}
+              {order.relatedInvoices && order.relatedInvoices.length > 0 ? (
+                <div className="so-detail-section">
+                  <h3 className="so-detail-section-title">Facturas ({order.relatedInvoices.length})</h3>
+                  <div className="table-wrap">
+                    <table className="table so-table-compact so-related-table">
+                      <thead>
+                        <tr>
+                          <th>Factura</th>
+                          <th>Estado</th>
+                          <th>Fecha</th>
+                          <th style={{ textAlign: 'right' }}>Total</th>
+                          <th style={{ textAlign: 'right' }}>Saldo</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {order.relatedInvoices.map((inv) => (
+                          <tr
+                            key={inv.id}
+                            onClick={() => router.push(`/app/invoices/${inv.id}`)}
+                            style={{ cursor: 'pointer' }}
+                          >
+                            <td>{inv.invoiceNumber ?? '—'}</td>
+                            <td>{getSalesOrderStatusConfig(inv.status, 'invoice').label}</td>
+                            <td>{formatDateOnly(inv.date)}</td>
+                            <td style={{ textAlign: 'right' }}>{formatCurrency(inv.total, inv.currencyCode)}</td>
+                            <td style={{ textAlign: 'right' }}>{formatCurrency(inv.balance, inv.currencyCode)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ) : null}
+
+              {/* Related packages */}
+              {order.relatedPackages && order.relatedPackages.length > 0 ? (
+                <div className="so-detail-section">
+                  <h3 className="so-detail-section-title">Paquetes ({order.relatedPackages.length})</h3>
+                  <div className="table-wrap">
+                    <table className="table so-table-compact so-related-table">
+                      <thead>
+                        <tr>
+                          <th>Paquete</th>
+                          <th>Estado</th>
+                          <th>Fecha</th>
+                          <th>Transportista</th>
+                          <th>Guía</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {order.relatedPackages.map((pkg) => (
+                          <tr
+                            key={pkg.id}
+                            onClick={() => router.push(`/app/packages/${pkg.id}`)}
+                            style={{ cursor: 'pointer' }}
+                          >
+                            <td>{pkg.packageNumber ?? '—'}</td>
+                            <td>{getSalesOrderStatusConfig(pkg.status, 'shipping').label}</td>
+                            <td>{formatDateOnly(pkg.date)}</td>
+                            <td>{pkg.carrier ?? '—'}</td>
+                            <td>{pkg.trackingNumber ?? '—'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ) : null}
+
+              {/* Related payments */}
+              {order.relatedPayments && order.relatedPayments.length > 0 ? (
+                <div className="so-detail-section">
+                  <h3 className="so-detail-section-title">Pagos ({order.relatedPayments.length})</h3>
+                  <div className="table-wrap">
+                    <table className="table so-table-compact so-related-table">
+                      <thead>
+                        <tr>
+                          <th>Folio</th>
+                          <th>Modo</th>
+                          <th>Fecha</th>
+                          <th style={{ textAlign: 'right' }}>Monto</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {order.relatedPayments.map((pay) => (
+                          <tr
+                            key={pay.id}
+                            onClick={() => router.push(`/app/payments/${pay.id}`)}
+                            style={{ cursor: 'pointer' }}
+                          >
+                            <td>{pay.paymentNumber ?? '—'}</td>
+                            <td>{pay.paymentMode ?? '—'}</td>
+                            <td>{formatDateOnly(pay.date)}</td>
+                            <td style={{ textAlign: 'right' }}>{formatCurrency(pay.amount, pay.currencyCode)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ) : null}
+
+              {/* Related contact */}
+              {order.relatedContact ? (
+                <div className="so-detail-section">
+                  <h3 className="so-detail-section-title">Cliente</h3>
+                  <div className="so-detail-grid">
+                    <Field label="Nombre" value={order.relatedContact.contactName} />
+                    <Field label="Empresa" value={order.relatedContact.companyName} />
+                    <Field label="Tipo" value={order.relatedContact.contactType} />
+                  </div>
+                  {order.relatedContact.id ? (
+                    <Link
+                      href={`/app/contacts/customers/${order.relatedContact.id}`}
+                      style={{
+                        fontSize: '0.875rem',
+                        color: 'var(--unik-accent)',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '0.25rem',
+                        marginTop: '0.5rem',
+                      }}
+                    >
+                      <ExternalLink size={12} /> Ver cliente
+                    </Link>
+                  ) : null}
                 </div>
               ) : null}
 

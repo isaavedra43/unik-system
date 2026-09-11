@@ -8,8 +8,12 @@ const STATUS_MAP: Record<string, PackageStatusConfig> = {
   shipped: { raw: 'shipped', label: 'Enviado', tone: 'info' },
   not_shipped: { raw: 'not_shipped', label: 'No enviado', tone: 'warning' },
   delivered: { raw: 'delivered', label: 'Entregado', tone: 'success' },
+  fulfilled: { raw: 'fulfilled', label: 'Entregado', tone: 'success' },
   returned: { raw: 'returned', label: 'Devuelto', tone: 'danger' },
   deleted: { raw: 'deleted', label: 'Eliminado', tone: 'danger' },
+  packaged: { raw: 'packaged', label: 'Empaquetado', tone: 'info' },
+  partially_shipped: { raw: 'partially_shipped', label: 'Parcial', tone: 'warning' },
+  pending: { raw: 'pending', label: 'Pendiente', tone: 'warning' },
 };
 
 function normalizeRaw(raw: string | null | undefined): string | null {

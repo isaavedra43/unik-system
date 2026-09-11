@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getCurrentSession } from '@/modules/auth/authorization';
 import { getPaymentById } from '@/modules/payments/payments-service';
+import { getPaymentRelations } from '@/modules/cross-module/relationships-service';
 
 export const runtime = 'nodejs';
 
@@ -25,5 +26,11 @@ export async function GET(
     return NextResponse.json({ error: 'No encontrado' }, { status: 404 });
   }
 
-  return NextResponse.json(payment);
+  const relations = await getPaymentRelations(payment.zohoCustomerId);
+  return NextResponse.json({
+    ...payment,
+    relatedContact: relations.contact,
+    relatedInvoices: relations.invoices,
+    relatedSalesOrders: relations.salesOrders,
+  });
 }

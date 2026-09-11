@@ -28,7 +28,7 @@ export interface SalesOrderColumnDefinition {
   /** Optional formatter key for client-side rendering. */
   formatter?: 'date' | 'currency' | 'statusDot' | 'boolean';
   /** Optional status category for label/tone mapping. */
-  statusCategory?: 'order' | 'payment' | 'invoice' | 'shipping';
+  statusCategory?: 'order' | 'payment' | 'invoice' | 'shipping' | 'sub_status' | 'ticket';
 }
 
 export const SALES_ORDERS_TABLE_KEY = 'sales_orders';
@@ -106,6 +106,38 @@ export const SALES_ORDER_COLUMNS: SalesOrderColumnDefinition[] = [
     priority: 5,
     formatter: 'statusDot',
     statusCategory: 'order',
+  },
+  {
+    id: 'ticketStatus',
+    label: 'Ticket',
+    field: 'ticketStatus',
+    type: 'status',
+    sortable: true,
+    filterable: true,
+    defaultVisible: true,
+    defaultWidth: 140,
+    minWidth: 100,
+    maxWidth: 180,
+    align: 'left',
+    priority: 5.5,
+    formatter: 'statusDot',
+    statusCategory: 'ticket',
+  },
+  {
+    id: 'subStatus',
+    label: 'Sub-estado',
+    field: 'subStatus',
+    type: 'status',
+    sortable: true,
+    filterable: true,
+    defaultVisible: false,
+    defaultWidth: 130,
+    minWidth: 100,
+    maxWidth: 180,
+    align: 'left',
+    priority: 5.6,
+    formatter: 'statusDot',
+    statusCategory: 'sub_status',
   },
   {
     id: 'invoicedStatus',

@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Bell, BellRing, ExternalLink, X } from 'lucide-react';
 import { toast } from 'sonner';
@@ -219,6 +220,101 @@ export function PaymentPreviewDrawer({
                   <p style={{ fontSize: '0.875rem', color: 'var(--unik-text-secondary)', whiteSpace: 'pre-wrap' }}>
                     {payment.description}
                   </p>
+                </div>
+              ) : null}
+
+              {/* Related contact */}
+              {payment.relatedContact ? (
+                <div className="so-detail-section">
+                  <h3 className="so-detail-section-title">Cliente</h3>
+                  <div className="so-detail-grid">
+                    <Field label="Nombre" value={payment.relatedContact.contactName} />
+                    <Field label="Empresa" value={payment.relatedContact.companyName} />
+                    <Field label="Tipo" value={payment.relatedContact.contactType} />
+                  </div>
+                  {payment.relatedContact.id ? (
+                    <Link
+                      href={`/app/contacts/customers/${payment.relatedContact.id}`}
+                      style={{
+                        fontSize: '0.875rem',
+                        color: 'var(--unik-accent)',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '0.25rem',
+                        marginTop: '0.5rem',
+                      }}
+                    >
+                      <ExternalLink size={12} /> Ver cliente
+                    </Link>
+                  ) : null}
+                </div>
+              ) : null}
+
+              {/* Related invoices */}
+              {payment.relatedInvoices && payment.relatedInvoices.length > 0 ? (
+                <div className="so-detail-section">
+                  <h3 className="so-detail-section-title">Facturas ({payment.relatedInvoices.length})</h3>
+                  <div className="table-wrap">
+                    <table className="table so-table-compact so-related-table">
+                      <thead>
+                        <tr>
+                          <th>Factura</th>
+                          <th>Estado</th>
+                          <th>Fecha</th>
+                          <th style={{ textAlign: 'right' }}>Total</th>
+                          <th style={{ textAlign: 'right' }}>Saldo</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {payment.relatedInvoices.map((inv) => (
+                          <tr
+                            key={inv.id}
+                            onClick={() => router.push(`/app/invoices/${inv.id}`)}
+                            style={{ cursor: 'pointer' }}
+                          >
+                            <td>{inv.invoiceNumber ?? '—'}</td>
+                            <td>{inv.status ?? '—'}</td>
+                            <td>{formatDateOnly(inv.date)}</td>
+                            <td style={{ textAlign: 'right' }}>{formatCurrency(inv.total, inv.currencyCode)}</td>
+                            <td style={{ textAlign: 'right' }}>{formatCurrency(inv.balance, inv.currencyCode)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ) : null}
+
+              {/* Related sales orders */}
+              {payment.relatedSalesOrders && payment.relatedSalesOrders.length > 0 ? (
+                <div className="so-detail-section">
+                  <h3 className="so-detail-section-title">Órdenes de venta ({payment.relatedSalesOrders.length})</h3>
+                  <div className="table-wrap">
+                    <table className="table so-table-compact so-related-table">
+                      <thead>
+                        <tr>
+                          <th>Orden</th>
+                          <th>Estado</th>
+                          <th>Fecha</th>
+                          <th style={{ textAlign: 'right' }}>Total</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {payment.relatedSalesOrders.map((so) => (
+                          <tr
+                            key={so.id}
+                            onClick={() => router.push(`/app/sales/orders/${so.id}`)}
+                            style={{ cursor: 'pointer' }}
+                          >
+                            <td>{so.salesOrderNumber ?? '—'}</td>
+                            <td>{so.status ?? '—'}</td>
+                            <td>{formatDateOnly(so.date)}</td>
+                            <td style={{ textAlign: 'right' }}>{formatCurrency(so.total)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               ) : null}
 

@@ -3,6 +3,7 @@ import { getCurrentSession } from '@/modules/auth/authorization';
 import { getSalesOrderById } from '@/modules/sales/sales-orders-service';
 import { getSalesOrderChangeEvents } from '@/modules/sales/sales-orders-change-events';
 import { isEntityWatched } from '@/modules/sales/entity-watch-service';
+import { getSalesOrderRelations } from '@/modules/cross-module/relationships-service';
 
 export const runtime = 'nodejs';
 
@@ -21,10 +22,19 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     return NextResponse.json({ error: 'Orden no encontrada' }, { status: 404 });
   }
 
-  const [changeEvents, isWatched] = await Promise.all([
+  const [changeEvents, isWatched, relations] = await Promise.all([
     getSalesOrderChangeEvents(id, 20),
     isEntityWatched(session.user.id, 'sales_order', id),
+    getSalesOrderRelations(order.zohoSalesOrderId, order.zohoCustomerId),
   ]);
 
-  return NextResponse.json({ ...order, change_events: changeEvents, is_watched: isWatched });
+  return NextResponse.json({
+    ...order,
+    change_events: changeEvents,
+    is_watched: isWatched,
+    relatedInvoices: relations.invoices,
+    relatedPackages: relations.packages,
+    relatedPayments: relations.payments,
+    relatedContact: relations.contact,
+  });
 }

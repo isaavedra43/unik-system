@@ -1,7 +1,8 @@
 'use client';
 
 import Link from 'next/link';
-import { ArrowLeft, Bell, BellRing } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { ArrowLeft, Bell, BellRing, ExternalLink } from 'lucide-react';
 import { toast } from 'sonner';
 import { useState } from 'react';
 import { watchOrderAction, unwatchOrderAction } from '@/app/app/sales/orders/actions';
@@ -12,6 +13,8 @@ import {
   formatDateTime,
   formatQuantity,
   getSalesOrderStatusConfig,
+  getTicketStatus,
+  getTicketLifecycleSteps,
 } from '@/modules/sales/sales-orders-helpers';
 
 interface SalesOrderDetailProps {
@@ -32,6 +35,7 @@ export function SalesOrderDetail({
   isWatched: initialWatched,
   canWatch,
 }: SalesOrderDetailProps) {
+  const router = useRouter();
   const [watched, setWatched] = useState(initialWatched);
 
   const handleWatch = async () => {
@@ -108,10 +112,22 @@ export function SalesOrderDetail({
       <div className="card" style={{ padding: '0.75rem 1rem' }}>
         <div className="so-status-strip">
           <StatusTile
+            label="Ticket"
+            value={getTicketStatus(order).label}
+            tone={getTicketStatus(order).tone}
+          />
+          <StatusTile
             label="Orden"
             value={getSalesOrderStatusConfig(order.status, 'order').label}
             tone={getSalesOrderStatusConfig(order.status, 'order').tone}
           />
+          {order.subStatus ? (
+            <StatusTile
+              label="Sub-estado"
+              value={getSalesOrderStatusConfig(order.subStatus, 'sub_status').label}
+              tone={getSalesOrderStatusConfig(order.subStatus, 'sub_status').tone}
+            />
+          ) : null}
           <StatusTile
             label="Pago"
             value={getSalesOrderStatusConfig(order.paidStatus, 'payment').label}
@@ -127,6 +143,24 @@ export function SalesOrderDetail({
             value={getSalesOrderStatusConfig(order.shippedStatus, 'shipping').label}
             tone={getSalesOrderStatusConfig(order.shippedStatus, 'shipping').tone}
           />
+        </div>
+      </div>
+
+      {/* Lifecycle bar */}
+      <div className="card" style={{ padding: '1rem' }}>
+        <h2 className="card-title" style={{ marginBottom: '0.75rem' }}>Ciclo de vida del ticket</h2>
+        <div className="ticket-lifecycle-bar">
+          {getTicketLifecycleSteps(order).map((step, idx) => (
+            <div key={step.label} className="ticket-lifecycle-step-wrapper">
+              <div className={`ticket-lifecycle-step ticket-lifecycle-${step.status}`}>
+                <span className="ticket-lifecycle-dot" />
+                <span className="ticket-lifecycle-label">{step.label}</span>
+              </div>
+              {idx < 6 ? (
+                <div className={`ticket-lifecycle-connector ticket-lifecycle-connector-${step.status}`} />
+              ) : null}
+            </div>
+          ))}
         </div>
       </div>
 
@@ -238,6 +272,124 @@ export function SalesOrderDetail({
           </table>
         </div>
       </div>
+
+      {/* Related invoices */}
+      {order.relatedInvoices && order.relatedInvoices.length > 0 ? (
+        <div className="card">
+          <h2 className="card-title">Facturas relacionadas ({order.relatedInvoices.length})</h2>
+          <div className="table-wrap">
+            <table className="table so-related-table">
+              <thead>
+                <tr>
+                  <th>Factura</th>
+                  <th>Estado</th>
+                  <th>Fecha</th>
+                  <th style={{ textAlign: 'right' }}>Total</th>
+                  <th style={{ textAlign: 'right' }}>Saldo</th>
+                </tr>
+              </thead>
+              <tbody>
+                {order.relatedInvoices.map((inv) => (
+                  <tr key={inv.id} onClick={() => router.push(`/app/invoices/${inv.id}`)} style={{ cursor: 'pointer' }}>
+                    <td>{inv.invoiceNumber ?? '—'}</td>
+                    <td>{getSalesOrderStatusConfig(inv.status, 'invoice').label}</td>
+                    <td>{formatDateOnly(inv.date)}</td>
+                    <td style={{ textAlign: 'right' }}>{formatCurrency(inv.total, inv.currencyCode)}</td>
+                    <td style={{ textAlign: 'right' }}>{formatCurrency(inv.balance, inv.currencyCode)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : null}
+
+      {/* Related packages */}
+      {order.relatedPackages && order.relatedPackages.length > 0 ? (
+        <div className="card">
+          <h2 className="card-title">Paquetes relacionados ({order.relatedPackages.length})</h2>
+          <div className="table-wrap">
+            <table className="table so-related-table">
+              <thead>
+                <tr>
+                  <th>Paquete</th>
+                  <th>Estado</th>
+                  <th>Fecha</th>
+                  <th>Transportista</th>
+                  <th>Guía</th>
+                </tr>
+              </thead>
+              <tbody>
+                {order.relatedPackages.map((pkg) => (
+                  <tr key={pkg.id} onClick={() => router.push(`/app/packages/${pkg.id}`)} style={{ cursor: 'pointer' }}>
+                    <td>{pkg.packageNumber ?? '—'}</td>
+                    <td>{getSalesOrderStatusConfig(pkg.status, 'shipping').label}</td>
+                    <td>{formatDateOnly(pkg.date)}</td>
+                    <td>{pkg.carrier ?? '—'}</td>
+                    <td>{pkg.trackingNumber ?? '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : null}
+
+      {/* Related payments */}
+      {order.relatedPayments && order.relatedPayments.length > 0 ? (
+        <div className="card">
+          <h2 className="card-title">Pagos relacionados ({order.relatedPayments.length})</h2>
+          <div className="table-wrap">
+            <table className="table so-related-table">
+              <thead>
+                <tr>
+                  <th>Folio</th>
+                  <th>Modo</th>
+                  <th>Fecha</th>
+                  <th style={{ textAlign: 'right' }}>Monto</th>
+                </tr>
+              </thead>
+              <tbody>
+                {order.relatedPayments.map((pay) => (
+                  <tr key={pay.id} onClick={() => router.push(`/app/payments/${pay.id}`)} style={{ cursor: 'pointer' }}>
+                    <td>{pay.paymentNumber ?? '—'}</td>
+                    <td>{pay.paymentMode ?? '—'}</td>
+                    <td>{formatDateOnly(pay.date)}</td>
+                    <td style={{ textAlign: 'right' }}>{formatCurrency(pay.amount, pay.currencyCode)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : null}
+
+      {/* Related contact */}
+      {order.relatedContact ? (
+        <div className="card">
+          <h2 className="card-title">Cliente</h2>
+          <div className="so-detail-grid">
+            <Field label="Nombre" value={order.relatedContact.contactName} />
+            <Field label="Empresa" value={order.relatedContact.companyName} />
+            <Field label="Tipo" value={order.relatedContact.contactType} />
+          </div>
+          {order.relatedContact.id ? (
+            <Link
+              href={`/app/contacts/customers/${order.relatedContact.id}`}
+              style={{
+                fontSize: '0.875rem',
+                color: 'var(--unik-accent)',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.25rem',
+                marginTop: '0.5rem',
+              }}
+            >
+              <ExternalLink size={12} /> Ver cliente completo
+            </Link>
+          ) : null}
+        </div>
+      ) : null}
 
       {/* Notes */}
       {order.notes ? (

@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Bell, BellRing, ExternalLink, X } from 'lucide-react';
 import { toast } from 'sonner';
@@ -254,6 +255,68 @@ export function PurchaseOrderPreviewDrawer({
                       </tbody>
                     </table>
                   </div>
+                </div>
+              ) : null}
+
+              {/* Related bills */}
+              {purchaseOrder.relatedBills && purchaseOrder.relatedBills.length > 0 ? (
+                <div className="so-detail-section">
+                  <h3 className="so-detail-section-title">Facturas de compra ({purchaseOrder.relatedBills.length})</h3>
+                  <div className="table-wrap">
+                    <table className="table so-table-compact so-related-table">
+                      <thead>
+                        <tr>
+                          <th>Factura</th>
+                          <th>Estado</th>
+                          <th>Fecha</th>
+                          <th style={{ textAlign: 'right' }}>Total</th>
+                          <th style={{ textAlign: 'right' }}>Saldo</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {purchaseOrder.relatedBills.map((bill) => (
+                          <tr
+                            key={bill.id}
+                            onClick={() => router.push(`/app/bills/${bill.id}`)}
+                            style={{ cursor: 'pointer' }}
+                          >
+                            <td>{bill.billNumber ?? '—'}</td>
+                            <td>{bill.status ?? '—'}</td>
+                            <td>{formatDateOnly(bill.date)}</td>
+                            <td style={{ textAlign: 'right' }}>{formatCurrency(bill.total, bill.currencyCode)}</td>
+                            <td style={{ textAlign: 'right' }}>{formatCurrency(bill.balance, bill.currencyCode)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ) : null}
+
+              {/* Related contact (vendor) */}
+              {purchaseOrder.relatedContact ? (
+                <div className="so-detail-section">
+                  <h3 className="so-detail-section-title">Proveedor</h3>
+                  <div className="so-detail-grid">
+                    <Field label="Nombre" value={purchaseOrder.relatedContact.contactName} />
+                    <Field label="Empresa" value={purchaseOrder.relatedContact.companyName} />
+                    <Field label="Tipo" value={purchaseOrder.relatedContact.contactType} />
+                  </div>
+                  {purchaseOrder.relatedContact.id ? (
+                    <Link
+                      href={`/app/contacts/vendors/${purchaseOrder.relatedContact.id}`}
+                      style={{
+                        fontSize: '0.875rem',
+                        color: 'var(--unik-accent)',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '0.25rem',
+                        marginTop: '0.5rem',
+                      }}
+                    >
+                      <ExternalLink size={12} /> Ver proveedor
+                    </Link>
+                  ) : null}
                 </div>
               ) : null}
 

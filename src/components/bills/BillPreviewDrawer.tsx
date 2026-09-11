@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Bell, BellRing, ExternalLink, X } from 'lucide-react';
 import { toast } from 'sonner';
@@ -216,6 +217,94 @@ export function BillPreviewDrawer({
                   <Field label="Saldo" value={formatCurrency(bill.balance, bill.currencyCode)} highlighted />
                 </div>
               </div>
+
+              {/* Related purchase order */}
+              {bill.relatedPurchaseOrder ? (
+                <div className="so-detail-section">
+                  <h3 className="so-detail-section-title">Orden de compra</h3>
+                  <div className="so-detail-grid">
+                    <Field label="Folio" value={bill.relatedPurchaseOrder.purchaseOrderNumber} />
+                    <Field label="Estado" value={bill.relatedPurchaseOrder.status} />
+                    <Field label="Fecha" value={formatDateOnly(bill.relatedPurchaseOrder.date)} />
+                    <Field label="Total" value={formatCurrency(bill.relatedPurchaseOrder.total, bill.currencyCode)} />
+                  </div>
+                  <Link
+                    href={`/app/purchase-orders/${bill.relatedPurchaseOrder.id}`}
+                    style={{
+                      fontSize: '0.875rem',
+                      color: 'var(--unik-accent)',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.25rem',
+                      marginTop: '0.5rem',
+                    }}
+                  >
+                    <ExternalLink size={12} /> Ver orden de compra
+                  </Link>
+                </div>
+              ) : null}
+
+              {/* Related contact (vendor) */}
+              {bill.relatedContact ? (
+                <div className="so-detail-section">
+                  <h3 className="so-detail-section-title">Proveedor</h3>
+                  <div className="so-detail-grid">
+                    <Field label="Nombre" value={bill.relatedContact.contactName} />
+                    <Field label="Empresa" value={bill.relatedContact.companyName} />
+                    <Field label="Tipo" value={bill.relatedContact.contactType} />
+                  </div>
+                  {bill.relatedContact.id ? (
+                    <Link
+                      href={`/app/contacts/vendors/${bill.relatedContact.id}`}
+                      style={{
+                        fontSize: '0.875rem',
+                        color: 'var(--unik-accent)',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '0.25rem',
+                        marginTop: '0.5rem',
+                      }}
+                    >
+                      <ExternalLink size={12} /> Ver proveedor
+                    </Link>
+                  ) : null}
+                </div>
+              ) : null}
+
+              {/* Related vendor credits */}
+              {bill.relatedVendorCredits && bill.relatedVendorCredits.length > 0 ? (
+                <div className="so-detail-section">
+                  <h3 className="so-detail-section-title">Créditos de proveedor ({bill.relatedVendorCredits.length})</h3>
+                  <div className="table-wrap">
+                    <table className="table so-table-compact so-related-table">
+                      <thead>
+                        <tr>
+                          <th>Crédito</th>
+                          <th>Estado</th>
+                          <th>Fecha</th>
+                          <th style={{ textAlign: 'right' }}>Total</th>
+                          <th style={{ textAlign: 'right' }}>Saldo</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {bill.relatedVendorCredits.map((vc) => (
+                          <tr
+                            key={vc.id}
+                            onClick={() => router.push(`/app/vendor-credits/${vc.id}`)}
+                            style={{ cursor: 'pointer' }}
+                          >
+                            <td>{vc.vendorCreditNumber ?? '—'}</td>
+                            <td>{vc.status ?? '—'}</td>
+                            <td>{formatDateOnly(vc.date)}</td>
+                            <td style={{ textAlign: 'right' }}>{formatCurrency(vc.total, vc.currencyCode)}</td>
+                            <td style={{ textAlign: 'right' }}>{formatCurrency(vc.balance, vc.currencyCode)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ) : null}
 
               {/* Notas */}
               {bill.notes ? (

@@ -9,7 +9,7 @@
  *   use normal locale formatting.
  */
 
-type StatusCategory = 'order' | 'payment' | 'invoice' | 'shipping';
+type StatusCategory = 'order' | 'payment' | 'invoice' | 'shipping' | 'sub_status' | 'ticket';
 
 export interface SalesOrderStatusConfig {
   raw: string;
@@ -24,6 +24,7 @@ const ORDER_STATUS_MAP: Record<string, SalesOrderStatusConfig> = {
   cancelled: { raw: 'cancelled', label: 'Cancelada', tone: 'danger' },
   draft: { raw: 'draft', label: 'Borrador', tone: 'warning' },
   open: { raw: 'open', label: 'Abierta', tone: 'info' },
+  on_hold: { raw: 'on_hold', label: 'En espera', tone: 'warning' },
 };
 
 const PAYMENT_STATUS_MAP: Record<string, SalesOrderStatusConfig> = {
@@ -45,10 +46,37 @@ const INVOICE_STATUS_MAP: Record<string, SalesOrderStatusConfig> = {
 const SHIPPING_STATUS_MAP: Record<string, SalesOrderStatusConfig> = {
   shipped: { raw: 'shipped', label: 'Enviado', tone: 'success' },
   delivered: { raw: 'delivered', label: 'Entregado', tone: 'success' },
+  fulfilled: { raw: 'fulfilled', label: 'Entregado', tone: 'success' },
   not_shipped: { raw: 'not_shipped', label: 'No enviado', tone: 'muted' },
   pending: { raw: 'pending', label: 'Pendiente', tone: 'warning' },
   partially_shipped: { raw: 'partially_shipped', label: 'Parcial', tone: 'warning' },
   packaged: { raw: 'packaged', label: 'Empaquetado', tone: 'info' },
+};
+
+const SUB_STATUS_MAP: Record<string, SalesOrderStatusConfig> = {
+  accepted: { raw: 'accepted', label: 'Aceptado', tone: 'info' },
+  processing: { raw: 'processing', label: 'Procesando', tone: 'info' },
+  picking: { raw: 'picking', label: 'Seleccionando', tone: 'info' },
+  packing: { raw: 'packing', label: 'Empaquetando', tone: 'info' },
+  ready_to_ship: { raw: 'ready_to_ship', label: 'Listo para envío', tone: 'info' },
+  shipped: { raw: 'shipped', label: 'Enviado', tone: 'success' },
+  delivered: { raw: 'delivered', label: 'Entregado', tone: 'success' },
+  returned: { raw: 'returned', label: 'Devuelto', tone: 'danger' },
+  cancelled: { raw: 'cancelled', label: 'Cancelado', tone: 'danger' },
+  draft: { raw: 'draft', label: 'Borrador', tone: 'warning' },
+};
+
+const TICKET_STATUS_MAP: Record<string, SalesOrderStatusConfig> = {
+  closed: { raw: 'closed', label: 'Cerrado', tone: 'success' },
+  void: { raw: 'void', label: 'Anulado', tone: 'danger' },
+  draft: { raw: 'draft', label: 'Borrador', tone: 'warning' },
+  on_hold: { raw: 'on_hold', label: 'En espera', tone: 'warning' },
+  delivered: { raw: 'delivered', label: 'Entregado', tone: 'success' },
+  in_transit: { raw: 'in_transit', label: 'En tránsito', tone: 'info' },
+  pending_shipment: { raw: 'pending_shipment', label: 'Pendiente de envío', tone: 'warning' },
+  payment_pending: { raw: 'payment_pending', label: 'Pago pendiente', tone: 'warning' },
+  not_invoiced: { raw: 'not_invoiced', label: 'Sin facturar', tone: 'muted' },
+  open: { raw: 'open', label: 'Abierto', tone: 'info' },
 };
 
 const CATEGORY_MAPS: Record<StatusCategory, Record<string, SalesOrderStatusConfig>> = {
@@ -56,6 +84,8 @@ const CATEGORY_MAPS: Record<StatusCategory, Record<string, SalesOrderStatusConfi
   payment: PAYMENT_STATUS_MAP,
   invoice: INVOICE_STATUS_MAP,
   shipping: SHIPPING_STATUS_MAP,
+  sub_status: SUB_STATUS_MAP,
+  ticket: TICKET_STATUS_MAP,
 };
 
 function normalizeRaw(raw: string | null | undefined): string | null {
@@ -201,4 +231,143 @@ export function formatQuantity(
   });
   if (unit) return `${formatted} ${unit}`;
   return formatted;
+}
+
+// ---------------------------------------------------------------------------
+// Ticket status — computed from order + payment + invoice + shipping status.
+// Answers the question: "Is this ticket closed, pending delivery, or open?"
+// ---------------------------------------------------------------------------
+
+export interface TicketStatusInput {
+  status: string | null;
+  subStatus: string | null;
+  paidStatus: string | null;
+  invoicedStatus: string | null;
+  shippedStatus: string | null;
+}
+
+export function getTicketStatus(order: TicketStatusInput): SalesOrderStatusConfig {
+  const status = normalizeRaw(order.status);
+  const paid = normalizeRaw(order.paidStatus);
+  const invoiced = normalizeRaw(order.invoicedStatus);
+  const shipped = normalizeRaw(order.shippedStatus);
+
+  if (status === 'closed') return TICKET_STATUS_MAP.closed;
+  if (status === 'void') return TICKET_STATUS_MAP.void;
+  if (status === 'draft') return TICKET_STATUS_MAP.draft;
+  if (status === 'on_hold') return TICKET_STATUS_MAP.on_hold;
+
+  if (shipped === 'fulfilled' || shipped === 'delivered')
+    return TICKET_STATUS_MAP.delivered;
+  if (shipped === 'shipped') return TICKET_STATUS_MAP.in_transit;
+
+  if (invoiced === 'invoiced' && (paid === 'paid' || paid === 'partially_paid' || paid === 'partial') && (shipped === 'not_shipped' || shipped === 'pending' || shipped === null))
+    return TICKET_STATUS_MAP.pending_shipment;
+  if (invoiced === 'invoiced' && (paid === 'unpaid' || paid === 'pending' || paid === null))
+    return TICKET_STATUS_MAP.payment_pending;
+  if (invoiced === 'not_invoiced' || invoiced === null)
+    return TICKET_STATUS_MAP.not_invoiced;
+
+  return TICKET_STATUS_MAP.open;
+}
+
+// ---------------------------------------------------------------------------
+// Ticket lifecycle steps — visual progress bar data.
+// ---------------------------------------------------------------------------
+
+export type LifecycleStepStatus = 'done' | 'current' | 'pending' | 'partial';
+
+export interface LifecycleStep {
+  label: string;
+  status: LifecycleStepStatus;
+}
+
+export function getTicketLifecycleSteps(order: TicketStatusInput): LifecycleStep[] {
+  const status = normalizeRaw(order.status);
+  const subStatus = normalizeRaw(order.subStatus);
+  const paid = normalizeRaw(order.paidStatus);
+  const invoiced = normalizeRaw(order.invoicedStatus);
+  const shipped = normalizeRaw(order.shippedStatus);
+
+  const isClosed = status === 'closed';
+  const isVoid = status === 'void' || status === 'cancelled';
+
+  // Step 1: Confirmado
+  const step1: LifecycleStepStatus = isVoid
+    ? 'pending'
+    : status === 'confirmed' || isClosed
+      ? 'done'
+      : status === 'draft'
+        ? 'current'
+        : 'done';
+
+  // Step 2: Aceptado (sub_status)
+  const step2: LifecycleStepStatus = isVoid
+    ? 'pending'
+    : subStatus === 'accepted' || subStatus === 'processing' || subStatus === 'picking' || subStatus === 'packing' || subStatus === 'ready_to_ship' || isClosed
+      ? 'done'
+      : step1 === 'done'
+        ? 'current'
+        : 'pending';
+
+  // Step 3: Facturado
+  const step3: LifecycleStepStatus = isVoid
+    ? 'pending'
+    : invoiced === 'invoiced' || isClosed
+      ? 'done'
+      : invoiced === 'partially_invoiced'
+        ? 'partial'
+        : step2 === 'done'
+          ? 'current'
+          : 'pending';
+
+  // Step 4: Pagado
+  const step4: LifecycleStepStatus = isVoid
+    ? 'pending'
+    : paid === 'paid' || isClosed
+      ? 'done'
+      : paid === 'partially_paid' || paid === 'partial'
+        ? 'partial'
+        : step3 === 'done'
+          ? 'current'
+          : 'pending';
+
+  // Step 5: Enviado
+  const step5: LifecycleStepStatus = isVoid
+    ? 'pending'
+    : shipped === 'shipped' || shipped === 'fulfilled' || shipped === 'delivered' || isClosed
+      ? 'done'
+      : shipped === 'partially_shipped'
+        ? 'partial'
+        : step4 === 'done'
+          ? 'current'
+          : 'pending';
+
+  // Step 6: Entregado
+  const step6: LifecycleStepStatus = isVoid
+    ? 'pending'
+    : shipped === 'fulfilled' || shipped === 'delivered' || isClosed
+      ? 'done'
+      : step5 === 'done'
+        ? 'current'
+        : 'pending';
+
+  // Step 7: Cerrado
+  const step7: LifecycleStepStatus = isVoid
+    ? 'pending'
+    : isClosed
+      ? 'done'
+      : step6 === 'done'
+        ? 'current'
+        : 'pending';
+
+  return [
+    { label: 'Confirmado', status: step1 },
+    { label: 'Aceptado', status: step2 },
+    { label: 'Facturado', status: step3 },
+    { label: 'Pagado', status: step4 },
+    { label: 'Enviado', status: step5 },
+    { label: 'Entregado', status: step6 },
+    { label: 'Cerrado', status: step7 },
+  ];
 }

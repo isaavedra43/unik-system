@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getCurrentSession } from '@/modules/auth/authorization';
 import { getPackageById } from '@/modules/packages/packages-service';
+import { getPackageRelations } from '@/modules/cross-module/relationships-service';
 
 export const runtime = 'nodejs';
 
@@ -12,5 +13,10 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   const { id } = await params;
   const pkg = await getPackageById(id);
   if (!pkg) return NextResponse.json({ error: 'No encontrado' }, { status: 404 });
-  return NextResponse.json(pkg);
+  const relations = await getPackageRelations(pkg.zohoSalesOrderId, pkg.zohoCustomerId);
+  return NextResponse.json({
+    ...pkg,
+    relatedSalesOrder: relations.salesOrder,
+    relatedContact: relations.contact,
+  });
 }

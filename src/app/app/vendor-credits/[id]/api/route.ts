@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentSession } from '@/modules/auth/authorization';
 import { getVendorCreditById } from '@/modules/vendor-credits/vendor-credits-service';
+import { getVendorCreditRelations } from '@/modules/cross-module/relationships-service';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -26,5 +27,10 @@ export async function GET(
     return NextResponse.json({ error: 'No encontrado' }, { status: 404 });
   }
 
-  return NextResponse.json(vendorCredit);
+  const relations = await getVendorCreditRelations(vendorCredit.zohoVendorId);
+  return NextResponse.json({
+    ...vendorCredit,
+    relatedContact: relations.contact,
+    relatedBills: relations.bills,
+  });
 }

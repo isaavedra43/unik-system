@@ -1,4 +1,8 @@
 import { Prisma } from '@prisma/client';
+import type {
+  RelatedSalesOrderSummary,
+  RelatedContactSummary,
+} from '@/modules/cross-module/relationships-service';
 
 interface PackageItemListRow {
   id: string;
@@ -59,6 +63,9 @@ export interface PackageDetail {
   createdAt: string;
   updatedAt: string;
   items: PackageItemListRow[];
+  /** Cross-module relations added by the API route. */
+  relatedSalesOrder?: RelatedSalesOrderSummary | null;
+  relatedContact?: RelatedContactSummary | null;
 }
 
 function decimalToString(value: Prisma.Decimal | null | undefined): string | null {

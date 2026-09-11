@@ -1,4 +1,9 @@
 import { Prisma } from '@prisma/client';
+import type {
+  RelatedPurchaseOrderDetail,
+  RelatedContactSummary,
+  RelatedVendorCreditSummary,
+} from '@/modules/cross-module/relationships-service';
 
 export interface BillListRow {
   id: string;
@@ -35,6 +40,10 @@ export interface BillDetail {
   normalizedAt: string;
   createdAt: string;
   updatedAt: string;
+  /** Cross-module relations added by the API route. */
+  relatedPurchaseOrder?: RelatedPurchaseOrderDetail | null;
+  relatedContact?: RelatedContactSummary | null;
+  relatedVendorCredits?: RelatedVendorCreditSummary[];
 }
 
 function dec(value: Prisma.Decimal | null | undefined): string | null {
