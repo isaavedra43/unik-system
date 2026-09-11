@@ -2,13 +2,18 @@
 
 import React, { useState, useMemo } from 'react';
 import {
-  Plus, Search, Users, MessageCircle, ChevronDown, ChevronRight,
-  Bookmark, Calendar, BarChart3, Megaphone, Search as SearchIcon,
+  Plus,
+  Search,
+  Users,
+  MessageCircle,
+  ChevronRight,
+  Bookmark,
+  Calendar,
+  BarChart3,
+  Megaphone,
 } from 'lucide-react';
 import { ChatNewDialog } from './ChatNewDialog';
-import { Input } from '@/components/shadcn/input';
-import { Button } from '@/components/shadcn/button';
-import { Avatar, AvatarFallback } from '@/components/shadcn/avatar';
+import { Button, Input } from '@/components/ui/primitives';
 import { ScrollArea } from '@/components/shadcn/scroll-area';
 import { cn } from '@/lib/utils';
 import type { ChatInboxItem } from '@/modules/chat/chat-events';
@@ -64,66 +69,47 @@ function ChatSidebarItem({
   onSelect: (id: string) => void;
 }) {
   const name = getDisplayName(item);
+  const isGroup = item.type === 'group';
+  const hasUnread = item.unreadCount > 0;
   return (
     <button
       type="button"
-      className={cn(
-        'flex items-center gap-3 w-full rounded-md p-2 text-left transition-colors',
-        'hover:bg-accent focus:bg-accent focus:outline-none',
-        isActive && 'bg-primary/10 ring-1 ring-primary/30'
-      )}
+      className={cn('chat-sidebar-item', isActive && 'active', hasUnread && 'unread')}
       onClick={() => onSelect(item.channelId)}
+      aria-current={isActive ? 'true' : undefined}
     >
-      <div className="relative shrink-0">
-        <Avatar className="size-9">
-          <AvatarFallback
-            className={cn('text-xs font-semibold', item.type === 'group' && 'bg-primary text-primary-foreground')}
-          >
-            {item.type === 'group' ? <Users size={16} /> : getInitials(name)}
-          </AvatarFallback>
-        </Avatar>
+      <span className={cn('chat-avatar', isGroup && 'group')} aria-hidden="true">
+        {isGroup ? <Users size={18} /> : getInitials(name)}
         {item.type === 'dm' && item.otherUserStatus === 'online' && (
-          <span className="absolute -bottom-0.5 -right-0.5 size-3 rounded-full bg-success ring-2 ring-background" />
+          <span className="chat-presence" />
         )}
-      </div>
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center justify-between gap-2">
-          <span className="text-sm font-medium text-foreground truncate">{name}</span>
-          <span className="text-[11px] text-muted-foreground shrink-0">
-            {formatTime(item.lastMessageAt)}
-          </span>
-        </div>
-        <div className="flex items-center justify-between gap-2 mt-0.5">
-          <span className="text-xs text-muted-foreground truncate flex-1">
-            {item.lastMessagePreview ?? 'Sin mensajes'}
-          </span>
-          {item.unreadCount > 0 && (
-            <span
-              className={cn(
-                'inline-flex items-center justify-center rounded-full px-1.5 min-w-[20px] h-5',
-                'text-[10px] font-bold shrink-0',
-                'bg-primary text-primary-foreground'
-              )}
-            >
+      </span>
+      <span className="chat-sidebar-content">
+        <span className="chat-sidebar-row">
+          <span className="chat-sidebar-name">{name}</span>
+          <span className="chat-sidebar-time">{formatTime(item.lastMessageAt)}</span>
+        </span>
+        <span className="chat-sidebar-row">
+          <span className="chat-sidebar-preview">{item.lastMessagePreview ?? 'Sin mensajes'}</span>
+          {hasUnread && (
+            <span className="chat-sidebar-badge" aria-label={`${item.unreadCount} sin leer`}>
               {item.unreadCount > 99 ? '99+' : item.unreadCount}
             </span>
           )}
-        </div>
-      </div>
+        </span>
+      </span>
     </button>
   );
 }
 
 function Section({
   title,
-  icon: Icon,
   items,
   activeId,
   onSelect,
   defaultOpen = true,
 }: {
   title: string;
-  icon: React.ComponentType<{ size?: number; className?: string }>;
   items: ChatInboxItem[];
   activeId: string | null;
   onSelect: (id: string) => void;
@@ -132,26 +118,29 @@ function Section({
   const [open, setOpen] = useState(defaultOpen);
   if (items.length === 0) return null;
   return (
-    <div className="flex flex-col gap-0.5">
+    <div className="chat-sidebar-section">
       <button
         type="button"
-        className="flex items-center gap-1.5 px-2 py-1.5 text-xs font-semibold text-muted-foreground hover:text-foreground transition-colors"
+        className="chat-sidebar-section-title"
         onClick={() => setOpen((p) => !p)}
+        aria-expanded={open}
       >
-        {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-        <Icon size={14} />
-        {title}
-        <span className="ml-auto text-[10px] font-normal">{items.length}</span>
+        <ChevronRight size={14} className={cn('chat-sidebar-chevron', open && 'open')} />
+        <span>{title}</span>
+        <span className="chat-sidebar-section-count">{items.length}</span>
       </button>
-      {open &&
-        items.map((item) => (
-          <ChatSidebarItem
-            key={item.channelId}
-            item={item}
-            isActive={item.channelId === activeId}
-            onSelect={onSelect}
-          />
-        ))}
+      {open && (
+        <div className="chat-sidebar-section-items">
+          {items.map((item) => (
+            <ChatSidebarItem
+              key={item.channelId}
+              item={item}
+              isActive={item.channelId === activeId}
+              onSelect={onSelect}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -182,51 +171,83 @@ export function ChatSidebar({ activeId, inbox, onSelect, onChannelCreated, globa
     return { recent, dms, groups };
   }, [filtered]);
 
+  const totalUnread = useMemo(() => inbox.reduce((sum, i) => sum + i.unreadCount, 0), [inbox]);
+
+  const quickActions = globalActions
+    ? [
+        { key: 'search', label: 'Buscar', title: 'Buscar mensajes', icon: Search, onClick: globalActions.onSearchMessages },
+        { key: 'bookmarks', label: 'Favoritos', title: 'Favoritos', icon: Bookmark, onClick: globalActions.onShowBookmarks },
+        { key: 'calendar', label: 'Agenda', title: 'Calendario', icon: Calendar, onClick: globalActions.onShowCalendar },
+        { key: 'broadcast', label: 'Difundir', title: 'Difundir mensaje', icon: Megaphone, onClick: globalActions.onShowBroadcast },
+        { key: 'stats', label: 'Métricas', title: 'Mis estadísticas', icon: BarChart3, onClick: globalActions.onShowStats },
+      ]
+    : [];
+
   return (
     <div className="chat-sidebar">
-      <div className="chat-sidebar-header flex flex-col gap-2 p-3 border-b border-border">
-        <Button onClick={() => setShowNew(true)} className="w-full" size="sm">
-          <Plus size={16} /> Nuevo chat
-        </Button>
-        <div className="relative">
-          <Search
-            size={16}
-            className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-          />
+      <div className="chat-sidebar-header">
+        <div className="chat-sidebar-title-row">
+          <div className="chat-sidebar-heading">
+            <h2 className="chat-sidebar-title">Mensajes</h2>
+            <p className="chat-sidebar-subtitle">
+              {totalUnread > 0 ? (
+                <>
+                  <span className="chat-sidebar-unread-dot" aria-hidden="true" />
+                  {totalUnread > 99 ? '99+' : totalUnread} sin leer
+                </>
+              ) : (
+                'Todo al día'
+              )}
+            </p>
+          </div>
+          <Button
+            type="button"
+            size="sm"
+            className="chat-sidebar-new-btn"
+            onClick={() => setShowNew(true)}
+            icon={<Plus size={16} />}
+          >
+            Nuevo chat
+          </Button>
+        </div>
+
+        <div className="chat-sidebar-searchbox">
           <Input
             type="text"
             placeholder="Buscar conversación..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="pl-9"
             aria-label="Buscar conversación"
+            leftIcon={<Search size={16} />}
           />
         </div>
-        {globalActions && (
-          <div className="flex items-center justify-center gap-0.5 pt-1 border-t border-border">
-            <Button variant="ghost" size="icon-sm" onClick={globalActions.onSearchMessages} aria-label="Buscar mensajes" title="Buscar mensajes">
-              <SearchIcon size={16} />
-            </Button>
-            <Button variant="ghost" size="icon-sm" onClick={globalActions.onShowBookmarks} aria-label="Favoritos" title="Favoritos">
-              <Bookmark size={16} />
-            </Button>
-            <Button variant="ghost" size="icon-sm" onClick={globalActions.onShowCalendar} aria-label="Calendario" title="Calendario">
-              <Calendar size={16} />
-            </Button>
-            <Button variant="ghost" size="icon-sm" onClick={globalActions.onShowBroadcast} aria-label="Difundir" title="Difundir mensaje">
-              <Megaphone size={16} />
-            </Button>
-            <Button variant="ghost" size="icon-sm" onClick={globalActions.onShowStats} aria-label="Estadísticas" title="Mis estadísticas">
-              <BarChart3 size={16} />
-            </Button>
+
+        {quickActions.length > 0 && (
+          <div className="chat-quick-actions" role="toolbar" aria-label="Herramientas del chat">
+            {quickActions.map(({ key, label, title, icon: Icon, onClick }) => (
+              <button
+                key={key}
+                type="button"
+                className="chat-quick-action"
+                onClick={onClick}
+                aria-label={title}
+                title={title}
+              >
+                <Icon size={17} />
+                <span>{label}</span>
+              </button>
+            ))}
           </div>
         )}
       </div>
 
-      <ScrollArea className="flex-1">
-        <div className="flex flex-col gap-2 p-2">
+      <ScrollArea className="flex-1 min-h-0">
+        <div className="chat-sidebar-list-inner">
           {filtered.length === 0 && (
-            <div className="py-8 text-center text-sm text-muted-foreground">
+            <div className="chat-sidebar-empty">
+              <span className="chat-sidebar-empty-icon" aria-hidden="true">
+                {search.trim() ? <Search size={18} /> : <MessageCircle size={18} />}
+              </span>
               {search.trim() ? 'No se encontraron conversaciones' : 'No hay conversaciones aún'}
             </div>
           )}
@@ -235,7 +256,6 @@ export function ChatSidebar({ activeId, inbox, onSelect, onChannelCreated, globa
               {!search.trim() && (
                 <Section
                   title="Recientes"
-                  icon={MessageCircle}
                   items={sections.recent}
                   activeId={activeId}
                   onSelect={onSelect}
@@ -243,7 +263,6 @@ export function ChatSidebar({ activeId, inbox, onSelect, onChannelCreated, globa
               )}
               <Section
                 title="Mensajes directos"
-                icon={MessageCircle}
                 items={search.trim() ? sections.dms : sections.dms.filter((i) => !sections.recent.includes(i))}
                 activeId={activeId}
                 onSelect={onSelect}
@@ -251,7 +270,6 @@ export function ChatSidebar({ activeId, inbox, onSelect, onChannelCreated, globa
               />
               <Section
                 title="Grupos"
-                icon={Users}
                 items={search.trim() ? sections.groups : sections.groups.filter((i) => !sections.recent.includes(i))}
                 activeId={activeId}
                 onSelect={onSelect}

@@ -500,6 +500,12 @@ export async function sendMessage(
 ): Promise<ChatMessageDTO> {
   await assertChannelMember(input.channelId, actor.id);
 
+  // Check if user is suspended from chat
+  const { isUserSuspended } = await import('./chat-admin-service');
+  if (await isUserSuspended(actor.id)) {
+    throw new ChatError('Tu cuenta de chat está suspendida. Contacta al administrador.');
+  }
+
   if (
     !input.content &&
     (!input.attachmentIds || input.attachmentIds.length === 0) &&

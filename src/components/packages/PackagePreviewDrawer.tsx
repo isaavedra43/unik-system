@@ -49,24 +49,40 @@ export function PackagePreviewDrawer({
   const [watched, setWatched] = useState(isWatched);
 
   useEffect(() => {
+    setWatched(isWatched);
+  }, [isWatched]);
+
+  useEffect(() => {
     let cancelled = false;
-    setLoading(true);
-    setError(null);
-    fetch(`${basePath}/${packageId}/api`)
-      .then((res) => {
+    async function load() {
+      setLoading(true);
+      setError(null);
+      try {
+        const res = await fetch(`${basePath}/${packageId}/api`);
         if (!res.ok) throw new Error('No se pudo cargar el paquete');
-        return res.json();
-      })
-      .then((data) => { if (!cancelled) { setPkg(data); setLoading(false); } })
-      .catch((err) => { if (!cancelled) { setError(err instanceof Error ? err.message : 'Error'); setLoading(false); } });
-    return () => { cancelled = true; };
+        const json = (await res.json()) as PackageDetail & { is_watched?: boolean };
+        if (!cancelled) {
+          setPkg(json);
+          if (typeof json.is_watched === 'boolean') setWatched(json.is_watched);
+        }
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : 'Error');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+    load();
+    return () => {
+      cancelled = true;
+    };
   }, [packageId, basePath]);
 
   useEffect(() => {
-    const handleEsc = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
-    window.addEventListener('keydown', handleEsc);
-    document.body.style.overflow = 'hidden';
-    return () => { window.removeEventListener('keydown', handleEsc); document.body.style.overflow = ''; };
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') onClose();
+    }
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
   }, [onClose]);
 
   const handleWatch = async () => {
@@ -87,98 +103,192 @@ export function PackagePreviewDrawer({
 
   const statusConfig = pkg ? getPackageStatusConfig(pkg.status) : null;
 
+  const hasShippingAddress = pkg && Boolean(
+    pkg.shippingAddress || pkg.shippingCity || pkg.shippingState || pkg.shippingZip || pkg.shippingCountry
+  );
+
   return (
-    <div className="fixed inset-0 z-50 flex" role="dialog" aria-modal="true">
-      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} aria-label="Cerrar" />
-      <div className="relative ml-auto h-full w-full max-w-md bg-background shadow-xl overflow-y-auto">
-        <div className="sticky top-0 z-10 flex items-center justify-between border-b bg-background px-4 py-3">
-          <h2 className="text-sm font-semibold truncate">{entityLabel}</h2>
-          <div className="flex items-center gap-1">
-            {canWatch && (
-              <button onClick={handleWatch} className="inline-flex items-center justify-center rounded-md p-1.5 hover:bg-accent transition-colors" aria-label={watched ? 'Dejar de seguir' : 'Seguir'}>
-                {watched ? <BellRing className="h-4 w-4 text-primary" /> : <Bell className="h-4 w-4" />}
+    <>
+      <div className="overlay" onClick={onClose} aria-hidden="true" />
+      <aside
+        className="so-detail-drawer"
+        role="dialog"
+        aria-modal="true"
+        aria-label={`Detalle de ${entityLabel.toLowerCase()}`}
+      >
+        <div className="so-detail-header">
+          <div>
+            <h2 style={{ fontSize: '1.125rem', fontWeight: 600, margin: 0 }}>
+              {pkg?.packageNumber ?? 'Cargando...'}
+            </h2>
+            {pkg?.customerName ? (
+              <p style={{ color: 'var(--unik-text-muted)', fontSize: '0.875rem', margin: '4px 0 0' }}>
+                {pkg.customerName}
+              </p>
+            ) : null}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            {canWatch ? (
+              <button className="btn btn-secondary btn-sm" onClick={handleWatch} aria-pressed={watched}>
+                {watched ? <BellRing size={14} /> : <Bell size={14} />}
+                {watched ? 'Siguiendo' : 'Seguir'}
               </button>
-            )}
-            <button onClick={() => router.push(`${basePath}/${packageId}`)} className="inline-flex items-center justify-center rounded-md p-1.5 hover:bg-accent transition-colors" aria-label="Abrir página completa">
-              <ExternalLink className="h-4 w-4" />
+            ) : null}
+            <button className="btn btn-secondary btn-sm" onClick={() => router.push(`${basePath}/${packageId}`)}>
+              <ExternalLink size={14} /> Abrir
             </button>
-            <button onClick={onClose} className="inline-flex items-center justify-center rounded-md p-1.5 hover:bg-accent transition-colors" aria-label="Cerrar">
-              <X className="h-4 w-4" />
+            <button className="icon-btn" onClick={onClose} aria-label="Cerrar">
+              <X size={18} />
             </button>
           </div>
         </div>
 
-        <div className="p-4 space-y-4">
-          {loading && (
-            <div className="flex items-center justify-center py-12">
-              <div className="h-6 w-6 animate-spin rounded-full border-2 border-muted border-t-primary" />
+        <div className="so-detail-body">
+          {loading ? (
+            <div style={{ textAlign: 'center', padding: '2rem' }}>
+              <span className="spinner" /> Cargando...
             </div>
-          )}
-          {error && <div className="rounded-md border border-destructive/20 bg-destructive/5 p-4 text-sm text-destructive">{error}</div>}
-          {pkg && !loading && (
+          ) : error ? (
+            <div style={{ textAlign: 'center', padding: '2rem' }}>
+              <p className="text-muted">{error}</p>
+            </div>
+          ) : pkg ? (
             <>
-              <div className="space-y-1">
-                <h3 className="text-lg font-bold">{pkg.packageNumber ?? '—'}</h3>
-                {pkg.trackingNumber && <p className="text-sm text-muted-foreground">Guía: {pkg.trackingNumber}</p>}
-                {statusConfig && (
-                  <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                    statusConfig.tone === 'success' ? 'bg-success/10 text-success'
-                    : statusConfig.tone === 'danger' ? 'bg-destructive/10 text-destructive'
-                    : statusConfig.tone === 'warning' ? 'bg-warning/10 text-warning'
-                    : statusConfig.tone === 'info' ? 'bg-info/10 text-info'
-                    : 'bg-muted text-muted-foreground'
-                  }`}>
-                    <span className={`h-1.5 w-1.5 rounded-full ${
-                      statusConfig.tone === 'success' ? 'bg-success'
-                      : statusConfig.tone === 'danger' ? 'bg-destructive'
-                      : statusConfig.tone === 'warning' ? 'bg-warning'
-                      : statusConfig.tone === 'info' ? 'bg-info'
-                      : 'bg-muted-foreground'
-                    }`} />
-                    {statusConfig.label}
-                  </span>
-                )}
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <PreviewField label="Fecha" value={pkg.date ? formatDateOnly(pkg.date) : '—'} />
-                <PreviewField label="Cliente" value={pkg.customerName ?? '—'} />
-                <PreviewField label="Paquetería" value={pkg.carrier ?? '—'} />
-                <PreviewField label="Costo de envío" value={formatCurrency(pkg.shippingCharge)} />
-              </div>
-
-              {pkg.items.length > 0 && (
-                <div className="space-y-2">
-                  <p className="text-xs text-muted-foreground uppercase tracking-wide">Contenido</p>
-                  <div className="space-y-1">
-                    {pkg.items.map((item) => (
-                      <div key={item.id} className="flex items-center justify-between text-sm">
-                        <span className="truncate">{item.name ?? '—'}</span>
-                        <span className="text-muted-foreground ml-2">{formatNumber(item.quantity)} {item.unit ?? ''}</span>
-                      </div>
-                    ))}
+              {/* Summary */}
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '1rem',
+                  padding: '0.75rem 1rem',
+                  background: 'var(--unik-surface)',
+                  borderRadius: 'var(--unik-radius-sm)',
+                  border: '1px solid var(--unik-border-subtle)',
+                  marginBottom: '1rem',
+                }}
+              >
+                <div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--unik-text-muted)', textTransform: 'uppercase', letterSpacing: '0.02em' }}>
+                    Estado
+                  </div>
+                  <div style={{ fontSize: '1rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <span className={`so-status-dot so-status-dot-${statusConfig?.tone ?? 'muted'}`} />
+                    {statusConfig?.label ?? '—'}
                   </div>
                 </div>
-              )}
+                {pkg.trackingNumber ? (
+                  <div style={{ textAlign: 'right' }}>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--unik-text-muted)', textTransform: 'uppercase', letterSpacing: '0.02em' }}>
+                      Guía
+                    </div>
+                    <div style={{ fontSize: '0.875rem', fontWeight: 600 }}>
+                      {pkg.trackingNumber}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
 
-              <div className="space-y-1 border-t pt-3">
-                <p className="text-xs text-muted-foreground uppercase tracking-wide">Sincronización</p>
-                <p className="text-xs text-muted-foreground">Últ. modificación remota: {formatDateTime(pkg.sourceRemoteModifiedAt)}</p>
-                <p className="text-xs text-muted-foreground">Últ. normalización: {formatDateTime(pkg.normalizedAt)}</p>
+              {/* General */}
+              <div className="so-detail-section">
+                <h3 className="so-detail-section-title">General</h3>
+                <div className="so-detail-grid">
+                  <Field label="Fecha" value={formatDateOnly(pkg.date)} />
+                  <Field label="Fecha de envío" value={formatDateOnly(pkg.shipmentDate)} />
+                  <Field label="Cliente" value={pkg.customerName} />
+                  <Field label="Paquetería" value={pkg.carrier} />
+                  <Field label="Tipo de envío" value={pkg.shipmentType} />
+                  <Field label="Método de entrega" value={pkg.deliveryMethod} />
+                  <Field label="Canal de venta" value={pkg.salesChannel} />
+                  <Field label="Orden de venta" value={pkg.salesorderNumber} />
+                  <Field label="Cantidad total" value={pkg.quantity ? formatNumber(pkg.quantity) : null} />
+                  <Field label="Costo de envío" value={formatCurrency(pkg.shippingCharge)} />
+                </div>
+              </div>
+
+              {/* Shipping address */}
+              {hasShippingAddress ? (
+                <div className="so-detail-section">
+                  <h3 className="so-detail-section-title">Dirección de envío</h3>
+                  <div className="so-detail-grid">
+                    <Field label="Atención" value={pkg.shippingAttention} />
+                    <Field label="Dirección" value={pkg.shippingAddress} />
+                    <Field label="Ciudad" value={pkg.shippingCity} />
+                    <Field label="Estado" value={pkg.shippingState} />
+                    <Field label="Código postal" value={pkg.shippingZip} />
+                    <Field label="País" value={pkg.shippingCountry} />
+                    <Field label="Teléfono" value={pkg.shippingPhone} />
+                  </div>
+                </div>
+              ) : null}
+
+              {/* Items */}
+              {pkg.items.length > 0 ? (
+                <div className="so-detail-section">
+                  <h3 className="so-detail-section-title">Contenido ({pkg.items.length})</h3>
+                  <div className="table-wrap">
+                    <table className="table so-table-compact">
+                      <thead>
+                        <tr>
+                          <th>SKU</th>
+                          <th>Producto</th>
+                          <th style={{ textAlign: 'right' }}>Cantidad</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {pkg.items.map((item) => (
+                          <tr key={item.id}>
+                            <td>{item.sku ?? '—'}</td>
+                            <td>
+                              <div>{item.name ?? '—'}</div>
+                              {item.description ? (
+                                <div style={{ fontSize: '0.75rem', color: 'var(--unik-text-muted)' }}>
+                                  {item.description}
+                                </div>
+                              ) : null}
+                            </td>
+                            <td style={{ textAlign: 'right' }}>
+                              {formatNumber(item.quantity)} {item.unit ?? ''}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ) : null}
+
+              {/* Sync */}
+              <div className="so-detail-section">
+                <h3 className="so-detail-section-title">Sincronización</h3>
+                <div className="so-detail-grid">
+                  <Field label="Últ. modificación remota" value={formatDateTime(pkg.sourceRemoteModifiedAt)} />
+                  <Field label="Normalizado" value={formatDateTime(pkg.normalizedAt)} />
+                </div>
               </div>
             </>
-          )}
+          ) : null}
         </div>
-      </div>
-    </div>
+      </aside>
+    </>
   );
 }
 
-function PreviewField({ label, value }: { label: string; value: string }) {
+function Field({
+  label,
+  value,
+  highlighted,
+}: {
+  label: string;
+  value: string | null;
+  highlighted?: boolean;
+}) {
   return (
-    <div className="space-y-0.5">
-      <p className="text-xs text-muted-foreground">{label}</p>
-      <p className="text-sm font-medium truncate">{value}</p>
+    <div className="so-detail-field">
+      <span className="so-detail-field-label">{label}</span>
+      <span className="so-detail-field-value" style={highlighted ? { fontWeight: 700 } : undefined}>
+        {value ?? '—'}
+      </span>
     </div>
   );
 }

@@ -6,9 +6,10 @@ import { Search } from 'lucide-react';
 interface MessageResult {
   id: string;
   channelId: string;
-  channelName: string;
-  sender: string;
-  content: string;
+  channelName: string | null;
+  senderId: string;
+  senderName: string;
+  content: string | null;
   createdAt: string;
 }
 
@@ -94,9 +95,9 @@ export function ChatAdminMessages() {
             )}
             {results.map((m) => (
               <tr key={m.id}>
-                <td>{m.channelName}</td>
-                <td>{m.sender}</td>
-                <td className="chat-admin-message-preview">{m.content}</td>
+                <td>{m.channelName ?? '—'}</td>
+                <td>{m.senderName}</td>
+                <td className="chat-admin-message-preview">{m.content ?? '—'}</td>
                 <td>{new Date(m.createdAt).toLocaleString('es-MX')}</td>
               </tr>
             ))}

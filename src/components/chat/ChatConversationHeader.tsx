@@ -2,8 +2,6 @@
 
 import React from 'react';
 import { ArrowLeft, MoreVertical, Users, Phone, Video, Search, Pin } from 'lucide-react';
-import { Avatar, AvatarFallback } from '@/components/shadcn/avatar';
-import { Button } from '@/components/shadcn/button';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator,
 } from '@/components/shadcn/dropdown-menu';
@@ -52,130 +50,133 @@ export function ChatConversationHeader({
     if (!channel) return '';
     if (isGroup) return `${channel.members.length} miembros`;
     if (!otherUser) return '';
-    if (otherUser.status === 'online') return 'en línea';
-    if (otherUser.status === 'away') return 'ausente';
-    return 'desconectado';
+    if (otherUser.status === 'online') return 'En línea';
+    if (otherUser.status === 'away') return 'Ausente';
+    return 'Desconectado';
   };
+
+  const presence =
+    !channel || isGroup || !otherUser
+      ? null
+      : otherUser.status === 'online'
+        ? 'online'
+        : otherUser.status === 'away'
+          ? 'away'
+          : 'offline';
 
   const canCall = isGroup ? (channel?.members.length ?? 0) <= 8 : true;
 
   return (
-    <div className="chat-conversation-header flex items-center gap-2 px-3 py-2 border-b border-border bg-background min-h-[56px]">
-      <Button
-        variant="ghost"
-        size="icon-sm"
+    <div className="chat-conversation-header">
+      <button
+        type="button"
+        className="chat-icon-btn chat-back-btn"
         onClick={onBack}
         aria-label="Volver"
-        className="md:hidden shrink-0"
       >
-        <ArrowLeft size={18} />
-      </Button>
+        <ArrowLeft size={20} />
+      </button>
 
-      <div className="relative shrink-0">
-        <Avatar className="size-9">
-          <AvatarFallback
-            className={cn('text-xs font-semibold', isGroup && 'bg-primary text-primary-foreground')}
-          >
-            {isGroup ? (
-              <Users size={18} />
-            ) : (
-              otherUser?.name.slice(0, 2).toUpperCase() ?? '??'
-            )}
-          </AvatarFallback>
-        </Avatar>
-        {otherUserOnline && (
-          <span className="absolute -bottom-0.5 -right-0.5 size-3 rounded-full bg-success ring-2 ring-background" />
-        )}
-      </div>
+      <span
+        className={cn('chat-avatar md', isGroup && 'group', !channel && 'is-loading')}
+        aria-hidden="true"
+      >
+        {channel &&
+          (isGroup ? <Users size={18} /> : (otherUser?.name.slice(0, 2).toUpperCase() ?? '??'))}
+        {otherUserOnline && <span className="chat-presence" />}
+      </span>
 
-      <div className="flex-1 min-w-0">
-        <div className="text-sm font-semibold text-foreground truncate">{getChannelName()}</div>
-        <div className="text-xs text-muted-foreground truncate">
+      <div className="chat-conversation-info">
+        <div className="chat-conversation-name">
+          {channel ? getChannelName() : <span className="chat-skel-line" aria-hidden="true" />}
+        </div>
+        <div className="chat-conversation-subtitle" aria-live="polite">
           {typingText ? (
-            <span className="flex items-center gap-1.5">
-              <span className="flex gap-0.5">
-                <span className="size-1 rounded-full bg-primary animate-pulse" style={{ animationDelay: '0ms' }} />
-                <span className="size-1 rounded-full bg-primary animate-pulse" style={{ animationDelay: '150ms' }} />
-                <span className="size-1 rounded-full bg-primary animate-pulse" style={{ animationDelay: '300ms' }} />
+            <span className="chat-typing-inline">
+              <span className="chat-typing-bubbles" aria-hidden="true">
+                <span />
+                <span />
+                <span />
               </span>
-              <span className="text-primary font-medium">{typingText} está escribiendo</span>
-              {typingPreview && <span className="italic">: {typingPreview}</span>}
+              <span className="chat-typing-label">{typingText} está escribiendo</span>
+              {typingPreview && <span className="chat-typing-snippet">: {typingPreview}</span>}
             </span>
           ) : (
-            getChannelSubtitle()
+            <>
+              {presence && <span className={cn('chat-status-dot', presence)} aria-hidden="true" />}
+              <span className="chat-conversation-status">{getChannelSubtitle()}</span>
+            </>
           )}
         </div>
       </div>
 
-      {canCall && channel && (
+      <div className="chat-conversation-actions">
+        {canCall && channel && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button type="button" className="chat-icon-btn" aria-label="Llamar" title="Llamar">
+                <Phone size={18} />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={onCallAudio}>
+                <Phone size={16} /> Llamada de voz
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={onCallVideo}>
+                <Video size={16} /> Videollamada
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
+
+        {onSearchInChannel && (
+          <button
+            type="button"
+            className="chat-icon-btn"
+            onClick={onSearchInChannel}
+            aria-label="Buscar en conversación"
+            title="Buscar en conversación"
+          >
+            <Search size={18} />
+          </button>
+        )}
+
+        {onShowPinned && (
+          <button
+            type="button"
+            className="chat-icon-btn"
+            onClick={onShowPinned}
+            aria-label="Mensajes fijados"
+            title="Mensajes fijados"
+          >
+            <Pin size={18} />
+            {pinnedCount && pinnedCount > 0 ? (
+              <span className="chat-icon-badge">{pinnedCount > 99 ? '99+' : pinnedCount}</span>
+            ) : null}
+          </button>
+        )}
+
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="icon-sm" aria-label="Llamar">
-              <Phone size={18} />
-            </Button>
+            <button type="button" className="chat-icon-btn" aria-label="Configuración" title="Más opciones">
+              <MoreVertical size={18} />
+            </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            <DropdownMenuItem onClick={onCallAudio}>
-              <Phone size={16} /> Llamada de voz
+            <DropdownMenuItem onClick={onShowSettings}>
+              <Users size={16} /> Ver información
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={onCallVideo}>
-              <Video size={16} /> Videollamada
-            </DropdownMenuItem>
+            {onShowPinned && (
+              <DropdownMenuItem onClick={onShowPinned}>
+                <Pin size={16} /> Mensajes fijados
+                {pinnedCount && pinnedCount > 0 ? ` (${pinnedCount})` : ''}
+              </DropdownMenuItem>
+            )}
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={onShowSettings}>Configuración</DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
-      )}
-
-      {onSearchInChannel && (
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          onClick={onSearchInChannel}
-          aria-label="Buscar en conversación"
-          className="shrink-0"
-        >
-          <Search size={18} />
-        </Button>
-      )}
-
-      {onShowPinned && (
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          onClick={onShowPinned}
-          aria-label="Mensajes fijados"
-          className="relative shrink-0"
-        >
-          <Pin size={18} />
-          {pinnedCount && pinnedCount > 0 ? (
-            <span className="absolute -top-0.5 -right-0.5 inline-flex items-center justify-center rounded-full bg-primary text-primary-foreground text-[9px] font-bold min-w-[16px] h-4 px-1">
-              {pinnedCount > 99 ? '99+' : pinnedCount}
-            </span>
-          ) : null}
-        </Button>
-      )}
-
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button variant="ghost" size="icon-sm" aria-label="Configuración" className="shrink-0">
-            <MoreVertical size={18} />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
-          <DropdownMenuItem onClick={onShowSettings}>
-            <Users size={16} /> Ver información
-          </DropdownMenuItem>
-          {onShowPinned && (
-            <DropdownMenuItem onClick={onShowPinned}>
-              <Pin size={16} /> Mensajes fijados
-              {pinnedCount && pinnedCount > 0 ? ` (${pinnedCount})` : ''}
-            </DropdownMenuItem>
-          )}
-          <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={onShowSettings} className="text-destructive">
-            Configuración
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+      </div>
     </div>
   );
 }

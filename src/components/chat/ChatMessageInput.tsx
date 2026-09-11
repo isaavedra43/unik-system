@@ -609,7 +609,7 @@ export function ChatMessageInput({
           <textarea
             ref={textareaRef}
             className="chat-input-textarea"
-            placeholder="Escribe un mensaje... (usa / para comandos)"
+            placeholder="Escribe un mensaje…"
             value={text}
             onChange={handleTextChange}
             onKeyDown={handleKeyDown}
@@ -657,6 +657,21 @@ export function ChatMessageInput({
         >
           <Send size={20} />
         </button>
+      </div>
+
+      <div className="chat-input-hint" aria-hidden="true">
+        <span>
+          <kbd>Enter</kbd> enviar
+        </span>
+        <span>
+          <kbd>Shift</kbd> + <kbd>Enter</kbd> nueva línea
+        </span>
+        <span>
+          <kbd>/</kbd> comandos
+        </span>
+        <span>
+          <kbd>@</kbd> mencionar
+        </span>
       </div>
 
       {isDragging && <div className="chat-input-drop-zone">Suelta los archivos aquí</div>}

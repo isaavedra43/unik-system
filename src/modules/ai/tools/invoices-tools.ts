@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { registerTool } from './registry';
+import { matchesStatus, textMatches } from './ai-filter-matching';
 import {
   dateRangeSchema,
   formatDate,
@@ -137,23 +138,23 @@ registerTool({
         } : {}),
       },
       orderBy: { date: 'desc' },
-      take: 1000,
+      take: 20000,
     });
 
     // Apply filters in JavaScript for reliability
     let filtered = invoices;
 
     if (args.customer) {
-      const c = args.customer.toLowerCase();
-      filtered = filtered.filter((o) => (o.customerName?.toLowerCase() ?? '').includes(c));
+      const c = args.customer;
+      filtered = filtered.filter((o) => textMatches(o.customerName, c));
     }
     if (args.status) {
-      const s = args.status.toLowerCase();
-      filtered = filtered.filter((o) => (o.status?.toLowerCase() ?? '').includes(s));
+      const s = args.status;
+      filtered = filtered.filter((o) => matchesStatus('invoice', o.status, s));
     }
     if (args.salesperson) {
-      const s = args.salesperson.toLowerCase();
-      filtered = filtered.filter((o) => (o.salespersonName?.toLowerCase() ?? '').includes(s));
+      const s = args.salesperson;
+      filtered = filtered.filter((o) => textMatches(o.salespersonName, s));
     }
     if (args.currency) {
       const c = args.currency.toUpperCase();

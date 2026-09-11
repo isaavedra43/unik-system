@@ -54,6 +54,9 @@ import './products-tools';
 // Contacts tools (customers and vendors with balances)
 import './contacts-tools';
 
+// Audit tools (pending deliveries with reasons, cash close reconciliation, customer/vendor product relations)
+import './audit-tools';
+
 // Artifact tools (PDF, Excel, CSV, tablas, gráficas)
 import './artifact-tools';
 

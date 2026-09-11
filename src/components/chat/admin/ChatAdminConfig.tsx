@@ -30,7 +30,13 @@ export function ChatAdminConfig({ canManage }: ChatAdminConfigProps) {
       const res = await fetch('/app/admin/chat/api/config');
       if (res.ok) {
         const json = await res.json();
-        setConfig(json.config ?? []);
+        // API returns { config: Record<string, string> } — convert to array
+        const configObj = json.config ?? {};
+        const entries: ConfigEntry[] = Object.entries(configObj).map(([key, value]) => ({
+          key,
+          value: String(value),
+        }));
+        setConfig(entries);
       } else {
         setError('No se pudo cargar la configuración');
       }

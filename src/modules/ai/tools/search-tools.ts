@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { registerTool } from './registry';
+import { statusLabel } from './ai-filter-matching';
 import { formatDate } from './date-helpers';
 
 /* ------------------------------------------------------------------ */
@@ -932,6 +933,7 @@ registerTool({
       statuses: statusCounts
         .map((s) => ({
           status: s.status ?? 'Sin estado',
+          label: statusLabel('salesOrder', s.status),
           count: s._count.id,
           total: decimalToString(s._sum.total),
         }))
@@ -946,6 +948,7 @@ registerTool({
       paidStatuses: paidStatusCounts
         .map((p) => ({
           paidStatus: p.paidStatus ?? 'Sin estado de pago',
+          label: statusLabel('salesPaid', p.paidStatus),
           count: p._count.id,
           total: decimalToString(p._sum.total),
         }))
@@ -953,6 +956,7 @@ registerTool({
       invoicedStatuses: invoicedStatusCounts
         .map((i) => ({
           invoicedStatus: i.invoicedStatus ?? 'Sin estado de facturación',
+          label: statusLabel('salesInvoiced', i.invoicedStatus),
           count: i._count.id,
           total: decimalToString(i._sum.total),
         }))
@@ -960,6 +964,7 @@ registerTool({
       shippedStatuses: shippedStatusCounts
         .map((s) => ({
           shippedStatus: s.shippedStatus ?? 'Sin estado de envío',
+          label: statusLabel('salesShipped', s.shippedStatus),
           count: s._count.id,
           total: decimalToString(s._sum.total),
         }))
@@ -990,25 +995,25 @@ registerTool({
       })),
       // New modules
       invoiceStatuses: invoiceStatusCounts
-        .map((s) => ({ status: s.status ?? 'Sin estado', count: s._count.id }))
+        .map((s) => ({ status: s.status ?? 'Sin estado', label: statusLabel('invoice', s.status), count: s._count.id }))
         .sort((a, b) => b.count - a.count),
       packageStatuses: packageStatusCounts
-        .map((s) => ({ status: s.status ?? 'Sin estado', count: s._count.id }))
+        .map((s) => ({ status: s.status ?? 'Sin estado', label: statusLabel('package', s.status), count: s._count.id }))
         .sort((a, b) => b.count - a.count),
       billStatuses: billStatusCounts
-        .map((s) => ({ status: s.status ?? 'Sin estado', count: s._count.id }))
+        .map((s) => ({ status: s.status ?? 'Sin estado', label: statusLabel('bill', s.status), count: s._count.id }))
         .sort((a, b) => b.count - a.count),
       paymentStatuses: paymentStatusCounts
-        .map((s) => ({ status: s.status ?? 'Sin estado', count: s._count.id }))
+        .map((s) => ({ status: s.status ?? 'Sin estado', label: statusLabel('customerPayment', s.status), count: s._count.id }))
         .sort((a, b) => b.count - a.count),
       paymentModes: paymentModeCounts
         .map((p) => ({ mode: p.paymentMode ?? 'Sin modo', count: p._count.id }))
         .sort((a, b) => b.count - a.count),
       purchaseOrderStatuses: purchaseOrderStatusCounts
-        .map((s) => ({ status: s.status ?? 'Sin estado', count: s._count.id }))
+        .map((s) => ({ status: s.status ?? 'Sin estado', label: statusLabel('purchaseOrder', s.status), count: s._count.id }))
         .sort((a, b) => b.count - a.count),
       vendorCreditStatuses: vendorCreditStatusCounts
-        .map((s) => ({ status: s.status ?? 'Sin estado', count: s._count.id }))
+        .map((s) => ({ status: s.status ?? 'Sin estado', label: statusLabel('vendorCredit', s.status), count: s._count.id }))
         .sort((a, b) => b.count - a.count),
       productStatuses: productStatusCounts
         .map((s) => ({ status: s.status ?? 'Sin estado', count: s._count.id }))

@@ -9,6 +9,9 @@ import { ChatAdminUsers } from './ChatAdminUsers';
 import { ChatAdminModeration } from './ChatAdminModeration';
 import { ChatAdminAlerts } from './ChatAdminAlerts';
 import { ChatAdminConfig } from './ChatAdminConfig';
+import { ChatAdminCalls } from './ChatAdminCalls';
+import { ChatAdminBroadcast } from './ChatAdminBroadcast';
+import { ChatAdminAuditLog } from './ChatAdminAuditLog';
 
 export interface ChatAdminPanelProps {
   canManage: boolean;
@@ -25,8 +28,11 @@ export function ChatAdminPanel({ canManage }: ChatAdminPanelProps) {
           <TabsTrigger value="conversations">Conversaciones</TabsTrigger>
           <TabsTrigger value="messages">Mensajes</TabsTrigger>
           <TabsTrigger value="users">Usuarios</TabsTrigger>
+          <TabsTrigger value="calls">Llamadas</TabsTrigger>
           <TabsTrigger value="moderation">Moderación</TabsTrigger>
           <TabsTrigger value="alerts">Alertas</TabsTrigger>
+          <TabsTrigger value="broadcast">Anuncios</TabsTrigger>
+          <TabsTrigger value="audit">Auditoría</TabsTrigger>
           <TabsTrigger value="config">Configuración</TabsTrigger>
         </TabsList>
 
@@ -42,11 +48,20 @@ export function ChatAdminPanel({ canManage }: ChatAdminPanelProps) {
         <TabsContent value="users" className="mt-4">
           <ChatAdminUsers />
         </TabsContent>
+        <TabsContent value="calls" className="mt-4">
+          <ChatAdminCalls />
+        </TabsContent>
         <TabsContent value="moderation" className="mt-4">
           <ChatAdminModeration canManage={canManage} />
         </TabsContent>
         <TabsContent value="alerts" className="mt-4">
           <ChatAdminAlerts canManage={canManage} />
+        </TabsContent>
+        <TabsContent value="broadcast" className="mt-4">
+          <ChatAdminBroadcast canManage={canManage} />
+        </TabsContent>
+        <TabsContent value="audit" className="mt-4">
+          <ChatAdminAuditLog />
         </TabsContent>
         <TabsContent value="config" className="mt-4">
           <ChatAdminConfig canManage={canManage} />

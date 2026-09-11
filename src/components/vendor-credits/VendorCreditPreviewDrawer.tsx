@@ -48,41 +48,40 @@ export function VendorCreditPreviewDrawer({
   const [watched, setWatched] = useState(isWatched);
 
   useEffect(() => {
+    setWatched(isWatched);
+  }, [isWatched]);
+
+  useEffect(() => {
     let cancelled = false;
-    setLoading(true);
-    setError(null);
-    fetch(`${basePath}/${vendorCreditId}/api`)
-      .then((res) => {
+    async function load() {
+      setLoading(true);
+      setError(null);
+      try {
+        const res = await fetch(`${basePath}/${vendorCreditId}/api`);
         if (!res.ok) throw new Error('No se pudo cargar el crédito de proveedor');
-        return res.json();
-      })
-      .then((data) => {
+        const json = (await res.json()) as VendorCreditDetail & { is_watched?: boolean };
         if (!cancelled) {
-          setVendorCredit(data);
-          setLoading(false);
+          setVendorCredit(json);
+          if (typeof json.is_watched === 'boolean') setWatched(json.is_watched);
         }
-      })
-      .catch((err) => {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : 'Error');
-          setLoading(false);
-        }
-      });
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : 'Error');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+    load();
     return () => {
       cancelled = true;
     };
   }, [vendorCreditId, basePath]);
 
   useEffect(() => {
-    const handleEsc = (e: KeyboardEvent) => {
+    function onKey(e: KeyboardEvent) {
       if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', handleEsc);
-    document.body.style.overflow = 'hidden';
-    return () => {
-      window.removeEventListener('keydown', handleEsc);
-      document.body.style.overflow = '';
-    };
+    }
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
   }, [onClose]);
 
   const handleWatch = async () => {
@@ -104,128 +103,145 @@ export function VendorCreditPreviewDrawer({
   const statusConfig = vendorCredit ? getVendorCreditStatusConfig(vendorCredit.status) : null;
 
   return (
-    <div className="fixed inset-0 z-50 flex" role="dialog" aria-modal="true">
-      <div
-        className="absolute inset-0 bg-black/40 backdrop-blur-sm"
-        onClick={onClose}
-        aria-label="Cerrar"
-      />
-      <div className="relative ml-auto h-full w-full max-w-md bg-background shadow-xl overflow-y-auto">
-        <div className="sticky top-0 z-10 flex items-center justify-between border-b bg-background px-4 py-3">
-          <h2 className="text-sm font-semibold truncate">{entityLabel}</h2>
-          <div className="flex items-center gap-1">
-            {canWatch && (
-              <button
-                onClick={handleWatch}
-                className="inline-flex items-center justify-center rounded-md p-1.5 hover:bg-accent transition-colors"
-                aria-label={watched ? 'Dejar de seguir' : 'Seguir'}
-              >
-                {watched ? <BellRing className="h-4 w-4 text-primary" /> : <Bell className="h-4 w-4" />}
+    <>
+      <div className="overlay" onClick={onClose} aria-hidden="true" />
+      <aside
+        className="so-detail-drawer"
+        role="dialog"
+        aria-modal="true"
+        aria-label={`Detalle de ${entityLabel.toLowerCase()}`}
+      >
+        <div className="so-detail-header">
+          <div>
+            <h2 style={{ fontSize: '1.125rem', fontWeight: 600, margin: 0 }}>
+              {vendorCredit?.vendorCreditNumber ?? 'Cargando...'}
+            </h2>
+            {vendorCredit?.vendorName ? (
+              <p style={{ color: 'var(--unik-text-muted)', fontSize: '0.875rem', margin: '4px 0 0' }}>
+                {vendorCredit.vendorName}
+              </p>
+            ) : null}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            {canWatch ? (
+              <button className="btn btn-secondary btn-sm" onClick={handleWatch} aria-pressed={watched}>
+                {watched ? <BellRing size={14} /> : <Bell size={14} />}
+                {watched ? 'Siguiendo' : 'Seguir'}
               </button>
-            )}
-            <button
-              onClick={() => router.push(`${basePath}/${vendorCreditId}`)}
-              className="inline-flex items-center justify-center rounded-md p-1.5 hover:bg-accent transition-colors"
-              aria-label="Abrir página completa"
-            >
-              <ExternalLink className="h-4 w-4" />
+            ) : null}
+            <button className="btn btn-secondary btn-sm" onClick={() => router.push(`${basePath}/${vendorCreditId}`)}>
+              <ExternalLink size={14} /> Abrir
             </button>
-            <button
-              onClick={onClose}
-              className="inline-flex items-center justify-center rounded-md p-1.5 hover:bg-accent transition-colors"
-              aria-label="Cerrar"
-            >
-              <X className="h-4 w-4" />
+            <button className="icon-btn" onClick={onClose} aria-label="Cerrar">
+              <X size={18} />
             </button>
           </div>
         </div>
 
-        <div className="p-4 space-y-4">
-          {loading && (
-            <div className="flex items-center justify-center py-12">
-              <div className="h-6 w-6 animate-spin rounded-full border-2 border-muted border-t-primary" />
+        <div className="so-detail-body">
+          {loading ? (
+            <div style={{ textAlign: 'center', padding: '2rem' }}>
+              <span className="spinner" /> Cargando...
             </div>
-          )}
-
-          {error && (
-            <div className="rounded-md border border-destructive/20 bg-destructive/5 p-4 text-sm text-destructive">
-              {error}
+          ) : error ? (
+            <div style={{ textAlign: 'center', padding: '2rem' }}>
+              <p className="text-muted">{error}</p>
             </div>
-          )}
-
-          {vendorCredit && !loading && (
+          ) : vendorCredit ? (
             <>
-              <div className="space-y-1">
-                <h3 className="text-lg font-bold">{vendorCredit.vendorCreditNumber ?? '—'}</h3>
-                <p className="text-sm text-muted-foreground">{vendorCredit.vendorName ?? '—'}</p>
-                {statusConfig && (
-                  <span
-                    className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                      statusConfig.tone === 'success'
-                        ? 'bg-success/10 text-success'
-                        : statusConfig.tone === 'danger'
-                          ? 'bg-destructive/10 text-destructive'
-                          : statusConfig.tone === 'warning'
-                            ? 'bg-warning/10 text-warning'
-                            : statusConfig.tone === 'info'
-                              ? 'bg-info/10 text-info'
-                              : 'bg-muted text-muted-foreground'
-                    }`}
-                  >
-                    <span
-                      className={`h-1.5 w-1.5 rounded-full ${
-                        statusConfig.tone === 'success'
-                          ? 'bg-success'
-                          : statusConfig.tone === 'danger'
-                            ? 'bg-destructive'
-                            : statusConfig.tone === 'warning'
-                              ? 'bg-warning'
-                              : statusConfig.tone === 'info'
-                                ? 'bg-info'
-                                : 'bg-muted-foreground'
-                      }`}
-                    />
-                    {statusConfig.label}
-                  </span>
-                )}
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <PreviewField label="Fecha" value={vendorCredit.date ? formatDateOnly(vendorCredit.date) : '—'} />
-                <PreviewField label="Moneda" value={vendorCredit.currencyCode ?? '—'} />
-                <PreviewField label="Total" value={formatCurrency(vendorCredit.total, vendorCredit.currencyCode)} />
-                <PreviewField label="Saldo" value={formatCurrency(vendorCredit.balance, vendorCredit.currencyCode)} />
-              </div>
-
-              {vendorCredit.notes && (
-                <div className="space-y-1">
-                  <p className="text-xs text-muted-foreground uppercase tracking-wide">Notas</p>
-                  <p className="text-sm text-muted-foreground whitespace-pre-wrap">{vendorCredit.notes}</p>
+              {/* Summary */}
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '1rem',
+                  padding: '0.75rem 1rem',
+                  background: 'var(--unik-surface)',
+                  borderRadius: 'var(--unik-radius-sm)',
+                  border: '1px solid var(--unik-border-subtle)',
+                  marginBottom: '1rem',
+                }}
+              >
+                <div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--unik-text-muted)', textTransform: 'uppercase', letterSpacing: '0.02em' }}>
+                    Estado
+                  </div>
+                  <div style={{ fontSize: '1rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <span className={`so-status-dot so-status-dot-${statusConfig?.tone ?? 'muted'}`} />
+                    {statusConfig?.label ?? '—'}
+                  </div>
                 </div>
-              )}
+                <div style={{ textAlign: 'right' }}>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--unik-text-muted)', textTransform: 'uppercase', letterSpacing: '0.02em' }}>
+                    Saldo
+                  </div>
+                  <div style={{ fontSize: '1rem', fontWeight: 600 }}>
+                    {formatCurrency(vendorCredit.balance, vendorCredit.currencyCode)}
+                  </div>
+                </div>
+              </div>
 
-              <div className="space-y-1 border-t pt-3">
-                <p className="text-xs text-muted-foreground uppercase tracking-wide">Sincronización</p>
-                <p className="text-xs text-muted-foreground">
-                  Últ. modificación remota: {formatDateTime(vendorCredit.sourceRemoteModifiedAt)}
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  Últ. normalización: {formatDateTime(vendorCredit.normalizedAt)}
-                </p>
+              {/* General */}
+              <div className="so-detail-section">
+                <h3 className="so-detail-section-title">General</h3>
+                <div className="so-detail-grid">
+                  <Field label="Fecha" value={formatDateOnly(vendorCredit.date)} />
+                  <Field label="Proveedor" value={vendorCredit.vendorName} />
+                  <Field label="Moneda" value={vendorCredit.currencyCode} />
+                </div>
+              </div>
+
+              {/* Totales */}
+              <div className="so-detail-section">
+                <h3 className="so-detail-section-title">Totales</h3>
+                <div className="so-detail-grid">
+                  <Field label="Total" value={formatCurrency(vendorCredit.total, vendorCredit.currencyCode)} highlighted />
+                  <Field label="Saldo" value={formatCurrency(vendorCredit.balance, vendorCredit.currencyCode)} highlighted />
+                </div>
+              </div>
+
+              {/* Notas */}
+              {vendorCredit.notes ? (
+                <div className="so-detail-section">
+                  <h3 className="so-detail-section-title">Notas</h3>
+                  <p style={{ fontSize: '0.875rem', color: 'var(--unik-text-secondary)', whiteSpace: 'pre-wrap' }}>
+                    {vendorCredit.notes}
+                  </p>
+                </div>
+              ) : null}
+
+              {/* Sync */}
+              <div className="so-detail-section">
+                <h3 className="so-detail-section-title">Sincronización</h3>
+                <div className="so-detail-grid">
+                  <Field label="Últ. modificación remota" value={formatDateTime(vendorCredit.sourceRemoteModifiedAt)} />
+                  <Field label="Normalizado" value={formatDateTime(vendorCredit.normalizedAt)} />
+                </div>
               </div>
             </>
-          )}
+          ) : null}
         </div>
-      </div>
-    </div>
+      </aside>
+    </>
   );
 }
 
-function PreviewField({ label, value }: { label: string; value: string }) {
+function Field({
+  label,
+  value,
+  highlighted,
+}: {
+  label: string;
+  value: string | null;
+  highlighted?: boolean;
+}) {
   return (
-    <div className="space-y-0.5">
-      <p className="text-xs text-muted-foreground">{label}</p>
-      <p className="text-sm font-medium truncate">{value}</p>
+    <div className="so-detail-field">
+      <span className="so-detail-field-label">{label}</span>
+      <span className="so-detail-field-value" style={highlighted ? { fontWeight: 700 } : undefined}>
+        {value ?? '—'}
+      </span>
     </div>
   );
 }

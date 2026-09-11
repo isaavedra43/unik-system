@@ -616,3 +616,276 @@ export async function setConfig(actor: CurrentUser, key: string, value: string):
     metadata: { key },
   });
 }
+
+// =====================================================
+// 1. Suspend / unsuspend users
+// =====================================================
+
+const SUSPENDED_KEY = 'chat.suspended_users';
+
+export async function getSuspendedUserIds(): Promise<Set<string>> {
+  const config = await prisma.internalChatConfig.findUnique({ where: { key: SUSPENDED_KEY } });
+  if (!config?.value) return new Set();
+  return new Set(config.value.split(',').filter(Boolean));
+}
+
+export async function suspendUser(actor: CurrentUser, userId: string): Promise<void> {
+  const user = await prisma.user.findUnique({ where: { id: userId }, select: { id: true, name: true } });
+  if (!user) throw new Error('Usuario no encontrado');
+
+  const current = await getSuspendedUserIds();
+  if (current.has(userId)) throw new Error('El usuario ya está suspendido');
+  current.add(userId);
+
+  await prisma.internalChatConfig.upsert({
+    where: { key: SUSPENDED_KEY },
+    create: { id: SUSPENDED_KEY, key: SUSPENDED_KEY, value: Array.from(current).join(',') },
+    update: { value: Array.from(current).join(',') },
+  });
+
+  await recordAuditEvent({
+    actorUserId: actor.id,
+    action: 'chat.admin.suspend_user',
+    targetType: 'user',
+    targetId: userId,
+    metadata: { userName: user.name },
+  });
+}
+
+export async function unsuspendUser(actor: CurrentUser, userId: string): Promise<void> {
+  const current = await getSuspendedUserIds();
+  if (!current.has(userId)) throw new Error('El usuario no está suspendido');
+  current.delete(userId);
+
+  await prisma.internalChatConfig.upsert({
+    where: { key: SUSPENDED_KEY },
+    create: { id: SUSPENDED_KEY, key: SUSPENDED_KEY, value: Array.from(current).join(',') },
+    update: { value: Array.from(current).join(',') },
+  });
+
+  await recordAuditEvent({
+    actorUserId: actor.id,
+    action: 'chat.admin.unsuspend_user',
+    targetType: 'user',
+    targetId: userId,
+  });
+}
+
+export async function isUserSuspended(userId: string): Promise<boolean> {
+  const suspended = await getSuspendedUserIds();
+  return suspended.has(userId);
+}
+
+// =====================================================
+// 2. Export channel messages
+// =====================================================
+
+export async function exportChannelMessages(
+  channelId: string,
+  format: 'csv' | 'json' = 'csv'
+): Promise<{ data: string; filename: string; contentType: string }> {
+  const channel = await prisma.internalChatChannel.findUnique({
+    where: { id: channelId },
+    select: { name: true },
+  });
+  if (!channel) throw new Error('Canal no encontrado');
+
+  const messages = await prisma.internalChatMessage.findMany({
+    where: { channelId, deletedAt: null },
+    orderBy: { createdAt: 'asc' },
+    include: { sender: { select: { name: true } } },
+    take: 10000,
+  });
+
+  const channelName = channel.name ?? channelId;
+  const safeName = channelName.replace(/[^a-zA-Z0-9_-]/g, '_');
+
+  if (format === 'json') {
+    const data = JSON.stringify(
+      messages.map((m) => ({
+        id: m.id,
+        sender: m.sender.name,
+        senderId: m.senderId,
+        content: m.content,
+        createdAt: m.createdAt.toISOString(),
+      })),
+      null,
+      2
+    );
+    return {
+      data,
+      filename: `${safeName}.json`,
+      contentType: 'application/json',
+    };
+  }
+
+  // CSV
+  const header = 'id,remitente,remitente_id,contenido,fecha\n';
+  const rows = messages.map((m) => {
+    const content = (m.content ?? '').replace(/"/g, '""').replace(/\n/g, ' ');
+    const sender = m.sender.name.replace(/"/g, '""');
+    return `"${m.id}","${sender}","${m.senderId}","${content}","${m.createdAt.toISOString()}"`;
+  });
+  return {
+    data: header + rows.join('\n'),
+    filename: `${safeName}.csv`,
+    contentType: 'text/csv',
+  };
+}
+
+// =====================================================
+// 3. List all calls (call monitoring)
+// =====================================================
+
+export async function listAllCalls(
+  options: { status?: string; limit?: number; offset?: number } = {}
+): Promise<{
+  calls: Array<{
+    id: string;
+    channelId: string;
+    channelName: string | null;
+    callerId: string;
+    callerName: string;
+    type: string;
+    status: string;
+    startedAt: string | null;
+    endedAt: string | null;
+    createdAt: string;
+    participantCount: number;
+  }>;
+  total: number;
+}> {
+  const limit = Math.min(options.limit ?? 50, 200);
+  const offset = options.offset ?? 0;
+  const where: Prisma.InternalChatCallWhereInput = {};
+  if (options.status) where.status = options.status;
+
+  const [calls, total] = await Promise.all([
+    prisma.internalChatCall.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      skip: offset,
+      take: limit,
+      include: {
+        caller: { select: { name: true } },
+        channel: { select: { name: true } },
+        _count: { select: { participants: true } },
+      },
+    }),
+    prisma.internalChatCall.count({ where }),
+  ]);
+
+  return {
+    calls: calls.map((c) => ({
+      id: c.id,
+      channelId: c.channelId,
+      channelName: c.channel.name,
+      callerId: c.callerId,
+      callerName: c.caller.name,
+      type: c.type,
+      status: c.status,
+      startedAt: c.startedAt?.toISOString() ?? null,
+      endedAt: c.endedAt?.toISOString() ?? null,
+      createdAt: c.createdAt.toISOString(),
+      participantCount: c._count.participants,
+    })),
+    total,
+  };
+}
+
+// =====================================================
+// 4. Global broadcast (send system message to all channels)
+// =====================================================
+
+export async function sendBroadcast(
+  actor: CurrentUser,
+  message: string
+): Promise<{ sentCount: number }> {
+  if (!message.trim()) throw new Error('El mensaje no puede estar vacío');
+
+  const channels = await prisma.internalChatChannel.findMany({
+    where: { type: 'group' },
+    select: { id: true },
+  });
+
+  if (channels.length === 0) {
+    return { sentCount: 0 };
+  }
+
+  // Create a message in each group channel
+  await prisma.internalChatMessage.createMany({
+    data: channels.map((c) => ({
+      channelId: c.id,
+      senderId: actor.id,
+      content: `[ANUNCIO] ${message}`,
+      priority: 'urgent',
+    })),
+  });
+
+  await recordAuditEvent({
+    actorUserId: actor.id,
+    action: 'chat.admin.broadcast',
+    targetType: 'chat_channel',
+    targetId: 'broadcast',
+    metadata: { message: message.slice(0, 200), channelCount: channels.length },
+  });
+
+  return { sentCount: channels.length };
+}
+
+// =====================================================
+// 5. Chat audit log
+// =====================================================
+
+export async function listChatAuditLog(
+  options: { limit?: number; offset?: number; action?: string } = {}
+): Promise<{
+  entries: Array<{
+    id: string;
+    actorUserId: string | null;
+    actorName: string | null;
+    action: string;
+    targetType: string;
+    targetId: string | null;
+    metadata: Prisma.JsonValue | null;
+    createdAt: string;
+  }>;
+  total: number;
+}> {
+  const limit = Math.min(options.limit ?? 50, 200);
+  const offset = options.offset ?? 0;
+  const where: Prisma.AuditLogWhereInput = {
+    action: options.action ?? { startsWith: 'chat.' },
+  };
+
+  const [entries, total] = await Promise.all([
+    prisma.auditLog.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      skip: offset,
+      take: limit,
+    }),
+    prisma.auditLog.count({ where }),
+  ]);
+
+  // Fetch actor names separately (AuditLog has no relation to User)
+  const actorIds = [...new Set(entries.map((e) => e.actorUserId).filter(Boolean))] as string[];
+  const actors = actorIds.length > 0
+    ? await prisma.user.findMany({ where: { id: { in: actorIds } }, select: { id: true, name: true } })
+    : [];
+  const actorMap = new Map(actors.map((a) => [a.id, a.name]));
+
+  return {
+    entries: entries.map((e) => ({
+      id: e.id,
+      actorUserId: e.actorUserId,
+      actorName: e.actorUserId ? actorMap.get(e.actorUserId) ?? null : null,
+      action: e.action,
+      targetType: e.targetType,
+      targetId: e.targetId,
+      metadata: e.metadata,
+      createdAt: e.createdAt.toISOString(),
+    })),
+    total,
+  };
+}

@@ -29,16 +29,25 @@ function isAudio(mime: string) { return mime.startsWith('audio/'); }
 
 export function ChatAttachmentPreview({ attachment, onRemove, compact }: ChatAttachmentPreviewProps) {
   const [lightbox, setLightbox] = useState(false);
+  const [imgFailed, setImgFailed] = useState(false);
   const url = `/app/chat/api/attachments/${attachment.id}`;
 
-  if (isImage(attachment.mimeType)) {
+  if (isImage(attachment.mimeType) && !imgFailed) {
     return (
       <>
-        <div className={cn('chat-att-image', compact && 'compact')}>
+        <div
+          className={cn('chat-att-image', compact && 'compact')}
+          style={
+            attachment.width && attachment.height
+              ? { aspectRatio: `${attachment.width} / ${attachment.height}` }
+              : undefined
+          }
+        >
           <Image
             src={url}
             alt={attachment.fileName}
             onClick={() => setLightbox(true)}
+            onError={() => setImgFailed(true)}
             width={200}
             height={200}
             unoptimized
@@ -128,7 +137,7 @@ export function ChatAttachmentPreview({ attachment, onRemove, compact }: ChatAtt
       className={cn('chat-att-doc', compact && 'compact')}
     >
       <div className="chat-att-doc-icon">
-        <FileText size={24} />
+        {isImage(attachment.mimeType) ? <ImageIcon size={22} /> : <FileText size={22} />}
       </div>
       <div className="chat-att-doc-info">
         <div className="chat-att-doc-name">{attachment.fileName}</div>

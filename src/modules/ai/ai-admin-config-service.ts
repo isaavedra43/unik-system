@@ -97,6 +97,10 @@ export const DEFAULT_AI_SETTINGS: AiSettings = {
     'getHourlySalesPattern',
     'getWeekdaySalesPattern',
     'getOrdersWithBalance',
+    // Audit & cross-module intelligence
+    'auditPendingDeliveries',
+    'getCashCloseReconciliation',
+    'findProductRelations',
     // Inventory
     'getProductCatalog',
     'getStockMovement',
@@ -163,7 +167,7 @@ export const DEFAULT_AI_SETTINGS: AiSettings = {
     'getSystemTime',
   ],
   maxAttachmentSizeMb: 10,
-  allowedMimeTypes: ['image/png', 'image/jpeg', 'application/pdf', 'text/plain'],
+  allowedMimeTypes: ['image/png', 'image/jpeg', 'application/pdf', 'text/plain', 'text/csv'],
   artifactTtlHours: 168, // 7 días
   voiceEnabled: false,
   sttModel: 'whisper-1',

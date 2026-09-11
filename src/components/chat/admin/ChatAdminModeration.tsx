@@ -25,7 +25,7 @@ export function ChatAdminModeration({ canManage }: ChatAdminModerationProps) {
       const res = await fetch('/app/admin/chat/api/moderation', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'delete_message', messageId }),
+        body: JSON.stringify({ action: 'delete_message', targetId: messageId }),
       });
       if (res.ok) {
         setFeedback({ type: 'success', message: 'Mensaje eliminado' });
@@ -48,7 +48,7 @@ export function ChatAdminModeration({ canManage }: ChatAdminModerationProps) {
       const res = await fetch('/app/admin/chat/api/moderation', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'delete_channel', channelId }),
+        body: JSON.stringify({ action: 'delete_channel', targetId: channelId }),
       });
       if (res.ok) {
         setFeedback({ type: 'success', message: 'Canal eliminado' });

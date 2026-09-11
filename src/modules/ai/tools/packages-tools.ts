@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { registerTool } from './registry';
+import { matchesStatus, textMatches } from './ai-filter-matching';
 import {
   dateRangeSchema,
   formatDate,
@@ -132,31 +133,31 @@ registerTool({
         } : {}),
       },
       orderBy: { date: 'desc' },
-      take: 1000,
+      take: 20000,
     });
 
     // Apply filters in JavaScript for reliability
     let filtered = packages;
 
     if (args.customer) {
-      const c = args.customer.toLowerCase();
-      filtered = filtered.filter((o) => (o.customerName?.toLowerCase() ?? '').includes(c));
+      const c = args.customer;
+      filtered = filtered.filter((o) => textMatches(o.customerName, c));
     }
     if (args.status) {
-      const s = args.status.toLowerCase();
-      filtered = filtered.filter((o) => (o.status?.toLowerCase() ?? '').includes(s));
+      const s = args.status;
+      filtered = filtered.filter((o) => matchesStatus('package', o.status, s));
     }
     if (args.shipmentType) {
-      const s = args.shipmentType.toLowerCase();
-      filtered = filtered.filter((o) => (o.shipmentType?.toLowerCase() ?? '').includes(s));
+      const s = args.shipmentType;
+      filtered = filtered.filter((o) => textMatches(o.shipmentType, s));
     }
     if (args.carrier) {
-      const c = args.carrier.toLowerCase();
-      filtered = filtered.filter((o) => (o.carrier?.toLowerCase() ?? '').includes(c));
+      const c = args.carrier;
+      filtered = filtered.filter((o) => textMatches(o.carrier, c));
     }
     if (args.deliveryMethod) {
-      const d = args.deliveryMethod.toLowerCase();
-      filtered = filtered.filter((o) => (o.deliveryMethod?.toLowerCase() ?? '').includes(d));
+      const d = args.deliveryMethod;
+      filtered = filtered.filter((o) => textMatches(o.deliveryMethod, d));
     }
     if (args.search) {
       const s = args.search.toLowerCase();

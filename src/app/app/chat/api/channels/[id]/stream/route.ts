@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentSession, hasPermission } from '@/modules/auth/authorization';
 import { getMessagesSince, assertChannelMember, getTypingUsers } from '@/modules/chat/chat-service';
 import { getPresence } from '@/modules/chat/chat-presence-service';
-import { getActiveCall, getPendingSignals } from '@/modules/chat/chat-calls-service';
+import { getActiveCall } from '@/modules/chat/chat-calls-service';
 import type { ChatStreamEvent } from '@/modules/chat/chat-events';
 
 export const runtime = 'nodejs';
@@ -10,7 +10,6 @@ export const dynamic = 'force-dynamic';
 
 const POLL_INTERVAL_MS = 2000;
 const HEARTBEAT_INTERVAL_MS = 15000;
-const CALL_POLL_INTERVAL_MS = 500; // faster polling when a call is active
 
 /**
  * SSE endpoint for real-time chat updates.
@@ -20,8 +19,10 @@ const CALL_POLL_INTERVAL_MS = 500; // faster polling when a call is active
  * client. This approach works without Redis and across multiple Railway
  * instances (with up to 2s latency).
  *
- * Also polls for WebRTC call events (call invites, accepts, ends, signals)
- * with a faster interval when a call is active.
+ * Also polls for active calls in the channel (call invites and call ends).
+ * WebRTC signaling is handled directly by the ChatCallDialog via the signal
+ * API, NOT through this SSE stream, to avoid signals being consumed before
+ * the dialog can process them.
  */
 export async function GET(_request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await getCurrentSession();
@@ -45,7 +46,6 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
   let lastTypingCheck = Date.now();
   let lastPresenceCheck = Date.now();
   let lastCallCheck = Date.now();
-  let lastSignalCheck = Date.now();
   const knownTyping = new Map<string, string | undefined>(); // userId -> preview
   let lastPresenceStatuses = new Map<string, string>();
   let knownCallId: string | null = null;
@@ -156,22 +156,12 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
             }
           }
 
-          // Poll for WebRTC signals (every 500ms when a call is active)
-          if (knownCallId && Date.now() - lastSignalCheck > 500) {
-            lastSignalCheck = Date.now();
-            const signals = await getPendingSignals(session.user.id, knownCallId);
-            for (const sig of signals) {
-              sendEvent({
-                type: 'webrtc_signal',
-                data: {
-                  callId: sig.callId,
-                  fromUserId: sig.fromUserId,
-                  signalType: sig.signalType,
-                  signal: sig.signal,
-                },
-              });
-            }
-          }
+          // NOTE: WebRTC signal polling is intentionally NOT done here.
+          // The ChatCallDialog polls for signals directly via the signal
+          // API (/app/chat/api/calls/[id]/signal). If the SSE stream also
+          // polled for signals, it would mark them as delivered before the
+          // ChatCallDialog could process them, breaking the WebRTC
+          // connection handshake.
         } catch {
           // ignore poll errors, keep going
         }

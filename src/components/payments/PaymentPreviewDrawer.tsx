@@ -10,7 +10,6 @@ import {
   formatDateOnly,
   formatDateTime,
   getPaymentStatusConfig,
-  type PaymentStatusConfig,
 } from '@/modules/payments/payments-helpers';
 import type { WatchAction } from '@/modules/shared/entity-workspace-types';
 
@@ -45,41 +44,40 @@ export function PaymentPreviewDrawer({
   const [watched, setWatched] = useState(isWatched);
 
   useEffect(() => {
+    setWatched(isWatched);
+  }, [isWatched]);
+
+  useEffect(() => {
     let cancelled = false;
-    setLoading(true);
-    setError(null);
-    fetch(`${basePath}/${paymentId}/api`)
-      .then((res) => {
+    async function load() {
+      setLoading(true);
+      setError(null);
+      try {
+        const res = await fetch(`${basePath}/${paymentId}/api`);
         if (!res.ok) throw new Error('No se pudo cargar el pago');
-        return res.json();
-      })
-      .then((data) => {
+        const json = (await res.json()) as PaymentDetail & { is_watched?: boolean };
         if (!cancelled) {
-          setPayment(data);
-          setLoading(false);
+          setPayment(json);
+          if (typeof json.is_watched === 'boolean') setWatched(json.is_watched);
         }
-      })
-      .catch((err) => {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : 'Error');
-          setLoading(false);
-        }
-      });
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : 'Error');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+    load();
     return () => {
       cancelled = true;
     };
   }, [paymentId, basePath]);
 
   useEffect(() => {
-    const handleEsc = (e: KeyboardEvent) => {
+    function onKey(e: KeyboardEvent) {
       if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', handleEsc);
-    document.body.style.overflow = 'hidden';
-    return () => {
-      window.removeEventListener('keydown', handleEsc);
-      document.body.style.overflow = '';
-    };
+    }
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
   }, [onClose]);
 
   const handleWatch = async () => {
@@ -101,149 +99,180 @@ export function PaymentPreviewDrawer({
   const statusConfig = payment ? getPaymentStatusConfig(payment.status) : null;
 
   return (
-    <div className="fixed inset-0 z-50 flex" role="dialog" aria-modal="true">
-      <div
-        className="absolute inset-0 bg-black/40 backdrop-blur-sm"
-        onClick={onClose}
-        aria-label="Cerrar"
-      />
-      <div className="relative ml-auto h-full w-full max-w-md bg-background shadow-xl overflow-y-auto">
-        <div className="sticky top-0 z-10 flex items-center justify-between border-b bg-background px-4 py-3">
-          <h2 className="text-sm font-semibold truncate">{entityLabel}</h2>
-          <div className="flex items-center gap-1">
-            {canWatch && (
-              <button
-                onClick={handleWatch}
-                className="inline-flex items-center justify-center rounded-md p-1.5 hover:bg-accent transition-colors"
-                aria-label={watched ? 'Dejar de seguir' : 'Seguir'}
-              >
-                {watched ? (
-                  <BellRing className="h-4 w-4 text-primary" />
-                ) : (
-                  <Bell className="h-4 w-4" />
-                )}
+    <>
+      <div className="overlay" onClick={onClose} aria-hidden="true" />
+      <aside
+        className="so-detail-drawer"
+        role="dialog"
+        aria-modal="true"
+        aria-label={`Detalle de ${entityLabel.toLowerCase()}`}
+      >
+        <div className="so-detail-header">
+          <div>
+            <h2 style={{ fontSize: '1.125rem', fontWeight: 600, margin: 0 }}>
+              {payment?.paymentNumber ?? 'Cargando...'}
+            </h2>
+            {payment?.customerName ? (
+              <p style={{ color: 'var(--unik-text-muted)', fontSize: '0.875rem', margin: '4px 0 0' }}>
+                {payment.customerName}
+              </p>
+            ) : null}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            {canWatch ? (
+              <button className="btn btn-secondary btn-sm" onClick={handleWatch} aria-pressed={watched}>
+                {watched ? <BellRing size={14} /> : <Bell size={14} />}
+                {watched ? 'Siguiendo' : 'Seguir'}
               </button>
-            )}
-            <button
-              onClick={() => router.push(`${basePath}/${paymentId}`)}
-              className="inline-flex items-center justify-center rounded-md p-1.5 hover:bg-accent transition-colors"
-              aria-label="Abrir página completa"
-            >
-              <ExternalLink className="h-4 w-4" />
+            ) : null}
+            <button className="btn btn-secondary btn-sm" onClick={() => router.push(`${basePath}/${paymentId}`)}>
+              <ExternalLink size={14} /> Abrir
             </button>
-            <button
-              onClick={onClose}
-              className="inline-flex items-center justify-center rounded-md p-1.5 hover:bg-accent transition-colors"
-              aria-label="Cerrar"
-            >
-              <X className="h-4 w-4" />
+            <button className="icon-btn" onClick={onClose} aria-label="Cerrar">
+              <X size={18} />
             </button>
           </div>
         </div>
 
-        <div className="p-4 space-y-4">
-          {loading && (
-            <div className="flex items-center justify-center py-12">
-              <div className="h-6 w-6 animate-spin rounded-full border-2 border-muted border-t-primary" />
+        <div className="so-detail-body">
+          {loading ? (
+            <div style={{ textAlign: 'center', padding: '2rem' }}>
+              <span className="spinner" /> Cargando...
             </div>
-          )}
-
-          {error && (
-            <div className="rounded-md border border-destructive/20 bg-destructive/5 p-4 text-sm text-destructive">
-              {error}
+          ) : error ? (
+            <div style={{ textAlign: 'center', padding: '2rem' }}>
+              <p className="text-muted">{error}</p>
             </div>
-          )}
-
-          {payment && !loading && (
+          ) : payment ? (
             <>
-              <div className="space-y-1">
-                <h3 className="text-lg font-bold">{payment.paymentNumber ?? '—'}</h3>
-                {payment.paymentMode && (
-                  <p className="text-sm text-muted-foreground">{payment.paymentMode}</p>
-                )}
-                {statusConfig && (
-                  <span
-                    className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium ${statusBadgeClasses(statusConfig.tone)}`}
-                  >
-                    <span className={`h-1.5 w-1.5 rounded-full ${statusDotClasses(statusConfig.tone)}`} />
-                    {statusConfig.label}
-                  </span>
-                )}
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <PreviewField label="Fecha" value={payment.date ? formatDateOnly(payment.date) : '—'} />
-                <PreviewField label="Cliente" value={payment.customerName ?? '—'} />
-                <PreviewField label="Modo de pago" value={payment.paymentMode ?? '—'} />
-                <PreviewField label="Monto" value={formatCurrency(payment.amount, payment.currencyCode)} />
-                <PreviewField label="Saldo" value={formatCurrency(payment.balance, payment.currencyCode)} />
-                <PreviewField label="Moneda" value={payment.currencyCode ?? '—'} />
-                <PreviewField label="Referencia" value={payment.referenceNumber ?? '—'} />
-                <PreviewField label="Tipo de cambio" value={payment.exchangeRate ?? '—'} />
-                <PreviewField label="Cargos bancarios" value={payment.bankCharges ?? '—'} />
-              </div>
-
-              {payment.description && (
-                <div className="space-y-1">
-                  <p className="text-xs text-muted-foreground uppercase tracking-wide">Descripción</p>
-                  <p className="text-sm whitespace-pre-wrap">{payment.description}</p>
+              {/* Summary */}
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '1rem',
+                  padding: '0.75rem 1rem',
+                  background: 'var(--unik-surface)',
+                  borderRadius: 'var(--unik-radius-sm)',
+                  border: '1px solid var(--unik-border-subtle)',
+                  marginBottom: '1rem',
+                }}
+              >
+                <div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--unik-text-muted)', textTransform: 'uppercase', letterSpacing: '0.02em' }}>
+                    Monto
+                  </div>
+                  <div style={{ fontSize: '1.25rem', fontWeight: 700 }}>
+                    {formatCurrency(payment.amount, payment.currencyCode)}
+                  </div>
                 </div>
-              )}
+                <div style={{ textAlign: 'right' }}>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--unik-text-muted)', textTransform: 'uppercase', letterSpacing: '0.02em' }}>
+                    Saldo
+                  </div>
+                  <div style={{ fontSize: '1rem', fontWeight: 600 }}>
+                    {formatCurrency(payment.balance, payment.currencyCode)}
+                  </div>
+                </div>
+              </div>
 
-              <div className="space-y-1 border-t pt-3">
-                <p className="text-xs text-muted-foreground uppercase tracking-wide">Sincronización</p>
-                <p className="text-xs text-muted-foreground">
-                  Últ. modificación remota: {formatDateTime(payment.sourceRemoteModifiedAt)}
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  Últ. normalización: {formatDateTime(payment.normalizedAt)}
-                </p>
+              {/* Status strip */}
+              <div className="so-detail-section">
+                <h3 className="so-detail-section-title">Estado</h3>
+                <div className="so-status-strip">
+                  <StatusTile
+                    label="Pago"
+                    value={statusConfig?.label ?? '—'}
+                    tone={statusConfig?.tone ?? 'muted'}
+                  />
+                </div>
+              </div>
+
+              {/* General */}
+              <div className="so-detail-section">
+                <h3 className="so-detail-section-title">General</h3>
+                <div className="so-detail-grid">
+                  <Field label="Fecha" value={formatDateOnly(payment.date)} />
+                  <Field label="Cliente" value={payment.customerName} />
+                  <Field label="Modo de pago" value={payment.paymentMode} />
+                  <Field label="Referencia" value={payment.referenceNumber} />
+                  <Field label="Moneda" value={payment.currencyCode} />
+                  <Field label="Tipo de cambio" value={payment.exchangeRate} />
+                  <Field label="Cargos bancarios" value={payment.bankCharges ? formatCurrency(payment.bankCharges, payment.currencyCode) : null} />
+                </div>
+              </div>
+
+              {/* Totales */}
+              <div className="so-detail-section">
+                <h3 className="so-detail-section-title">Totales</h3>
+                <div className="so-detail-grid">
+                  <Field label="Monto" value={formatCurrency(payment.amount, payment.currencyCode)} highlighted />
+                  <Field label="Saldo" value={formatCurrency(payment.balance, payment.currencyCode)} highlighted />
+                </div>
+              </div>
+
+              {/* Descripción */}
+              {payment.description ? (
+                <div className="so-detail-section">
+                  <h3 className="so-detail-section-title">Descripción</h3>
+                  <p style={{ fontSize: '0.875rem', color: 'var(--unik-text-secondary)', whiteSpace: 'pre-wrap' }}>
+                    {payment.description}
+                  </p>
+                </div>
+              ) : null}
+
+              {/* Sync */}
+              <div className="so-detail-section">
+                <h3 className="so-detail-section-title">Sincronización</h3>
+                <div className="so-detail-grid">
+                  <Field label="Últ. modificación remota" value={formatDateTime(payment.sourceRemoteModifiedAt)} />
+                  <Field label="Normalizado" value={formatDateTime(payment.normalizedAt)} />
+                </div>
               </div>
             </>
-          )}
+          ) : null}
         </div>
+      </aside>
+    </>
+  );
+}
+
+function Field({
+  label,
+  value,
+  highlighted,
+}: {
+  label: string;
+  value: string | null;
+  highlighted?: boolean;
+}) {
+  return (
+    <div className="so-detail-field">
+      <span className="so-detail-field-label">{label}</span>
+      <span className="so-detail-field-value" style={highlighted ? { fontWeight: 700 } : undefined}>
+        {value ?? '—'}
+      </span>
+    </div>
+  );
+}
+
+function StatusTile({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: string;
+  tone: 'success' | 'info' | 'warning' | 'danger' | 'muted';
+}) {
+  return (
+    <div className="so-status-tile" title={`${label}: ${value}`}>
+      <span className={`so-status-dot so-status-dot-${tone}`} />
+      <div>
+        <div className="so-status-tile-label">{label}</div>
+        <div className="so-status-tile-value">{value}</div>
       </div>
     </div>
   );
-}
-
-function PreviewField({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="space-y-0.5">
-      <p className="text-xs text-muted-foreground">{label}</p>
-      <p className="text-sm font-medium truncate">{value}</p>
-    </div>
-  );
-}
-
-function statusBadgeClasses(tone: PaymentStatusConfig['tone']): string {
-  switch (tone) {
-    case 'success':
-      return 'bg-success/10 text-success';
-    case 'danger':
-      return 'bg-destructive/10 text-destructive';
-    case 'warning':
-      return 'bg-warning/10 text-warning';
-    case 'info':
-      return 'bg-info/10 text-info';
-    case 'muted':
-    default:
-      return 'bg-muted text-muted-foreground';
-  }
-}
-
-function statusDotClasses(tone: PaymentStatusConfig['tone']): string {
-  switch (tone) {
-    case 'success':
-      return 'bg-success';
-    case 'danger':
-      return 'bg-destructive';
-    case 'warning':
-      return 'bg-warning';
-    case 'info':
-      return 'bg-info';
-    case 'muted':
-    default:
-      return 'bg-muted-foreground';
-  }
 }

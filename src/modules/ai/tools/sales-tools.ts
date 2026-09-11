@@ -6,6 +6,21 @@ import {
   buildOrderDateWhereFlexible,
   dateRangeSchema,
 } from './date-helpers';
+import {
+  DELIVERY_TYPES,
+  resolveStatusQuery,
+  statusDistribution,
+  statusLabel,
+  valueDistribution,
+  type StatusDomain,
+} from './ai-filter-matching';
+import {
+  activeSalesOrderFilters,
+  applySalesOrderFilters,
+  interpretSalesOrderMatches,
+  perFilterMatchCounts,
+  type SalesOrderFilterArgs,
+} from './sales-order-ai-filters';
 
 /* ------------------------------------------------------------------ */
 /* Helpers                                                            */
@@ -38,134 +53,134 @@ function toNumber(value: unknown): number {
 /* Handles ANY combination of filters + grouping + item details       */
 /* ------------------------------------------------------------------ */
 const GROUP_BY_DIMENSIONS = [
-  'none', 'paymentMethod', 'deliveryMethod', 'status', 'subStatus', 'paidStatus',
-  'salesperson', 'location', 'customer', 'date', 'product',
+  'none', 'paymentMethod', 'deliveryMethod', 'status', 'subStatus', 'paidStatus', 'invoicedStatus',
+  'shippedStatus', 'salesperson', 'location', 'customer', 'date', 'product',
 ] as const;
+
+const MAX_ORDERS_SCANNED = 20000;
+const MAX_ORDERS_SCANNED_WITH_ITEMS = 5000;
+
+const SALES_ORDER_SCALAR_SELECT = {
+  id: true,
+  salesOrderNumber: true,
+  customerName: true,
+  customerPhone: true,
+  salespersonName: true,
+  status: true,
+  subStatus: true,
+  paidStatus: true,
+  invoicedStatus: true,
+  shippedStatus: true,
+  paymentMethod: true,
+  deliveryMethod: true,
+  locationName: true,
+  total: true,
+  balance: true,
+  orderDate: true,
+  referenceNumber: true,
+  shippingAttention: true,
+  shippingAddressLine1: true,
+  shippingAddressLine2: true,
+  shippingCity: true,
+  shippingState: true,
+  shippingPostalCode: true,
+  shippingPhone: true,
+  notes: true,
+  saleMadeInWarehouse: true,
+} as const;
+
+const SALES_ORDER_ITEM_SELECT = {
+  name: true,
+  sku: true,
+  quantity: true,
+  unit: true,
+  rate: true,
+  lineTotal: true,
+  description: true,
+} as const;
+
+/** SQL pre-filter for status queries that resolve to known raw values; keeps "all history" queries fast. */
+function buildSalesStatusWhere(args: SalesOrderFilterArgs): Record<string, unknown> {
+  const fields: Array<['status' | 'paidStatus' | 'invoicedStatus' | 'shippedStatus', StatusDomain]> = [
+    ['status', 'salesOrder'],
+    ['paidStatus', 'salesPaid'],
+    ['invoicedStatus', 'salesInvoiced'],
+    ['shippedStatus', 'salesShipped'],
+  ];
+  const and: Array<Record<string, unknown>> = [];
+  for (const [field, domain] of fields) {
+    const raws = resolveStatusQuery(domain, args[field]);
+    if (raws) and.push({ OR: raws.map((raw) => ({ [field]: { equals: raw, mode: 'insensitive' } })) });
+  }
+  return and.length > 0 ? { AND: and } : {};
+}
 
 registerTool({
   name: 'querySalesOrders',
   description:
-    'TOOL UNIVERSAL de ventas. Úsalo para CUALQUIER consulta de ventas, sola o combinada. ' +
-    'Soporta filtrar por fecha, método de pago, método de entrega, cliente, vendedor, estado general (status), sub-estado de entrega (subStatus), estado de pago (paidStatus), estado de facturación (invoicedStatus), sucursal, y producto. ' +
-    'Puede agrupar por cualquier dimensión. Puede incluir los items (productos) y direcciones de entrega. ' +
-    'ESTADOS: status="Confirmada", subStatus="Pendiente"/"Enviado", paidStatus="Pagada"/"Parcial"/"Pendiente". ' +
-    '"Pendiente de entrega" = subStatus="Pendiente", NO status="pending". ' +
-    '"No pagadas" = paidStatus="Pendiente" o paidStatus="Parcial". ' +
+    'TOOL UNIVERSAL de ventas (órdenes de venta). Úsalo para CUALQUIER consulta de ventas, por compuesta que sea: combina en UNA llamada todos los filtros que mencione el usuario. ' +
+    'Filtra por periodo, método de pago, método o tipo de entrega, lugar de entrega (estado/ciudad/colonia), cliente, vendedor, producto/material, estados de entrega/pago/facturación, sucursal, montos y saldo. ' +
+    'Agrupa por cualquier dimensión e incluye productos, direcciones, teléfonos y notas. ' +
+    'Los filtros de texto ignoran acentos y mayúsculas; los de estado aceptan español o inglés ("por entregar", "Pendiente", "con saldo", "sin facturar"). ' +
+    'Si no hay resultados devuelve "diagnostic" con qué filtro vació la consulta y cuántas coinciden fuera del periodo. ' +
     'EJEMPLOS: ' +
-    '"ventas de hoy en efectivo" → querySalesOrders(dateRange="today", paymentMethods=["EFECTIVO"]). ' +
-    '"ventas a pie de obra de hoy" → querySalesOrders(dateRange="today", deliveryMethod="A PIE DE OBRA"). ' +
-    '"ventas de efectivo y transferencia de ayer" → querySalesOrders(dateRange="yesterday", paymentMethods=["EFECTIVO","TRANSFERENCIA"]). ' +
-    '"ventas por método de entrega de hoy" → querySalesOrders(dateRange="today", groupBy="deliveryMethod"). ' +
-    '"ventas por vendedor de este mes" → querySalesOrders(dateRange="this_month", groupBy="salesperson"). ' +
-    '"ventas del producto silla de hoy" → querySalesOrders(dateRange="today", product="silla"). ' +
-    '"ventas de hoy con detalle de productos" → querySalesOrders(dateRange="today", includeItems=true). ' +
-    '"ventas de hoy en efectivo a pie de obra" → querySalesOrders(dateRange="today", paymentMethods=["EFECTIVO"], deliveryMethod="A PIE DE OBRA"). ' +
-    '"pendientes de entrega de hoy" → querySalesOrders(dateRange="today", shippedStatus="Pendiente"). ' +
-    '"no pagadas de hoy" → querySalesOrders(dateRange="today", paidStatus="Pendiente"). ' +
-    '"parcialmente pagadas de hoy" → querySalesOrders(dateRange="today", paidStatus="Parcial"). ' +
-    '"ventas por enviar de la semana" → querySalesOrders(dateRange="this_week", shippedStatus="Pendiente"). ' +
-    '"ventas no entregadas de ayer" → querySalesOrders(dateRange="yesterday", shippedStatus="Pendiente"). ' +
-    'ENTREGAS ABIERTAS (CRÍTICOS): ' +
-    '"entregas abiertas semana" → querySalesOrders(dateRange="this_week", shippedStatus="Pendiente", includeShippingAddress=true). ' +
-    '"entregas abiertas a pie de obra" → querySalesOrders(deliveryMethod="A PIE DE OBRA", shippedStatus="Pendiente", includeShippingAddress=true). ' +
-    '"entregas abiertas semana a pie de obra" → querySalesOrders(dateRange="this_week", deliveryMethod="A PIE DE OBRA", shippedStatus="Pendiente", includeShippingAddress=true, includeItems=true). ' +
-    '"venta no he entregado" → querySalesOrders(shippedStatus="Pendiente", includeShippingAddress=true). ' +
-    '"ordenes pendientes de entrega" → querySalesOrders(shippedStatus="Pendiente"). ' +
-    'NOTA: Para entregas SIEMPRE usa shippedStatus, NO subStatus. deliveryMethod = CÓMO se entrega ("A PIE DE OBRA"). shippedStatus = ESTADO de la entrega ("Pendiente" o "Enviado").',
+    '"pendientes de entregar de este mes a pie de obra" → (dateRange="this_month", deliveryType="pie_de_obra", shippedStatus="por entregar", includeShippingAddress=true). ' +
+    '"ventas que tengo que entregar a domicilio" → (dateRange="all", deliveryType="entrega_a_cliente", shippedStatus="por entregar", includeShippingAddress=true). ' +
+    '"ventas de agosto en efectivo de porcelanato con entrega en Jalisco" → (dateRange="custom", dateFrom="2026-08-01", dateTo="2026-08-31", paymentMethods=["EFECTIVO"], product="porcelanato", shippingLocation="Jalisco", includeItems=true, includeShippingAddress=true). ' +
+    '"quién me debe por vendedor" → (dateRange="all", paidStatus="con saldo", groupBy="salesperson"). ' +
+    '"ventas de hoy por método de pago" → (dateRange="today", groupBy="paymentMethod"). ' +
+    '"ventas de más de 100 mil sin facturar" → (dateRange="all", minTotal=100000, invoicedStatus="sin facturar").',
   category: 'sales',
   requiredPermission: 'sales_orders.view',
   enabledByDefault: true,
   parameters: z.object({
     dateRange: dateRangeSchema,
-    dateFrom: z.string().optional().describe('Fecha inicio YYYY-MM-DD. Para fechas específicas.'),
-    dateTo: z.string().optional().describe('Fecha fin YYYY-MM-DD.'),
-    // Payment filters
+    dateFrom: z.string().optional().describe('Fecha inicio YYYY-MM-DD (con dateRange="custom").'),
+    dateTo: z.string().optional().describe('Fecha fin YYYY-MM-DD (con dateRange="custom").'),
     paymentMethods: z.array(z.string()).optional().describe(
-      'Filtrar por métodos de pago EXACTOS (mayúsculas). Ej: ["EFECTIVO"], ["EFECTIVO","TRANSFERENCIA"], ["EFECTIVO EN BODEGA"]. ' +
-      'NUNCA incluyas "EFECTIVO EN BODEGA" si el usuario pide solo "efectivo".'
+      'Métodos de pago exactos (sin importar acentos/mayúsculas). Ej: ["EFECTIVO"], ["EFECTIVO","TRANSFERENCIA"], ["TARJETA"], ["DEPOSITO"], ["CREDITO"]. ' +
+      '"EFECTIVO EN BODEGA" y "EFECTIVO Y TARJETA" son métodos distintos de "EFECTIVO": inclúyelos solo si el usuario los pide.'
     ),
-    // Delivery filter
     deliveryMethod: z.string().optional().describe(
-      'Filtrar por método de entrega (búsqueda parcial, case-insensitive). Ej: "A PIE DE OBRA", "RECOGE EN BODEGA", "INSTALACIÓN".'
+      'Método de entrega por nombre (palabras parciales). Ej: "a pie de obra", "recoge en bodega", "instalacion". Para tipos genéricos ("a domicilio", "que recogen") usa deliveryType.'
     ),
-    // Other filters
-    customer: z.string().optional().describe('Filtrar por nombre del cliente (búsqueda parcial).'),
-    salesperson: z.string().optional().describe('Filtrar por vendedor (búsqueda parcial).'),
-    status: z.string().optional().describe(
-      'Filtrar por estado GENERAL de la orden (búsqueda parcial). ' +
-      'Valores típicos: "Confirmada", "Cerrada". ' +
-      'NO uses este filtro para "pendiente de entrega" o "no pagada" — usa subStatus o paidStatus.'
+    deliveryType: z.enum(DELIVERY_TYPES).optional().describe(
+      'Tipo de entrega inferido: "entrega_a_cliente" = todo lo que se lleva al cliente (a domicilio, a pie de obra, instalación, envío); "recoge_en_bodega" = el cliente recoge; "instalacion"; "pie_de_obra"; "domicilio".'
     ),
-    subStatus: z.string().optional().describe(
-      'Filtrar por sub-estado (búsqueda parcial). ' +
-      'Valores típicos: "confirmed", "closed", "draft", "void". ' +
-      'NO uses este filtro para "pendiente de entrega" — usa shippedStatus.'
+    shippingLocation: z.string().optional().describe(
+      'Lugar de entrega: estado, ciudad, colonia, calle o CP. Busca en toda la dirección de envío y entiende abreviaturas de estados (gto, jal, ags, qro, cdmx) y ciudades principales. Ej: "Jalisco", "León", "Lomas del Molino".'
     ),
+    customer: z.string().optional().describe('Cliente (nombre parcial).'),
+    salesperson: z.string().optional().describe('Vendedor (nombre parcial).'),
+    status: z.string().optional().describe('Estado GENERAL: "Confirmada", "Cerrada", "Borrador", "Anulada". No lo uses para entrega, pago o facturación.'),
+    subStatus: z.string().optional().describe('Sub-estado interno de Zoho. Casi nunca se necesita.'),
     paidStatus: z.string().optional().describe(
-      'Filtrar por estado de PAGO (búsqueda parcial). ' +
-      'Valores típicos: "Pagada", "Parcial", "Pendiente". ' +
-      'Úsalo cuando el usuario pregunte por "no pagadas", "con saldo", "pendientes de pago", "a crédito".'
+      'Estado de PAGO: "Pagada", "Parcial", "Pendiente", "sin pagar" (no pagadas), "con saldo" (sin pagar + parciales), "Vencida".'
     ),
-    invoicedStatus: z.string().optional().describe(
-      'Filtrar por estado de FACTURACIÓN (búsqueda parcial). ' +
-      'Valores típicos: "Facturada", "Pendiente".'
-    ),
+    invoicedStatus: z.string().optional().describe('Estado de FACTURACIÓN: "Facturada", "sin facturar", "Parcial".'),
     shippedStatus: z.string().optional().describe(
-      'Filtrar por estado de ENVÍO/ENTREGA (búsqueda parcial). ' +
-      'Valores típicos: "Pendiente" (pendiente de enviar), "Enviado" (ya enviado). ' +
-      'Úsalo cuando el usuario pregunte por "pendientes de entrega", "no enviados", "por enviar", "no entregados", "faltan por enviar".'
+      'Estado de ENTREGA: "por entregar" (Pendiente + No enviado + Parcial — úsalo para cualquier pregunta de pendientes de entrega), "Pendiente", "Parcial", "Enviado", "entregadas" (enviadas, entregadas o cumplidas).'
     ),
-    location: z.string().optional().describe('Filtrar por sucursal (búsqueda parcial). Ej: "Patio Unik".'),
-    product: z.string().optional().describe(
-      'Filtrar por nombre de producto (búsqueda parcial en los items de la orden). ' +
-      'Ej: "silla", "loseta", "cemento". Solo devuelve órdenes que contienen ese producto.'
-    ),
-    search: z.string().optional().describe('Búsqueda libre en número de orden, cliente, referencia.'),
-    // Grouping
+    location: z.string().optional().describe('Sucursal (nombre parcial). Ej: "Patio Unik".'),
+    product: z.string().optional().describe('Producto o material: nombre, SKU o descripción (palabras parciales). Solo devuelve órdenes que lo contienen.'),
+    minTotal: z.number().optional().describe('Total mínimo de la orden en MXN.'),
+    maxTotal: z.number().optional().describe('Total máximo de la orden en MXN.'),
+    hasBalance: z.boolean().optional().describe('true = solo órdenes con saldo por cobrar; false = solo saldadas.'),
+    saleMadeInWarehouse: z.boolean().optional().describe('true = ventas realizadas en almacén/bodega.'),
+    search: z.string().optional().describe('Búsqueda libre en folio, cliente, referencia, dirección, teléfono y notas.'),
     groupBy: z.enum(GROUP_BY_DIMENSIONS).default('none').describe(
-      'Agrupar resultados por una dimensión. ' +
-      '"none" = lista de órdenes individuales. ' +
-      '"paymentMethod" = agrupar por método de pago. ' +
-      '"deliveryMethod" = agrupar por método de entrega. ' +
-      '"salesperson" = agrupar por vendedor. ' +
-      '"location" = agrupar por sucursal. ' +
-      '"customer" = agrupar por cliente. ' +
-      '"status" = agrupar por estado general. ' +
-      '"subStatus" = agrupar por sub-estado de entrega. ' +
-      '"paidStatus" = agrupar por estado de pago. ' +
-      '"date" = agrupar por fecha. ' +
-      '"product" = agrupar por producto (requiere includeItems o product filter).'
+      'Agrupar: "none" (lista), "paymentMethod", "deliveryMethod", "salesperson", "location", "customer", "status", "paidStatus", "invoicedStatus", "shippedStatus", "date", "product" (suma cantidades por producto).'
     ),
-    // Output options
-    includeItems: z.boolean().default(false).describe(
-      'true = incluir los items (productos) de cada orden con nombre, cantidad, unidad y total. ' +
-      'Útil cuando el usuario pide "qué productos tiene cada venta" o "detalle de productos".'
-    ),
-    includeShippingAddress: z.boolean().default(false).describe(
-      'true = incluir la dirección de entrega de cada orden. ' +
-      'Útil cuando el usuario pide "dirección de entrega" o "dónde se entregó".'
-    ),
-    // Pagination
+    includeItems: z.boolean().default(false).describe('true = incluir productos de cada orden (nombre, cantidad, unidad, total).'),
+    includeShippingAddress: z.boolean().default(false).describe('true = incluir dirección de entrega, teléfono y notas de cada orden.'),
     page: z.number().int().min(1).default(1),
-    pageSize: z.number().int().min(1).max(100).default(50),
+    pageSize: z.number().int().min(1).max(200).default(50),
   }),
   execute: async (_actor, rawArgs) => {
-    const args = rawArgs as {
+    const args = rawArgs as SalesOrderFilterArgs & {
       dateRange: string;
       dateFrom?: string;
       dateTo?: string;
-      paymentMethods?: string[];
-      deliveryMethod?: string;
-      customer?: string;
-      salesperson?: string;
-      status?: string;
-      subStatus?: string;
-      paidStatus?: string;
-      invoicedStatus?: string;
-      shippedStatus?: string;
-      location?: string;
-      product?: string;
-      search?: string;
       groupBy: (typeof GROUP_BY_DIMENSIONS)[number];
       includeItems: boolean;
       includeShippingAddress: boolean;
@@ -174,236 +189,93 @@ registerTool({
     };
 
     const dateWhere = buildOrderDateWhereFlexible(args.dateRange, args.dateFrom, args.dateTo);
+    const hasDateFilter = Object.keys(dateWhere).length > 0;
+    const needItems = args.includeItems || Boolean(args.product) || args.groupBy === 'product';
+    const scanLimit = needItems ? MAX_ORDERS_SCANNED_WITH_ITEMS : MAX_ORDERS_SCANNED;
+    const statusWhere = buildSalesStatusWhere(args);
+    const activeFilters = activeSalesOrderFilters(args);
 
-    // Build the base where clause — only date goes in SQL, everything else in JS
-    const where: Record<string, unknown> = { ...dateWhere };
-
-    // Fetch orders with items if needed
-    const orders = await prisma.salesOrder.findMany({
-      where: where as never,
-      select: {
-        id: true,
-        salesOrderNumber: true,
-        customerName: true,
-        salespersonName: true,
-        status: true,
-        subStatus: true,
-        paidStatus: true,
-        invoicedStatus: true,
-        shippedStatus: true,
-        paymentMethod: true,
-        deliveryMethod: true,
-        locationName: true,
-        total: true,
-        balance: true,
-        orderDate: true,
-        referenceNumber: true,
-        shippingAddressLine1: true,
-        shippingAddressLine2: true,
-        shippingCity: true,
-        shippingState: true,
-        shippingPostalCode: true,
-        ...(args.includeItems || args.product || args.groupBy === 'product' ? {
-          items: {
-            select: {
-              name: true,
-              sku: true,
-              quantity: true,
-              unit: true,
-              rate: true,
-              lineTotal: true,
-              description: true,
-            },
-          },
-        } : {}),
-      },
-      orderBy: { orderDate: 'desc' },
-      take: 1000,
-    });
-
-    // Apply ALL filters in JavaScript for reliability
-    let filtered = orders;
-
-    // Payment methods filter (exact match, case-insensitive)
-    if (args.paymentMethods && args.paymentMethods.length > 0) {
-      const methods = args.paymentMethods.map((m) => m.toLowerCase());
-      filtered = filtered.filter((o) => {
-        const pm = o.paymentMethod?.toLowerCase() ?? '';
-        return methods.includes(pm);
+    const fetchOrders = (where: Record<string, unknown>) =>
+      prisma.salesOrder.findMany({
+        where: where as never,
+        select: {
+          ...SALES_ORDER_SCALAR_SELECT,
+          ...(needItems ? { items: { select: SALES_ORDER_ITEM_SELECT } } : {}),
+        },
+        orderBy: { orderDate: 'desc' },
+        take: scanLimit,
       });
-    }
 
-    // Delivery method filter (partial match, case-insensitive)
-    if (args.deliveryMethod) {
-      const dm = args.deliveryMethod.toLowerCase();
-      filtered = filtered.filter((o) => {
-        const odm = o.deliveryMethod?.toLowerCase() ?? '';
-        return odm.includes(dm);
-      });
-    }
+    const orders = await fetchOrders({ ...dateWhere, ...statusWhere });
+    const truncated = orders.length >= scanLimit;
+    const filtered = applySalesOrderFilters(orders, args);
 
-    // Customer filter (partial match)
-    if (args.customer) {
-      const c = args.customer.toLowerCase();
-      filtered = filtered.filter((o) =>
-        (o.customerName?.toLowerCase() ?? '').includes(c)
-      );
-    }
-
-    // Salesperson filter (partial match)
-    if (args.salesperson) {
-      const s = args.salesperson.toLowerCase();
-      filtered = filtered.filter((o) =>
-        (o.salespersonName?.toLowerCase() ?? '').includes(s)
-      );
-    }
-
-    // Status filter (partial match on status field)
-    if (args.status) {
-      const s = args.status.toLowerCase();
-      filtered = filtered.filter((o) =>
-        (o.status?.toLowerCase() ?? '').includes(s)
-      );
-    }
-
-    // SubStatus filter (partial match — for "pendiente de entrega", "enviado", etc.)
-    if (args.subStatus) {
-      const s = args.subStatus.toLowerCase();
-      filtered = filtered.filter((o) =>
-        (o.subStatus?.toLowerCase() ?? '').includes(s)
-      );
-    }
-
-    // PaidStatus filter (partial match — for "no pagadas", "con saldo", etc.)
-    if (args.paidStatus) {
-      const s = args.paidStatus.toLowerCase();
-      filtered = filtered.filter((o) =>
-        (o.paidStatus?.toLowerCase() ?? '').includes(s)
-      );
-    }
-
-    // InvoicedStatus filter (partial match — for "facturadas", "no facturadas", etc.)
-    if (args.invoicedStatus) {
-      const s = args.invoicedStatus.toLowerCase();
-      filtered = filtered.filter((o) =>
-        (o.invoicedStatus?.toLowerCase() ?? '').includes(s)
-      );
-    }
-
-    // ShippedStatus filter (partial match — for "pendiente de envío", "no enviados", etc.)
-    if (args.shippedStatus) {
-      const s = args.shippedStatus.toLowerCase();
-      filtered = filtered.filter((o) =>
-        (o.shippedStatus?.toLowerCase() ?? '').includes(s)
-      );
-    }
-
-    // Location filter (partial match)
-    if (args.location) {
-      const l = args.location.toLowerCase();
-      filtered = filtered.filter((o) =>
-        (o.locationName?.toLowerCase() ?? '').includes(l)
-      );
-    }
-
-    // Product filter (partial match on items)
-    if (args.product) {
-      const p = args.product.toLowerCase();
-      filtered = filtered.filter((o) => {
-        const items = (o as { items?: Array<{ name?: string }> }).items ?? [];
-        return items.some((item) => (item.name?.toLowerCase() ?? '').includes(p));
-      });
-    }
-
-    // Free text search
-    if (args.search) {
-      const s = args.search.toLowerCase();
-      filtered = filtered.filter((o) =>
-        (o.salesOrderNumber?.toLowerCase() ?? '').includes(s) ||
-        (o.customerName?.toLowerCase() ?? '').includes(s) ||
-        (o.referenceNumber?.toLowerCase() ?? '').includes(s)
-      );
-    }
-
-    // AUTO-DIAGNÓSTICO: Si hay 0 resultados Y se usó algún filtro de estado,
-    // hacer una consulta sin ese filtro para mostrar qué valores existen realmente.
-    // Esto evita que la IA afirme "no hay datos" cuando el filtro estaba mal.
-    const usedStatusFilter = !!(args.status || args.subStatus || args.paidStatus || args.invoicedStatus || args.shippedStatus);
+    // Zero results: say which filter emptied the result and whether matches exist outside the period.
     let diagnostic: Record<string, unknown> | null = null;
-    if (filtered.length === 0 && usedStatusFilter) {
-      // Consultar sin filtros de estado para ver qué valores existen
-      const ordersForDiagnosis = orders; // Ya tenemos todas las órdenes del rango de fechas
-      const uniqueStatuses = new Map<string, number>();
-      const uniqueSubStatuses = new Map<string, number>();
-      const uniquePaidStatuses = new Map<string, number>();
-      const uniqueInvoicedStatuses = new Map<string, number>();
-      const uniqueShippedStatuses = new Map<string, number>();
-      for (const o of ordersForDiagnosis) {
-        if (o.status) uniqueStatuses.set(o.status, (uniqueStatuses.get(o.status) ?? 0) + 1);
-        if (o.subStatus) uniqueSubStatuses.set(o.subStatus, (uniqueSubStatuses.get(o.subStatus) ?? 0) + 1);
-        if (o.paidStatus) uniquePaidStatuses.set(o.paidStatus, (uniquePaidStatuses.get(o.paidStatus) ?? 0) + 1);
-        if (o.invoicedStatus) uniqueInvoicedStatuses.set(o.invoicedStatus, (uniqueInvoicedStatuses.get(o.invoicedStatus) ?? 0) + 1);
-        if (o.shippedStatus) uniqueShippedStatuses.set(o.shippedStatus, (uniqueShippedStatuses.get(o.shippedStatus) ?? 0) + 1);
-      }
+    if (filtered.length === 0) {
+      const inRange = activeFilters.length > 0 ? await fetchOrders(dateWhere) : orders;
+      const allDates =
+        hasDateFilter && activeFilters.length > 0 ? applySalesOrderFilters(await fetchOrders(statusWhere), args) : null;
       diagnostic = {
-        message: 'La consulta con los filtros actuales devolvió 0 resultados. Aquí están los valores disponibles en el rango de fechas:',
-        totalOrdersInDateRange: ordersForDiagnosis.length,
-        availableStatuses: [...uniqueStatuses.entries()].map(([v, c]) => ({ value: v, count: c })),
-        availableSubStatuses: [...uniqueSubStatuses.entries()].map(([v, c]) => ({ value: v, count: c })),
-        availablePaidStatuses: [...uniquePaidStatuses.entries()].map(([v, c]) => ({ value: v, count: c })),
-        availableInvoicedStatuses: [...uniqueInvoicedStatuses.entries()].map(([v, c]) => ({ value: v, count: c })),
-        availableShippedStatuses: [...uniqueShippedStatuses.entries()].map(([v, c]) => ({ value: v, count: c })),
-        hint: 'Reintenta con un valor que SÍ exista en la lista anterior. NO digas "no hay datos" — reintenta con el valor correcto.',
+        message: 'La consulta devolvió 0 resultados. NO respondas "no hay" sin revisar este diagnóstico y reintentar.',
+        totalOrdersInDateRange: inRange.length,
+        matchesPerFilterInDateRange: perFilterMatchCounts(inRange, args),
+        ...(allDates
+          ? {
+              matchesWithSameFiltersAllDates: allDates.length,
+              examplesOutsideDateRange: allDates.slice(0, 5).map((o) => ({
+                number: o.salesOrderNumber,
+                date: formatDate(o.orderDate),
+                customer: o.customerName,
+              })),
+            }
+          : {}),
+        availableValuesInDateRange: {
+          shippedStatus: statusDistribution('salesShipped', inRange.map((o) => o.shippedStatus)),
+          paidStatus: statusDistribution('salesPaid', inRange.map((o) => o.paidStatus)),
+          invoicedStatus: statusDistribution('salesInvoiced', inRange.map((o) => o.invoicedStatus)),
+          status: statusDistribution('salesOrder', inRange.map((o) => o.status)),
+          deliveryMethod: valueDistribution(inRange.map((o) => o.deliveryMethod)),
+          paymentMethod: valueDistribution(inRange.map((o) => o.paymentMethod)),
+          salesperson: valueDistribution(inRange.map((o) => o.salespersonName)),
+        },
+        hint:
+          'El filtro con menos coincidencias en matchesPerFilterInDateRange es el que vació el resultado: corrige su valor con availableValuesInDateRange y reintenta. ' +
+          'Si matchesWithSameFiltersAllDates > 0 las órdenes existen fuera del periodo: si el usuario no pidió fecha usa dateRange="all"; si la pidió, díselo con el número.',
       };
     }
 
-    // Build the response based on groupBy
+    const common = {
+      dateFilter: { dateRange: args.dateRange, dateFrom: args.dateFrom ?? null, dateTo: args.dateTo ?? null },
+      filters: Object.fromEntries(activeFilters.map((k) => [k, args[k]])),
+      ...(filtered.length > 0 && activeFilters.length > 0 ? { interpretation: interpretSalesOrderMatches(filtered, args) } : {}),
+      ...(truncated
+        ? {
+            truncated: true,
+            truncatedNote: `Se revisaron solo las ${scanLimit} órdenes más recientes del periodo; acota el periodo para totales exactos.`,
+          }
+        : {}),
+      ...(diagnostic ? { diagnostic } : {}),
+    };
+    const totalRevenue = filtered.reduce((s, o) => s + toNumber(o.total), 0).toFixed(2);
+    const totalBalance = filtered.reduce((s, o) => s + toNumber(o.balance), 0).toFixed(2);
+
     if (args.groupBy === 'none') {
-      // Return individual orders (paginated)
-      const total = filtered.length;
-      const totalPages = Math.ceil(total / args.pageSize);
-      const paginated = filtered.slice(
-        (args.page - 1) * args.pageSize,
-        args.page * args.pageSize
-      );
-
-      const totalSum = filtered.reduce((s, o) => s + toNumber(o.total), 0);
-      const balanceSum = filtered.reduce((s, o) => s + toNumber(o.balance), 0);
-
+      const paginated = filtered.slice((args.page - 1) * args.pageSize, args.page * args.pageSize);
       return {
         mode: 'list',
-        total,
+        total: filtered.length,
+        showing: paginated.length,
         page: args.page,
         pageSize: args.pageSize,
-        totalPages,
-        totalSum: totalSum.toFixed(2),
-        balanceSum: balanceSum.toFixed(2),
-        dateFilter: {
-          dateRange: args.dateRange,
-          dateFrom: args.dateFrom ?? null,
-          dateTo: args.dateTo ?? null,
-        },
-        filters: {
-          paymentMethods: args.paymentMethods ?? null,
-          deliveryMethod: args.deliveryMethod ?? null,
-          customer: args.customer ?? null,
-          salesperson: args.salesperson ?? null,
-          status: args.status ?? null,
-          subStatus: args.subStatus ?? null,
-          paidStatus: args.paidStatus ?? null,
-          invoicedStatus: args.invoicedStatus ?? null,
-          shippedStatus: args.shippedStatus ?? null,
-          location: args.location ?? null,
-          product: args.product ?? null,
-          search: args.search ?? null,
-        },
-        ...(diagnostic ? { diagnostic } : {}),
+        totalPages: Math.ceil(filtered.length / args.pageSize),
+        totalSum: totalRevenue,
+        balanceSum: totalBalance,
+        ...common,
         orders: paginated.map((o) => formatOrder(o, args.includeItems, args.includeShippingAddress)),
       };
     }
 
-    // Group by dimension
-    // For product grouping, we track total quantity per product and addresses per order
     const groups = new Map<string, {
       count: number;
       total: number;
@@ -417,15 +289,16 @@ registerTool({
       let key = 'SIN DATO';
       if (args.groupBy === 'paymentMethod') key = o.paymentMethod ?? 'SIN MÉTODO DE PAGO';
       else if (args.groupBy === 'deliveryMethod') key = o.deliveryMethod ?? 'SIN MÉTODO DE ENTREGA';
-      else if (args.groupBy === 'status') key = o.status ?? 'SIN ESTADO';
+      else if (args.groupBy === 'status') key = statusLabel('salesOrder', o.status) ?? 'SIN ESTADO';
       else if (args.groupBy === 'subStatus') key = o.subStatus ?? 'SIN SUB-ESTADO';
-      else if (args.groupBy === 'paidStatus') key = o.paidStatus ?? 'SIN ESTADO DE PAGO';
+      else if (args.groupBy === 'paidStatus') key = statusLabel('salesPaid', o.paidStatus) ?? 'SIN ESTADO DE PAGO';
+      else if (args.groupBy === 'invoicedStatus') key = statusLabel('salesInvoiced', o.invoicedStatus) ?? 'SIN ESTADO DE FACTURACIÓN';
+      else if (args.groupBy === 'shippedStatus') key = statusLabel('salesShipped', o.shippedStatus) ?? 'SIN ESTADO DE ENTREGA';
       else if (args.groupBy === 'salesperson') key = o.salespersonName ?? 'SIN VENDEDOR';
       else if (args.groupBy === 'location') key = o.locationName ?? 'SIN SUCURSAL';
       else if (args.groupBy === 'customer') key = o.customerName ?? 'SIN CLIENTE';
       else if (args.groupBy === 'date') key = formatDate(o.orderDate) ?? 'SIN FECHA';
       else if (args.groupBy === 'product') {
-        // Group by product — each order's items expand into multiple groups
         const items = (o as { items?: Array<{ name?: string; quantity?: unknown; unit?: string; lineTotal?: unknown }> }).items ?? [];
         if (items.length === 0) {
           const g = groups.get('SIN PRODUCTOS') ?? { count: 0, total: 0, balance: 0, orders: [] as typeof filtered };
@@ -465,20 +338,24 @@ registerTool({
       groups.set(key, g);
     }
 
+    const includeGroupOrders = args.includeItems || args.includeShippingAddress || args.groupBy === 'product';
     const groupedResult = [...groups.entries()]
       .map(([key, g]) => ({
         key,
         count: g.count,
         total: g.total.toFixed(2),
         balance: g.balance.toFixed(2),
-        // For product grouping, include total quantity (m²) and unit
-        ...(args.groupBy === 'product' && g.totalQuantity !== undefined ? {
-          totalQuantity: g.totalQuantity.toFixed(2),
-          unit: g.unit ?? '',
-        } : {}),
-        ...(args.includeItems || args.groupBy === 'product' ? {
-          orders: g.orders.slice(0, 50).map((o) => formatOrder(o, args.includeItems || args.groupBy === 'product', args.includeShippingAddress)),
-        } : {}),
+        ...(args.groupBy === 'product' && g.totalQuantity !== undefined
+          ? { totalQuantity: g.totalQuantity.toFixed(2), unit: g.unit ?? '' }
+          : {}),
+        orderNumbers: g.orders.slice(0, 50).map((o) => o.salesOrderNumber),
+        ...(includeGroupOrders
+          ? {
+              orders: g.orders
+                .slice(0, 50)
+                .map((o) => formatOrder(o, args.includeItems || args.groupBy === 'product', args.includeShippingAddress)),
+            }
+          : {}),
       }))
       .sort((a, b) => Number(b.total) - Number(a.total));
 
@@ -487,33 +364,15 @@ registerTool({
       groupBy: args.groupBy,
       groupCount: groups.size,
       totalOrders: filtered.length,
-      totalRevenue: filtered.reduce((s, o) => s + toNumber(o.total), 0).toFixed(2),
-      totalBalance: filtered.reduce((s, o) => s + toNumber(o.balance), 0).toFixed(2),
-      dateFilter: {
-        dateRange: args.dateRange,
-        dateFrom: args.dateFrom ?? null,
-        dateTo: args.dateTo ?? null,
-      },
-      filters: {
-        paymentMethods: args.paymentMethods ?? null,
-        deliveryMethod: args.deliveryMethod ?? null,
-        customer: args.customer ?? null,
-        salesperson: args.salesperson ?? null,
-        status: args.status ?? null,
-        subStatus: args.subStatus ?? null,
-        paidStatus: args.paidStatus ?? null,
-        invoicedStatus: args.invoicedStatus ?? null,
-        location: args.location ?? null,
-        product: args.product ?? null,
-        search: args.search ?? null,
-      },
-      ...(diagnostic ? { diagnostic } : {}),
+      totalRevenue,
+      totalBalance,
+      ...common,
       groups: groupedResult,
     };
   },
 });
 
-/** Helper to format an order for the response. */
+/** Helper to format an order for the response (statuses in Spanish). */
 function formatOrder(
   o: Record<string, unknown>,
   includeItems: boolean,
@@ -521,19 +380,18 @@ function formatOrder(
 ): Record<string, unknown> {
   const result: Record<string, unknown> = {
     number: o.salesOrderNumber,
+    date: formatDate(o.orderDate as Date | null | undefined),
     customer: o.customerName,
     salesperson: o.salespersonName,
-    status: o.status,
-    subStatus: o.subStatus,
-    paidStatus: o.paidStatus,
-    invoicedStatus: o.invoicedStatus,
-    shippedStatus: o.shippedStatus,
+    status: statusLabel('salesOrder', o.status as string | null),
+    paidStatus: statusLabel('salesPaid', o.paidStatus as string | null),
+    invoicedStatus: statusLabel('salesInvoiced', o.invoicedStatus as string | null),
+    shippedStatus: statusLabel('salesShipped', o.shippedStatus as string | null),
     paymentMethod: o.paymentMethod,
     deliveryMethod: o.deliveryMethod,
     location: o.locationName,
     total: decimalToString(o.total),
     balance: decimalToString(o.balance),
-    date: formatDate(o.orderDate as Date | null | undefined),
   };
 
   if (includeItems) {
@@ -558,6 +416,8 @@ function formatOrder(
       o.shippingPostalCode,
     ].filter((p) => p !== null && p !== undefined && String(p).trim() !== '');
     result.shippingAddress = addrParts.length > 0 ? addrParts.join(', ') : null;
+    result.phone = o.shippingPhone ?? o.customerPhone ?? null;
+    if (o.notes) result.notes = String(o.notes).slice(0, 300);
   }
 
   return result;

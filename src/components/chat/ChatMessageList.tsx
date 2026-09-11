@@ -1,11 +1,9 @@
 'use client';
 
 import React, { useRef, useEffect, useMemo, useState, useCallback } from 'react';
-import { ArrowDown, AlertCircle, RefreshCw } from 'lucide-react';
+import { ArrowDown, AlertCircle, RefreshCw, MessageCircle } from 'lucide-react';
 import { ScrollArea } from '@/components/shadcn/scroll-area';
-import { Button } from '@/components/shadcn/button';
-import { Skeleton } from '@/components/shadcn/skeleton';
-import { cn } from '@/lib/utils';
+import { Button } from '@/components/ui/primitives';
 import type { ChatMessageDTO } from '@/modules/chat/chat-events';
 import { ChatMessage } from './ChatMessage';
 
@@ -32,6 +30,7 @@ export interface ChatMessageListProps {
   onRsvpEvent: (eventId: string, status: 'yes' | 'no' | 'maybe') => void;
   onOpenThread?: (threadId: string, rootMessage: ChatMessageDTO) => void;
   channelId: string;
+  isGroup?: boolean;
 }
 
 interface DateGroup {
@@ -55,7 +54,7 @@ export function ChatMessageList({
   messages, loading, error, hasMore, loadingMore, onLoadMore,
   currentUserId, onReply, onReaction, onRemoveReaction, onEdit, onDelete,
   onForward, onBookmark, onUnbookmark, onPin, onUnpin, onTranslate,
-  onVotePoll, onRsvpEvent, onOpenThread, channelId,
+  onVotePoll, onRsvpEvent, onOpenThread, channelId, isGroup = true,
 }: ChatMessageListProps) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -126,29 +125,31 @@ export function ChatMessageList({
 
   if (loading) {
     return (
-      <div className="flex flex-col gap-3 p-4">
-        <div className="flex gap-2 items-end">
-          <Skeleton className="size-8 rounded-full" />
-          <Skeleton className="h-12 w-48 rounded-lg" />
-        </div>
-        <div className="flex gap-2 items-end justify-end">
-          <Skeleton className="h-12 w-40 rounded-lg" />
-        </div>
-        <div className="flex gap-2 items-end">
-          <Skeleton className="size-8 rounded-full" />
-          <Skeleton className="h-16 w-56 rounded-lg" />
-        </div>
+      <div className="chat-skel-list" aria-busy="true" aria-label="Cargando mensajes">
+        <div className="chat-skel left" style={{ width: '38%' }} />
+        <div className="chat-skel left tall" style={{ width: '56%' }} />
+        <div className="chat-skel right" style={{ width: '32%' }} />
+        <div className="chat-skel left" style={{ width: '44%' }} />
+        <div className="chat-skel right tall" style={{ width: '50%' }} />
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="flex flex-col items-center justify-center gap-3 p-8 text-center">
-        <AlertCircle size={32} className="text-destructive" />
-        <div className="text-sm text-destructive">{error}</div>
-        <Button variant="outline" size="sm" onClick={onLoadMore}>
-          <RefreshCw size={16} /> Reintentar
+      <div className="chat-messages-state error" role="alert">
+        <div className="chat-messages-state-icon">
+          <AlertCircle size={24} />
+        </div>
+        <div className="chat-messages-state-title">{error}</div>
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          onClick={onLoadMore}
+          icon={<RefreshCw size={14} />}
+        >
+          Reintentar
         </Button>
       </div>
     );
@@ -156,31 +157,32 @@ export function ChatMessageList({
 
   if (messages.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center gap-2 p-8 text-center">
-        <div className="text-base font-medium text-foreground">No hay mensajes aún</div>
-        <div className="text-sm text-muted-foreground">Escribe el primer mensaje</div>
+      <div className="chat-messages-state">
+        <div className="chat-messages-state-icon">
+          <MessageCircle size={24} />
+        </div>
+        <div className="chat-messages-state-title">No hay mensajes aún</div>
+        <div className="chat-messages-state-text">Escribe el primer mensaje</div>
       </div>
     );
   }
 
   return (
-    <div className="relative flex-1 min-h-0">
+    <div className="chat-message-scroller relative flex-1 min-h-0">
       <ScrollArea
         className="h-full"
         onScroll={handleScroll}
       >
-        <div ref={viewportRef} className="min-h-full">
+        <div ref={viewportRef} className="chat-thread min-h-full">
           {hasMore && (
-            <div className="py-2 text-center text-xs text-muted-foreground">
+            <div className="chat-load-more">
               {loadingMore ? 'Cargando...' : 'Desliza hacia arriba para ver más'}
             </div>
           )}
           {grouped.map((group, gi) => (
-            <div key={gi} className="flex flex-col gap-1 px-3 py-1">
-              <div className="flex justify-center py-2">
-                <span className="inline-flex items-center rounded-full bg-muted px-3 py-1 text-xs font-medium text-muted-foreground">
-                  {formatDateLabel(group.date)}
-                </span>
+            <div key={gi} className="chat-date-group">
+              <div className="chat-date-separator">
+                <span>{formatDateLabel(group.date)}</span>
               </div>
               {group.messages.map((msg, mi) => {
                 const prevMsg = mi > 0 ? group.messages[mi - 1] : null;
@@ -212,6 +214,7 @@ export function ChatMessageList({
                     onOpenThread={onOpenThread}
                     channelId={channelId}
                     currentUserId={currentUserId}
+                    isGroup={isGroup}
                   />
                 );
               })}
@@ -222,18 +225,14 @@ export function ChatMessageList({
       </ScrollArea>
 
       {showScrollBtn && (
-        <Button
-          variant="outline"
-          size="icon"
-          className={cn(
-            'absolute bottom-4 right-4 z-10 size-10 rounded-full shadow-lg',
-            'bg-background border-border hover:bg-accent'
-          )}
+        <button
+          type="button"
+          className="chat-scroll-bottom"
           onClick={() => scrollToBottom('smooth')}
           aria-label="Ir al final"
         >
           <ArrowDown size={18} />
-        </Button>
+        </button>
       )}
     </div>
   );

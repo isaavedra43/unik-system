@@ -276,6 +276,25 @@ export async function saveSignal(
   signalType: 'offer' | 'answer' | 'ice',
   signal: string
 ): Promise<void> {
+  // Verify the call exists and both sender and recipient are participants
+  const call = await prisma.internalChatCall.findUnique({
+    where: { id: callId },
+    include: CALL_INCLUDE,
+  });
+  if (!call) throw new ChatCallError('Llamada no encontrada');
+
+  const isCaller = call.callerId === fromUserId;
+  const isFromParticipant = call.participants.some((p) => p.userId === fromUserId);
+  if (!isCaller && !isFromParticipant) {
+    throw new AuthorizationError('No eres participante de esta llamada');
+  }
+
+  const isToCaller = call.callerId === toUserId;
+  const isToParticipant = call.participants.some((p) => p.userId === toUserId);
+  if (!isToCaller && !isToParticipant) {
+    throw new AuthorizationError('El destinatario no es participante de esta llamada');
+  }
+
   await prisma.internalChatCallSignal.create({
     data: { callId, fromUserId, toUserId, signalType, signal },
   });
@@ -322,6 +341,29 @@ export async function getPendingSignals(
     signal: s.signal,
     createdAt: s.createdAt.toISOString(),
   }));
+}
+
+// =====================================================
+// Get incoming calls for a user (ringing calls where user is a participant)
+// =====================================================
+
+export async function getIncomingCalls(userId: string): Promise<ChatCallDTO[]> {
+  const calls = await prisma.internalChatCall.findMany({
+    where: {
+      status: 'ringing',
+      participants: {
+        some: {
+          userId,
+          acceptedAt: null,
+          declinedAt: null,
+        },
+      },
+      callerId: { not: userId },
+    },
+    include: CALL_INCLUDE,
+    orderBy: { createdAt: 'desc' },
+  });
+  return Promise.all(calls.map(toCallDTO));
 }
 
 // =====================================================

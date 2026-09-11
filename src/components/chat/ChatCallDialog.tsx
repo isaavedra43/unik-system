@@ -58,9 +58,11 @@ export function ChatCallDialog({
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
   const durationTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const signalPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const callStatusPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const calleeUserIdRef = useRef<string | null>(null);
   const callerUserIdRef = useRef<string | null>(null);
   const remoteDescriptionSetRef = useRef(false);
+  const pendingIceCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
 
   const cleanup = useCallback(() => {
     if (durationTimerRef.current) {
@@ -70,6 +72,10 @@ export function ChatCallDialog({
     if (signalPollRef.current) {
       clearInterval(signalPollRef.current);
       signalPollRef.current = null;
+    }
+    if (callStatusPollRef.current) {
+      clearInterval(callStatusPollRef.current);
+      callStatusPollRef.current = null;
     }
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach((t) => t.stop());
@@ -127,6 +133,16 @@ export function ChatCallDialog({
               await pcRef.current.setRemoteDescription(new RTCSessionDescription(signalData));
               remoteDescriptionSetRef.current = true;
 
+              // Process any buffered ICE candidates
+              for (const candidate of pendingIceCandidatesRef.current) {
+                try {
+                  await pcRef.current.addIceCandidate(new RTCIceCandidate(candidate));
+                } catch {
+                  // ignore duplicate/invalid candidates
+                }
+              }
+              pendingIceCandidatesRef.current = [];
+
               // Create and send answer
               const answer = await pcRef.current.createAnswer();
               await pcRef.current.setLocalDescription(answer);
@@ -141,6 +157,16 @@ export function ChatCallDialog({
             if (!remoteDescriptionSetRef.current && pcRef.current.signalingState === 'have-local-offer') {
               await pcRef.current.setRemoteDescription(new RTCSessionDescription(signalData));
               remoteDescriptionSetRef.current = true;
+
+              // Process any buffered ICE candidates
+              for (const candidate of pendingIceCandidatesRef.current) {
+                try {
+                  await pcRef.current.addIceCandidate(new RTCIceCandidate(candidate));
+                } catch {
+                  // ignore duplicate/invalid candidates
+                }
+              }
+              pendingIceCandidatesRef.current = [];
             }
           } else if (sig.signalType === 'ice' && signalData) {
             // Both sides receive ICE candidates
@@ -150,6 +176,9 @@ export function ChatCallDialog({
               } catch {
                 // ignore duplicate/invalid candidates
               }
+            } else {
+              // Buffer ICE candidates until remote description is set
+              pendingIceCandidatesRef.current.push(signalData);
             }
           }
         } catch {
@@ -160,6 +189,33 @@ export function ChatCallDialog({
       // silent
     }
   }, [role, sendSignal]);
+
+  // =====================================================
+  // Poll call status (detect when the other party hangs up)
+  // =====================================================
+
+  const pollCallStatus = useCallback(async (callId: string) => {
+    try {
+      const res = await fetch(`/app/chat/api/calls/${callId}/status`);
+      if (!res.ok) return;
+      const data = await res.json();
+      const call: ChatCallDTO | undefined = data.data;
+
+      if (!call) return;
+
+      // If the call has ended/missed/declined, close the dialog
+      if (call.status === 'ended' || call.status === 'missed' || call.status === 'declined') {
+        cleanup();
+        setCallState((prev) => ({
+          ...prev,
+          status: call.status === 'declined' ? 'declined' : 'ended',
+        }));
+        setTimeout(onClose, 800);
+      }
+    } catch {
+      // silent
+    }
+  }, [cleanup, onClose]);
 
   // =====================================================
   // Create RTCPeerConnection and setup handlers
@@ -257,24 +313,32 @@ export function ChatCallDialog({
         localVideoRef.current.srcObject = localStream;
       }
 
-      // Initiate call via API
-      const res = await fetch('/app/chat/api/calls', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          channelId,
-          type,
-          participantIds: participants.map((p) => p.userId),
-        }),
-      });
+      // Use existing call data if the call was already created by the parent
+      // (ChatConversation.startCall already called the API). Only create a
+      // new call if we don't have one yet.
+      let callId: string;
+      if (callData?.id) {
+        callId = callData.id;
+      } else {
+        const res = await fetch('/app/chat/api/calls', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            channelId,
+            type,
+            participantIds: participants.map((p) => p.userId),
+          }),
+        });
 
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || 'Error al iniciar la llamada');
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.error || 'Error al iniciar la llamada');
+        }
+
+        const data = await res.json();
+        callId = data.data.id;
       }
 
-      const data = await res.json();
-      const callId: string = data.data.id;
       const calleeUserId = participants[0]?.userId;
       calleeUserIdRef.current = calleeUserId ?? null;
 
@@ -296,7 +360,10 @@ export function ChatCallDialog({
       }
 
       // Start polling for signals (answer + ice from callee)
-      signalPollRef.current = setInterval(() => pollSignals(callId), 500);
+      signalPollRef.current = setInterval(() => pollSignals(callId), 300);
+
+      // Start polling for call status (detect when callee accepts/declines/ends)
+      callStatusPollRef.current = setInterval(() => pollCallStatus(callId), 1000);
     } catch (err) {
       setCallState((prev) => ({
         ...prev,
@@ -304,7 +371,7 @@ export function ChatCallDialog({
         error: err instanceof Error ? err.message : 'Error desconocido',
       }));
     }
-  }, [channelId, type, participants, createPeerConnection, sendSignal, pollSignals]);
+  }, [channelId, type, participants, callData, createPeerConnection, sendSignal, pollSignals, pollCallStatus]);
 
   // =====================================================
   // CALLEE: join existing call
@@ -341,7 +408,10 @@ export function ChatCallDialog({
 
       // Start polling for signals (offer + ice from caller)
       // The offer should arrive shortly from the caller
-      signalPollRef.current = setInterval(() => pollSignals(callId), 500);
+      signalPollRef.current = setInterval(() => pollSignals(callId), 300);
+
+      // Start polling for call status (detect when caller hangs up)
+      callStatusPollRef.current = setInterval(() => pollCallStatus(callId), 1000);
     } catch (err) {
       setCallState((prev) => ({
         ...prev,
@@ -349,7 +419,7 @@ export function ChatCallDialog({
         error: err instanceof Error ? err.message : 'Error desconocido',
       }));
     }
-  }, [callData, createPeerConnection, pollSignals]);
+  }, [callData, createPeerConnection, pollSignals, pollCallStatus]);
 
   // =====================================================
   // Start call on mount

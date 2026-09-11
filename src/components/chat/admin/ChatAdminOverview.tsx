@@ -16,20 +16,28 @@ import { ChatAdminStatCard } from './ChatAdminStatCard';
 interface StatsData {
   stats: {
     totalChannels: number;
+    totalDmChannels: number;
+    totalGroupChannels: number;
     totalMessages: number;
-    messages24h: number;
+    totalAttachments: number;
     activeUsers24h: number;
-    polls: number;
-    events: number;
+    activeUsers7d: number;
+    messages24h: number;
+    messages7d: number;
+    messages30d: number;
+    totalPolls: number;
+    totalEvents: number;
+    totalMentions: number;
     unreadMentions: number;
     activeAlerts: number;
   };
-  byDay: Array<{ date: string; messages: number }>;
+  activity: Array<{ date: string; messages: number }>;
   topUsers: Array<{
     userId: string;
     userName: string;
     messageCount: number;
-    channelCount: number;
+    attachmentCount: number;
+    lastActivity: string | null;
   }>;
 }
 
@@ -59,7 +67,7 @@ export function ChatAdminOverview() {
   if (!data) return <div className="chat-admin-error">No se pudieron cargar las estadísticas</div>;
 
   const s = data.stats;
-  const maxMessages = Math.max(...data.byDay.map((d) => d.messages), 1);
+  const maxMessages = Math.max(...data.activity.map((d) => d.messages), 1);
 
   return (
     <div className="chat-admin-overview">
@@ -86,12 +94,12 @@ export function ChatAdminOverview() {
         />
         <ChatAdminStatCard
           label="Encuestas"
-          value={s.polls.toLocaleString('es-MX')}
+          value={s.totalPolls.toLocaleString('es-MX')}
           icon={<BarChart3 size={20} />}
         />
         <ChatAdminStatCard
           label="Eventos"
-          value={s.events.toLocaleString('es-MX')}
+          value={s.totalEvents.toLocaleString('es-MX')}
           icon={<Calendar size={20} />}
         />
         <ChatAdminStatCard
@@ -111,8 +119,8 @@ export function ChatAdminOverview() {
       <div className="chat-admin-section">
         <h3 className="chat-admin-section-title">Mensajes por día (30 días)</h3>
         <div className="chat-admin-chart">
-          {data.byDay.length === 0 && <div className="chat-admin-empty">Sin datos</div>}
-          {data.byDay.map((d) => (
+          {data.activity.length === 0 && <div className="chat-admin-empty">Sin datos</div>}
+          {data.activity.map((d) => (
             <div
               key={d.date}
               className="chat-admin-chart-bar"
@@ -135,7 +143,7 @@ export function ChatAdminOverview() {
             <div key={u.userId} className="chat-admin-list-item">
               <span className="chat-admin-list-name">{u.userName}</span>
               <span className="chat-admin-list-count">{u.messageCount} msgs</span>
-              <span className="chat-admin-list-meta">{u.channelCount} canales</span>
+              <span className="chat-admin-list-meta">{u.attachmentCount} adjuntos</span>
             </div>
           ))}
         </div>

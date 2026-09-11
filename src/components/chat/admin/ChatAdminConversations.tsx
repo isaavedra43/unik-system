@@ -1,23 +1,26 @@
 'use client';
 
 import React, { useEffect, useState, useCallback } from 'react';
-import { ArrowLeft, MessageSquare } from 'lucide-react';
+import { ArrowLeft, MessageSquare, Download } from 'lucide-react';
 
 interface Channel {
   id: string;
   type: string;
-  name: string;
-  members: number;
-  messages: number;
-  lastMessage: string | null;
-  lastMessageAt: string | null;
+  name: string | null;
+  createdBy: string;
+  memberCount: number;
+  messageCount: number;
+  lastMessageAt: string;
+  createdAt: string;
 }
 
 interface Message {
   id: string;
-  sender: string;
-  content: string;
+  senderId: string;
+  senderName: string;
+  content: string | null;
   createdAt: string;
+  deletedAt: string | null;
 }
 
 export function ChatAdminConversations() {
@@ -78,6 +81,11 @@ export function ChatAdminConversations() {
     setMessages([]);
   };
 
+  const handleExport = (format: 'csv' | 'json') => {
+    if (!selectedChannel) return;
+    window.open(`/app/admin/chat/api/conversations/${selectedChannel.id}/export?format=${format}`, '_blank');
+  };
+
   if (loading) return <div className="chat-admin-loading">Cargando…</div>;
   if (error) return <div className="chat-admin-error">{error}</div>;
 
@@ -88,10 +96,20 @@ export function ChatAdminConversations() {
           <ArrowLeft size={16} />
           Volver a conversaciones
         </button>
-        <h3 className="chat-admin-section-title">
-          #{selectedChannel.name}{' '}
-          <span className="chat-admin-channel-type">({selectedChannel.type})</span>
-        </h3>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap' }}>
+          <h3 className="chat-admin-section-title">
+            #{selectedChannel.name ?? 'sin-nombre'}{' '}
+            <span className="chat-admin-channel-type">({selectedChannel.type})</span>
+          </h3>
+          <div style={{ display: 'flex', gap: '0.5rem' }}>
+            <button type="button" className="chat-admin-btn-secondary chat-admin-btn-sm" onClick={() => handleExport('csv')}>
+              <Download size={14} /> CSV
+            </button>
+            <button type="button" className="chat-admin-btn-secondary chat-admin-btn-sm" onClick={() => handleExport('json')}>
+              <Download size={14} /> JSON
+            </button>
+          </div>
+        </div>
         {messagesLoading && <div className="chat-admin-loading">Cargando mensajes…</div>}
         {messagesError && <div className="chat-admin-error">{messagesError}</div>}
         {!messagesLoading && !messagesError && (
@@ -99,8 +117,10 @@ export function ChatAdminConversations() {
             {messages.length === 0 && <div className="chat-admin-empty">Sin mensajes</div>}
             {messages.map((m) => (
               <div key={m.id} className="chat-admin-message-item">
-                <div className="chat-admin-message-sender">{m.sender}</div>
-                <div className="chat-admin-message-content">{m.content}</div>
+                <div className="chat-admin-message-sender">{m.senderName}</div>
+                <div className="chat-admin-message-content">
+                  {m.deletedAt ? <em style={{ color: 'var(--unik-text-muted)' }}>[eliminado]</em> : (m.content ?? '—')}
+                </div>
                 <div className="chat-admin-message-date">
                   {new Date(m.createdAt).toLocaleString('es-MX')}
                 </div>
@@ -140,15 +160,11 @@ export function ChatAdminConversations() {
             >
               <td>{c.type}</td>
               <td>
-                <MessageSquare size={14} /> {c.name}
+                <MessageSquare size={14} /> {c.name ?? '—'}
               </td>
-              <td>{c.members}</td>
-              <td>{c.messages.toLocaleString('es-MX')}</td>
-              <td>
-                {c.lastMessage
-                  ? new Date(c.lastMessageAt ?? c.lastMessage).toLocaleString('es-MX')
-                  : '—'}
-              </td>
+              <td>{c.memberCount}</td>
+              <td>{c.messageCount.toLocaleString('es-MX')}</td>
+              <td>{new Date(c.lastMessageAt).toLocaleString('es-MX')}</td>
             </tr>
           ))}
         </tbody>

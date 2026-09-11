@@ -10,11 +10,14 @@ export interface ChatAdminAlertsProps {
 interface Alert {
   id: string;
   type: string;
-  severity: 'high' | 'medium' | 'low';
-  user: string;
-  channel: string;
+  severity: string;
+  userId: string | null;
+  channelId: string | null;
+  messageId: string | null;
+  metadata: { keyword?: string; preview?: string; links?: string[]; emails?: string[]; hour?: number; count?: number; window?: string } | null;
+  resolvedAt: string | null;
+  resolvedBy: string | null;
   createdAt: string;
-  resolved: boolean;
 }
 
 export function ChatAdminAlerts({ canManage }: ChatAdminAlertsProps) {
@@ -56,7 +59,7 @@ export function ChatAdminAlerts({ canManage }: ChatAdminAlertsProps) {
         body: JSON.stringify({ alertId }),
       });
       if (res.ok) {
-        setAlerts((prev) => prev.map((a) => (a.id === alertId ? { ...a, resolved: true } : a)));
+        setAlerts((prev) => prev.map((a) => (a.id === alertId ? { ...a, resolvedAt: new Date().toISOString() } : a)));
       }
     } catch {
       // ignore
@@ -67,8 +70,8 @@ export function ChatAdminAlerts({ canManage }: ChatAdminAlertsProps) {
 
   const filtered = alerts.filter((a) => {
     if (filter === 'all') return true;
-    if (filter === 'resolved') return a.resolved;
-    return !a.resolved;
+    if (filter === 'resolved') return a.resolvedAt !== null;
+    return a.resolvedAt === null;
   });
 
   if (loading) return <div className="chat-admin-loading">Cargando…</div>;
@@ -105,7 +108,7 @@ export function ChatAdminAlerts({ canManage }: ChatAdminAlertsProps) {
         {filtered.map((a) => (
           <div
             key={a.id}
-            className={`chat-admin-alert chat-admin-alert-${a.severity} ${a.resolved ? 'resolved' : ''}`}
+            className={`chat-admin-alert chat-admin-alert-${a.severity} ${a.resolvedAt ? 'resolved' : ''}`}
           >
             <div className="chat-admin-alert-icon">
               <AlertTriangle size={18} />
@@ -113,13 +116,13 @@ export function ChatAdminAlerts({ canManage }: ChatAdminAlertsProps) {
             <div className="chat-admin-alert-body">
               <div className="chat-admin-alert-type">{a.type}</div>
               <div className="chat-admin-alert-meta">
-                <span>{a.user}</span>
-                <span>#{a.channel}</span>
+                <span>{a.userId ?? '—'}</span>
+                <span>#{a.channelId ?? '—'}</span>
                 <span>{new Date(a.createdAt).toLocaleString('es-MX')}</span>
               </div>
             </div>
             <div className="chat-admin-alert-actions">
-              {a.resolved ? (
+              {a.resolvedAt ? (
                 <span className="chat-admin-alert-resolved">
                   <CheckCircle size={16} /> Resuelta
                 </span>

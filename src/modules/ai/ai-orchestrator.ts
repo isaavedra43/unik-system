@@ -42,67 +42,6 @@ interface OrchestratorEvent {
   data?: unknown;
 }
 
-/**
- * Auto-corrección: Si una tool devuelve 0 resultados + diagnostic,
- * sugiere parámetros corregidos basado en la pregunta del usuario.
- */
-function suggestCorrectedParams(
-  toolResult: Record<string, unknown>,
-  userMessage: string,
-  originalParams: Record<string, unknown>
-): Record<string, unknown> | null {
-  const diagnostic = toolResult.diagnostic as Record<string, unknown> | undefined;
-  if (!diagnostic) return null;
-  const msg = userMessage.toLowerCase();
-  const corrected = { ...originalParams };
-  let madeChanges = false;
-
-  // Caso 1: Si preguntó por entregas pero no usó shippedStatus
-  const hasShippedStatuses = Boolean(diagnostic.availableShippedStatuses);
-  if (!corrected.shippedStatus && hasShippedStatuses) {
-    if (
-      msg.includes('entrega') ||
-      msg.includes('enviar') ||
-      msg.includes('abierto') ||
-      msg.includes('pendiente') ||
-      msg.includes('por enviar') ||
-      msg.includes('no entregado') ||
-      msg.includes('faltan')
-    ) {
-      // El usuario probablemente busca órdenes pendientes de envío
-      corrected.shippedStatus = 'Pendiente';
-      madeChanges = true;
-    }
-  }
-
-  // Caso 2: Si preguntó por pagos pero no usó paidStatus
-  const hasPaidStatuses = Boolean(diagnostic.availablePaidStatuses);
-  if (!corrected.paidStatus && hasPaidStatuses) {
-    if (
-      msg.includes('cobr') ||
-      msg.includes('pago') ||
-      msg.includes('deuda') ||
-      msg.includes('me deben') ||
-      msg.includes('saldo') ||
-      msg.includes('sin pagar')
-    ) {
-      corrected.paidStatus = 'Pendiente';
-      madeChanges = true;
-    }
-  }
-
-  // Caso 3: Si preguntó por facturación pero no usó invoicedStatus
-  const hasInvoicedStatuses = Boolean(diagnostic.availableInvoicedStatuses);
-  if (!corrected.invoicedStatus && hasInvoicedStatuses) {
-    if (msg.includes('factur')) {
-      corrected.invoicedStatus = 'Pendiente';
-      madeChanges = true;
-    }
-  }
-
-  return madeChanges ? corrected : null;
-}
-
 export async function* runAssistant(
   input: OrchestratorInput
 ): AsyncGenerator<OrchestratorEvent> {
@@ -697,35 +636,7 @@ export async function* runAssistant(
         }
       }
 
-      let result = await executeTool(tc.name, input.actor, parsedArgs);
-
-      // AUTO-CORRECCIÓN: Si 0 resultados + diagnostic, reintenta automáticamente
-      const toolResultObj = result.result as Record<string, unknown> | undefined;
-      const orders = toolResultObj?.orders as unknown[] | undefined;
-      if (
-        result.success &&
-        toolResultObj &&
-        typeof toolResultObj === 'object' &&
-        orders?.length === 0 &&
-        toolResultObj.diagnostic
-      ) {
-        const correctedParams = suggestCorrectedParams(
-          toolResultObj,
-          input.message,
-          (parsedArgs as Record<string, unknown>) || {}
-        );
-
-        if (correctedParams) {
-          // Silenciosamente reintenta con los parámetros corregidos
-          const retryResult = await executeTool(tc.name, input.actor, correctedParams);
-          // Si ahora hay resultados, usa el reintentado
-          const retryResultObj = retryResult.result as Record<string, unknown> | undefined;
-          const retryOrders = retryResultObj?.orders as unknown[] | undefined;
-          if (retryResult.success && retryOrders && retryOrders.length > 0) {
-            result = retryResult;
-          }
-        }
-      }
+      const result = await executeTool(tc.name, input.actor, parsedArgs);
 
       // Track the last data tool result for auto-injection into artifact tools
       if (result.success && result.result && typeof result.result === 'object' && !ARTIFACT_TOOLS.has(tc.name)) {

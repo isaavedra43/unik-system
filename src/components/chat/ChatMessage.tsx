@@ -57,6 +57,7 @@ export interface ChatMessageProps {
   onOpenThread?: (threadId: string, rootMessage: ChatMessageDTO) => void;
   channelId: string;
   currentUserId: string;
+  isGroup?: boolean;
 }
 
 function formatTime(iso: string): string {
@@ -99,6 +100,7 @@ export function ChatMessage({
   onOpenThread,
   channelId,
   currentUserId,
+  isGroup = true,
 }: ChatMessageProps) {
   const [showActions, setShowActions] = useState(false);
   const [showMoreActions, setShowMoreActions] = useState(false);
@@ -149,21 +151,72 @@ export function ChatMessage({
   const canEdit = isOwn && !isDeleted && !message.attachments.length;
   const canDelete = isOwn;
 
+  const hasBody =
+    !!message.content?.trim() ||
+    message.attachments.length > 0 ||
+    !!message.location ||
+    !!message.poll ||
+    !!message.event;
+  const isMediaOnly =
+    !message.content &&
+    message.attachments.length > 0 &&
+    message.attachments.every(
+      (a) => a.mimeType.startsWith('image/') || a.mimeType.startsWith('video/')
+    );
+  const hasRichBlock = !!message.location || !!message.poll || !!message.event;
+
+  const meta = (
+    <div className="chat-msg-meta">
+      {message.threadId && onOpenThread && (
+        <button
+          type="button"
+          className="chat-msg-thread-btn"
+          onClick={() => onOpenThread(message.threadId!, message)}
+          aria-label="Ver hilo"
+          title="Ver hilo"
+        >
+          <MessageSquareText size={12} /> Hilo
+        </button>
+      )}
+      {message.editedAt && <span className="chat-msg-edited">editado</span>}
+      <span className="chat-msg-time">{formatTime(message.createdAt)}</span>
+      {isOwn && !isDeleted && (
+        <button
+          type="button"
+          className={cn('chat-msg-read', message.readBy.length > 0 && 'seen')}
+          onClick={() => setShowReaders(true)}
+          aria-label="Ver lecturas"
+          title="Visto por"
+        >
+          {message.readBy.length > 0 ? <CheckCheck size={14} /> : <Check size={14} />}
+        </button>
+      )}
+    </div>
+  );
+
   return (
     <div
-      className={`chat-msg-wrapper ${isOwn ? 'own' : ''} ${showAvatar ? 'with-avatar' : 'compact'}`}
+      className={cn(
+        'chat-msg-wrapper',
+        isOwn && 'own',
+        showAvatar ? 'with-avatar' : 'compact',
+        !isGroup && 'dm'
+      )}
       onMouseEnter={() => setShowActions(true)}
       onMouseLeave={() => setShowActions(false)}
     >
-      {/* Avatar */}
-      {showAvatar && !isOwn && (
-        <div className="chat-msg-avatar">{senderName.slice(0, 2).toUpperCase()}</div>
-      )}
-      {showAvatar && isOwn && <div className="chat-msg-avatar-spacer" />}
+      {/* Avatar (groups only) */}
+      {!isOwn && isGroup && (showAvatar ? (
+        <div className="chat-msg-avatar" aria-hidden="true">
+          {senderName.slice(0, 2).toUpperCase()}
+        </div>
+      ) : (
+        <div className="chat-msg-avatar-spacer" aria-hidden="true" />
+      ))}
 
       <div className="chat-msg-content">
         {/* Sender name (groups only, not own) */}
-        {showAvatar && !isOwn && <div className="chat-msg-sender">{senderName}</div>}
+        {showAvatar && !isOwn && isGroup && <div className="chat-msg-sender">{senderName}</div>}
 
         {/* Reply quote */}
         {message.replyToId && message.replyToPreview && (
@@ -187,6 +240,7 @@ export function ChatMessage({
         {isDeleted ? (
           <div className={`chat-msg-bubble ${isOwn ? 'own' : 'other'} deleted`}>
             Este mensaje fue eliminado
+            {meta}
           </div>
         ) : editing ? (
           <div className="chat-msg-edit">
@@ -215,7 +269,13 @@ export function ChatMessage({
           </div>
         ) : (
           <div
-            className={`chat-msg-bubble ${isOwn ? 'own' : 'other'} ${message.priority === 'urgent' ? 'urgent' : ''}`}
+            className={cn(
+              'chat-msg-bubble',
+              isOwn ? 'own' : 'other',
+              message.priority === 'urgent' && 'urgent',
+              isMediaOnly && 'media-only',
+              hasRichBlock && 'rich'
+            )}
           >
             {message.priority === 'urgent' && (
               <div className="chat-msg-urgent-badge">
@@ -251,6 +311,10 @@ export function ChatMessage({
                 onRsvp={(status) => onRsvpEvent(message.event!.id, status)}
               />
             )}
+            {!hasBody && (
+              <div className="chat-msg-text chat-msg-empty">Contenido no disponible</div>
+            )}
+            {meta}
           </div>
         )}
 
@@ -275,33 +339,8 @@ export function ChatMessage({
           </div>
         )}
 
-        {/* Meta: time + read status */}
-        <div className="chat-msg-meta">
-          <span className="chat-msg-time">{formatTime(message.createdAt)}</span>
-          {message.editedAt && <span className="chat-msg-edited">editado</span>}
-          {message.threadId && onOpenThread && (
-            <button
-              type="button"
-              className="chat-msg-thread-btn"
-              onClick={() => onOpenThread(message.threadId!, message)}
-              aria-label="Ver hilo"
-              title="Ver hilo"
-            >
-              <MessageSquareText size={12} /> Hilo
-            </button>
-          )}
-          {isOwn && !isDeleted && (
-            <button
-              type="button"
-              className="chat-msg-read"
-              onClick={() => setShowReaders(true)}
-              aria-label="Ver lecturas"
-              title="Visto por"
-            >
-              {message.readBy.length > 0 ? <CheckCheck size={14} /> : <Check size={14} />}
-            </button>
-          )}
-        </div>
+        {/* Meta lives inside the bubble; only shown here while editing */}
+        {editing && meta}
       </div>
 
       {/* Action toolbar */}
