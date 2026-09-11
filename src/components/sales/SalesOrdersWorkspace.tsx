@@ -134,9 +134,32 @@ function normalizeTablePreference(p: TablePreferenceConfig): TablePreferenceConf
   );
   const savedOrder = p.columnOrder.length > 0 ? p.columnOrder : SALES_ORDER_DEFAULT_COLUMN_ORDER;
   const missing = SALES_ORDER_DEFAULT_COLUMN_ORDER.filter((id) => !savedOrder.includes(id));
+
+  // Insert missing columns at their correct priority position instead of appending at the end.
+  // This ensures new columns like ticketStatus appear in the right place.
+  const mergedOrder: string[] = [...savedOrder];
+  for (const missingId of missing) {
+    const colDef = SALES_ORDER_COLUMN_MAP[missingId];
+    if (!colDef) {
+      mergedOrder.push(missingId);
+      continue;
+    }
+    const missingPriority = colDef.priority;
+    // Find the insertion point: before the first column with higher priority
+    let insertIdx = mergedOrder.length;
+    for (let i = 0; i < mergedOrder.length; i++) {
+      const existingCol = SALES_ORDER_COLUMN_MAP[mergedOrder[i]];
+      if (existingCol && existingCol.priority > missingPriority) {
+        insertIdx = i;
+        break;
+      }
+    }
+    mergedOrder.splice(insertIdx, 0, missingId);
+  }
+
   return {
     ...p,
-    columnOrder: [...savedOrder, ...missing],
+    columnOrder: mergedOrder,
     columnVisibility: { ...defaultVisibility, ...p.columnVisibility },
     columnWidths: { ...defaultWidths, ...p.columnWidths },
   };
