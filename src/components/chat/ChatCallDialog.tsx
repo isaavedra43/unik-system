@@ -4,6 +4,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   Phone, PhoneOff, Video, VideoOff, Mic, MicOff,
   Loader2, AlertCircle, Monitor, MonitorOff,
+  Maximize2, Minimize2, SwitchCamera, Signal,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { ChatCallDTO } from '@/modules/chat/chat-events';
@@ -27,33 +28,21 @@ interface CallState {
 interface RemoteParticipant {
   userId: string;
   name: string;
-  stream: MediaStream | null;
   connected: boolean;
+  hasVideo: boolean;
   screenSharing: boolean;
 }
 
 // =====================================================
-// ICE servers — STUN + TURN for reliable NAT traversal
+// ICE servers — STUN + TURN for NAT traversal
 // =====================================================
 const ICE_SERVERS: RTCIceServer[] = [
   { urls: 'stun:stun.l.google.com:19302' },
   { urls: 'stun:stun1.l.google.com:19302' },
   { urls: 'stun:stun2.l.google.com:19302' },
-  {
-    urls: 'turn:openrelay.metered.ca:80',
-    username: 'openrelayproject',
-    credential: 'openrelayproject',
-  },
-  {
-    urls: 'turn:openrelay.metered.ca:443',
-    username: 'openrelayproject',
-    credential: 'openrelayproject',
-  },
-  {
-    urls: 'turn:openrelay.metered.ca:443?transport=tcp',
-    username: 'openrelayproject',
-    credential: 'openrelayproject',
-  },
+  { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
+  { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
+  { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
 ];
 
 const RTC_CONFIG: RTCConfiguration = {
@@ -82,7 +71,10 @@ export function ChatCallDialog({
   const [videoOff, setVideoOff] = useState(false);
   const [screenSharing, setScreenSharing] = useState(false);
   const [duration, setDuration] = useState(0);
-  const [remoteParticipants, setRemoteParticipants] = useState<Map<string, RemoteParticipant>>(new Map());
+  const [fullscreen, setFullscreen] = useState(false);
+  const [remoteParticipants, setRemoteParticipants] = useState<RemoteParticipant[]>([]);
+  const [networkQuality, setNetworkQuality] = useState<'good' | 'medium' | 'poor' | 'unknown'>('unknown');
+  const [tick, setTick] = useState(0); // force re-render to attach streams
 
   // Refs
   const localStreamRef = useRef<MediaStream | null>(null);
@@ -92,18 +84,18 @@ export function ChatCallDialog({
   const videoRefsRef = useRef<Map<string, HTMLVideoElement>>(new Map());
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteAudioRefsRef = useRef<Map<string, HTMLAudioElement>>(new Map());
+  const overlayRef = useRef<HTMLDivElement>(null);
   const durationTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const signalPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const callStatusPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const connectionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const statsTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const callIdRef = useRef<string | null>(null);
   const roleRef = useRef(role);
-  const participantsRef = useRef(participants);
-  const localStreamReadyRef = useRef(false);
   const pendingOffersRef = useRef<Map<string, RTCSessionDescriptionInit>>(new Map());
   const remoteDescSetRef = useRef<Set<string>>(new Set());
   const pendingIceRef = useRef<Map<string, RTCIceCandidateInit[]>>(new Map());
-  const senderVideoTrackRef = useRef<RTCRtpSender | null>(null);
+  const facingModeRef = useRef<'user' | 'environment'>('user');
 
   const log = useCallback((...args: unknown[]) => {
     if (typeof window !== 'undefined' && (window as unknown as Record<string, unknown>).DEV_CALL_DEBUG) {
@@ -111,6 +103,10 @@ export function ChatCallDialog({
       console.log('[ChatCall]', ...args);
     }
   }, []);
+
+  // All remote user IDs (everyone except me)
+  const remoteUserIds = participants.filter((p) => p.userId !== currentUserId).map((p) => p.userId);
+  const remoteNamesRef = useRef(new Map(participants.map((p) => [p.userId, p.name])));
 
   // =====================================================
   // Cleanup
@@ -120,6 +116,7 @@ export function ChatCallDialog({
     if (signalPollRef.current) { clearInterval(signalPollRef.current); signalPollRef.current = null; }
     if (callStatusPollRef.current) { clearInterval(callStatusPollRef.current); callStatusPollRef.current = null; }
     if (connectionTimeoutRef.current) { clearTimeout(connectionTimeoutRef.current); connectionTimeoutRef.current = null; }
+    if (statsTimerRef.current) { clearInterval(statsTimerRef.current); statsTimerRef.current = null; }
     if (localStreamRef.current) { localStreamRef.current.getTracks().forEach((t) => t.stop()); localStreamRef.current = null; }
     if (screenStreamRef.current) { screenStreamRef.current.getTracks().forEach((t) => t.stop()); screenStreamRef.current = null; }
     pcsRef.current.forEach((pc) => pc.close());
@@ -128,10 +125,33 @@ export function ChatCallDialog({
     remoteDescSetRef.current.clear();
     pendingIceRef.current.clear();
     pendingOffersRef.current.clear();
-    localStreamReadyRef.current = false;
   }, []);
 
   useEffect(() => { return () => cleanup(); }, [cleanup]);
+
+  // =====================================================
+  // Attach remote streams to video elements
+  // This runs on every render + tick to ensure streams
+  // are always attached even if elements mount late.
+  // =====================================================
+  useEffect(() => {
+    remoteUserIds.forEach((uid) => {
+      const stream = remoteStreamsRef.current.get(uid);
+      const videoEl = videoRefsRef.current.get(uid);
+      const audioEl = remoteAudioRefsRef.current.get(uid);
+      if (stream && videoEl && videoEl.srcObject !== stream) {
+        log('attaching stream to video for', uid);
+        videoEl.srcObject = stream;
+        videoEl.play().catch(() => {});
+      }
+      if (stream && audioEl && audioEl.srcObject !== stream) {
+        log('attaching stream to audio for', uid);
+        audioEl.srcObject = stream;
+        audioEl.play().catch(() => {});
+      }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tick, remoteParticipants]);
 
   // =====================================================
   // Signal helpers
@@ -147,6 +167,27 @@ export function ChatCallDialog({
   }, [log]);
 
   // =====================================================
+  // Update remote participant state
+  // =====================================================
+  const updateRemoteParticipant = useCallback((userId: string, updates: Partial<RemoteParticipant>) => {
+    setRemoteParticipants((prev) => {
+      const existing = prev.find((p) => p.userId === userId);
+      if (existing) {
+        return prev.map((p) => p.userId === userId ? { ...p, ...updates } : p);
+      }
+      return [...prev, {
+        userId,
+        name: remoteNamesRef.current.get(userId) ?? 'Usuario',
+        connected: false,
+        hasVideo: false,
+        screenSharing: false,
+        ...updates,
+      }];
+    });
+    setTick((t) => t + 1);
+  }, []);
+
+  // =====================================================
   // Create a peer connection for a specific participant
   // =====================================================
   const createPeerConnection = useCallback((callId: string, remoteUserId: string, localStream: MediaStream) => {
@@ -156,42 +197,33 @@ export function ChatCallDialog({
 
     // Add local tracks
     localStream.getTracks().forEach((track) => {
-      const sender = pc.addTrack(track, localStream);
-      if (track.kind === 'video') {
-        senderVideoTrackRef.current = sender;
-      }
+      pc.addTrack(track, localStream);
     });
 
     // Remote stream
     const remoteStream = new MediaStream();
     remoteStreamsRef.current.set(remoteUserId, remoteStream);
 
-    // Attach to audio element
-    const audioEl = remoteAudioRefsRef.current.get(remoteUserId);
-    if (audioEl) {
-      audioEl.srcObject = remoteStream;
-    }
-
     pc.ontrack = (event) => {
       log('ontrack from', remoteUserId, 'kind:', event.track.kind);
-      event.streams[0]?.getTracks().forEach((track) => remoteStream.addTrack(track));
-      if (event.streams[0] === undefined) remoteStream.addTrack(event.track);
-
-      // Attach to video element
-      const videoEl = videoRefsRef.current.get(remoteUserId);
-      if (videoEl) videoEl.srcObject = remoteStream;
-      const audioEl2 = remoteAudioRefsRef.current.get(remoteUserId);
-      if (audioEl2) {
-        audioEl2.srcObject = remoteStream;
-        audioEl2.play().catch(() => {});
+      // Add track to remote stream
+      event.streams[0]?.getTracks().forEach((track) => {
+        if (!remoteStream.getTracks().includes(track)) {
+          remoteStream.addTrack(track);
+        }
+      });
+      if (event.streams[0] === undefined) {
+        remoteStream.addTrack(event.track);
       }
 
-      setRemoteParticipants((prev) => {
-        const next = new Map(prev);
-        const existing = next.get(remoteUserId) ?? { userId: remoteUserId, name: participantsRef.current.find((p) => p.userId === remoteUserId)?.name ?? 'Usuario', stream: null, connected: false, screenSharing: false };
-        next.set(remoteUserId, { ...existing, stream: remoteStream, connected: true });
-        return next;
+      // Update state to trigger re-render + stream attachment
+      updateRemoteParticipant(remoteUserId, {
+        connected: true,
+        hasVideo: remoteStream.getVideoTracks().length > 0,
       });
+
+      // Force immediate attachment
+      setTick((t) => t + 1);
     };
 
     pc.onicecandidate = async (event) => {
@@ -208,6 +240,8 @@ export function ChatCallDialog({
         if (!durationTimerRef.current) {
           durationTimerRef.current = setInterval(() => setDuration((d) => d + 1), 1000);
         }
+      } else if (pc.iceConnectionState === 'disconnected') {
+        setCallState((prev) => ({ ...prev, status: 'connecting' }));
       } else if (pc.iceConnectionState === 'failed') {
         if (roleRef.current === 'caller') {
           log('ICE failed for', remoteUserId, '— attempting restart');
@@ -222,13 +256,10 @@ export function ChatCallDialog({
 
     pc.onconnectionstatechange = () => {
       log('PC state for', remoteUserId, ':', pc.connectionState);
-      if (pc.connectionState === 'failed') {
-        setCallState((prev) => ({ ...prev, status: 'failed', error: 'Conexión WebRTC fallida.' }));
-      }
     };
 
     return pc;
-  }, [sendSignal, log]);
+  }, [sendSignal, log, updateRemoteParticipant]);
 
   // =====================================================
   // Process incoming signals
@@ -244,12 +275,10 @@ export function ChatCallDialog({
       const signalData = JSON.parse(sig.signal);
 
       if (sig.signalType === 'offer') {
-        // Create PC if it doesn't exist (callee receiving offer from caller)
         if (!pc && localStreamRef.current) {
           pc = createPeerConnection(callId, remoteUserId, localStreamRef.current);
         }
         if (!pc) {
-          // Buffer offer until local stream is ready
           pendingOffersRef.current.set(remoteUserId, signalData);
           return;
         }
@@ -258,12 +287,10 @@ export function ChatCallDialog({
           await pc.setRemoteDescription(new RTCSessionDescription(signalData));
           remoteDescSetRef.current.add(remoteUserId);
 
-          // Process pending ICE
           const pending = pendingIceRef.current.get(remoteUserId) ?? [];
           for (const c of pending) { try { await pc.addIceCandidate(new RTCIceCandidate(c)); } catch {} }
           pendingIceRef.current.delete(remoteUserId);
 
-          // Create and send answer
           const answer = await pc.createAnswer();
           await pc.setLocalDescription(answer);
           await sendSignal(callId, remoteUserId, 'answer', answer);
@@ -282,7 +309,6 @@ export function ChatCallDialog({
         if (pc && remoteDescSetRef.current.has(remoteUserId)) {
           try { await pc.addIceCandidate(new RTCIceCandidate(signalData)); } catch {}
         } else {
-          // Buffer
           const arr = pendingIceRef.current.get(remoteUserId) ?? [];
           arr.push(signalData);
           pendingIceRef.current.set(remoteUserId, arr);
@@ -319,13 +345,12 @@ export function ChatCallDialog({
       const call: ChatCallDTO | undefined = data.data;
       if (!call) return;
       if (call.status === 'ended' || call.status === 'missed' || call.status === 'declined') {
-        log('call status:', call.status);
         cleanup();
         setCallState((prev) => ({ ...prev, status: call.status === 'declined' ? 'declined' : 'ended' }));
         setTimeout(onClose, 800);
       }
     } catch {}
-  }, [cleanup, onClose, log]);
+  }, [cleanup, onClose]);
 
   const startConnectionTimeout = useCallback(() => {
     if (connectionTimeoutRef.current) clearTimeout(connectionTimeoutRef.current);
@@ -338,16 +363,51 @@ export function ChatCallDialog({
   }, []);
 
   // =====================================================
+  // Network quality monitoring
+  // =====================================================
+  const startNetworkMonitoring = useCallback(() => {
+    if (statsTimerRef.current) clearInterval(statsTimerRef.current);
+    statsTimerRef.current = setInterval(async () => {
+      for (const [, pc] of pcsRef.current) {
+        try {
+          const stats = await pc.getStats();
+          let rtt = 0;
+          let packetsLost = 0;
+          let packetsSent = 0;
+          stats.forEach((report) => {
+            if (report.type === 'candidate-pair' && report.state === 'succeeded' && report.nominated) {
+              rtt = report.currentRoundTripTime ?? 0;
+            }
+            if (report.type === 'outbound-rtp' && report.kind === 'video') {
+              packetsSent = report.packetsSent ?? 0;
+              packetsLost = report.packetsLost ?? 0;
+            }
+          });
+          const lossRate = packetsSent > 0 ? packetsLost / packetsSent : 0;
+          if (rtt > 0.3 || lossRate > 0.1) {
+            setNetworkQuality('poor');
+          } else if (rtt > 0.15 || lossRate > 0.05) {
+            setNetworkQuality('medium');
+          } else {
+            setNetworkQuality('good');
+          }
+        } catch {}
+      }
+    }, 3000);
+  }, []);
+
+  // =====================================================
   // Get local media
   // =====================================================
-  const getLocalMedia = useCallback(async (callType: 'audio' | 'video') => {
+  const getLocalMedia = useCallback(async (callType: 'audio' | 'video', facingMode: 'user' | 'environment' = 'user') => {
     const constraints: MediaStreamConstraints = {
       audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-      video: callType === 'video' ? { width: { ideal: 1280 }, height: { ideal: 720 } } : false,
+      video: callType === 'video'
+        ? { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode }
+        : false,
     };
     const stream = await navigator.mediaDevices.getUserMedia(constraints);
     localStreamRef.current = stream;
-    localStreamReadyRef.current = true;
     if (localVideoRef.current && callType === 'video') {
       localVideoRef.current.srcObject = stream;
     }
@@ -355,7 +415,7 @@ export function ChatCallDialog({
   }, []);
 
   // =====================================================
-  // CALLER: start call — create offers for ALL participants
+  // CALLER: start call
   // =====================================================
   const startCallAsCaller = useCallback(async () => {
     try {
@@ -378,7 +438,6 @@ export function ChatCallDialog({
       callIdRef.current = callId;
       setCallState({ status: 'ringing', callId, error: null });
 
-      // Create a peer connection + offer for EACH participant
       for (const p of participants) {
         if (p.userId === currentUserId) continue;
         const pc = createPeerConnection(callId, p.userId, localStream);
@@ -390,6 +449,7 @@ export function ChatCallDialog({
       signalPollRef.current = setInterval(() => pollSignals(callId), 300);
       callStatusPollRef.current = setInterval(() => pollCallStatus(callId), 1000);
       startConnectionTimeout();
+      startNetworkMonitoring();
     } catch (err) {
       log('caller error:', err);
       const msg = err instanceof Error ? err.message : 'Error';
@@ -400,10 +460,10 @@ export function ChatCallDialog({
           : msg.includes('NotFound') ? 'No se encontró micrófono/cámara.' : msg,
       }));
     }
-  }, [channelId, type, participants, callData, currentUserId, createPeerConnection, sendSignal, pollSignals, pollCallStatus, startConnectionTimeout, getLocalMedia, log]);
+  }, [channelId, type, participants, callData, currentUserId, createPeerConnection, sendSignal, pollSignals, pollCallStatus, startConnectionTimeout, startNetworkMonitoring, getLocalMedia, log]);
 
   // =====================================================
-  // CALLEE: join call — create PCs and wait for offers
+  // CALLEE: join call
   // =====================================================
   const joinCallAsCallee = useCallback(async () => {
     if (!callData) return;
@@ -416,7 +476,6 @@ export function ChatCallDialog({
       const localStream = await getLocalMedia(callData.type);
       setCallState({ status: 'connecting', callId, error: null });
 
-      // Process any buffered offers
       for (const [remoteUserId, offer] of pendingOffersRef.current) {
         const pc = createPeerConnection(callId, remoteUserId, localStream);
         await pc.setRemoteDescription(new RTCSessionDescription(offer));
@@ -430,6 +489,7 @@ export function ChatCallDialog({
       signalPollRef.current = setInterval(() => pollSignals(callId), 300);
       callStatusPollRef.current = setInterval(() => pollCallStatus(callId), 1000);
       startConnectionTimeout();
+      startNetworkMonitoring();
     } catch (err) {
       log('callee error:', err);
       const msg = err instanceof Error ? err.message : 'Error';
@@ -440,7 +500,7 @@ export function ChatCallDialog({
           : msg.includes('NotFound') ? 'No se encontró micrófono/cámara.' : msg,
       }));
     }
-  }, [callData, createPeerConnection, sendSignal, pollSignals, pollCallStatus, startConnectionTimeout, getLocalMedia, log]);
+  }, [callData, createPeerConnection, sendSignal, pollSignals, pollCallStatus, startConnectionTimeout, startNetworkMonitoring, getLocalMedia, log]);
 
   useEffect(() => {
     if (role === 'caller') startCallAsCaller();
@@ -474,7 +534,7 @@ export function ChatCallDialog({
   }, [videoOff]);
 
   // =====================================================
-  // Screen sharing
+  // Screen sharing — with renegotiation
   // =====================================================
   const toggleScreenShare = useCallback(async () => {
     if (screenSharing) {
@@ -483,27 +543,26 @@ export function ChatCallDialog({
         screenStreamRef.current.getTracks().forEach((t) => t.stop());
         screenStreamRef.current = null;
       }
-      // Replace screen track with camera track in all PCs
       if (localStreamRef.current) {
         const cameraTrack = localStreamRef.current.getVideoTracks()[0];
         if (cameraTrack) {
           pcsRef.current.forEach((pc) => {
-            const sender = pc.getSenders().find((s) => s.track?.kind === 'video');
-            if (sender) sender.replaceTrack(cameraTrack);
+            const senders = pc.getSenders();
+            const videoSender = senders.find((s) => s.track?.kind === 'video');
+            if (videoSender) {
+              videoSender.replaceTrack(cameraTrack).catch((e) => log('replaceTrack error:', e));
+            }
           });
           if (localVideoRef.current) localVideoRef.current.srcObject = localStreamRef.current;
         }
       }
       setScreenSharing(false);
     } else {
-      // Start screen share
       try {
-        // Desktop: getDisplayMedia. Mobile: fallback to back camera
         let screenStream: MediaStream;
         if (navigator.mediaDevices.getDisplayMedia) {
           screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
         } else {
-          // Mobile fallback: switch to back camera
           screenStream = await navigator.mediaDevices.getUserMedia({
             video: { facingMode: 'environment' },
             audio: false,
@@ -512,16 +571,16 @@ export function ChatCallDialog({
         screenStreamRef.current = screenStream;
         const screenTrack = screenStream.getVideoTracks()[0];
 
-        // Replace camera track with screen track in all PCs
+        // Replace camera track with screen track in ALL peer connections
         pcsRef.current.forEach((pc) => {
-          const sender = pc.getSenders().find((s) => s.track?.kind === 'video');
-          if (sender) sender.replaceTrack(screenTrack);
+          const videoSender = pc.getSenders().find((s) => s.track?.kind === 'video');
+          if (videoSender) {
+            videoSender.replaceTrack(screenTrack).catch((e) => log('replaceTrack error:', e));
+          }
         });
 
-        // Show screen in local preview
         if (localVideoRef.current) localVideoRef.current.srcObject = screenStream;
 
-        // Auto-stop when user stops sharing via browser UI
         screenTrack.onended = () => {
           if (screenStreamRef.current) {
             screenStreamRef.current.getTracks().forEach((t) => t.stop());
@@ -532,7 +591,7 @@ export function ChatCallDialog({
             if (cameraTrack) {
               pcsRef.current.forEach((pc) => {
                 const sender = pc.getSenders().find((s) => s.track?.kind === 'video');
-                if (sender) sender.replaceTrack(cameraTrack);
+                if (sender) sender.replaceTrack(cameraTrack).catch(() => {});
               });
               if (localVideoRef.current) localVideoRef.current.srcObject = localStreamRef.current;
             }
@@ -546,6 +605,65 @@ export function ChatCallDialog({
       }
     }
   }, [screenSharing, log]);
+
+  // =====================================================
+  // Camera switch (front/back) — for mobile
+  // =====================================================
+  const switchCamera = useCallback(async () => {
+    if (!localStreamRef.current || type !== 'video') return;
+    const newFacing = facingModeRef.current === 'user' ? 'environment' : 'user';
+    facingModeRef.current = newFacing;
+
+    try {
+      const newStream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: newFacing, width: { ideal: 1280 }, height: { ideal: 720 } },
+        audio: false,
+      });
+      const newVideoTrack = newStream.getVideoTracks()[0];
+
+      const oldVideoTrack = localStreamRef.current.getVideoTracks()[0];
+      if (oldVideoTrack) oldVideoTrack.stop();
+
+      localStreamRef.current.removeTrack(oldVideoTrack);
+      localStreamRef.current.addTrack(newVideoTrack);
+
+      pcsRef.current.forEach((pc) => {
+        const sender = pc.getSenders().find((s) => s.track?.kind === 'video');
+        if (sender) sender.replaceTrack(newVideoTrack).catch(() => {});
+      });
+
+      if (localVideoRef.current) localVideoRef.current.srcObject = localStreamRef.current;
+    } catch {
+      // camera switch failed — keep current camera
+    }
+  }, [type]);
+
+  // =====================================================
+  // Fullscreen toggle
+  // =====================================================
+  const toggleFullscreen = useCallback(async () => {
+    try {
+      if (!fullscreen) {
+        if (overlayRef.current?.requestFullscreen) {
+          await overlayRef.current.requestFullscreen();
+          setFullscreen(true);
+        }
+      } else {
+        if (document.exitFullscreen) {
+          await document.exitFullscreen();
+          setFullscreen(false);
+        }
+      }
+    } catch {
+      // fullscreen not supported
+    }
+  }, [fullscreen]);
+
+  useEffect(() => {
+    const handler = () => setFullscreen(!!document.fullscreenElement);
+    document.addEventListener('fullscreenchange', handler);
+    return () => document.removeEventListener('fullscreenchange', handler);
+  }, []);
 
   // =====================================================
   // Render helpers
@@ -569,46 +687,64 @@ export function ChatCallDialog({
   const isActive = callState.status === 'active';
   const isConnecting = callState.status === 'ringing' || callState.status === 'connecting';
   const callType = role === 'callee' ? callData?.type ?? type : type;
-  const remoteList = Array.from(remoteParticipants.values());
-  const remoteCount = remoteList.length;
+  const remoteCount = remoteParticipants.length;
   const isMultiParty = remoteCount > 1;
 
   const statusDotClass = {
-    initiating: 'ringing',
-    ringing: 'ringing',
-    connecting: 'connecting',
-    active: 'active',
-    ended: 'ended',
-    declined: 'declined',
-    failed: 'failed',
+    initiating: 'ringing', ringing: 'ringing', connecting: 'connecting',
+    active: 'active', ended: 'ended', declined: 'declined', failed: 'failed',
   }[callState.status];
+
+  const networkIcon = {
+    good: { color: '#22c55e', label: 'Buena' },
+    medium: { color: '#f59e0b', label: 'Regular' },
+    poor: { color: '#ef4444', label: 'Mala' },
+    unknown: { color: '#64748b', label: '' },
+  }[networkQuality];
 
   return (
     <>
-      {/* Hidden audio elements for each remote participant */}
-      {participants.filter((p) => p.userId !== currentUserId).map((p) => (
-        <audio key={`audio-${p.userId}`} ref={(el) => { if (el) remoteAudioRefsRef.current.set(p.userId, el); }} autoPlay playsInline className="hidden" />
+      {/* Hidden audio elements — ALWAYS rendered for every remote participant */}
+      {remoteUserIds.map((uid) => (
+        <audio
+          key={`audio-${uid}`}
+          ref={(el) => { if (el) remoteAudioRefsRef.current.set(uid, el); }}
+          autoPlay playsInline
+          className="hidden"
+        />
       ))}
 
-      <div className="chat-call-overlay" role="dialog" aria-modal="true" aria-label={callType === 'video' ? 'Videollamada' : 'Llamada de voz'}>
+      <div className="chat-call-overlay" ref={overlayRef} role="dialog" aria-modal="true" aria-label={callType === 'video' ? 'Videollamada' : 'Llamada de voz'}>
         {/* Top bar */}
         <div className="chat-call-topbar">
           <div className="chat-call-info">
             <div>
               <div className="chat-call-info-name">
-                {isMultiParty ? `${remoteCount + 1} participantes` : (remoteList[0]?.name ?? participants[0]?.name ?? 'Usuario')}
+                {isMultiParty ? `${remoteCount + 1} participantes` : (remoteParticipants[0]?.name ?? participants.find((p) => p.userId !== currentUserId)?.name ?? 'Usuario')}
               </div>
               <div className="chat-call-info-status">
                 <span className={cn('chat-call-status-dot', statusDotClass)} />
                 {statusText}
+                {networkQuality !== 'unknown' && isActive && (
+                  <span className="flex items-center gap-1 ml-2" title={`Calidad: ${networkIcon.label}`}>
+                    <Signal size={14} style={{ color: networkIcon.color }} />
+                  </span>
+                )}
               </div>
             </div>
           </div>
-          {callState.status === 'failed' && callState.error && (
-            <div className="flex items-center gap-1 text-xs text-red-400">
-              <AlertCircle size={14} /> {callState.error}
-            </div>
-          )}
+          <div className="flex items-center gap-2">
+            {callType === 'video' && (
+              <button className="chat-call-ctrl" onClick={toggleFullscreen} aria-label={fullscreen ? 'Salir de pantalla completa' : 'Pantalla completa'} style={{ width: 40, height: 40 }}>
+                {fullscreen ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
+              </button>
+            )}
+            {callState.status === 'failed' && callState.error && (
+              <div className="flex items-center gap-1 text-xs text-red-400">
+                <AlertCircle size={14} /> {callState.error}
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Screen share banner */}
@@ -620,17 +756,17 @@ export function ChatCallDialog({
 
         {/* Stage */}
         <div className="chat-call-stage">
-          {callType === 'video' && remoteCount > 0 ? (
+          {callType === 'video' ? (
             isMultiParty ? (
-              /* Multi-participant grid */
-              <div className="chat-call-grid" data-count={String(remoteCount + 1)}>
-                {/* Remote participants */}
-                {remoteList.map((rp) => (
+              /* Multi-participant grid — always render video elements */
+              <div className="chat-call-grid" data-count={String(Math.min(remoteCount + 1, 8))}>
+                {remoteParticipants.map((rp) => (
                   <div key={rp.userId} className={cn('chat-call-tile', rp.screenSharing && 'chat-call-tile-screen-share')}>
+                    {/* Always render video element so ontrack can attach to it */}
                     <video
                       ref={(el) => { if (el) videoRefsRef.current.set(rp.userId, el); }}
                       autoPlay playsInline
-                      className={rp.connected ? '' : 'opacity-0'}
+                      style={{ opacity: rp.connected ? 1 : 0 }}
                     />
                     {!rp.connected && (
                       <div className="chat-call-tile-placeholder">
@@ -640,47 +776,49 @@ export function ChatCallDialog({
                         <span>{rp.name}</span>
                       </div>
                     )}
-                    <div className="chat-call-tile-label">
-                      {rp.name}
-                    </div>
+                    <div className="chat-call-tile-label">{rp.name}</div>
                   </div>
                 ))}
-                {/* Local tile in grid */}
                 <div className="chat-call-tile">
                   <video ref={localVideoRef} autoPlay muted playsInline />
                   <div className="chat-call-tile-label">Tú</div>
                 </div>
               </div>
             ) : (
-              /* 1-on-1: main remote video + PiP local */
+              /* 1-on-1: always render BOTH video elements */
               <>
+                {/* Remote video — always rendered, even before connection */}
                 <video
-                  ref={(el) => { if (el && remoteList[0]) videoRefsRef.current.set(remoteList[0].userId, el); }}
+                  ref={(el) => {
+                    if (el && remoteUserIds[0]) videoRefsRef.current.set(remoteUserIds[0], el);
+                  }}
                   autoPlay playsInline
                   className="chat-call-main-video"
+                  style={{ opacity: isActive ? 1 : 0 }}
                 />
-                {!isActive && (
+                {/* Connecting overlay */}
+                {isConnecting && (
                   <div className="chat-call-connecting">
                     <div className="chat-call-connecting-spinner" />
                     <div className="chat-call-connecting-text">{statusText}</div>
                   </div>
                 )}
-                {/* PiP local */}
-                {callType === 'video' && (
-                  <div className="chat-call-pip">
-                    <video ref={localVideoRef} autoPlay muted playsInline />
-                    <div className="chat-call-pip-label">Tú</div>
-                  </div>
-                )}
+                {/* Local PiP — always rendered */}
+                <div className="chat-call-pip">
+                  <video ref={localVideoRef} autoPlay muted playsInline />
+                  <div className="chat-call-pip-label">Tú</div>
+                </div>
               </>
             )
           ) : (
             /* Audio-only view */
             <div className="chat-call-audio-view">
               <div className="chat-call-audio-avatar">
-                {remoteList[0]?.name ? remoteList[0].name.slice(0, 2).toUpperCase() : <Phone size={48} />}
+                {remoteParticipants[0]?.name ? remoteParticipants[0].name.slice(0, 2).toUpperCase() : <Phone size={48} />}
               </div>
-              <div className="chat-call-audio-name">{remoteList[0]?.name ?? participants[0]?.name ?? 'Usuario'}</div>
+              <div className="chat-call-audio-name">
+                {remoteParticipants[0]?.name ?? participants.find((p) => p.userId !== currentUserId)?.name ?? 'Usuario'}
+              </div>
               <div className="chat-call-audio-status">
                 {isConnecting && <Loader2 size={16} className="animate-spin" />}
                 {statusText}
@@ -711,6 +849,10 @@ export function ChatCallDialog({
               </button>
               <button className={cn('chat-call-ctrl chat-call-ctrl-screen', screenSharing && 'active')} onClick={toggleScreenShare} aria-label={screenSharing ? 'Dejar de compartir' : 'Compartir pantalla'}>
                 {screenSharing ? <MonitorOff size={22} /> : <Monitor size={22} />}
+              </button>
+              {/* Camera switch — visible on all devices, useful on mobile */}
+              <button className="chat-call-ctrl" onClick={switchCamera} aria-label="Cambiar cámara">
+                <SwitchCamera size={22} />
               </button>
             </>
           )}
