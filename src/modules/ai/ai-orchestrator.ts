@@ -755,23 +755,30 @@ export async function* runAssistant(
         }
       }
 
-      // If the tool generated an artifact, emit an artifact event
+      // If the tool generated one or more artifacts, emit an artifact event per artifact.
+      // (generateReportImage returns MULTIPLE artifacts — "Parte 1 de 3", "Parte 2 de 3"...—
+      // when the data doesn't fit in a single image, instead of silently truncating.)
       if (result.success && result.result && typeof result.result === 'object') {
         const toolResult = result.result as Record<string, unknown>;
-        if (toolResult.artifactId && toolResult.type) {
+        const artifactList = Array.isArray(toolResult.artifacts)
+          ? (toolResult.artifacts as Array<Record<string, unknown>>)
+          : toolResult.artifactId && toolResult.type
+            ? [toolResult]
+            : [];
+        for (const a of artifactList) {
           yield {
             type: 'artifact',
             data: {
-              artifactId: toolResult.artifactId,
-              type: toolResult.type,
-              title: toolResult.title,
-              filename: toolResult.filename,
-              downloadUrl: toolResult.downloadUrl,
-              inlineRender: toolResult.inlineRender,
-              rowCount: toolResult.rowCount,
-              sizeBytes: toolResult.sizeBytes,
-              pageCount: toolResult.pageCount,
-              chartType: toolResult.chartType,
+              artifactId: a.artifactId,
+              type: a.type,
+              title: a.title,
+              filename: a.filename,
+              downloadUrl: a.downloadUrl,
+              inlineRender: a.inlineRender,
+              rowCount: a.rowCount,
+              sizeBytes: a.sizeBytes,
+              pageCount: a.pageCount,
+              chartType: a.chartType,
             },
           };
         }

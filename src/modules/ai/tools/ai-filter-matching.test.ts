@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { matchesLocation, matchesStatus, matchesTicketStatus, resolveStatusQuery, statusLabel, textMatches } from './ai-filter-matching';
+import { documentNumberOrConditions, matchesLocation, matchesStatus, matchesTicketStatus, resolveStatusQuery, statusLabel, textMatches } from './ai-filter-matching';
 import { applySalesOrderFilters, perFilterMatchCounts } from './sales-order-ai-filters';
 import { getTicketStatus } from '@/modules/sales/sales-orders-helpers';
 
@@ -235,6 +235,40 @@ describe('regression: real "A PIE DE OBRA" September 2026 export (the bug report
       // The old, still-valid-for-dispatch-questions filter does NOT count these — that's expected.
       expect(matchesStatus('salesShipped', row.shippedStatus, 'por entregar')).toBe(false);
     }
+  });
+});
+
+describe('documentNumberOrConditions — "22654" should find "OV-22654" (reported bug)', () => {
+  // Simulates Prisma's `equals`/`endsWith` matching against a real value.
+  function matches(real: string, query: string): boolean {
+    const conds = documentNumberOrConditions('salesOrderNumber', query);
+    return conds.some((c) => {
+      const f = (c as Record<string, { equals?: string; endsWith?: string }>).salesOrderNumber;
+      if (f?.equals !== undefined) return real.toLowerCase() === f.equals.toLowerCase();
+      if (f?.endsWith !== undefined) return real.endsWith(f.endsWith);
+      return false;
+    });
+  }
+
+  it('finds the real order when the user types only the digits', () => {
+    expect(matches('OV-22654', '22654')).toBe(true);
+    expect(matches('OV-22654', 'OV-22654')).toBe(true);
+    expect(matches('OV-22654', 'ov-22654')).toBe(true);
+  });
+
+  it('does NOT match a different order whose number merely ends in the same digits as a substring', () => {
+    // "654" must not match "OV-22654" (that would silently return the wrong order).
+    expect(matches('OV-22654', '654')).toBe(false);
+  });
+
+  it('does not produce a false positive across different orders with overlapping digits', () => {
+    // "22654" must not match "OV-122654" (a different, longer order number).
+    expect(matches('OV-122654', '22654')).toBe(false);
+  });
+
+  it('a query with no digits at all needs no fallback condition', () => {
+    const conds = documentNumberOrConditions('invoiceNumber', 'UUID-ABC');
+    expect(conds).toHaveLength(1);
   });
 });
 

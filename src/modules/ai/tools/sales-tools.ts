@@ -9,6 +9,7 @@ import {
 import {
   DELIVERY_TYPES,
   classifyDeliveryMethod,
+  documentNumberOrConditions,
   resolveStatusQuery,
   statusDistribution,
   statusLabel,
@@ -856,7 +857,7 @@ registerTool({
     const order = await prisma.salesOrder.findFirst({
       where: {
         OR: [
-          { salesOrderNumber: { equals: args.salesOrderNumber, mode: 'insensitive' } },
+          ...documentNumberOrConditions('salesOrderNumber', args.salesOrderNumber),
           { id: args.salesOrderNumber },
         ],
       },
@@ -922,7 +923,7 @@ registerTool({
     const order = await prisma.salesOrder.findFirst({
       where: {
         OR: [
-          { salesOrderNumber: { equals: args.salesOrderNumber, mode: 'insensitive' } },
+          ...documentNumberOrConditions('salesOrderNumber', args.salesOrderNumber),
           { id: args.salesOrderNumber },
         ],
       },

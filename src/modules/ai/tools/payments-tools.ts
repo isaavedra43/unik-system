@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { registerTool } from './registry';
-import { matchesStatus, textMatches } from './ai-filter-matching';
+import { documentNumberOrConditions, matchesStatus, textMatches } from './ai-filter-matching';
 import {
   dateRangeSchema,
   formatDate,
@@ -232,7 +232,7 @@ registerTool({
     const payment = await prisma.customerPayment.findFirst({
       where: {
         OR: [
-          { paymentNumber: { equals: args.paymentNumber, mode: 'insensitive' } },
+          ...documentNumberOrConditions('paymentNumber', args.paymentNumber),
           { id: args.paymentNumber },
         ],
       },

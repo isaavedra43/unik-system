@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { registerTool } from './registry';
-import { matchesStatus, textMatches } from './ai-filter-matching';
+import { documentNumberOrConditions, matchesStatus, textMatches } from './ai-filter-matching';
 import {
   dateRangeSchema,
   formatDate,
@@ -317,7 +317,7 @@ registerTool({
     const order = await prisma.purchaseOrder.findFirst({
       where: {
         OR: [
-          { purchaseOrderNumber: { equals: args.purchaseOrderNumber, mode: 'insensitive' } },
+          ...documentNumberOrConditions('purchaseOrderNumber', args.purchaseOrderNumber),
           { id: args.purchaseOrderNumber },
         ],
       },
@@ -539,7 +539,7 @@ registerTool({
     const bill = await prisma.bill.findFirst({
       where: {
         OR: [
-          { billNumber: { equals: args.billNumber, mode: 'insensitive' } },
+          ...documentNumberOrConditions('billNumber', args.billNumber),
           { id: args.billNumber },
         ],
       },
@@ -741,7 +741,7 @@ registerTool({
     const credit = await prisma.vendorCredit.findFirst({
       where: {
         OR: [
-          { vendorCreditNumber: { equals: args.vendorCreditNumber, mode: 'insensitive' } },
+          ...documentNumberOrConditions('vendorCreditNumber', args.vendorCreditNumber),
           { id: args.vendorCreditNumber },
         ],
       },

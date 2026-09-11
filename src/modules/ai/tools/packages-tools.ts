@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { registerTool } from './registry';
-import { matchesStatus, textMatches } from './ai-filter-matching';
+import { documentNumberOrConditions, matchesStatus, textMatches } from './ai-filter-matching';
 import {
   dateRangeSchema,
   formatDate,
@@ -307,7 +307,7 @@ registerTool({
     const pkg = await prisma.package.findFirst({
       where: {
         OR: [
-          { packageNumber: { equals: args.packageNumber, mode: 'insensitive' } },
+          ...documentNumberOrConditions('packageNumber', args.packageNumber),
           { id: args.packageNumber },
         ],
       },

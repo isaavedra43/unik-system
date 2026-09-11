@@ -589,6 +589,26 @@ export function matchesLocation(values: unknown[], query: string | null | undefi
   return splitQuery(query).some((fragment) => matchesLocationSingle(values, fragment));
 }
 
+/* Document numbers (OV-22654, EST-020723...) ---------------------------- */
+
+/**
+ * Prisma OR-conditions for "find this document by its number", tolerant of the user/model
+ * typing just the digits ("22654" instead of "OV-22654" — a real reported case where
+ * getSalesOrderDetail found nothing until the user added the prefix themselves). Exact match
+ * is tried first; if the query is purely numeric and doesn't already match the real format, a
+ * `-<digits>` suffix match is added — this only matches the FULL numeric part after a prefix
+ * (e.g. "654" does NOT match "OV-1654"), so it can't silently return the wrong document.
+ */
+export function documentNumberOrConditions(field: string, query: string): Array<Record<string, unknown>> {
+  const trimmed = query.trim();
+  const conditions: Array<Record<string, unknown>> = [{ [field]: { equals: trimmed, mode: 'insensitive' } }];
+  const digits = trimmed.replace(/\D/g, '');
+  if (digits) {
+    conditions.push({ [field]: { endsWith: `-${digits}` } });
+  }
+  return conditions;
+}
+
 export function valueDistribution(values: Array<string | null | undefined>, limit = 30): Array<{ value: string; count: number }> {
   const counts = new Map<string, number>();
   for (const v of values) {

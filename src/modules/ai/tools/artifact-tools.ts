@@ -630,9 +630,9 @@ registerTool({
 registerTool({
   name: 'generateReportImage',
   description:
-    'Genera UNA IMAGEN (PNG/SVG) con el reporte: título, KPIs y una tabla compacta — NO es una gráfica de barras/línea/pie (para eso usa generateChart). ' +
+    'Genera IMÁGENES (PNG/SVG) con el reporte: título, KPIs y una tabla — NO es una gráfica de barras/línea/pie (para eso usa generateChart). ' +
     'Úsalo cuando el usuario pida explícitamente "una imagen del reporte", "una foto con los datos", o algo para compartir directo por WhatsApp/redes sin abrir un PDF. ' +
-    'Es un snapshot compacto: muestra máximo ~20 filas (usa maxRows para ajustar) — si el usuario necesita TODAS las filas, ofrece también el PDF o Excel. ' +
+    'Cada imagen muestra hasta ~20 filas (ajustable con maxRows); si hay más filas de las que caben en una imagen, el sistema genera AUTOMÁTICAMENTE varias imágenes ("Parte 1 de 3", "Parte 2 de 3"...) hasta cubrir TODAS las filas (límite de 8 imágenes ≈ 160 filas — si el usuario pidió aún más, ofrece PDF/Excel para el resto). ' +
     'SOLO necesitas pasar title y rows; columnas y KPIs se auto-generan igual que en generatePdfReport. Los estados (Cerrado, Pendiente, etc.) se colorean automáticamente.',
   category: 'export',
   requiredPermission: 'sales_orders.view',
@@ -641,15 +641,15 @@ registerTool({
     conversationId: z.string().optional().describe('Se inyecta automáticamente, no lo pongas.'),
     title: z.string().default('Reporte UNIK').describe('Título del reporte'),
     subtitle: z.string().optional(),
-    rows: z.array(z.record(z.unknown())).optional().describe('Los datos a mostrar (array de la tool anterior).'),
+    rows: z.array(z.record(z.unknown())).optional().describe('Los datos a mostrar (array de la tool anterior). Pasa TODAS las filas que quieras cubrir — si no caben en una imagen, se generan las que hagan falta.'),
     columns: z.array(z.object({
       header: z.string(),
       key: z.string(),
       format: z.enum(['currency', 'number', 'percentage', 'date', 'text']).optional(),
     })).optional().describe('OPCIONAL. Se generan automáticamente de las claves de las rows si no se pasan (columnas de texto largo como direcciones/items se omiten para mantener la imagen compacta).'),
-    summaryCards: z.array(z.object({ label: z.string(), value: z.string() })).optional().describe('KPIs de resumen (ej: [{label: "Total", value: "$500,000.00"}]).'),
+    summaryCards: z.array(z.object({ label: z.string(), value: z.string() })).optional().describe('KPIs de resumen del TOTAL (ej: [{label: "Total", value: "$500,000.00"}]) — se muestran solo en la primera imagen.'),
     brandColor: z.string().optional().describe('Color hex (ej: #2563eb).'),
-    maxRows: z.number().int().min(1).max(60).default(20).describe('Máximo de filas en la imagen (default 20). Más filas → ofrece PDF/Excel en su lugar.'),
+    maxRows: z.number().int().min(1).max(60).default(20).describe('Filas por imagen (default 20). No limita el total: si hay más filas que esto, se generan más imágenes.'),
   }),
   execute: async (_actor, rawArgs) => {
     const args = rawArgs as {
@@ -671,47 +671,53 @@ registerTool({
     // Long free-text fields never fit in a compact image row — keep the snapshot glanceable.
     const IMAGE_EXCLUDE_KEYS = new Set(['items', 'shippingAddress', 'notes', 'description', 'address', 'direccion', 'dirección']);
     const cols = (args.columns ?? autoColumns(flatRows)).filter((c) => !IMAGE_EXCLUDE_KEYS.has(c.key));
+    const imageColumns = cols.map((c) => ({
+      header: c.header,
+      key: c.key,
+      align: c.format === 'currency' || c.format === 'number' ? 'right' as const : (c.key === 'status' || c.key === 'ticketStatus') ? 'center' as const : 'left' as const,
+      format: (v: unknown) => formatValue(v, c.format),
+    }));
 
-    const { svg, width, height, rowsShown, rowsOmitted } = generateReportImageSvg({
-      title: args.title,
-      subtitle: args.subtitle,
-      logoText: 'UNIK',
-      brandColor: args.brandColor,
-      maxRows: args.maxRows,
-      columns: cols.map((c) => ({
-        header: c.header,
-        key: c.key,
-        align: c.format === 'currency' || c.format === 'number' ? 'right' as const : c.key === 'status' ? 'center' as const : 'left' as const,
-        format: (v: unknown) => formatValue(v, c.format),
-      })),
-      rows: flatRows,
-      summaryCards: args.summaryCards,
-    });
+    // If everything doesn't fit in one image, generate as many as needed to cover ALL rows —
+    // never silently truncate to a "preview" and push the user to a file instead.
+    const MAX_IMAGE_PARTS = 8;
+    const totalParts = Math.min(MAX_IMAGE_PARTS, Math.ceil(flatRows.length / args.maxRows));
+    const rowsCovered = Math.min(flatRows.length, totalParts * args.maxRows);
+    const rowsNotCovered = flatRows.length - rowsCovered;
 
-    const artifact = await createArtifact({
-      conversationId: args.conversationId,
-      type: 'image',
-      inlineData: { svg, width, height },
-      meta: {
-        title: args.title,
-        rowCount: flatRows.length,
-        rowsShown,
-        rowsOmitted,
+    const artifacts: Array<Record<string, unknown>> = [];
+    for (let part = 0; part < totalParts; part++) {
+      const chunk = flatRows.slice(part * args.maxRows, (part + 1) * args.maxRows);
+      const partTitle = totalParts > 1 ? `${args.title} — Parte ${part + 1} de ${totalParts}` : args.title;
+      const { svg, width, height } = generateReportImageSvg({
+        title: partTitle,
+        subtitle: part === 0 ? args.subtitle : `Continuación · filas ${part * args.maxRows + 1}–${part * args.maxRows + chunk.length} de ${flatRows.length}`,
+        logoText: 'UNIK',
         brandColor: args.brandColor,
-      },
-    });
+        maxRows: chunk.length, // this chunk is never itself truncated
+        columns: imageColumns,
+        rows: chunk,
+        summaryCards: part === 0 ? args.summaryCards : undefined, // KPIs describe the WHOLE set — show once, not per part
+      });
+
+      const artifact = await createArtifact({
+        conversationId: args.conversationId,
+        type: 'image',
+        inlineData: { svg, width, height },
+        meta: { title: partTitle, rowCount: chunk.length, part: part + 1, totalParts, brandColor: args.brandColor },
+      });
+
+      artifacts.push({ artifactId: artifact.id, type: 'image', title: partTitle, inlineRender: true, rowCount: chunk.length });
+    }
 
     return {
-      artifactId: artifact.id,
-      type: 'image',
-      title: args.title,
-      inlineRender: true,
-      rowCount: flatRows.length,
-      rowsShown,
-      rowsOmitted,
-      ...(rowsOmitted > 0
-        ? { note: `Se muestran ${rowsShown} de ${flatRows.length} filas en la imagen. Ofrece generar el PDF o Excel si el usuario necesita todas.` }
-        : {}),
+      artifacts,
+      imageCount: totalParts,
+      totalRows: flatRows.length,
+      rowsCovered,
+      ...(rowsNotCovered > 0
+        ? { note: `Se generaron ${totalParts} imágenes cubriendo ${rowsCovered} de ${flatRows.length} filas (límite de ${MAX_IMAGE_PARTS} imágenes por mensaje). Para las ${rowsNotCovered} filas restantes, genera el PDF o Excel.` }
+        : { note: `Se generaron ${totalParts} imagen(es) cubriendo las ${flatRows.length} filas — no falta ninguna.` }),
     };
   },
 });
@@ -720,7 +726,8 @@ registerTool({
 registerTool({
   name: 'generateTable',
   description:
-    'Genera una tabla que se muestra en el chat. SOLO necesitas pasar title y rows.',
+    'Genera una tabla dentro del chat, en una caja con scroll propio (no un archivo, no una imagen). ÚSALA por default para cualquier lista de más de ~8 filas en vez de escribir la tabla tú mismo en markdown — ' +
+    'el sistema toma las filas de los datos automáticamente (TODAS, sin límite de longitud) en vez de que tengas que escribirlas una por una, así nunca terminas cortando con "..." a medias. SOLO necesitas pasar title y rows.',
   category: 'export',
   requiredPermission: 'sales_orders.view',
   enabledByDefault: true,

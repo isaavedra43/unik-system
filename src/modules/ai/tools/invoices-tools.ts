@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { registerTool } from './registry';
-import { matchesStatus, textMatches } from './ai-filter-matching';
+import { documentNumberOrConditions, matchesStatus, textMatches } from './ai-filter-matching';
 import {
   dateRangeSchema,
   formatDate,
@@ -331,7 +331,7 @@ registerTool({
     const invoice = await prisma.invoice.findFirst({
       where: {
         OR: [
-          { invoiceNumber: { equals: args.invoiceNumber, mode: 'insensitive' } },
+          ...documentNumberOrConditions('invoiceNumber', args.invoiceNumber),
           { cfdiUuid: { equals: args.invoiceNumber, mode: 'insensitive' } },
           { id: args.invoiceNumber },
         ],
