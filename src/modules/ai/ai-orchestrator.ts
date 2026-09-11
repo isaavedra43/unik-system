@@ -261,6 +261,7 @@ export async function* runAssistant(
     'generatePdfReport',
     'generateExcelReport',
     'generateCsvExport',
+    'generateReportImage',
     'generateTable',
   ]);
 

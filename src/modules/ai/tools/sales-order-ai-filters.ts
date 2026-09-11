@@ -4,12 +4,14 @@ import {
   matchesDeliveryType,
   matchesLocation,
   matchesStatus,
+  matchesTicketStatus,
   statusLabel,
   textEquals,
   textMatches,
   toAmount,
   type DeliveryType,
 } from './ai-filter-matching';
+import { getTicketStatus } from '@/modules/sales/sales-orders-helpers';
 
 export interface SalesOrderFilterArgs {
   paymentMethods?: string[];
@@ -23,6 +25,7 @@ export interface SalesOrderFilterArgs {
   paidStatus?: string;
   invoicedStatus?: string;
   shippedStatus?: string;
+  ticketStatus?: string;
   location?: string;
   product?: string;
   minTotal?: number;
@@ -80,6 +83,7 @@ const FILTER_PREDICATES: Record<FilterKey, (o: FilterableSalesOrder, a: SalesOrd
   paidStatus: (o, a) => matchesStatus('salesPaid', o.paidStatus, a.paidStatus),
   invoicedStatus: (o, a) => matchesStatus('salesInvoiced', o.invoicedStatus, a.invoicedStatus),
   shippedStatus: (o, a) => matchesStatus('salesShipped', o.shippedStatus, a.shippedStatus),
+  ticketStatus: (o, a) => matchesTicketStatus(o, a.ticketStatus),
   location: (o, a) => textMatches(o.locationName, a.location),
   product: (o, a) =>
     !a.product || (o.items ?? []).some((item) => anyTextMatches([item.name, item.sku, item.description], a.product)),
@@ -129,6 +133,19 @@ export function interpretSalesOrderMatches(orders: FilterableSalesOrder[], args:
   if (args.shippedStatus) out.shippedStatuses = distinct(orders.map((o) => statusLabel('salesShipped', o.shippedStatus)));
   if (args.paidStatus) out.paidStatuses = distinct(orders.map((o) => statusLabel('salesPaid', o.paidStatus)));
   if (args.invoicedStatus) out.invoicedStatuses = distinct(orders.map((o) => statusLabel('salesInvoiced', o.invoicedStatus)));
+  if (args.ticketStatus) {
+    out.ticketStatuses = distinct(
+      orders.map((o) =>
+        getTicketStatus({
+          status: o.status ?? null,
+          subStatus: o.subStatus ?? null,
+          paidStatus: o.paidStatus ?? null,
+          invoicedStatus: o.invoicedStatus ?? null,
+          shippedStatus: o.shippedStatus ?? null,
+        }).label
+      )
+    );
+  }
   if (args.status) out.statuses = distinct(orders.map((o) => statusLabel('salesOrder', o.status)));
   if (args.paymentMethods?.length) out.paymentMethods = distinct(orders.map((o) => o.paymentMethod));
   if (args.customer) out.customers = distinct(orders.map((o) => o.customerName));

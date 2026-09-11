@@ -4,8 +4,12 @@
  * Generates professional charts as SVG strings (no native dependencies needed).
  * Supports: bar, horizontal bar, line, pie, doughnut.
  *
- * The SVG is stored inline in the database and rendered in the chat.
+ * The SVG is stored inline in the database and rendered in the chat via
+ * `dangerouslySetInnerHTML` — every model-controlled string (labels, titles, colors) MUST be
+ * escaped/sanitized before being embedded (see `escapeXml` and `sanitizeSvgColor`).
  */
+
+import { sanitizeSvgColor } from './status-tone';
 
 type ChartType = 'bar' | 'horizontal-bar' | 'line' | 'pie' | 'doughnut';
 
@@ -41,8 +45,10 @@ const MARGIN = { top: 50, right: 30, bottom: 50, left: 60 };
 export function generateChartSvg(options: ChartOptions): string {
   const width = options.width ?? DEFAULT_WIDTH;
   const height = options.height ?? DEFAULT_HEIGHT;
-  const colors = options.colors ?? DEFAULT_COLORS;
-  const brandColor = options.brandColor ?? DEFAULT_COLORS[0];
+  // Colors are AI tool-call arguments (model-controlled) interpolated directly into SVG fill/
+  // stroke attributes below; sanitize here once so every chart type is safe by construction.
+  const colors = (options.colors ?? DEFAULT_COLORS).map((c, i) => sanitizeSvgColor(c, DEFAULT_COLORS[i % DEFAULT_COLORS.length]));
+  const brandColor = sanitizeSvgColor(options.brandColor, DEFAULT_COLORS[0]);
 
   switch (options.type) {
     case 'bar':
@@ -60,8 +66,19 @@ export function generateChartSvg(options: ChartOptions): string {
   }
 }
 
+// String.fromCharCode avoids writing literal entity text, which editor/copy pipelines have
+// been observed to silently HTML-decode back to bare & < > (turning this "escaper" into a
+// no-op and producing invalid SVG for any label containing those characters — e.g. a real
+// customer name like "M&T ARQUITECTOS").
+const XML_ESCAPES: Record<string, string> = {
+  '&': String.fromCharCode(38, 97, 109, 112, 59), // &amp;
+  '<': String.fromCharCode(38, 108, 116, 59), // &lt;
+  '>': String.fromCharCode(38, 103, 116, 59), // &gt;
+  '"': String.fromCharCode(38, 113, 117, 111, 116, 59), // &quot;
+};
+
 function escapeXml(s: string): string {
-  return s.replace(/&/g, '&').replace(/</g, '<').replace(/>/g, '>').replace(/"/g, '"');
+  return s.replace(/[&<>"]/g, (ch) => XML_ESCAPES[ch]);
 }
 
 function truncateLabel(s: string, maxLen: number): string {

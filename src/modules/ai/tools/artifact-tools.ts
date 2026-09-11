@@ -8,6 +8,8 @@ import { generatePdfReport, type PdfTableColumn, type PdfSection } from '../gene
 import { generateExcelReport, type ExcelColumn } from '../generators/excel-generator';
 import { generateCsvReport } from '../generators/csv-generator';
 import { generateChartSvg } from '../generators/chart-generator';
+import { generateReportImageSvg } from '../generators/image-report-generator';
+import { hexToArgb } from '../generators/status-tone';
 import { generateTableData } from '../generators/table-generator';
 import { getAiSettings } from '../ai-admin-config-service';
 
@@ -414,7 +416,7 @@ registerTool({
     const { sizeBytes } = await generateExcelReport(filePath, {
       title: args.title,
       subtitle: args.subtitle,
-      brandColor: args.brandColor ? args.brandColor.replace('#', 'FF').toUpperCase() : undefined,
+      brandColor: args.brandColor ? hexToArgb(args.brandColor) : undefined,
       columns: excelColumns,
       rows,
       summaryCards: args.summaryCards,
@@ -592,6 +594,98 @@ registerTool({
       title: args.title,
       chartType: args.chartType,
       inlineRender: true,
+    };
+  },
+});
+
+// 4b. generateReportImage — a REPORT rendered as a single image (title + KPIs + table),
+// NOT a bar/line/pie chart. Use generateChart for those; use this when the user explicitly
+// asks for "una imagen del reporte" / "una foto con los datos" / algo para compartir directo.
+registerTool({
+  name: 'generateReportImage',
+  description:
+    'Genera UNA IMAGEN (PNG/SVG) con el reporte: título, KPIs y una tabla compacta — NO es una gráfica de barras/línea/pie (para eso usa generateChart). ' +
+    'Úsalo cuando el usuario pida explícitamente "una imagen del reporte", "una foto con los datos", o algo para compartir directo por WhatsApp/redes sin abrir un PDF. ' +
+    'Es un snapshot compacto: muestra máximo ~20 filas (usa maxRows para ajustar) — si el usuario necesita TODAS las filas, ofrece también el PDF o Excel. ' +
+    'SOLO necesitas pasar title y rows; columnas y KPIs se auto-generan igual que en generatePdfReport. Los estados (Cerrado, Pendiente, etc.) se colorean automáticamente.',
+  category: 'export',
+  requiredPermission: 'sales_orders.view',
+  enabledByDefault: true,
+  parameters: z.object({
+    conversationId: z.string().optional().describe('Se inyecta automáticamente, no lo pongas.'),
+    title: z.string().default('Reporte UNIK').describe('Título del reporte'),
+    subtitle: z.string().optional(),
+    rows: z.array(z.record(z.unknown())).optional().describe('Los datos a mostrar (array de la tool anterior).'),
+    columns: z.array(z.object({
+      header: z.string(),
+      key: z.string(),
+      format: z.enum(['currency', 'number', 'percentage', 'date', 'text']).optional(),
+    })).optional().describe('OPCIONAL. Se generan automáticamente de las claves de las rows si no se pasan (columnas de texto largo como direcciones/items se omiten para mantener la imagen compacta).'),
+    summaryCards: z.array(z.object({ label: z.string(), value: z.string() })).optional().describe('KPIs de resumen (ej: [{label: "Total", value: "$500,000.00"}]).'),
+    brandColor: z.string().optional().describe('Color hex (ej: #2563eb).'),
+    maxRows: z.number().int().min(1).max(60).default(20).describe('Máximo de filas en la imagen (default 20). Más filas → ofrece PDF/Excel en su lugar.'),
+  }),
+  execute: async (_actor, rawArgs) => {
+    const args = rawArgs as {
+      conversationId: string;
+      title: string;
+      subtitle?: string;
+      rows?: Record<string, unknown>[];
+      columns?: Array<{ header: string; key: string; format?: string }>;
+      summaryCards?: Array<{ label: string; value: string }>;
+      brandColor?: string;
+      maxRows: number;
+    };
+
+    const flatRows = (args.rows ?? []).map((r) => flattenRow(r));
+    if (flatRows.length === 0) {
+      return { error: 'No hay datos para generar la imagen. Llama primero una tool de datos (ej: querySalesOrders, getTopProducts).' };
+    }
+
+    // Long free-text fields never fit in a compact image row — keep the snapshot glanceable.
+    const IMAGE_EXCLUDE_KEYS = new Set(['items', 'shippingAddress', 'notes', 'description', 'address', 'direccion', 'dirección']);
+    const cols = (args.columns ?? autoColumns(flatRows)).filter((c) => !IMAGE_EXCLUDE_KEYS.has(c.key));
+
+    const { svg, width, height, rowsShown, rowsOmitted } = generateReportImageSvg({
+      title: args.title,
+      subtitle: args.subtitle,
+      logoText: 'UNIK',
+      brandColor: args.brandColor,
+      maxRows: args.maxRows,
+      columns: cols.map((c) => ({
+        header: c.header,
+        key: c.key,
+        align: c.format === 'currency' || c.format === 'number' ? 'right' as const : c.key === 'status' ? 'center' as const : 'left' as const,
+        format: (v: unknown) => formatValue(v, c.format),
+      })),
+      rows: flatRows,
+      summaryCards: args.summaryCards,
+    });
+
+    const artifact = await createArtifact({
+      conversationId: args.conversationId,
+      type: 'image',
+      inlineData: { svg, width, height },
+      meta: {
+        title: args.title,
+        rowCount: flatRows.length,
+        rowsShown,
+        rowsOmitted,
+        brandColor: args.brandColor,
+      },
+    });
+
+    return {
+      artifactId: artifact.id,
+      type: 'image',
+      title: args.title,
+      inlineRender: true,
+      rowCount: flatRows.length,
+      rowsShown,
+      rowsOmitted,
+      ...(rowsOmitted > 0
+        ? { note: `Se muestran ${rowsShown} de ${flatRows.length} filas en la imagen. Ofrece generar el PDF o Excel si el usuario necesita todas.` }
+        : {}),
     };
   },
 });

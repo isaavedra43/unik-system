@@ -5,13 +5,27 @@
  * `not_invoiced`...) while users and the model speak Spanish ("Pendiente",
  * "por entregar", "sin facturar"). Every status filter must resolve through
  * this dictionary instead of a raw substring match.
+ *
+ * IMPORTANT — single-field vs. derived status: this file only translates
+ * Spanish/English phrases into the raw value of ONE field at a time. Any
+ * business status computed from MORE than one field (like a sales order's
+ * overall "ticket" status) must be computed by that module's own canonical
+ * function (e.g. `getTicketStatus` in `@/modules/sales/sales-orders-helpers`)
+ * and only WRAPPED here (see `matchesTicketStatus`) — never re-derived from
+ * scratch. Reimplementing multi-field logic here is what caused the AI to
+ * disagree with the app's own "Ticket" column on 2026-09-11 (it treated a
+ * `shippedStatus="shipped"` order as already delivered, when the order was
+ * only "in transit" and still open per `getTicketStatus`).
  */
+
+import { getSalesOrderStatusOptions, getTicketStatus } from '@/modules/sales/sales-orders-helpers';
 
 export type StatusDomain =
   | 'salesOrder'
   | 'salesPaid'
   | 'salesInvoiced'
   | 'salesShipped'
+  | 'salesTicket'
   | 'invoice'
   | 'bill'
   | 'purchaseOrder'
@@ -261,6 +275,34 @@ const DICTIONARIES: Record<StatusDomain, DomainDictionary> = {
     ],
     groups: [],
   },
+  // Raw values/labels sourced from getTicketStatus's own TICKET_STATUS_MAP (via
+  // getSalesOrderStatusOptions) so this can never drift from the app's real "Ticket" column.
+  salesTicket: {
+    statuses: getSalesOrderStatusOptions('ticket').map((o) => ({ raw: o.value, label: o.label, synonyms: [] as string[] })),
+    groups: [
+      {
+        // "Still needs to be delivered" — excludes closed/void/delivered. Deliberately excludes
+        // draft/on_hold: those aren't confirmed sales yet, so counting them here would overstate
+        // "what's pending to deliver". They're still reachable via the broader "no cerrado" group below.
+        phrases: [
+          'pendiente de entrega', 'pendientes de entrega', 'pendiente de entregar', 'por entregar',
+          'sin entregar', 'no entregado', 'no entregada', 'que falta entregar', 'falta por entregar',
+          'que tengo que entregar', 'que me falta entregar', 'pendiente', 'pendientes',
+        ],
+        raws: ['in_transit', 'pending_shipment', 'payment_pending', 'not_invoiced', 'open'],
+      },
+      {
+        // Broader "ticket not finished" — everything except closed/void (includes delivered, draft, on_hold).
+        phrases: [
+          'no se ha cerrado', 'no cerrado', 'no cerrada', 'sin cerrar', 'abierto', 'abierta',
+          'no terminado', 'no terminada', 'que falta por hacer',
+        ],
+        raws: ['draft', 'on_hold', 'delivered', 'in_transit', 'pending_shipment', 'payment_pending', 'not_invoiced', 'open'],
+      },
+      { phrases: ['entregado', 'entregada', 'ya entregado', 'ya entregada', 'ya llego', 'ya le llego'], raws: ['delivered'] },
+      { phrases: ['cerrado', 'cerrada', 'terminado', 'terminada', 'completado', 'finalizado'], raws: ['closed'] },
+    ],
+  },
 };
 
 function humanize(raw: string): string {
@@ -344,6 +386,33 @@ export function matchesStatus(
     const f = normalizeText(fragment);
     return rawKey.includes(f) || normalizeText(statusLabel(domain, raw)).includes(f);
   });
+}
+
+export interface TicketStatusFields {
+  status?: string | null;
+  subStatus?: string | null;
+  paidStatus?: string | null;
+  invoicedStatus?: string | null;
+  shippedStatus?: string | null;
+}
+
+/**
+ * True when an order's OVERALL ticket status (computed by the same `getTicketStatus` the app's
+ * Sales Orders Workspace uses for its "Ticket" column — never re-derived here) satisfies a
+ * user/model query. Use this for "pendientes de entregar" / "qué me falta entregar" / "qué no se
+ * ha cerrado" — a `shippedStatus="shipped"` order is still open here (in_transit), unlike
+ * `matchesStatus('salesShipped', ...)` which only reasons about warehouse dispatch mechanics.
+ */
+export function matchesTicketStatus(order: TicketStatusFields, query: string | null | undefined): boolean {
+  if (!query) return true;
+  const raw = getTicketStatus({
+    status: order.status ?? null,
+    subStatus: order.subStatus ?? null,
+    paidStatus: order.paidStatus ?? null,
+    invoicedStatus: order.invoicedStatus ?? null,
+    shippedStatus: order.shippedStatus ?? null,
+  }).raw;
+  return matchesStatus('salesTicket', raw, query);
 }
 
 /** Value → count distribution with Spanish labels, for diagnostics. */

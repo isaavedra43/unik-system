@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { Bot, User as UserIcon, FileText, Image as ImageIcon, Plus } from 'lucide-react';
+import React from 'react';
+import { Bot, User as UserIcon, FileText, Image as ImageIcon } from 'lucide-react';
 import { AssistantMarkdown } from './AssistantMarkdown';
 import { AssistantToolCallCard, type ToolCallData } from './AssistantToolCallCard';
 
@@ -42,79 +42,9 @@ function isImage(mimeType: string): boolean {
 
 export interface AssistantMessageProps {
   message: AssistantMessageData;
-  onAddToChat?: (text: string) => void;
 }
 
-export function AssistantMessage({ message, onAddToChat }: AssistantMessageProps) {
-  const contentRef = useRef<HTMLDivElement>(null);
-  const [selectedText, setSelectedText] = useState('');
-  const [showAddButton, setShowAddButton] = useState(false);
-  const [buttonPos, setButtonPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
-
-  // Detect text selection within this message using mouseup
-  const handleSelectionChange = useCallback(() => {
-    if (!contentRef.current || !onAddToChat) {
-      setShowAddButton(false);
-      return;
-    }
-    const selection = window.getSelection();
-    if (!selection || selection.isCollapsed || selection.rangeCount === 0) {
-      setShowAddButton(false);
-      setSelectedText('');
-      return;
-    }
-    const range = selection.getRangeAt(0);
-    // Check if selection is within this message's content
-    const container = contentRef.current;
-    if (!container.contains(range.commonAncestorContainer)) {
-      setShowAddButton(false);
-      setSelectedText('');
-      return;
-    }
-    const text = selection.toString().trim();
-    if (text.length < 2) {
-      setShowAddButton(false);
-      setSelectedText('');
-      return;
-    }
-    // Get selection position relative to viewport (for fixed positioning)
-    const rect = range.getBoundingClientRect();
-    setButtonPos({
-      x: rect.left + rect.width / 2,
-      y: rect.top,
-    });
-    setSelectedText(text);
-    setShowAddButton(true);
-  }, [onAddToChat]);
-
-  useEffect(() => {
-    if (!onAddToChat) return;
-    document.addEventListener('selectionchange', handleSelectionChange);
-    return () => {
-      document.removeEventListener('selectionchange', handleSelectionChange);
-    };
-  }, [handleSelectionChange, onAddToChat]);
-
-  // Use mousedown on the button to preserve the selection
-  const handleAddToChatMouseDown = useCallback((e: React.MouseEvent) => {
-    e.preventDefault(); // Prevent focus change that would clear selection
-    e.stopPropagation();
-  }, []);
-
-  const handleAddToChatClick = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    // Use the saved selectedText (more reliable than reading selection at click time)
-    const text = selectedText || window.getSelection()?.toString().trim() || '';
-    if (text && onAddToChat) {
-      onAddToChat(text);
-      // Clear selection
-      window.getSelection()?.removeAllRanges();
-      setShowAddButton(false);
-      setSelectedText('');
-    }
-  }, [onAddToChat, selectedText]);
-
+export function AssistantMessage({ message }: AssistantMessageProps) {
   if (message.role === 'tool') {
     // Tool messages are rendered as cards within the assistant message
     return null;
@@ -154,29 +84,9 @@ export function AssistantMessage({ message, onAddToChat }: AssistantMessageProps
             ))}
           </div>
         )}
-        <div ref={contentRef} className="assistant-msg-content">
+        <div className="assistant-msg-content">
           {message.content && <AssistantMarkdown content={message.content} />}
         </div>
-        {/* Floating "Agregar al chat" button — fixed position relative to viewport */}
-        {showAddButton && onAddToChat && (
-          <button
-            type="button"
-            className="assistant-add-to-chat-btn"
-            onMouseDown={handleAddToChatMouseDown}
-            onClick={handleAddToChatClick}
-            style={{
-              position: 'fixed',
-              left: `${buttonPos.x}px`,
-              top: `${buttonPos.y - 8}px`,
-              transform: 'translate(-50%, -100%)',
-              zIndex: 9999,
-            }}
-            title="Agregar al chat"
-          >
-            <Plus size={12} />
-            <span>Agregar al chat</span>
-          </button>
-        )}
         {toolCallData.map((tc, idx) => (
           <AssistantToolCallCard key={idx} data={tc} />
         ))}

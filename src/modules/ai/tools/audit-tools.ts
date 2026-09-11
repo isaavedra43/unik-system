@@ -11,7 +11,7 @@ import {
 import {
   DELIVERY_TYPES,
   matchesStatus,
-  resolveStatusQuery,
+  matchesTicketStatus,
   statusDistribution,
   statusLabel,
   textMatches,
@@ -20,6 +20,7 @@ import {
   type DeliveryType,
 } from './ai-filter-matching';
 import { applySalesOrderFilters } from './sales-order-ai-filters';
+import { getTicketStatus } from '@/modules/sales/sales-orders-helpers';
 import {
   auditPendingDelivery,
   percentile,
@@ -93,13 +94,28 @@ registerTool({
     };
 
     const dateWhere = buildOrderDateWhereFlexible(args.dateRange, args.dateFrom, args.dateTo);
-    const openRaws = resolveStatusQuery('salesShipped', 'por entregar') ?? [];
+    // Safe superset for the SQL pre-filter: never excludes a genuinely pending order (including
+    // ones "shipped"/en tránsito but not closed), while still excluding void/cancelled and
+    // fully-closed-and-delivered orders. The real "is this order pending?" check (matchesTicketStatus,
+    // same source of truth as the app's "Ticket" column) happens in JS below — this SQL clause only
+    // trims fetch volume, it must never encode the actual business rule itself.
     const orders = await prisma.salesOrder.findMany({
       where: {
         ...dateWhere,
-        OR: [
-          ...openRaws.map((raw) => ({ shippedStatus: { equals: raw, mode: 'insensitive' } })),
-          { status: { equals: 'draft', mode: 'insensitive' } },
+        AND: [
+          { NOT: { status: { equals: 'void', mode: 'insensitive' } } },
+          { NOT: { status: { equals: 'cancelled', mode: 'insensitive' } } },
+          {
+            OR: [
+              { NOT: { status: { equals: 'closed', mode: 'insensitive' } } },
+              {
+                AND: [
+                  { NOT: { shippedStatus: { equals: 'delivered', mode: 'insensitive' } } },
+                  { NOT: { shippedStatus: { equals: 'fulfilled', mode: 'insensitive' } } },
+                ],
+              },
+            ],
+          },
         ],
       } as never,
       select: {
@@ -110,6 +126,7 @@ registerTool({
         customerPhone: true,
         salespersonName: true,
         status: true,
+        subStatus: true,
         paidStatus: true,
         invoicedStatus: true,
         shippedStatus: true,
@@ -131,7 +148,15 @@ registerTool({
     });
 
     const active = orders.filter((o) => !matchesStatus('salesOrder', o.status, 'Anulada, Cancelada'));
-    const scoped = applySalesOrderFilters(active, {
+    // The real population: genuinely pending per the same ticketStatus the app's "Ticket" column
+    // uses, PLUS the anomaly this tool explicitly promises to surface — a closed order whose
+    // shipping never actually completed ("cerrada_sin_entregar", flagged below by auditPendingDelivery).
+    const pendingOrClosedAnomaly = active.filter(
+      (o) =>
+        matchesTicketStatus(o, 'pendiente de entrega') ||
+        (matchesStatus('salesOrder', o.status, 'Cerrada') && !matchesStatus('salesShipped', o.shippedStatus, 'entregadas'))
+    );
+    const scoped = applySalesOrderFilters(pendingOrClosedAnomaly, {
       deliveryMethod: args.deliveryMethod,
       deliveryType: args.deliveryType,
       shippingLocation: args.shippingLocation,
@@ -180,6 +205,7 @@ registerTool({
         byDeliveryMethod: valueDistribution(scoped.map((o) => o.deliveryMethod)),
         bySalesperson: valueDistribution(scoped.map((o) => o.salespersonName)),
         byShippedStatus: statusDistribution('salesShipped', scoped.map((o) => o.shippedStatus)),
+        byTicketStatus: statusDistribution('salesTicket', scoped.map((o) => getTicketStatus(o).raw)),
         alerts: [...alerts.values()].sort((a, b) => b.count - a.count),
       },
       total: listed.length,
@@ -194,6 +220,7 @@ registerTool({
         deliveryMethod: o.deliveryMethod,
         status: statusLabel('salesOrder', o.status),
         shippedStatus: statusLabel('salesShipped', o.shippedStatus),
+        ticketStatus: getTicketStatus(o).label,
         paidStatus: statusLabel('salesPaid', o.paidStatus),
         invoicedStatus: statusLabel('salesInvoiced', o.invoicedStatus),
         total: round2(toAmount(o.total)),

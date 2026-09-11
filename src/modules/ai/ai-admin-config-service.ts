@@ -158,6 +158,7 @@ export const DEFAULT_AI_SETTINGS: AiSettings = {
     'generateExcelReport',
     'generateCsvExport',
     'generateChart',
+    'generateReportImage',
     'generateTable',
     'listArtifacts',
     'cleanupArtifacts',

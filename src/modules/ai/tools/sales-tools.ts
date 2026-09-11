@@ -47,6 +47,28 @@ function toNumber(value: unknown): number {
   return Number(value);
 }
 
+/**
+ * The order's OVERALL ticket status — the same computed value that drives the "Ticket" column
+ * in the Sales Orders Workspace (see getTicketStatus). Use this, not raw shippedStatus, whenever
+ * the question is "is this order actually done" (e.g. "pendientes de entregar"): a
+ * shippedStatus="shipped" order is only in transit here, not delivered.
+ */
+function ticketStatusOf(o: {
+  status?: unknown;
+  subStatus?: unknown;
+  paidStatus?: unknown;
+  invoicedStatus?: unknown;
+  shippedStatus?: unknown;
+}) {
+  return getTicketStatus({
+    status: (o.status as string | null) ?? null,
+    subStatus: (o.subStatus as string | null) ?? null,
+    paidStatus: (o.paidStatus as string | null) ?? null,
+    invoicedStatus: (o.invoicedStatus as string | null) ?? null,
+    shippedStatus: (o.shippedStatus as string | null) ?? null,
+  });
+}
+
 /* ------------------------------------------------------------------ */
 /* Tools                                                              */
 /* ------------------------------------------------------------------ */
@@ -57,7 +79,7 @@ function toNumber(value: unknown): number {
 /* ------------------------------------------------------------------ */
 const GROUP_BY_DIMENSIONS = [
   'none', 'paymentMethod', 'deliveryMethod', 'status', 'subStatus', 'paidStatus', 'invoicedStatus',
-  'shippedStatus', 'salesperson', 'location', 'customer', 'date', 'product',
+  'shippedStatus', 'ticketStatus', 'salesperson', 'location', 'customer', 'date', 'product',
 ] as const;
 
 const MAX_ORDERS_SCANNED = 20000;
@@ -127,8 +149,8 @@ registerTool({
     'Los filtros de texto ignoran acentos y mayúsculas; los de estado aceptan español o inglés ("por entregar", "Pendiente", "con saldo", "sin facturar"). ' +
     'Si no hay resultados devuelve "diagnostic" con qué filtro vació la consulta y cuántas coinciden fuera del periodo. ' +
     'EJEMPLOS: ' +
-    '"pendientes de entregar de este mes a pie de obra" → (dateRange="this_month", deliveryType="pie_de_obra", shippedStatus="por entregar", includeShippingAddress=true). ' +
-    '"ventas que tengo que entregar a domicilio" → (dateRange="all", deliveryType="entrega_a_cliente", shippedStatus="por entregar", includeShippingAddress=true). ' +
+    '"pendientes de entregar de este mes a pie de obra" → (dateRange="this_month", deliveryType="pie_de_obra", ticketStatus="pendiente de entrega", includeShippingAddress=true). ' +
+    '"ventas que tengo que entregar a domicilio" → (dateRange="all", deliveryType="entrega_a_cliente", ticketStatus="pendiente de entrega", includeShippingAddress=true). ' +
     '"ventas de agosto en efectivo de porcelanato con entrega en Jalisco" → (dateRange="custom", dateFrom="2026-08-01", dateTo="2026-08-31", paymentMethods=["EFECTIVO"], product="porcelanato", shippingLocation="Jalisco", includeItems=true, includeShippingAddress=true). ' +
     '"quién me debe por vendedor" → (dateRange="all", paidStatus="con saldo", groupBy="salesperson"). ' +
     '"ventas de hoy por método de pago" → (dateRange="today", groupBy="paymentMethod"). ' +
@@ -162,7 +184,14 @@ registerTool({
     ),
     invoicedStatus: z.string().optional().describe('Estado de FACTURACIÓN: "Facturada", "sin facturar", "Parcial".'),
     shippedStatus: z.string().optional().describe(
-      'Estado de ENTREGA: "por entregar" (Pendiente + No enviado + Parcial — úsalo para cualquier pregunta de pendientes de entrega), "Pendiente", "Parcial", "Enviado", "entregadas" (enviadas, entregadas o cumplidas).'
+      'Estado de DESPACHO/ALMACÉN (mecánica de envío, NO si el pedido ya quedó resuelto): "por entregar" = Pendiente + No enviado + Parcial (aún NO ha salido de bodega). "Enviado" = ya salió pero no ha llegado. "entregadas" = enviadas, entregadas o cumplidas. ' +
+      'Úsalo SOLO para preguntas específicas de despacho ("qué no ha salido de bodega", "qué ya se envió"). Para "qué me falta entregar" o pendientes en general usa ticketStatus.'
+    ),
+    ticketStatus: z.string().optional().describe(
+      'Estado GENERAL del pedido — misma fuente de verdad que la columna "Ticket" del listado de ventas (resume status+pago+factura+entrega en un solo estado). ' +
+      'Valores: "Cerrado", "Anulado", "Borrador", "En espera", "Entregado", "En tránsito", "Pendiente de envío", "Pago pendiente", "Sin facturar", "Abierto". ' +
+      'ÚSALO POR DEFAULT para "qué me falta entregar", "pendientes de entrega", "qué no se ha cerrado": ticketStatus="pendiente de entrega" incluye TODO lo que no está Cerrado, Anulado ni Entregado — incluye lo que YA SALIÓ de bodega pero no ha llegado (En tránsito). ' +
+      'Una orden con shippedStatus="Enviado" (ya salió) SIGUE pendiente de entrega: nunca la cuentes como entregada solo por eso.'
     ),
     location: z.string().optional().describe('Sucursal (nombre parcial). Ej: "Patio Unik".'),
     product: z.string().optional().describe('Producto o material: nombre, SKU o descripción (palabras parciales). Solo devuelve órdenes que lo contienen.'),
@@ -172,7 +201,7 @@ registerTool({
     saleMadeInWarehouse: z.boolean().optional().describe('true = ventas realizadas en almacén/bodega.'),
     search: z.string().optional().describe('Búsqueda libre en folio, cliente, referencia, dirección, teléfono y notas.'),
     groupBy: z.enum(GROUP_BY_DIMENSIONS).default('none').describe(
-      'Agrupar: "none" (lista), "paymentMethod", "deliveryMethod", "salesperson", "location", "customer", "status", "paidStatus", "invoicedStatus", "shippedStatus", "date", "product" (suma cantidades por producto).'
+      'Agrupar: "none" (lista), "paymentMethod", "deliveryMethod", "salesperson", "location", "customer", "status", "paidStatus", "invoicedStatus", "shippedStatus", "ticketStatus", "date", "product" (suma cantidades por producto).'
     ),
     includeItems: z.boolean().default(false).describe('true = incluir productos de cada orden (nombre, cantidad, unidad, total).'),
     includeShippingAddress: z.boolean().default(false).describe('true = incluir dirección de entrega, teléfono y notas de cada orden.'),
@@ -234,6 +263,7 @@ registerTool({
             }
           : {}),
         availableValuesInDateRange: {
+          ticketStatus: statusDistribution('salesTicket', inRange.map((o) => ticketStatusOf(o).raw)),
           shippedStatus: statusDistribution('salesShipped', inRange.map((o) => o.shippedStatus)),
           paidStatus: statusDistribution('salesPaid', inRange.map((o) => o.paidStatus)),
           invoicedStatus: statusDistribution('salesInvoiced', inRange.map((o) => o.invoicedStatus)),
@@ -320,6 +350,7 @@ registerTool({
       else if (args.groupBy === 'paidStatus') key = statusLabel('salesPaid', o.paidStatus) ?? 'SIN ESTADO DE PAGO';
       else if (args.groupBy === 'invoicedStatus') key = statusLabel('salesInvoiced', o.invoicedStatus) ?? 'SIN ESTADO DE FACTURACIÓN';
       else if (args.groupBy === 'shippedStatus') key = statusLabel('salesShipped', o.shippedStatus) ?? 'SIN ESTADO DE ENTREGA';
+      else if (args.groupBy === 'ticketStatus') key = ticketStatusOf(o).label;
       else if (args.groupBy === 'salesperson') key = o.salespersonName ?? 'SIN VENDEDOR';
       else if (args.groupBy === 'location') key = o.locationName ?? 'SIN SUCURSAL';
       else if (args.groupBy === 'customer') key = o.customerName ?? 'SIN CLIENTE';
@@ -413,6 +444,7 @@ function formatOrder(
     paidStatus: statusLabel('salesPaid', o.paidStatus as string | null),
     invoicedStatus: statusLabel('salesInvoiced', o.invoicedStatus as string | null),
     shippedStatus: statusLabel('salesShipped', o.shippedStatus as string | null),
+    ticketStatus: ticketStatusOf(o).label,
     paymentMethod: o.paymentMethod,
     deliveryMethod: o.deliveryMethod,
     location: o.locationName,

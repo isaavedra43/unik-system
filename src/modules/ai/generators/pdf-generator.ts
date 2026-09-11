@@ -1,5 +1,6 @@
 import PDFDocument from 'pdfkit';
 import fs from 'fs';
+import { colorForStatusLabel, sanitizeSvgColor } from './status-tone';
 
 /**
  * Professional PDF Report Generator
@@ -52,6 +53,9 @@ interface PdfReportOptions {
 
 const DEFAULT_BRAND = '#2563eb';
 const DEFAULT_ACCENT = '#64748b';
+
+/** @deprecated use `colorForStatusLabel` from `./status-tone` — kept for existing test imports. */
+export const toneForStatusLabel = colorForStatusLabel;
 const PAGE_MARGIN = 40;
 const FOOTER_HEIGHT = 30;
 const CELL_PAD_X = 6;
@@ -234,8 +238,12 @@ export function generatePdfReport(
   options: PdfReportOptions
 ): Promise<{ sizeBytes: number; pageCount: number }> {
   return new Promise((resolve, reject) => {
-    const brand = options.brandColor ?? DEFAULT_BRAND;
-    const accent = options.accentColor ?? DEFAULT_ACCENT;
+    // brandColor/accentColor/summaryCards[].color are AI tool-call arguments (model-controlled);
+    // pdfkit isn't an HTML-injection context, but a garbage color string can throw at render
+    // time — validate to a strict hex color (or fall back) for robustness, same rule as the
+    // SVG-based generators (see sanitizeSvgColor).
+    const brand = sanitizeSvgColor(options.brandColor, DEFAULT_BRAND);
+    const accent = sanitizeSvgColor(options.accentColor, DEFAULT_ACCENT);
     const requestedFontSize = options.fontSize ?? MAX_CONTENT_FONT_SIZE;
     const orientation = options.orientation ?? 'landscape';
 
@@ -319,7 +327,7 @@ export function generatePdfReport(
       const cardHeight = 44;
       options.summaryCards.forEach((card, i) => {
         const x = PAGE_MARGIN + i * (cardWidth + cardGap);
-        const cardColor = card.color ?? brand;
+        const cardColor = sanitizeSvgColor(card.color, brand);
         doc.roundedRect(x, cursorY, cardWidth, cardHeight, 6)
           .fillColor('#f8fafc')
           .fill();
@@ -457,9 +465,11 @@ export function generatePdfReport(
         for (let i = 0; i < tableColumns.length; i++) {
           const col = tableColumns[i];
           const align = col.align ?? 'left';
+          // Never color amount columns even if a value happened to collide with a status word.
+          const statusColor = align !== 'right' ? toneForStatusLabel(cellValues[i]) : null;
           doc.fontSize(fontSize)
-            .fillColor('#334155')
-            .font('Helvetica')
+            .fillColor(statusColor ?? '#334155')
+            .font(statusColor ? 'Helvetica-Bold' : 'Helvetica')
             .text(cellValues[i], x + CELL_PAD_X, rowY + CELL_PAD_Y, {
               width: innerWidths[i],
               height: tableRowHeight - CELL_PAD_Y,

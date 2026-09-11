@@ -22,8 +22,6 @@ export interface AssistantInputProps {
   canUpload?: boolean;
   canUseVoice?: boolean;
   onVoiceOpen?: () => void;
-  prefillText?: string;
-  onPrefillConsumed?: () => void;
 }
 
 export function AssistantInput({
@@ -36,8 +34,6 @@ export function AssistantInput({
   canUpload = false,
   canUseVoice = false,
   onVoiceOpen,
-  prefillText,
-  onPrefillConsumed,
 }: AssistantInputProps) {
   const [value, setValue] = useState('');
   const [attachments, setAttachments] = useState<AttachmentDraft[]>([]);
@@ -45,30 +41,6 @@ export function AssistantInput({
   const [uploadError, setUploadError] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  // Handle prefill text (from "Agregar al chat" feature)
-  useEffect(() => {
-    if (prefillText && prefillText.trim().length > 0) {
-      setValue((prev) => {
-        // Append to existing text with a space if there's already content
-        if (prev.trim().length > 0) {
-          return `${prev} ${prefillText}`.slice(0, maxLength);
-        }
-        return prefillText.slice(0, maxLength);
-      });
-      // Focus the textarea after prefilling
-      setTimeout(() => {
-        const ta = textareaRef.current;
-        if (ta) {
-          ta.focus();
-          ta.setSelectionRange(ta.value.length, ta.value.length);
-        }
-      }, 0);
-      // Clear the prefill text so it can be set again
-      onPrefillConsumed?.();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [prefillText]);
 
   // Auto-resize textarea
   useEffect(() => {

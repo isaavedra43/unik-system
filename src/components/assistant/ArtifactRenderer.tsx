@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { FileText, FileSpreadsheet, File, BarChart3, Table, Download, Loader2 } from 'lucide-react';
+import { FileText, FileSpreadsheet, File, BarChart3, Table, Download, Loader2, Image as ImageIcon } from 'lucide-react';
 
 export interface ArtifactData {
   artifactId: string;
@@ -30,6 +30,12 @@ interface InlineChartData {
   chartType: string;
 }
 
+interface InlineImageData {
+  svg: string;
+  width: number;
+  height: number;
+}
+
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -55,6 +61,8 @@ function ArtifactIcon({ type }: { type: string }) {
       return <File size={20} />;
     case 'chart':
       return <BarChart3 size={20} />;
+    case 'image':
+      return <ImageIcon size={20} />;
     case 'table':
       return <Table size={20} />;
     default:
@@ -63,7 +71,7 @@ function ArtifactIcon({ type }: { type: string }) {
 }
 
 export function ArtifactRenderer({ artifact }: { artifact: ArtifactData }) {
-  const [inlineData, setInlineData] = useState<InlineTableData | InlineChartData | null>(null);
+  const [inlineData, setInlineData] = useState<InlineTableData | InlineChartData | InlineImageData | null>(null);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -140,6 +148,19 @@ export function ArtifactRenderer({ artifact }: { artifact: ArtifactData }) {
         <div
           className="artifact-chart-svg"
           dangerouslySetInnerHTML={{ __html: chart.svg }}
+        />
+      </div>
+    );
+  }
+
+  // Inline report IMAGE (SVG) — a rendered report snapshot, not a chart.
+  if (artifact.type === 'image' && inlineData && 'svg' in inlineData) {
+    const image = inlineData as InlineImageData;
+    return (
+      <div className="artifact-card artifact-image-card">
+        <div
+          className="artifact-image-svg"
+          dangerouslySetInnerHTML={{ __html: image.svg }}
         />
       </div>
     );

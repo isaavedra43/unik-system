@@ -5964,6 +5964,20 @@ textarea.input {
   height: auto;
 }
 
+/* Report image card (generateReportImage) — a data-dense table snapshot, unlike the small
+   decorative charts above: shown at its natural crisp size (SVG stays sharp at any size) with
+   horizontal scroll instead of shrinking text to fit a narrow chat panel. */
+.artifact-image-card {
+  padding: var(--unik-space-3);
+  overflow-x: auto;
+}
+
+.artifact-image-svg svg {
+  display: block;
+  max-width: none;
+  height: auto;
+}
+
 /* ===== Voice Mode — Full-screen conversational overlay ===== */
 
 .voice-mode-overlay {

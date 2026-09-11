@@ -1,5 +1,6 @@
 import ExcelJS from 'exceljs';
 import fs from 'fs';
+import { hexToArgb, toneForStatusLabel, TONE_HEX } from './status-tone';
 
 /**
  * Professional Excel/XLSX Report Generator
@@ -37,11 +38,18 @@ const DEFAULT_BRAND = 'FF2563EB';
 const HEADER_FILL: Partial<ExcelJS.Fill> = { type: 'pattern', pattern: 'solid' };
 const ALT_FILL: Partial<ExcelJS.Fill> = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF1F5F9' } };
 
+/** `options.brandColor` is caller-supplied (ultimately AI tool-call args) — validate it's a
+ * real 8-digit ARGB hex before it reaches ExcelJS, rather than trusting it as-is. */
+function sanitizeArgb(value: string | null | undefined, fallback: string): string {
+  if (!value) return fallback;
+  return /^[0-9A-Fa-f]{8}$/.test(value) ? value.toUpperCase() : fallback;
+}
+
 export async function generateExcelReport(
   outputPath: string,
   options: ExcelReportOptions
 ): Promise<{ sizeBytes: number }> {
-  const brand = options.brandColor ?? DEFAULT_BRAND;
+  const brand = sanitizeArgb(options.brandColor, DEFAULT_BRAND);
   const workbook = new ExcelJS.Workbook();
   workbook.creator = options.author ?? 'UNIK Asistente IA';
   workbook.created = new Date();
@@ -130,6 +138,13 @@ export async function generateExcelReport(
       } else if (col.type === 'percentage') {
         cell.numFmt = '0.0%';
         cell.alignment = { horizontal: 'right' };
+      } else if (col.type === 'text' || !col.type) {
+        // Color known status labels (Cerrado, Pendiente, Enviado...) the same way the PDF and
+        // report image do, so a status reads the same color across every report format.
+        const tone = typeof cell.value === 'string' ? toneForStatusLabel(cell.value) : null;
+        if (tone) {
+          cell.font = { bold: true, color: { argb: hexToArgb(TONE_HEX[tone]) } };
+        }
       }
     });
   });

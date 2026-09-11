@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { generatePdfReport } from './pdf-generator';
+import { generatePdfReport, toneForStatusLabel } from './pdf-generator';
 
 const files: string[] = [];
 function tmpPdf(): string {
@@ -95,5 +95,43 @@ describe('generatePdfReport — wide table with long free-text columns', () => {
     });
     expect(pageCount).toBeGreaterThan(0);
     expect(pageCount).toBeLessThan(50);
+  });
+});
+
+describe('toneForStatusLabel — colored status badges', () => {
+  it('recognizes the real Spanish labels the app and the AI tools produce', () => {
+    expect(toneForStatusLabel('Cerrado')).toBe('#15803d');
+    expect(toneForStatusLabel('En tránsito')).toBe('#2563eb');
+    expect(toneForStatusLabel('Pendiente de envío')).toBe('#b45309');
+    expect(toneForStatusLabel('Anulado')).toBe('#b91c1c');
+    expect(toneForStatusLabel('Pagada')).toBe('#15803d');
+  });
+
+  it('is case/whitespace-insensitive but does not color arbitrary text (e.g. customer names, amounts)', () => {
+    expect(toneForStatusLabel('  cerrado  ')).toBe('#15803d');
+    expect(toneForStatusLabel('CARMEN HERNANDEZ SANDOVAL')).toBeNull();
+    expect(toneForStatusLabel('$126,730.00')).toBeNull();
+  });
+});
+
+describe('generatePdfReport — status columns render without breaking layout', () => {
+  it('a report with real ticketStatus labels still builds a valid, bounded PDF', async () => {
+    const out = tmpPdf();
+    const rows = [
+      { number: 'OV-23381', ticketStatus: 'En tránsito', total: '$5,166.72' },
+      { number: 'OV-23380', ticketStatus: 'Pendiente de envío', total: '$126,730.00' },
+      { number: 'OV-23311', ticketStatus: 'Cerrado', total: '$14,658.00' },
+    ];
+    const { sizeBytes, pageCount } = await generatePdfReport(out, {
+      title: 'Ticket status',
+      columns: [
+        { header: 'Orden', key: 'number' },
+        { header: 'Ticket', key: 'ticketStatus' },
+        { header: 'Total', key: 'total', align: 'right' },
+      ],
+      rows,
+    });
+    expect(sizeBytes).toBeGreaterThan(0);
+    expect(pageCount).toBe(1);
   });
 });
