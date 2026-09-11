@@ -10,6 +10,33 @@ function getAccessibleModules(actor: CurrentUser): string[] {
       'Órdenes de Venta — consultar ventas, métodos de pago (efectivo, transferencia, tarjeta), vendedores, sucursales, productos, estados de orden, totales'
     );
   }
+  if (has('purchase_orders.view')) {
+    modules.push('Órdenes de Compra — pedidos a proveedores, items, fechas de entrega, saldos');
+  }
+  if (has('bills.view')) {
+    modules.push('Facturas de Compra — facturas recibidas de proveedores, saldos, vencimientos');
+  }
+  if (has('vendor_credits.view')) {
+    modules.push('Créditos de Proveedor — notas de crédito de proveedores, saldos');
+  }
+  if (has('payments.view')) {
+    modules.push('Pagos — pagos recibidos de clientes, métodos de pago, montos');
+  }
+  if (has('invoices.view')) {
+    modules.push('Facturas — facturas a clientes, CFDI, saldos, vencimientos');
+  }
+  if (has('packages.view')) {
+    modules.push('Paquetes — envíos, tracking, transportistas, direcciones de envío');
+  }
+  if (has('products.view')) {
+    modules.push('Productos — catálogo real con stock, marcas, categorías, campos SAT');
+  }
+  if (has('customers.view')) {
+    modules.push('Clientes — saldos, créditos, direcciones, datos fiscales');
+  }
+  if (has('vendors.view')) {
+    modules.push('Proveedores — saldos, créditos, direcciones');
+  }
   if (has('users.view')) modules.push('Usuarios — lista de usuarios del sistema');
   if (has('roles.view')) modules.push('Roles y permisos — roles del sistema');
   if (has('integrations.view')) modules.push('Integraciones — estado de Zoho y sincronización');
@@ -115,6 +142,51 @@ REGLAS CRÍTICAS:
 - **getCrossTabAnalysis**: análisis cruzado de dos dimensiones
 - **getSalesAlerts**: detecta anomalías
 - **getSalesForecast**: pronóstico de ventas
+
+### Módulos de compra — ÓRDENES DE COMPRA, FACTURAS DE COMPRA, CRÉDITOS DE PROVEEDOR
+- **queryPurchaseOrders**: TOOL UNIVERSAL para órdenes de compra a proveedores. Filtros: dateRange, vendor, status, salesperson, currency, product, search. groupBy: none, vendor, status, date, product. includeItems=true para ver qué productos se pidieron.
+- **getPurchaseOrderDetail**: detalle de una orden de compra con items.
+- **queryBills**: TOOL UNIVERSAL para facturas de compra (bills). Filtros: dateRange, vendor, status, currency, search. groupBy: none, vendor, status, date.
+- **getBillDetail**: detalle de una factura de compra.
+- **queryVendorCredits**: TOOL UNIVERSAL para créditos de proveedor (notas de crédito). Filtros: dateRange, vendor, status, currency, search. groupBy: none, vendor, status, date.
+- **getVendorCreditDetail**: detalle de un crédito de proveedor.
+- EJEMPLOS: "qué material le pedí al proveedor X" → queryPurchaseOrders(vendor="X", includeItems=true). "facturas de compra abiertas" → queryBills(status="open"). "qué proveedor recibió crédito esta semana" → queryVendorCredits(dateRange="this_week", groupBy="vendor").
+
+### Módulo de pagos — PAGOS RECIBIDOS
+- **queryPayments**: TOOL UNIVERSAL para pagos recibidos de clientes. Filtros: dateRange, customer, paymentMode, status, currency, search. groupBy: none, customer, paymentMode, status, date.
+- **getPaymentDetail**: detalle de un pago.
+- EJEMPLOS: "pagos de esta semana" → queryPayments(dateRange="this_week"). "pagos en efectivo de hoy" → queryPayments(dateRange="today", paymentMode="EFECTIVO"). "pagos por cliente" → queryPayments(groupBy="customer").
+
+### Módulo de facturas — FACTURAS A CLIENTES
+- **queryInvoices**: TOOL UNIVERSAL para facturas a clientes. Filtros: dateRange, customer, status, salesperson, currency, product, search. groupBy: none, customer, status, salesperson, date, product. includeItems=true para ver productos. includeShippingAddress=true para dirección. Incluye campos CFDI (cfdiUuid, usoCfdi, metodoPago, formaPago).
+- **getInvoiceDetail**: detalle de una factura con items, CFDI y direcciones.
+- EJEMPLOS: "facturas abiertas" → queryInvoices(status="open"). "facturas del cliente X" → queryInvoices(customer="X"). "facturas con CFDI" → queryInvoices(search="UUID").
+
+### Módulo de paquetes — ENVÍOS Y TRACKING
+- **queryPackages**: TOOL UNIVERSAL para paquetes/envíos. Filtros: dateRange, customer, status, shipmentType, carrier, deliveryMethod, search. groupBy: none, customer, status, carrier, deliveryMethod, date. includeItems=true para ver productos. includeShippingAddress=true para dirección.
+- **getPackageDetail**: detalle de un paquete con items, tracking y dirección.
+- EJEMPLOS: "paquetes abiertos de esta semana" → queryPackages(dateRange="this_week", status="open"). "paquetes por transportista" → queryPackages(groupBy="carrier"). "paquetes con tracking" → queryPackages(dateRange="this_month").
+
+### Módulo de productos — CATÁLOGO REAL (tabla Product)
+- **queryProducts**: TOOL UNIVERSAL para el catálogo de productos. Filtros: search, status, productType, category, vendor, brand, manufacturer, lowStock. groupBy: none, category, vendor, brand, status, productType. Incluye stock (stockOnHand, availableStock, reorderLevel), SAT (satProductCode, satUnitCode), marca, fabricante.
+- **getProductDetail**: detalle de un producto con todos los campos.
+- NOTA: Este tool consulta el catálogo REAL (tabla Product). Los tools getProductCatalog/getProductDetails/getProductSearch consultan desde SalesOrderItem (ventas históricas). Usa queryProducts para "qué productos tengo", "stock de X", "catálogo". Usa getProductCatalog para "productos más vendidos".
+
+### Módulo de contactos — CLIENTES Y PROVEEDORES
+- **queryContacts**: TOOL UNIVERSAL para contactos. Filtros: search, contactType (customer/vendor), status, taxRegime, owner, outstandingReceivableOnly, outstandingPayableOnly. groupBy: none, contactType, status, taxRegime, owner. includeAddresses=true para direcciones.
+- **getContactDetail**: detalle de un contacto con todos los campos.
+- EJEMPLOS: "clientes" → queryContacts(contactType="customer"). "proveedores" → queryContacts(contactType="vendor"). "clientes que me deben" → queryContacts(contactType="customer", outstandingReceivableOnly=true). "proveedores a los que debo" → queryContacts(contactType="vendor", outstandingPayableOnly=true).
+
+### Mapeo de preguntas comunes a tools
+- "¿qué proveedor recibió pago (crédito de proveedor) esta semana?" → queryVendorCredits(dateRange="this_week", groupBy="vendor")
+- "¿ya le pidieron el material al proveedor X esta semana?" → queryPurchaseOrders(dateRange="this_week", vendor="X", includeItems=true)
+- "¿qué pedidos tengo que entregar esta semana?" → querySalesOrders(dateRange="this_week", shippedStatus="Pendiente")
+- "¿qué órdenes están abiertas y son de entrega a pie de obra del mes pasado?" → querySalesOrders(dateRange="last_month", deliveryMethod="A PIE DE OBRA", shippedStatus="Pendiente", includeItems=true, includeShippingAddress=true)
+- "¿qué paquetes están abiertos de esta semana?" → queryPackages(dateRange="this_week", status="open")
+- "¿qué facturas están abiertas?" → queryInvoices(status="open")
+- "¿qué productos tengo en catálogo?" → queryProducts()
+- "¿stock de cemento?" → queryProducts(search="cemento")
+- "¿qué clientes me deben?" → queryContacts(contactType="customer", outstandingReceivableOnly=true)
 
 ## Manejo de fechas — REGLAS SIMPLES
 - "hoy" → dateRange="today"

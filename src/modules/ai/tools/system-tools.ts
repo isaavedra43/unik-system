@@ -61,6 +61,51 @@ registerTool({
       label: 'Inventario (productos, stock, bundles)',
       accessible: has('sales_orders.view'),
     });
+    modules.push({
+      key: 'purchase_orders',
+      label: 'Órdenes de Compra — pedidos a proveedores, items, fechas de entrega',
+      accessible: has('purchase_orders.view'),
+    });
+    modules.push({
+      key: 'bills',
+      label: 'Facturas de Compra — facturas de proveedores, saldos, vencimientos',
+      accessible: has('bills.view'),
+    });
+    modules.push({
+      key: 'vendor_credits',
+      label: 'Créditos de Proveedor — notas de crédito de proveedores',
+      accessible: has('vendor_credits.view'),
+    });
+    modules.push({
+      key: 'payments',
+      label: 'Pagos — pagos recibidos de clientes, métodos de pago',
+      accessible: has('payments.view'),
+    });
+    modules.push({
+      key: 'invoices',
+      label: 'Facturas — facturas a clientes, CFDI, saldos',
+      accessible: has('invoices.view'),
+    });
+    modules.push({
+      key: 'packages',
+      label: 'Paquetes — envíos, tracking, carriers, direcciones',
+      accessible: has('packages.view'),
+    });
+    modules.push({
+      key: 'products',
+      label: 'Productos — catálogo, stock, categorías, marcas',
+      accessible: has('products.view'),
+    });
+    modules.push({
+      key: 'customers',
+      label: 'Clientes — saldos, créditos, direcciones',
+      accessible: has('customers.view'),
+    });
+    modules.push({
+      key: 'vendors',
+      label: 'Proveedores — saldos, créditos',
+      accessible: has('vendors.view'),
+    });
     modules.push({ key: 'users', label: 'Usuarios', accessible: has('users.view') });
     modules.push({ key: 'roles', label: 'Roles y permisos', accessible: has('roles.view') });
     modules.push({

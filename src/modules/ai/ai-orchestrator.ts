@@ -334,6 +334,58 @@ export async function* runAssistant(
       return 'Panorama de Datos UNIK';
     }
 
+    // For new module tools — build dynamic titles with filters
+    if (toolName === 'queryPurchaseOrders') {
+      const parts: string[] = ['Órdenes de Compra'];
+      if (toolArgs?.vendor) parts.push(`de ${toolArgs.vendor}`);
+      if (toolArgs?.status) parts.push(`(${toolArgs.status})`);
+      return `${parts.join(' ')}${dateLabel}`;
+    }
+    if (toolName === 'queryBills') {
+      const parts: string[] = ['Facturas de Compra'];
+      if (toolArgs?.vendor) parts.push(`de ${toolArgs.vendor}`);
+      if (toolArgs?.status) parts.push(`(${toolArgs.status})`);
+      return `${parts.join(' ')}${dateLabel}`;
+    }
+    if (toolName === 'queryVendorCredits') {
+      const parts: string[] = ['Créditos de Proveedor'];
+      if (toolArgs?.vendor) parts.push(`de ${toolArgs.vendor}`);
+      if (toolArgs?.status) parts.push(`(${toolArgs.status})`);
+      return `${parts.join(' ')}${dateLabel}`;
+    }
+    if (toolName === 'queryPayments') {
+      const parts: string[] = ['Pagos'];
+      if (toolArgs?.customer) parts.push(`de ${toolArgs.customer}`);
+      if (toolArgs?.paymentMode) parts.push(`en ${toolArgs.paymentMode}`);
+      return `${parts.join(' ')}${dateLabel}`;
+    }
+    if (toolName === 'queryInvoices') {
+      const parts: string[] = ['Facturas'];
+      if (toolArgs?.customer) parts.push(`de ${toolArgs.customer}`);
+      if (toolArgs?.status) parts.push(`(${toolArgs.status})`);
+      return `${parts.join(' ')}${dateLabel}`;
+    }
+    if (toolName === 'queryPackages') {
+      const parts: string[] = ['Paquetes'];
+      if (toolArgs?.customer) parts.push(`de ${toolArgs.customer}`);
+      if (toolArgs?.carrier) parts.push(`(${toolArgs.carrier})`);
+      if (toolArgs?.status) parts.push(`(${toolArgs.status})`);
+      return `${parts.join(' ')}${dateLabel}`;
+    }
+    if (toolName === 'queryProducts') {
+      const parts: string[] = ['Catálogo de Productos'];
+      if (toolArgs?.category) parts.push(`— ${toolArgs.category}`);
+      if (toolArgs?.brand) parts.push(`— ${toolArgs.brand}`);
+      if (toolArgs?.lowStock) parts.push('(Stock Bajo)');
+      return parts.join(' ');
+    }
+    if (toolName === 'queryContacts') {
+      const parts: string[] = ['Contactos'];
+      if (toolArgs?.contactType === 'customer') parts[0] = 'Clientes';
+      else if (toolArgs?.contactType === 'vendor') parts[0] = 'Proveedores';
+      return parts.join(' ');
+    }
+
     // Static title map for other tools
     const titleMap: Record<string, string> = {
       getTopProducts: 'Productos Más Vendidos',

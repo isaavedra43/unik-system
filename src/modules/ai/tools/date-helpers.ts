@@ -196,15 +196,61 @@ export function formatDate(date: Date | null | undefined): string | null {
 }
 
 /**
+ * Builds a Prisma where clause for a date field from a resolved date range.
+ * Returns an empty object if from/to are null (meaning "all history").
+ *
+ * Generic version: pass the field name (default: "date").
+ */
+export function buildDateWhere(
+  range: DateRangeShortcut | string | undefined,
+  fieldName: string = 'date'
+): Record<string, unknown> {
+  const { from, to } = resolveDateRange(range);
+  if (from === null || to === null) return {};
+  return { [fieldName]: { gte: from, lte: to } };
+}
+
+/**
+ * Builds a Prisma where clause for a date field from EITHER a dateRange shortcut
+ * OR explicit dateFrom/dateTo strings (YYYY-MM-DD).
+ *
+ * If dateFrom/dateTo are provided, they take priority over dateRange.
+ * Generic version: pass the field name (default: "date").
+ */
+export function buildDateWhereFlexible(
+  range: DateRangeShortcut | string | undefined,
+  dateFrom?: string,
+  dateTo?: string,
+  fieldName: string = 'date'
+): Record<string, unknown> {
+  // Explicit dates take priority
+  if (dateFrom && dateTo) {
+    const from = new Date(`${dateFrom}T00:00:00Z`);
+    const to = new Date(`${dateTo}T23:59:59.999Z`);
+    return { [fieldName]: { gte: from, lte: to } };
+  }
+  if (dateFrom) {
+    const from = new Date(`${dateFrom}T00:00:00Z`);
+    return { [fieldName]: { gte: from } };
+  }
+  if (dateTo) {
+    const to = new Date(`${dateTo}T23:59:59.999Z`);
+    return { [fieldName]: { lte: to } };
+  }
+  // Fall back to shortcut
+  return buildDateWhere(range, fieldName);
+}
+
+/**
  * Builds a Prisma where clause for orderDate from a resolved date range.
  * Returns an empty object if from/to are null (meaning "all history").
+ *
+ * Backward-compatible wrapper around buildDateWhere with fieldName="orderDate".
  */
 export function buildOrderDateWhere(
   range: DateRangeShortcut | string | undefined
 ): Record<string, unknown> {
-  const { from, to } = resolveDateRange(range);
-  if (from === null || to === null) return {};
-  return { orderDate: { gte: from, lte: to } };
+  return buildDateWhere(range, 'orderDate');
 }
 
 /**
@@ -213,26 +259,13 @@ export function buildOrderDateWhere(
  *
  * If dateFrom/dateTo are provided, they take priority over dateRange.
  * This lets the IA query specific months like "agosto" → dateFrom="2026-08-01", dateTo="2026-08-31".
+ *
+ * Backward-compatible wrapper around buildDateWhereFlexible with fieldName="orderDate".
  */
 export function buildOrderDateWhereFlexible(
   range: DateRangeShortcut | string | undefined,
   dateFrom?: string,
   dateTo?: string
 ): Record<string, unknown> {
-  // Explicit dates take priority
-  if (dateFrom && dateTo) {
-    const from = new Date(`${dateFrom}T00:00:00Z`);
-    const to = new Date(`${dateTo}T23:59:59.999Z`);
-    return { orderDate: { gte: from, lte: to } };
-  }
-  if (dateFrom) {
-    const from = new Date(`${dateFrom}T00:00:00Z`);
-    return { orderDate: { gte: from } };
-  }
-  if (dateTo) {
-    const to = new Date(`${dateTo}T23:59:59.999Z`);
-    return { orderDate: { lte: to } };
-  }
-  // Fall back to shortcut
-  return buildOrderDateWhere(range);
+  return buildDateWhereFlexible(range, dateFrom, dateTo, 'orderDate');
 }

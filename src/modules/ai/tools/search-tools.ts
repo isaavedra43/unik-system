@@ -137,8 +137,36 @@ registerTool({
     const paymentFields = ['paymentMethod'] as const;
     const paymentOrConditions = buildFuzzyFilter(paymentFields, terms);
 
+    // Build fuzzy conditions for new modules
+    const invoiceFields = ['invoiceNumber', 'customerName', 'referenceNumber', 'cfdiUuid'] as const;
+    const invoiceOrConditions = buildFuzzyFilter(invoiceFields, terms);
+
+    const packageFields = ['packageNumber', 'customerName', 'trackingNumber', 'carrier', 'salesorderNumber'] as const;
+    const packageOrConditions = buildFuzzyFilter(packageFields, terms);
+
+    const billFields = ['billNumber', 'vendorName'] as const;
+    const billOrConditions = buildFuzzyFilter(billFields, terms);
+
+    const customerPaymentFields = ['paymentNumber', 'customerName', 'referenceNumber'] as const;
+    const customerPaymentOrConditions = buildFuzzyFilter(customerPaymentFields, terms);
+
+    const purchaseOrderFields = ['purchaseOrderNumber', 'vendorName', 'referenceNumber'] as const;
+    const purchaseOrderOrConditions = buildFuzzyFilter(purchaseOrderFields, terms);
+
+    const vendorCreditFields = ['vendorCreditNumber', 'vendorName'] as const;
+    const vendorCreditOrConditions = buildFuzzyFilter(vendorCreditFields, terms);
+
+    const productCatalogFields = ['name', 'sku', 'brand', 'manufacturer', 'categoryName', 'description'] as const;
+    const productCatalogOrConditions = buildFuzzyFilter(productCatalogFields, terms);
+
+    const contactFields = ['contactName', 'companyName', 'primaryEmail', 'primaryPhone'] as const;
+    const contactOrConditions = buildFuzzyFilter(contactFields, terms);
+
     // Run all searches in parallel for maximum speed
-    const [orders, products, customers, salespeople, deliveryMethods, paymentMethods] = await Promise.all([
+    const [
+      orders, products, customers, salespeople, deliveryMethods, paymentMethods,
+      invoices, packages, bills, customerPayments, purchaseOrders, vendorCredits, productCatalog, contacts,
+    ] = await Promise.all([
       // 1. Search in SalesOrders — ALL text fields with fuzzy matching
       prisma.salesOrder.findMany({
         where: { OR: orderOrConditions },
@@ -253,6 +281,145 @@ registerTool({
         },
         orderBy: { orderDate: 'desc' },
         take: limit * 3,
+      }),
+
+      // 7. Search in Invoices
+      prisma.invoice.findMany({
+        where: { OR: invoiceOrConditions },
+        select: {
+          invoiceNumber: true,
+          customerName: true,
+          status: true,
+          date: true,
+          total: true,
+          balance: true,
+          currencyCode: true,
+          referenceNumber: true,
+          cfdiUuid: true,
+        },
+        orderBy: { date: 'desc' },
+        take: limit,
+      }),
+
+      // 8. Search in Packages
+      prisma.package.findMany({
+        where: { OR: packageOrConditions },
+        select: {
+          packageNumber: true,
+          customerName: true,
+          status: true,
+          date: true,
+          carrier: true,
+          trackingNumber: true,
+          deliveryMethod: true,
+          shipmentStatus: true,
+          salesorderNumber: true,
+        },
+        orderBy: { date: 'desc' },
+        take: limit,
+      }),
+
+      // 9. Search in Bills
+      prisma.bill.findMany({
+        where: { OR: billOrConditions },
+        select: {
+          billNumber: true,
+          vendorName: true,
+          status: true,
+          date: true,
+          total: true,
+          balance: true,
+          currencyCode: true,
+        },
+        orderBy: { date: 'desc' },
+        take: limit,
+      }),
+
+      // 10. Search in CustomerPayments
+      prisma.customerPayment.findMany({
+        where: { OR: customerPaymentOrConditions },
+        select: {
+          paymentNumber: true,
+          customerName: true,
+          paymentMode: true,
+          status: true,
+          date: true,
+          amount: true,
+          currencyCode: true,
+          referenceNumber: true,
+        },
+        orderBy: { date: 'desc' },
+        take: limit,
+      }),
+
+      // 11. Search in PurchaseOrders
+      prisma.purchaseOrder.findMany({
+        where: { OR: purchaseOrderOrConditions },
+        select: {
+          purchaseOrderNumber: true,
+          vendorName: true,
+          status: true,
+          date: true,
+          total: true,
+          balance: true,
+          currencyCode: true,
+          referenceNumber: true,
+        },
+        orderBy: { date: 'desc' },
+        take: limit,
+      }),
+
+      // 12. Search in VendorCredits
+      prisma.vendorCredit.findMany({
+        where: { OR: vendorCreditOrConditions },
+        select: {
+          vendorCreditNumber: true,
+          vendorName: true,
+          status: true,
+          date: true,
+          total: true,
+          balance: true,
+          currencyCode: true,
+        },
+        orderBy: { date: 'desc' },
+        take: limit,
+      }),
+
+      // 13. Search in Product catalog
+      prisma.product.findMany({
+        where: { OR: productCatalogOrConditions },
+        select: {
+          name: true,
+          sku: true,
+          status: true,
+          rate: true,
+          unit: true,
+          stockOnHand: true,
+          availableStock: true,
+          categoryName: true,
+          brand: true,
+          manufacturer: true,
+          vendorName: true,
+        },
+        orderBy: { name: 'asc' },
+        take: limit,
+      }),
+
+      // 14. Search in Contacts
+      prisma.contact.findMany({
+        where: { OR: contactOrConditions },
+        select: {
+          contactName: true,
+          companyName: true,
+          contactType: true,
+          status: true,
+          primaryEmail: true,
+          primaryPhone: true,
+          outstandingReceivable: true,
+          outstandingPayable: true,
+        },
+        orderBy: { contactName: 'asc' },
+        take: limit,
       }),
     ]);
 
@@ -372,7 +539,8 @@ registerTool({
       }
     }
 
-    const totalResults = orders.length + products.length + customerMap.size + salespersonMap.size + deliveryMap.size + paymentMap.size;
+    const totalResults = orders.length + products.length + customerMap.size + salespersonMap.size + deliveryMap.size + paymentMap.size
+      + invoices.length + packages.length + bills.length + customerPayments.length + purchaseOrders.length + vendorCredits.length + productCatalog.length + contacts.length;
 
     return {
       query: args.query,
@@ -467,6 +635,97 @@ registerTool({
           total: p.total.toFixed(2),
           balance: p.balance.toFixed(2),
         })),
+      invoices: invoices.map((inv) => ({
+        type: 'invoice',
+        number: inv.invoiceNumber,
+        customer: inv.customerName,
+        status: inv.status,
+        date: formatDate(inv.date),
+        total: decimalToString(inv.total),
+        balance: decimalToString(inv.balance),
+        currency: inv.currencyCode,
+        referenceNumber: inv.referenceNumber,
+        cfdiUuid: inv.cfdiUuid,
+      })),
+      packages: packages.map((pkg) => ({
+        type: 'package',
+        number: pkg.packageNumber,
+        customer: pkg.customerName,
+        status: pkg.status,
+        date: formatDate(pkg.date),
+        carrier: pkg.carrier,
+        trackingNumber: pkg.trackingNumber,
+        deliveryMethod: pkg.deliveryMethod,
+        shipmentStatus: pkg.shipmentStatus,
+        salesorderNumber: pkg.salesorderNumber,
+      })),
+      bills: bills.map((b) => ({
+        type: 'bill',
+        number: b.billNumber,
+        vendor: b.vendorName,
+        status: b.status,
+        date: formatDate(b.date),
+        total: decimalToString(b.total),
+        balance: decimalToString(b.balance),
+        currency: b.currencyCode,
+      })),
+      customerPayments: customerPayments.map((p) => ({
+        type: 'customerPayment',
+        number: p.paymentNumber,
+        customer: p.customerName,
+        paymentMode: p.paymentMode,
+        status: p.status,
+        date: formatDate(p.date),
+        amount: decimalToString(p.amount),
+        currency: p.currencyCode,
+        referenceNumber: p.referenceNumber,
+      })),
+      purchaseOrders: purchaseOrders.map((po) => ({
+        type: 'purchaseOrder',
+        number: po.purchaseOrderNumber,
+        vendor: po.vendorName,
+        status: po.status,
+        date: formatDate(po.date),
+        total: decimalToString(po.total),
+        balance: decimalToString(po.balance),
+        currency: po.currencyCode,
+        referenceNumber: po.referenceNumber,
+      })),
+      vendorCredits: vendorCredits.map((vc) => ({
+        type: 'vendorCredit',
+        number: vc.vendorCreditNumber,
+        vendor: vc.vendorName,
+        status: vc.status,
+        date: formatDate(vc.date),
+        total: decimalToString(vc.total),
+        balance: decimalToString(vc.balance),
+        currency: vc.currencyCode,
+      })),
+      productCatalog: productCatalog.map((p) => ({
+        type: 'productCatalog',
+        name: p.name,
+        sku: p.sku,
+        status: p.status,
+        rate: decimalToString(p.rate),
+        unit: p.unit,
+        stockOnHand: decimalToString(p.stockOnHand),
+        availableStock: decimalToString(p.availableStock),
+        category: p.categoryName,
+        brand: p.brand,
+        manufacturer: p.manufacturer,
+        vendor: p.vendorName,
+      })),
+      contacts: contacts.map((c) => ({
+        type: 'contact',
+        name: c.contactName,
+        company: c.companyName,
+        contactType: c.contactType,
+        status: c.status,
+        email: c.primaryEmail,
+        phone: c.primaryPhone,
+        outstandingReceivable: decimalToString(c.outstandingReceivable),
+        outstandingPayable: decimalToString(c.outstandingPayable),
+      })),
     };
   },
 });
@@ -505,6 +764,32 @@ registerTool({
       paymentMethodCounts,
       deliveryMethodCounts,
       recentOrders,
+      // New modules
+      totalInvoices,
+      invoiceStatusCounts,
+      invoiceDateRange,
+      totalPackages,
+      packageStatusCounts,
+      packageDateRange,
+      totalBills,
+      billStatusCounts,
+      billDateRange,
+      totalCustomerPayments,
+      paymentStatusCounts,
+      paymentModeCounts,
+      paymentDateRange,
+      totalPurchaseOrders,
+      purchaseOrderStatusCounts,
+      purchaseOrderDateRange,
+      totalVendorCredits,
+      vendorCreditStatusCounts,
+      vendorCreditDateRange,
+      totalProductCatalog,
+      productStatusCounts,
+      productCategoryCounts,
+      totalContacts,
+      contactTypeCounts,
+      contactStatusCounts,
     ] = await Promise.all([
       prisma.salesOrder.count(),
       prisma.salesOrderItem.count(),
@@ -578,6 +863,32 @@ registerTool({
           shippedStatus: true,
         },
       }),
+      // New modules
+      prisma.invoice.count(),
+      prisma.invoice.groupBy({ by: ['status'], _count: { id: true } }),
+      prisma.invoice.aggregate({ _min: { date: true }, _max: { date: true } }),
+      prisma.package.count(),
+      prisma.package.groupBy({ by: ['status'], _count: { id: true } }),
+      prisma.package.aggregate({ _min: { date: true }, _max: { date: true } }),
+      prisma.bill.count(),
+      prisma.bill.groupBy({ by: ['status'], _count: { id: true } }),
+      prisma.bill.aggregate({ _min: { date: true }, _max: { date: true } }),
+      prisma.customerPayment.count(),
+      prisma.customerPayment.groupBy({ by: ['status'], _count: { id: true } }),
+      prisma.customerPayment.groupBy({ by: ['paymentMode'], _count: { id: true } }),
+      prisma.customerPayment.aggregate({ _min: { date: true }, _max: { date: true } }),
+      prisma.purchaseOrder.count(),
+      prisma.purchaseOrder.groupBy({ by: ['status'], _count: { id: true } }),
+      prisma.purchaseOrder.aggregate({ _min: { date: true }, _max: { date: true } }),
+      prisma.vendorCredit.count(),
+      prisma.vendorCredit.groupBy({ by: ['status'], _count: { id: true } }),
+      prisma.vendorCredit.aggregate({ _min: { date: true }, _max: { date: true } }),
+      prisma.product.count(),
+      prisma.product.groupBy({ by: ['status'], _count: { id: true } }),
+      prisma.product.groupBy({ by: ['categoryName'], _count: { id: true } }),
+      prisma.contact.count(),
+      prisma.contact.groupBy({ by: ['contactType'], _count: { id: true } }),
+      prisma.contact.groupBy({ by: ['status'], _count: { id: true } }),
     ]);
 
     return {
@@ -592,6 +903,21 @@ registerTool({
         totalBalance: decimalToString(dateRange._sum.balance),
         oldestOrder: formatDate(dateRange._min.orderDate),
         newestOrder: formatDate(dateRange._max.orderDate),
+        // New modules summary
+        totalInvoices,
+        totalPackages,
+        totalBills,
+        totalCustomerPayments,
+        totalPurchaseOrders,
+        totalVendorCredits,
+        totalProductCatalog,
+        totalContacts,
+        invoiceDateRange: { oldest: formatDate(invoiceDateRange._min.date), newest: formatDate(invoiceDateRange._max.date) },
+        packageDateRange: { oldest: formatDate(packageDateRange._min.date), newest: formatDate(packageDateRange._max.date) },
+        billDateRange: { oldest: formatDate(billDateRange._min.date), newest: formatDate(billDateRange._max.date) },
+        paymentDateRange: { oldest: formatDate(paymentDateRange._min.date), newest: formatDate(paymentDateRange._max.date) },
+        purchaseOrderDateRange: { oldest: formatDate(purchaseOrderDateRange._min.date), newest: formatDate(purchaseOrderDateRange._max.date) },
+        vendorCreditDateRange: { oldest: formatDate(vendorCreditDateRange._min.date), newest: formatDate(vendorCreditDateRange._max.date) },
       },
       customers: totalCustomers
         .map((c) => ({ name: c.customerName ?? 'Sin nombre', orders: c._count.id }))
@@ -662,6 +988,41 @@ registerTool({
         paidStatus: o.paidStatus,
         shippedStatus: o.shippedStatus,
       })),
+      // New modules
+      invoiceStatuses: invoiceStatusCounts
+        .map((s) => ({ status: s.status ?? 'Sin estado', count: s._count.id }))
+        .sort((a, b) => b.count - a.count),
+      packageStatuses: packageStatusCounts
+        .map((s) => ({ status: s.status ?? 'Sin estado', count: s._count.id }))
+        .sort((a, b) => b.count - a.count),
+      billStatuses: billStatusCounts
+        .map((s) => ({ status: s.status ?? 'Sin estado', count: s._count.id }))
+        .sort((a, b) => b.count - a.count),
+      paymentStatuses: paymentStatusCounts
+        .map((s) => ({ status: s.status ?? 'Sin estado', count: s._count.id }))
+        .sort((a, b) => b.count - a.count),
+      paymentModes: paymentModeCounts
+        .map((p) => ({ mode: p.paymentMode ?? 'Sin modo', count: p._count.id }))
+        .sort((a, b) => b.count - a.count),
+      purchaseOrderStatuses: purchaseOrderStatusCounts
+        .map((s) => ({ status: s.status ?? 'Sin estado', count: s._count.id }))
+        .sort((a, b) => b.count - a.count),
+      vendorCreditStatuses: vendorCreditStatusCounts
+        .map((s) => ({ status: s.status ?? 'Sin estado', count: s._count.id }))
+        .sort((a, b) => b.count - a.count),
+      productStatuses: productStatusCounts
+        .map((s) => ({ status: s.status ?? 'Sin estado', count: s._count.id }))
+        .sort((a, b) => b.count - a.count),
+      productCategories: productCategoryCounts
+        .map((c) => ({ category: c.categoryName ?? 'Sin categoría', count: c._count.id }))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 20),
+      contactTypes: contactTypeCounts
+        .map((c) => ({ type: c.contactType ?? 'Sin tipo', count: c._count.id }))
+        .sort((a, b) => b.count - a.count),
+      contactStatuses: contactStatusCounts
+        .map((s) => ({ status: s.status ?? 'Sin estado', count: s._count.id }))
+        .sort((a, b) => b.count - a.count),
     };
   },
 });

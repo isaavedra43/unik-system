@@ -2,7 +2,18 @@ import { z, ZodType } from 'zod';
 import type { CurrentUser } from '@/modules/auth/authorization';
 import { zodToJsonSchema } from './zod-to-json-schema';
 
-export type ToolCategory = 'sales' | 'system' | 'export' | 'finance' | 'inventory';
+export type ToolCategory =
+  | 'sales'
+  | 'system'
+  | 'export'
+  | 'finance'
+  | 'inventory'
+  | 'purchases'
+  | 'payments'
+  | 'invoices'
+  | 'packages'
+  | 'products'
+  | 'contacts';
 
 interface ToolDefinition {
   name: string;

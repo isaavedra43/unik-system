@@ -36,6 +36,24 @@ import './advanced-analytics-tools';
 // Operations tools (order items, notifications, integration status, team performance, dashboard)
 import './operations-tools';
 
+// Purchases tools (purchase orders, bills, vendor credits)
+import './purchases-tools';
+
+// Payments tools (customer payments received)
+import './payments-tools';
+
+// Invoices tools (customer invoices with CFDI)
+import './invoices-tools';
+
+// Packages tools (shipments, tracking, carriers)
+import './packages-tools';
+
+// Products tools (catalog from Product table with stock, SAT, brand)
+import './products-tools';
+
+// Contacts tools (customers and vendors with balances)
+import './contacts-tools';
+
 // Artifact tools (PDF, Excel, CSV, tablas, gráficas)
 import './artifact-tools';
 

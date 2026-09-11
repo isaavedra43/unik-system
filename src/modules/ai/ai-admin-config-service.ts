@@ -127,6 +127,28 @@ export const DEFAULT_AI_SETTINGS: AiSettings = {
     // Operations
     'getNotifications',
     'getIntegrationStatus',
+    // Purchases
+    'queryPurchaseOrders',
+    'getPurchaseOrderDetail',
+    'queryBills',
+    'getBillDetail',
+    'queryVendorCredits',
+    'getVendorCreditDetail',
+    // Payments
+    'queryPayments',
+    'getPaymentDetail',
+    // Invoices
+    'queryInvoices',
+    'getInvoiceDetail',
+    // Packages
+    'queryPackages',
+    'getPackageDetail',
+    // Products (catalog from Product table)
+    'queryProducts',
+    'getProductDetail',
+    // Contacts (customers and vendors)
+    'queryContacts',
+    'getContactDetail',
     // Artifacts
     'generatePdfReport',
     'generateExcelReport',
