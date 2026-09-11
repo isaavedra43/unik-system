@@ -35,11 +35,18 @@ interface RemoteParticipant {
 
 // =====================================================
 // ICE servers — STUN + TURN for NAT traversal
+// Multiple STUN servers for redundancy. The free TURN relay
+// is a last-resort fallback for strict NATs (symmetric NAT,
+// corporate firewalls) where STUN alone can't establish a
+// direct path.
 // =====================================================
 const ICE_SERVERS: RTCIceServer[] = [
   { urls: 'stun:stun.l.google.com:19302' },
   { urls: 'stun:stun1.l.google.com:19302' },
   { urls: 'stun:stun2.l.google.com:19302' },
+  { urls: 'stun:stun3.l.google.com:19302' },
+  { urls: 'stun:stun4.l.google.com:19302' },
+  { urls: 'stun:stun.cloudflare.com:3478' },
   { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
   { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
   { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
@@ -51,7 +58,8 @@ const RTC_CONFIG: RTCConfiguration = {
   bundlePolicy: 'max-bundle',
 };
 
-const CONNECTION_TIMEOUT_MS = 30_000;
+const CONNECTION_TIMEOUT_MS = 45_000;
+const ICE_GATHERING_TIMEOUT_MS = 3_000;
 
 export function ChatCallDialog({
   channelId,
@@ -167,6 +175,42 @@ export function ChatCallDialog({
   }, [log]);
 
   // =====================================================
+  // Wait for ICE gathering to complete (with timeout fallback).
+  // This bundles all ICE candidates into the offer/answer SDP,
+  // eliminating the need for trickle ICE and making the
+  // connection more reliable on networks where candidate
+  // signals might be delayed or lost.
+  // =====================================================
+  const waitForIceGathering = useCallback((pc: RTCPeerConnection): Promise<void> => {
+    return new Promise((resolve) => {
+      if (pc.iceGatheringState === 'complete') {
+        resolve();
+        return;
+      }
+      let resolved = false;
+      const checkComplete = () => {
+        if (resolved) return;
+        if (pc.iceGatheringState === 'complete') {
+          resolved = true;
+          pc.removeEventListener('icegatheringstatechange', checkComplete);
+          resolve();
+        }
+      };
+      pc.addEventListener('icegatheringstatechange', checkComplete);
+      // Fallback timeout: resolve even if gathering isn't complete,
+      // so we don't block the call indefinitely on slow networks.
+      // Trickle ICE candidates will still be sent via onicecandidate.
+      setTimeout(() => {
+        if (resolved) return;
+        resolved = true;
+        pc.removeEventListener('icegatheringstatechange', checkComplete);
+        log('ICE gathering timeout — sending with partial candidates');
+        resolve();
+      }, ICE_GATHERING_TIMEOUT_MS);
+    });
+  }, [log]);
+
+  // =====================================================
   // Update remote participant state
   // =====================================================
   const updateRemoteParticipant = useCallback((userId: string, updates: Partial<RemoteParticipant>) => {
@@ -243,13 +287,36 @@ export function ChatCallDialog({
       } else if (pc.iceConnectionState === 'disconnected') {
         setCallState((prev) => ({ ...prev, status: 'connecting' }));
       } else if (pc.iceConnectionState === 'failed') {
+        log('ICE failed for', remoteUserId, '— attempting restart');
+        // Both caller and callee attempt ICE restart.
+        // The caller creates a new offer with iceRestart; the callee
+        // responds to that offer with a new answer. If both sides
+        // restart simultaneously, the glare is resolved by the
+        // signaling state check in processSignal (only stable PCs
+        // accept offers).
         if (roleRef.current === 'caller') {
-          log('ICE failed for', remoteUserId, '— attempting restart');
           pc.restartIce();
           pc.createOffer({ iceRestart: true })
             .then((offer) => pc.setLocalDescription(offer))
+            .then(() => waitForIceGathering(pc))
             .then(() => sendSignal(callIdRef.current!, remoteUserId, 'offer', pc.localDescription))
             .catch((err) => log('ICE restart failed:', err));
+        }
+        // Callee: if ICE failed, we wait for the caller's restart offer.
+        // But as a fallback, also attempt restart after a short delay
+        // in case the caller's restart signal was lost.
+        if (roleRef.current === 'callee') {
+          setTimeout(() => {
+            if (pc.iceConnectionState === 'failed' || pc.iceConnectionState === 'disconnected') {
+              log('callee: initiating fallback ICE restart for', remoteUserId);
+              pc.restartIce();
+              pc.createOffer({ iceRestart: true })
+                .then((offer) => pc.setLocalDescription(offer))
+                .then(() => waitForIceGathering(pc))
+                .then(() => sendSignal(callIdRef.current!, remoteUserId, 'offer', pc.localDescription))
+                .catch((e) => log('callee ICE restart failed:', e));
+            }
+          }, 2000);
         }
       }
     };
@@ -259,7 +326,7 @@ export function ChatCallDialog({
     };
 
     return pc;
-  }, [sendSignal, log, updateRemoteParticipant]);
+  }, [sendSignal, waitForIceGathering, log, updateRemoteParticipant]);
 
   // =====================================================
   // Process incoming signals
@@ -293,7 +360,10 @@ export function ChatCallDialog({
 
           const answer = await pc.createAnswer();
           await pc.setLocalDescription(answer);
-          await sendSignal(callId, remoteUserId, 'answer', answer);
+          // Wait for ICE gathering to complete (with timeout) so the
+          // answer contains all candidates.
+          await waitForIceGathering(pc);
+          await sendSignal(callId, remoteUserId, 'answer', pc.localDescription);
         }
       } else if (sig.signalType === 'answer') {
         if (pc && pc.signalingState === 'have-local-offer') {
@@ -317,7 +387,7 @@ export function ChatCallDialog({
     } catch (err) {
       log('processSignal error:', err);
     }
-  }, [createPeerConnection, sendSignal, log]);
+  }, [createPeerConnection, sendSignal, waitForIceGathering, log]);
 
   // =====================================================
   // Poll signals
@@ -443,7 +513,11 @@ export function ChatCallDialog({
         const pc = createPeerConnection(callId, p.userId, localStream);
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
-        await sendSignal(callId, p.userId, 'offer', offer);
+        // Wait for ICE gathering to complete (with timeout) so the
+        // offer contains all candidates. This makes the connection
+        // more reliable than pure trickle ICE.
+        await waitForIceGathering(pc);
+        await sendSignal(callId, p.userId, 'offer', pc.localDescription);
       }
 
       signalPollRef.current = setInterval(() => pollSignals(callId), 300);
@@ -460,7 +534,7 @@ export function ChatCallDialog({
           : msg.includes('NotFound') ? 'No se encontró micrófono/cámara.' : msg,
       }));
     }
-  }, [channelId, type, participants, callData, currentUserId, createPeerConnection, sendSignal, pollSignals, pollCallStatus, startConnectionTimeout, startNetworkMonitoring, getLocalMedia, log]);
+  }, [channelId, type, participants, callData, currentUserId, createPeerConnection, sendSignal, waitForIceGathering, pollSignals, pollCallStatus, startConnectionTimeout, startNetworkMonitoring, getLocalMedia, log]);
 
   // =====================================================
   // CALLEE: join call
@@ -482,7 +556,10 @@ export function ChatCallDialog({
         remoteDescSetRef.current.add(remoteUserId);
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
-        await sendSignal(callId, remoteUserId, 'answer', answer);
+        // Wait for ICE gathering to complete (with timeout) so the
+        // answer contains all candidates.
+        await waitForIceGathering(pc);
+        await sendSignal(callId, remoteUserId, 'answer', pc.localDescription);
       }
       pendingOffersRef.current.clear();
 
@@ -500,7 +577,7 @@ export function ChatCallDialog({
           : msg.includes('NotFound') ? 'No se encontró micrófono/cámara.' : msg,
       }));
     }
-  }, [callData, createPeerConnection, sendSignal, pollSignals, pollCallStatus, startConnectionTimeout, startNetworkMonitoring, getLocalMedia, log]);
+  }, [callData, createPeerConnection, sendSignal, waitForIceGathering, pollSignals, pollCallStatus, startConnectionTimeout, startNetworkMonitoring, getLocalMedia, log]);
 
   useEffect(() => {
     if (role === 'caller') startCallAsCaller();

@@ -3920,8 +3920,13 @@ textarea.input {
   border-radius: 0 var(--unik-radius-sm) var(--unik-radius-sm) 0;
 }
 
+/* Bounded + scrollable so a table with many rows (the model's own markdown, not just the
+   generateTable widget) never balloons the chat message — full data stays one scroll away
+   instead of forcing a download. Mirrors .artifact-table-wrapper's proven pattern. */
 .assistant-md-table-wrap {
   overflow-x: auto;
+  overflow-y: auto;
+  max-height: 420px;
   margin: var(--unik-space-2) 0;
   border: 1px solid var(--unik-border);
   border-radius: var(--unik-radius-md);
@@ -3938,9 +3943,13 @@ textarea.input {
   padding: var(--unik-space-2) var(--unik-space-3);
   border-bottom: 1px solid var(--unik-border-subtle);
   text-align: left;
+  white-space: nowrap;
 }
 
 .assistant-md-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
   background: var(--unik-surface-hover);
   font-weight: var(--unik-weight-semibold);
   color: var(--unik-text-muted);
@@ -3951,6 +3960,10 @@ textarea.input {
 
 .assistant-md-table tbody tr:last-child td {
   border-bottom: none;
+}
+
+.assistant-md-table-status {
+  font-weight: var(--unik-weight-semibold);
 }
 
 /* Widget (floating) */

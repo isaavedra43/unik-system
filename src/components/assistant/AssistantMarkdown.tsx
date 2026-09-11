@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import { colorForStatusLabel } from '@/modules/ai/generators/status-tone';
 
 /**
  * Minimal markdown renderer for the AI assistant.
@@ -81,9 +82,23 @@ export function AssistantMarkdown({ content }: { content: string }) {
             <tbody>
               {rows.map((r, ri) => (
                 <tr key={ri}>
-                  {r.map((c, ci) => (
-                    <td key={ci} dangerouslySetInnerHTML={{ __html: renderInline(c) }} />
-                  ))}
+                  {r.map((c, ci) => {
+                    // Color known status words (Cerrado, Pendiente...) the same way every other
+                    // report format does — only when the cell IS the status word, not a
+                    // substring match, so it never mis-colors an address or customer name.
+                    const color = colorForStatusLabel(c);
+                    return color ? (
+                      <td key={ci}>
+                        <span
+                          className="assistant-md-table-status"
+                          style={{ color }}
+                          dangerouslySetInnerHTML={{ __html: renderInline(c) }}
+                        />
+                      </td>
+                    ) : (
+                      <td key={ci} dangerouslySetInnerHTML={{ __html: renderInline(c) }} />
+                    );
+                  })}
                 </tr>
               ))}
             </tbody>

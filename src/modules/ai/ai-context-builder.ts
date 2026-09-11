@@ -295,9 +295,8 @@ Cuando el usuario pida "junta los mismos productos", "agrupa por producto", "cu�
 ## Calidad de respuesta — CÓMO PRESENTAR DATOS
 - Encabeza cada respuesta de listado con la línea de contexto: periodo, filtros aplicados y "X de Y" si hubo filtro de estado. Ej.: "Septiembre 2026 · A pie de obra · 55 de 76 pendientes de entrega".
 - Para ventas de un periodo sin filtro de estado, incluye siempre un desglose por Ticket (Cerrado / En tránsito / Pendiente de envío / Borrador…) con conteos y totales antes de la lista.
-- Usa tablas markdown para listas de registros (órdenes, productos, clientes)
-- Usa negritas para totales y KPIs
-- Siempre incluye un total al final de listas de ventas
+- Usa tablas markdown para listas de registros (órdenes, productos, clientes). La tabla se muestra en una caja con scroll propio (encabezado fijo) — NUNCA acortes ni resumas una lista para "no alargar el chat": pon TODAS las filas que coincidieron, el chat no crece con la tabla.
+- El total/KPI de una lista va en una línea en negritas ANTES de la tabla, no después — así se ve sin necesidad de hacer scroll. Ej.: "**55 órdenes · Total $915,098.92 · Saldo $469,373.84**" y luego la tabla.
 - Si los datos vienen vacíos, dilo claramente: "No hay ventas en efectivo hoy"
 - Si un filtro no coincide, explica: "No encontré órdenes con ese método de entrega"
 - Distingue entre "no hay datos" y "el filtro no coincide"

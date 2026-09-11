@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { FileText, FileSpreadsheet, File, BarChart3, Table, Download, Loader2, Image as ImageIcon } from 'lucide-react';
+import { colorForStatusLabel } from '@/modules/ai/generators/status-tone';
 
 export interface ArtifactData {
   artifactId: string;
@@ -113,14 +114,21 @@ export function ArtifactRenderer({ artifact }: { artifact: ArtifactData }) {
             <tbody>
               {table.rows.map((row, i) => (
                 <tr key={i} className={i % 2 === 1 ? 'alt' : ''}>
-                  {table.columns.map((col, j) => (
-                    <td
-                      key={j}
-                      style={{ textAlign: (col.align ?? 'left') as 'left' | 'right' | 'center' }}
-                    >
-                      {formatCellValue(row[col.key], col.format)}
-                    </td>
-                  ))}
+                  {table.columns.map((col, j) => {
+                    const text = formatCellValue(row[col.key], col.format);
+                    const color = colorForStatusLabel(text);
+                    return (
+                      <td
+                        key={j}
+                        style={{
+                          textAlign: (col.align ?? 'left') as 'left' | 'right' | 'center',
+                          ...(color ? { color, fontWeight: 600 } : {}),
+                        }}
+                      >
+                        {text}
+                      </td>
+                    );
+                  })}
                 </tr>
               ))}
             </tbody>
