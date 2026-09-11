@@ -133,14 +133,23 @@ export function ChatAdminOverview() {
             </div>
           ))}
         </div>
+        <div className="chat-admin-chart-labels">
+          <span>{data.activity[0]?.date.slice(5) ?? ''}</span>
+          <span>{data.activity[Math.floor(data.activity.length / 2)]?.date.slice(5) ?? ''}</span>
+          <span>{data.activity[data.activity.length - 1]?.date.slice(5) ?? ''}</span>
+        </div>
       </div>
 
       <div className="chat-admin-section">
         <h3 className="chat-admin-section-title">Usuarios más activos</h3>
         <div className="chat-admin-list">
           {data.topUsers.length === 0 && <div className="chat-admin-empty">Sin datos</div>}
-          {data.topUsers.map((u) => (
+          {data.topUsers.map((u, idx) => (
             <div key={u.userId} className="chat-admin-list-item">
+              <span className="chat-admin-list-rank">#{idx + 1}</span>
+              <span className="chat-admin-list-avatar">
+                {u.userName.slice(0, 2).toUpperCase()}
+              </span>
               <span className="chat-admin-list-name">{u.userName}</span>
               <span className="chat-admin-list-count">{u.messageCount} msgs</span>
               <span className="chat-admin-list-meta">{u.attachmentCount} adjuntos</span>

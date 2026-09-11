@@ -23,18 +23,20 @@ export function ChatAdminPanel({ canManage }: ChatAdminPanelProps) {
   return (
     <div className="flex flex-col gap-4">
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <TabsList className="flex-wrap h-auto justify-start">
-          <TabsTrigger value="overview">Resumen</TabsTrigger>
-          <TabsTrigger value="conversations">Conversaciones</TabsTrigger>
-          <TabsTrigger value="messages">Mensajes</TabsTrigger>
-          <TabsTrigger value="users">Usuarios</TabsTrigger>
-          <TabsTrigger value="calls">Llamadas</TabsTrigger>
-          <TabsTrigger value="moderation">Moderación</TabsTrigger>
-          <TabsTrigger value="alerts">Alertas</TabsTrigger>
-          <TabsTrigger value="broadcast">Anuncios</TabsTrigger>
-          <TabsTrigger value="audit">Auditoría</TabsTrigger>
-          <TabsTrigger value="config">Configuración</TabsTrigger>
-        </TabsList>
+        <div className="chat-admin-tabs-wrapper">
+          <TabsList className="chat-admin-tabs-list">
+            <TabsTrigger value="overview">Resumen</TabsTrigger>
+            <TabsTrigger value="conversations">Conversaciones</TabsTrigger>
+            <TabsTrigger value="messages">Mensajes</TabsTrigger>
+            <TabsTrigger value="users">Usuarios</TabsTrigger>
+            <TabsTrigger value="calls">Llamadas</TabsTrigger>
+            <TabsTrigger value="moderation">Moderación</TabsTrigger>
+            <TabsTrigger value="alerts">Alertas</TabsTrigger>
+            <TabsTrigger value="broadcast">Anuncios</TabsTrigger>
+            <TabsTrigger value="audit">Auditoría</TabsTrigger>
+            <TabsTrigger value="config">Configuración</TabsTrigger>
+          </TabsList>
+        </div>
 
         <TabsContent value="overview" className="mt-4">
           <ChatAdminOverview />
