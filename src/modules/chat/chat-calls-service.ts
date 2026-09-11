@@ -55,12 +55,25 @@ async function toCallDTO(call: {
     startedAt: call.startedAt?.toISOString() ?? null,
     endedAt: call.endedAt?.toISOString() ?? null,
     createdAt: call.createdAt.toISOString(),
-    participants: call.participants.map((p) => ({
-      userId: p.userId,
-      name: p.user.name,
-      acceptedAt: p.acceptedAt?.toISOString() ?? null,
-      declinedAt: p.declinedAt?.toISOString() ?? null,
-    })),
+    // Include the caller as a virtual participant so the callee's
+    // ChatCallDialog creates audio/video elements for the caller.
+    // Without this, the callee has no element to play the caller's audio.
+    participants: [
+      {
+        userId: call.callerId,
+        name: call.caller.name,
+        acceptedAt: call.startedAt?.toISOString() ?? null,
+        declinedAt: null,
+      },
+      ...call.participants
+        .filter((p) => p.userId !== call.callerId)
+        .map((p) => ({
+          userId: p.userId,
+          name: p.user.name,
+          acceptedAt: p.acceptedAt?.toISOString() ?? null,
+          declinedAt: p.declinedAt?.toISOString() ?? null,
+        })),
+    ],
   };
 }
 
