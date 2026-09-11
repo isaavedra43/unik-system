@@ -165,8 +165,8 @@ export function ChatPageClient({ user }: ChatPageClientProps) {
     setRefreshKey((k) => k + 1);
   };
 
-  const handleRefresh = () => setRefreshKey((k) => k + 1);
-  const handleBack = () => setActiveChannelId(null);
+  const handleRefresh = useCallback(() => setRefreshKey((k) => k + 1), []);
+  const handleBack = useCallback(() => setActiveChannelId(null), []);
 
   // =====================================================
   // Incoming call handlers (page level)

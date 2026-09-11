@@ -471,6 +471,7 @@ export function SalesOrdersWorkspace({
   const [columnManagerOpen, setColumnManagerOpen] = useState(false);
   const [viewSelectorOpen, setViewSelectorOpen] = useState(false);
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
+  const [exportAllColumns, setExportAllColumns] = useState(false);
   const [saveViewModalOpen, setSaveViewModalOpen] = useState(false);
   const [viewName, setViewName] = useState('');
   const [viewVisibility, setViewVisibility] = useState<'private' | 'shared'>('private');
@@ -923,7 +924,11 @@ export function SalesOrdersWorkspace({
 
   // Export
   const handleExport = useCallback(
-    async (format: 'csv' | 'xlsx', scope: 'current_page' | 'selected' | 'filtered') => {
+    async (
+      format: 'csv' | 'xlsx',
+      scope: 'current_page' | 'selected' | 'filtered',
+      includeAllColumns?: boolean
+    ) => {
       if (!canExport) return;
       setExportMenuOpen(false);
       const formData = new FormData();
@@ -932,6 +937,13 @@ export function SalesOrdersWorkspace({
       formData.set('query', JSON.stringify(query));
       if (scope === 'selected') {
         selectedIds.forEach((id) => formData.append('selectedIds', id));
+      }
+      // Pass the user's visible columns so the export matches their table view
+      if (includeAllColumns) {
+        formData.set('includeAllColumns', 'true');
+      } else {
+        const visibleColumnIds = visibleColumns.map((c) => c.id);
+        formData.set('visibleColumns', JSON.stringify(visibleColumnIds));
       }
       toast.loading('Generando exportación...', { id: 'export' });
       const result = await exportSalesOrdersAction(
@@ -948,7 +960,7 @@ export function SalesOrdersWorkspace({
         toast.error(result.error ?? 'Error al exportar', { id: 'export' });
       }
     },
-    [canExport, query, selectedIds]
+    [canExport, query, selectedIds, visibleColumns]
   );
 
   // Save view
@@ -1291,47 +1303,57 @@ export function SalesOrdersWorkspace({
                 {exportMenuOpen ? (
                   <div
                     className="so-view-dropdown"
-                    style={{ right: 0, left: 'auto', minWidth: 220 }}
+                    style={{ right: 0, left: 'auto', minWidth: 260 }}
                   >
+                    <div className="so-view-dropdown-section">
+                      <label className="so-column-manager-item" style={{ paddingLeft: 0 }}>
+                        <input
+                          type="checkbox"
+                          checked={exportAllColumns}
+                          onChange={(e) => setExportAllColumns(e.target.checked)}
+                        />
+                        <span>Incluir todas las columnas</span>
+                      </label>
+                    </div>
                     <div className="so-view-dropdown-section">CSV</div>
                     <button
                       className="so-view-dropdown-item"
-                      onClick={() => handleExport('csv', 'current_page')}
+                      onClick={() => handleExport('csv', 'current_page', exportAllColumns)}
                     >
                       Página actual
                     </button>
                     {selectedIds.size > 0 ? (
                       <button
                         className="so-view-dropdown-item"
-                        onClick={() => handleExport('csv', 'selected')}
+                        onClick={() => handleExport('csv', 'selected', exportAllColumns)}
                       >
                         Filas seleccionadas ({selectedIds.size})
                       </button>
                     ) : null}
                     <button
                       className="so-view-dropdown-item"
-                      onClick={() => handleExport('csv', 'filtered')}
+                      onClick={() => handleExport('csv', 'filtered', exportAllColumns)}
                     >
                       Todos los resultados filtrados
                     </button>
                     <div className="so-view-dropdown-section">Excel</div>
                     <button
                       className="so-view-dropdown-item"
-                      onClick={() => handleExport('xlsx', 'current_page')}
+                      onClick={() => handleExport('xlsx', 'current_page', exportAllColumns)}
                     >
                       Página actual
                     </button>
                     {selectedIds.size > 0 ? (
                       <button
                         className="so-view-dropdown-item"
-                        onClick={() => handleExport('xlsx', 'selected')}
+                        onClick={() => handleExport('xlsx', 'selected', exportAllColumns)}
                       >
                         Filas seleccionadas ({selectedIds.size})
                       </button>
                     ) : null}
                     <button
                       className="so-view-dropdown-item"
-                      onClick={() => handleExport('xlsx', 'filtered')}
+                      onClick={() => handleExport('xlsx', 'filtered', exportAllColumns)}
                     >
                       Todos los resultados filtrados
                     </button>

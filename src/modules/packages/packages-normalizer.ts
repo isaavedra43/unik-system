@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { SOURCE, PACKAGES_ENTITY_TYPE } from '@/modules/integrations/zoho/packages-sync';
 
-const CURRENT_PACKAGE_NORMALIZER_VERSION = 2;
+const CURRENT_PACKAGE_NORMALIZER_VERSION = 3;
 
 export const NORMALIZATION_ERROR_CODE = {
   SNAPSHOT_SHAPE_INVALID: 'SNAPSHOT_SHAPE_INVALID',
@@ -71,8 +71,8 @@ const packagePayloadSchema = z
     tracking_number: z.string().nullish(),
     delivery_method: z.string().nullish(),
     shipping_charge: z.union([z.string(), z.number()]).nullish(),
-    salesorder_id: z.string().nullish(),
-    customer_id: z.string().nullish(),
+    salesorder_id: z.union([z.string(), z.number().transform(String)]).nullish(),
+    customer_id: z.union([z.string(), z.number().transform(String)]).nullish(),
     customer_name: z.string().nullish(),
     last_modified_time: z.string().nullish(),
     // Additional fields

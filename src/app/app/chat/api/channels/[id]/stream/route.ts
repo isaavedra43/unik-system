@@ -46,9 +46,12 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
   let lastTypingCheck = Date.now();
   let lastPresenceCheck = Date.now();
   let lastCallCheck = Date.now();
+  let lastReadReceiptCheck = Date.now();
   const knownTyping = new Map<string, string | undefined>(); // userId -> preview
   let lastPresenceStatuses = new Map<string, string>();
   let knownCallId: string | null = null;
+  // Track the latest readAt we've seen for each user to detect new receipts
+  const knownReadReceipts = new Map<string, Date>(); // userId -> latest readAt
 
   const stream = new ReadableStream({
     async start(controller) {
@@ -162,6 +165,28 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
           // polled for signals, it would mark them as delivered before the
           // ChatCallDialog could process them, breaking the WebRTC
           // connection handshake.
+
+          // Check for new read receipts (every 3 seconds)
+          // This powers the "seen" check marks on the sender's messages.
+          if (Date.now() - lastReadReceiptCheck > 3000) {
+            lastReadReceiptCheck = Date.now();
+            const newReceipts = await getNewReadReceipts(channelId, session.user.id, knownReadReceipts);
+            if (newReceipts.length > 0) {
+              // Group by userId and emit events
+              const byUser = new Map<string, string[]>();
+              for (const r of newReceipts) {
+                const arr = byUser.get(r.userId) ?? [];
+                arr.push(r.messageId);
+                byUser.set(r.userId, arr);
+              }
+              for (const [userId, messageIds] of byUser) {
+                sendEvent({
+                  type: 'read_update',
+                  data: { channelId, messageIds, userId },
+                });
+              }
+            }
+          }
         } catch {
           // ignore poll errors, keep going
         }
@@ -216,4 +241,49 @@ async function getChannelMemberIds(channelId: string): Promise<string[]> {
     select: { userId: true },
   });
   return members.map((m) => m.userId);
+}
+
+/**
+ * Find new read receipts from other users in the channel.
+ * Updates the knownReadReceipts map in-place and returns the new receipts.
+ */
+async function getNewReadReceipts(
+  channelId: string,
+  currentUserId: string,
+  knownReadReceipts: Map<string, Date>
+): Promise<{ messageId: string; userId: string }[]> {
+  const { prisma } = await import('@/lib/prisma');
+
+  // Find the latest readAt per user in this channel (excluding current user)
+  const receipts = await prisma.internalChatReadReceipt.findMany({
+    where: {
+      userId: { not: currentUserId },
+      message: { channelId },
+    },
+    select: {
+      messageId: true,
+      userId: true,
+      readAt: true,
+    },
+    orderBy: { readAt: 'desc' },
+  });
+
+  const newReceipts: { messageId: string; userId: string }[] = [];
+  const seenInThisPoll = new Set<string>();
+
+  for (const r of receipts) {
+    const key = `${r.userId}:${r.messageId}`;
+    if (seenInThisPoll.has(key)) continue;
+    seenInThisPoll.add(key);
+
+    const knownLatest = knownReadReceipts.get(r.userId);
+    if (!knownLatest || r.readAt > knownLatest) {
+      newReceipts.push({ messageId: r.messageId, userId: r.userId });
+      if (!knownLatest || r.readAt > knownLatest) {
+        knownReadReceipts.set(r.userId, r.readAt);
+      }
+    }
+  }
+
+  return newReceipts;
 }

@@ -870,7 +870,7 @@ registerTool({
     });
     if (!order) return { found: false, searchedNumber: args.salesOrderNumber };
 
-    const relations = await getSalesOrderRelations(order.zohoSalesOrderId, order.zohoCustomerId);
+    const relations = await getSalesOrderRelations(order.zohoSalesOrderId, order.zohoCustomerId, order.salesOrderNumber);
     const ticketStatus = getTicketStatus({
       status: order.status,
       subStatus: order.subStatus,

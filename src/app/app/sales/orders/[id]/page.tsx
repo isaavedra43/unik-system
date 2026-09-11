@@ -22,7 +22,7 @@ export default async function SalesOrderDetailPage({
   const [changeEvents, isWatched, relations] = await Promise.all([
     getSalesOrderChangeEvents(id, 50),
     isEntityWatched(user.id, 'sales_order', id),
-    getSalesOrderRelations(order.zohoSalesOrderId, order.zohoCustomerId),
+    getSalesOrderRelations(order.zohoSalesOrderId, order.zohoCustomerId, order.salesOrderNumber),
   ]);
 
   return (

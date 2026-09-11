@@ -462,14 +462,31 @@ export async function getProductPackageHistory(
 
 export async function getPackagesBySalesOrderZohoId(
   zohoSalesOrderId: string,
-  limit = 10
+  limit = 10,
+  salesOrderNumber?: string | null
 ): Promise<RelatedPackageSummary[]> {
+  const take = Math.max(1, Math.min(limit, 50));
   const packages = await prisma.package.findMany({
     where: { zohoSalesOrderId },
     orderBy: { date: 'desc' },
-    take: Math.max(1, Math.min(limit, 50)),
+    take,
     select: { id: true, packageNumber: true, status: true, date: true, trackingNumber: true, carrier: true },
   });
+
+  // Fallback: match by salesorderNumber if no packages found by zohoSalesOrderId
+  if (packages.length === 0 && salesOrderNumber && salesOrderNumber.trim().length > 0) {
+    const fallbackPackages = await prisma.package.findMany({
+      where: { salesorderNumber: salesOrderNumber },
+      orderBy: { date: 'desc' },
+      take,
+      select: { id: true, packageNumber: true, status: true, date: true, trackingNumber: true, carrier: true },
+    });
+    return fallbackPackages.map((p) => ({
+      id: p.id, packageNumber: p.packageNumber, status: p.status,
+      date: p.date?.toISOString() ?? null, trackingNumber: p.trackingNumber, carrier: p.carrier,
+    }));
+  }
+
   return packages.map((p) => ({
     id: p.id, packageNumber: p.packageNumber, status: p.status,
     date: p.date?.toISOString() ?? null, trackingNumber: p.trackingNumber, carrier: p.carrier,
@@ -560,11 +577,12 @@ export interface SalesOrderRelations {
 
 export async function getSalesOrderRelations(
   zohoSalesOrderId: string,
-  zohoCustomerId: string | null
+  zohoCustomerId: string | null,
+  salesOrderNumber?: string | null
 ): Promise<SalesOrderRelations> {
   const [invoices, packages, payments, contact] = await Promise.all([
     getInvoicesBySalesOrderZohoId(zohoSalesOrderId),
-    getPackagesBySalesOrderZohoId(zohoSalesOrderId),
+    getPackagesBySalesOrderZohoId(zohoSalesOrderId, 10, salesOrderNumber),
     zohoCustomerId ? getPaymentsBySalesOrderZohoId(zohoCustomerId) : Promise.resolve([]),
     zohoCustomerId ? getContactByZohoId(zohoCustomerId) : Promise.resolve(null),
   ]);

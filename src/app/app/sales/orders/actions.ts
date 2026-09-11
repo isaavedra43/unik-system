@@ -423,6 +423,7 @@ const exportSchema = z.object({
   scope: z.enum(['current_page', 'selected', 'filtered']),
   selectedIds: z.array(z.string()).optional(),
   includeAllColumns: z.boolean().optional(),
+  visibleColumns: z.string().optional(),
   query: z.string(),
 });
 
@@ -445,6 +446,7 @@ export async function exportSalesOrdersAction(
       scope: formData.get('scope'),
       selectedIds: formData.getAll('selectedIds').map(String),
       includeAllColumns: formData.get('includeAllColumns') === 'true',
+      visibleColumns: formData.get('visibleColumns') ?? undefined,
       query: formData.get('query'),
     });
     if (!parsed.success) {
@@ -470,6 +472,16 @@ export async function exportSalesOrdersAction(
       };
     }
 
+    // Parse visibleColumns if provided
+    let visibleColumns: string[] | undefined;
+    if (parsed.data.visibleColumns) {
+      try {
+        visibleColumns = JSON.parse(parsed.data.visibleColumns);
+      } catch {
+        visibleColumns = undefined;
+      }
+    }
+
     // Dynamic import to keep exceljs out of the client bundle.
     const { getSalesOrdersForExport, buildCsv } =
       await import('@/modules/sales/sales-orders-service');
@@ -478,6 +490,7 @@ export async function exportSalesOrdersAction(
       scope: parsed.data.scope,
       selectedIds: parsed.data.selectedIds,
       includeAllColumns: parsed.data.includeAllColumns,
+      visibleColumns,
     });
 
     const timestamp = new Date().toISOString().split('T')[0];

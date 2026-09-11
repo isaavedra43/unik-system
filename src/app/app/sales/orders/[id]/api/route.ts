@@ -25,7 +25,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const [changeEvents, isWatched, relations] = await Promise.all([
     getSalesOrderChangeEvents(id, 20),
     isEntityWatched(session.user.id, 'sales_order', id),
-    getSalesOrderRelations(order.zohoSalesOrderId, order.zohoCustomerId),
+    getSalesOrderRelations(order.zohoSalesOrderId, order.zohoCustomerId, order.salesOrderNumber),
   ]);
 
   return NextResponse.json({

@@ -143,6 +143,7 @@ export type ChatStreamEvent =
       };
     }
   | { type: 'read'; data: { channelId: string; userId: string; lastReadAt: string } }
+  | { type: 'read_update'; data: { channelId: string; messageIds: string[]; userId: string } }
   | { type: 'presence'; data: { userId: string; status: string; lastSeenAt: string } }
   | {
       type: 'typing';

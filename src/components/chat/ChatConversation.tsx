@@ -46,6 +46,12 @@ export function ChatConversation({ channelId, user, onRefresh, onBack, onIncomin
   // Timestamp of when the conversation was first opened — used to show
   // a "new messages" separator for messages that arrive after opening.
   const firstOpenAtRef = useRef<string | null>(null);
+  // Refs for callbacks used inside the SSE effect — avoids restarting the
+  // EventSource when parent re-renders with new callback identities.
+  const onRefreshRef = useRef(onRefresh);
+  onRefreshRef.current = onRefresh;
+  const onIncomingCallRef = useRef(onIncomingCall);
+  onIncomingCallRef.current = onIncomingCall;
 
   // Load channel info
   useEffect(() => {
@@ -122,7 +128,7 @@ export function ChatConversation({ channelId, user, onRefresh, onBack, onIncomin
             });
             // Auto mark as read
             fetch(`/app/chat/api/channels/${channelId}/read`, { method: 'POST' }).catch(() => {});
-            onRefresh();
+            onRefreshRef.current();
             break;
           case 'edit':
             setMessages((prev) =>
@@ -187,9 +193,9 @@ export function ChatConversation({ channelId, user, onRefresh, onBack, onIncomin
           case 'call_invite':
             // SSE detected an incoming call in this channel.
             // Forward to page-level handler as a fallback to HTTP polling.
-            if (onIncomingCall && evt.data.callerId !== user.id &&
+            if (onIncomingCallRef.current && evt.data.callerId !== user.id &&
                 evt.data.participants.some((p) => p.userId === user.id)) {
-              onIncomingCall(evt.data);
+              onIncomingCallRef.current(evt.data);
             }
             break;
           case 'call_end':
@@ -212,6 +218,16 @@ export function ChatConversation({ channelId, user, onRefresh, onBack, onIncomin
               };
             });
             break;
+          case 'read_update':
+            // Another user read messages — update readBy on those messages
+            setMessages((prev) =>
+              prev.map((m) => {
+                if (!evt.data.messageIds.includes(m.id)) return m;
+                if (m.readBy.includes(evt.data.userId)) return m;
+                return { ...m, readBy: [...m.readBy, evt.data.userId] };
+              })
+            );
+            break;
           case 'heartbeat':
             // keep-alive
             break;
@@ -225,7 +241,7 @@ export function ChatConversation({ channelId, user, onRefresh, onBack, onIncomin
       es.close();
       eventSourceRef.current = null;
     };
-  }, [channelId, onRefresh]);
+  }, [channelId, user.id]);
 
   // Load more (older messages)
   const loadMore = useCallback(async () => {

@@ -882,9 +882,36 @@ export async function markAsRead(actor: CurrentUser, channelId: string): Promise
   await assertChannelMember(channelId, actor.id);
   const now = new Date();
 
-  await prisma.internalChatMember.update({
-    where: { channelId_userId: { channelId, userId: actor.id } },
-    data: { lastReadAt: now },
+  await prisma.$transaction(async (tx) => {
+    // Update the member's lastReadAt timestamp
+    await tx.internalChatMember.update({
+      where: { channelId_userId: { channelId, userId: actor.id } },
+      data: { lastReadAt: now },
+    });
+
+    // Create read receipts for all messages from other users in this channel
+    // that the current user hasn't yet recorded a receipt for.
+    // This powers the "seen" check marks on the sender's side.
+    const unreadMessages = await tx.internalChatMessage.findMany({
+      where: {
+        channelId,
+        senderId: { not: actor.id },
+        deletedAt: null,
+        readReceipts: { none: { userId: actor.id } },
+      },
+      select: { id: true },
+    });
+
+    if (unreadMessages.length > 0) {
+      await tx.internalChatReadReceipt.createMany({
+        data: unreadMessages.map((m) => ({
+          messageId: m.id,
+          userId: actor.id,
+          readAt: now,
+        })),
+        skipDuplicates: true,
+      });
+    }
   });
 
   return now.toISOString();
