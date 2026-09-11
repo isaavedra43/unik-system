@@ -499,9 +499,7 @@ function findMxState(query: string): MxState | null {
   );
 }
 
-/** Matches free-text addresses by the query itself, or by a Mexican state's name, abbreviation or main cities. */
-export function matchesLocation(values: unknown[], query: string | null | undefined): boolean {
-  if (!query) return true;
+function matchesLocationSingle(values: unknown[], query: string): boolean {
   if (anyTextMatches(values, query)) return true;
   const state = findMxState(query);
   if (!state) return false;
@@ -510,6 +508,16 @@ export function matchesLocation(values: unknown[], query: string | null | undefi
   if (state.names.some(has) || state.abbrevs.some(has)) return true;
   if (MX_STATES.some((s) => s !== state && s.names.some(has))) return false;
   return state.cities.some(has);
+}
+
+/**
+ * Matches free-text addresses by the query itself, by a Mexican state's name/abbreviation/main
+ * cities, or by a city name alone (any city listed under any state). Accepts several places in
+ * one query ("León o Silao", "León, Silao") — matches if ANY of them matches.
+ */
+export function matchesLocation(values: unknown[], query: string | null | undefined): boolean {
+  if (!query) return true;
+  return splitQuery(query).some((fragment) => matchesLocationSingle(values, fragment));
 }
 
 export function valueDistribution(values: Array<string | null | undefined>, limit = 30): Array<{ value: string; count: number }> {

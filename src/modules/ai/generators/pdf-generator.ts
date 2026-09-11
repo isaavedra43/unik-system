@@ -8,16 +8,24 @@ import fs from 'fs';
  * - A4 landscape by default (8 columns need width)
  * - Header: logo + title + accent line + summary cards
  * - Table: dynamic row height based on measured text, no overlap
- * - Pagination: repeats header on each page, never splits a row
+ * - Column widths are ALWAYS normalized to the page's content width, so a
+ *   table never overflows the page regardless of how many columns are given.
+ * - Long free-text fields (address, notes, product list) are rendered as
+ *   full-width "detail lines" below the row instead of a cramped column.
+ * - Pagination: repeats header on each page, never splits a row. Row height
+ *   accounts for explicit "\n" line breaks so PDFKit never triggers its own
+ *   mid-row automatic page break.
  * - Footer: page number + timestamp
  */
 
 export interface PdfTableColumn {
   header: string;
   key: string;
-  width?: number; // absolute points
+  width?: number; // relative weight (points), normalized to fit the page — never absolute
   align?: 'left' | 'right' | 'center';
   format?: (value: unknown) => string;
+  /** Render as a full-width wrapped line below the row instead of a table column (for long text). */
+  detail?: boolean;
 }
 
 export interface PdfSection {
@@ -50,9 +58,12 @@ const CELL_PAD_X = 6;
 const CELL_PAD_Y = 4;
 const HEADER_HEIGHT = 22;
 const MIN_ROW_HEIGHT = 20;
-const CONTENT_FONT_SIZE = 8;
+const MIN_COLUMN_WIDTH = 42;
+const MAX_CONTENT_FONT_SIZE = 8;
+const MIN_CONTENT_FONT_SIZE = 6;
 const HEADER_FONT_SIZE = 8;
-const LINE_HEIGHT = 10;
+const DETAIL_FONT_SIZE = 7.5;
+const DETAIL_LABEL_WIDTH = 90;
 
 function contentWidth(doc: PDFKit.PDFDocument): number {
   return doc.page.width - PAGE_MARGIN * 2;
@@ -63,8 +74,12 @@ function pageBottom(doc: PDFKit.PDFDocument): number {
 }
 
 /**
- * Measures how many lines a text will occupy within a given column width
- * at a given font size. Uses pdfkit's widthOfString to wrap manually.
+ * Measures how many lines a text will occupy within a given column width at
+ * a given font size — mirrors pdfkit's own wrapping so the row height we
+ * compute always matches what pdfkit actually renders. Honors explicit "\n"
+ * as a forced break (pdfkit does too); a naive word-split would swallow it
+ * and under-count lines, which is what caused rows to overflow their
+ * computed height and trigger pdfkit's own emergency page breaks mid-row.
  */
 function measureLines(
   doc: PDFKit.PDFDocument,
@@ -72,19 +87,30 @@ function measureLines(
   maxWidth: number,
   fontSize: number
 ): number {
-  if (!text || text.length === 0) return 1;
+  if (!text) return 1;
   doc.fontSize(fontSize).font('Helvetica');
-  const words = text.split(/\s+/);
-  let lines = 1;
-  let currentLine = '';
-  for (const word of words) {
-    const testLine = currentLine ? `${currentLine} ${word}` : word;
-    if (doc.widthOfString(testLine) <= maxWidth) {
-      currentLine = testLine;
-    } else {
-      // Word itself wider than column? Hard-break it.
+  const paragraphs = text.split('\n');
+  let total = 0;
+  for (const para of paragraphs) {
+    if (para.length === 0) {
+      total += 1;
+      continue;
+    }
+    const words = para.split(/\s+/).filter(Boolean);
+    if (words.length === 0) {
+      total += 1;
+      continue;
+    }
+    let lines = 1;
+    let currentLine = '';
+    for (const word of words) {
+      const testLine = currentLine ? `${currentLine} ${word}` : word;
+      if (doc.widthOfString(testLine) <= maxWidth) {
+        currentLine = testLine;
+        continue;
+      }
       if (!currentLine) {
-        // Break long word char by char
+        // Word itself wider than column: hard-break it character by character.
         let chunk = '';
         for (const ch of word) {
           if (doc.widthOfString(chunk + ch) <= maxWidth) {
@@ -100,25 +126,107 @@ function measureLines(
         currentLine = word;
       }
     }
+    total += lines;
   }
-  return lines;
+  return Math.max(1, total);
+}
+
+interface ResolvedColumns {
+  tableColumns: PdfTableColumn[];
+  detailColumns: PdfTableColumn[];
+  widths: number[];
+  innerWidths: number[];
+  fontSize: number;
 }
 
 /**
- * Computes column widths from percentage hints or equal distribution.
- * Percentages are relative to content width.
+ * Splits columns into table columns (rendered side by side) and detail
+ * columns (rendered as full-width wrapped lines below the row), then
+ * normalizes table column widths to exactly fill the page's content width —
+ * regardless of how many columns or what widths the caller requested. This
+ * is what prevents a wide table from ever running off the right edge of the
+ * page. If there are still too many columns to stay readable, the content
+ * font size is shrunk (down to a floor) before anything is allowed to
+ * overflow.
  */
-function computeColumnWidths(
+function resolveColumns(
+  doc: PDFKit.PDFDocument,
   cols: PdfTableColumn[],
+  requestedFontSize: number,
   totalWidth: number
-): number[] {
-  // If all columns have explicit widths, use them
-  const explicit = cols.map((c) => c.width);
-  if (explicit.every((w) => w !== undefined)) {
-    return explicit as number[];
+): ResolvedColumns {
+  const tableColumns = cols.filter((c) => !c.detail);
+  const detailColumns = cols.filter((c) => c.detail);
+  const n = Math.max(1, tableColumns.length);
+
+  let fontSize = requestedFontSize;
+  // Too many columns for the requested font size: shrink it so every column
+  // can still fit at least MIN_COLUMN_WIDTH.
+  while (fontSize > MIN_CONTENT_FONT_SIZE && totalWidth / n < MIN_COLUMN_WIDTH) {
+    fontSize -= 0.5;
   }
-  // Default distribution: equal
-  return cols.map(() => totalWidth / cols.length);
+
+  const weights = tableColumns.map((c) => (c.width && c.width > 0 ? c.width : totalWidth / n));
+  const weightSum = weights.reduce((s, w) => s + w, 0) || 1;
+  // Normalize proportionally to the actual page width, then enforce a floor
+  // per column and re-distribute any leftover from columns that were
+  // already above the floor — this keeps relative proportions (a customer
+  // name column stays wider than a status column) while guaranteeing the
+  // total always equals totalWidth exactly.
+  let widths = weights.map((w) => (w / weightSum) * totalWidth);
+  const floor = Math.min(MIN_COLUMN_WIDTH, totalWidth / n);
+  let deficit = 0;
+  widths = widths.map((w) => {
+    if (w < floor) {
+      deficit += floor - w;
+      return floor;
+    }
+    return w;
+  });
+  if (deficit > 0) {
+    const aboveFloorIdx = widths.map((w, i) => (w > floor ? i : -1)).filter((i) => i >= 0);
+    const aboveFloorTotal = aboveFloorIdx.reduce((s, i) => s + (widths[i] - floor), 0) || 1;
+    for (const i of aboveFloorIdx) {
+      const share = ((widths[i] - floor) / aboveFloorTotal) * deficit;
+      widths[i] = Math.max(floor, widths[i] - share);
+    }
+  }
+  // Final correction so widths sum EXACTLY to totalWidth (rounding safety).
+  const sumNow = widths.reduce((s, w) => s + w, 0);
+  if (widths.length > 0 && sumNow > 0) {
+    widths[widths.length - 1] += totalWidth - sumNow;
+  }
+
+  return {
+    tableColumns,
+    detailColumns,
+    widths,
+    innerWidths: widths.map((w) => Math.max(4, w - CELL_PAD_X * 2)),
+    fontSize,
+  };
+}
+
+function cellText(col: PdfTableColumn, row: Record<string, unknown>): string {
+  const rawValue = row[col.key];
+  if (col.format) return col.format(rawValue);
+  if (rawValue === null || rawValue === undefined) return '';
+  if (typeof rawValue === 'object') {
+    if (Array.isArray(rawValue)) {
+      return rawValue
+        .map((v) =>
+          typeof v === 'object' && v !== null
+            ? Object.entries(v as Record<string, unknown>)
+                .map(([k, v2]) => `${k}: ${String(v2 ?? '')}`)
+                .join(', ')
+            : String(v)
+        )
+        .join('\n');
+    }
+    return Object.entries(rawValue as Record<string, unknown>)
+      .map(([k, v]) => `${k}: ${String(v ?? '')}`)
+      .join(', ');
+  }
+  return String(rawValue);
 }
 
 export function generatePdfReport(
@@ -128,7 +236,7 @@ export function generatePdfReport(
   return new Promise((resolve, reject) => {
     const brand = options.brandColor ?? DEFAULT_BRAND;
     const accent = options.accentColor ?? DEFAULT_ACCENT;
-    const fontSize = options.fontSize ?? CONTENT_FONT_SIZE;
+    const requestedFontSize = options.fontSize ?? MAX_CONTENT_FONT_SIZE;
     const orientation = options.orientation ?? 'landscape';
 
     const doc = new PDFDocument({
@@ -270,18 +378,17 @@ export function generatePdfReport(
         continue;
       }
 
-      const cols = section.columns;
       const cw = contentWidth(doc);
-      const colWidths = computeColumnWidths(cols, cw);
-      const innerWidths = colWidths.map((w) => w - CELL_PAD_X * 2);
+      const { tableColumns, detailColumns, widths: colWidths, innerWidths, fontSize } =
+        resolveColumns(doc, section.columns, requestedFontSize, cw);
 
       const drawTableHeader = (y: number): number => {
         doc.rect(PAGE_MARGIN, y, cw, HEADER_HEIGHT)
           .fillColor(brand)
           .fill();
         let x = PAGE_MARGIN;
-        for (let i = 0; i < cols.length; i++) {
-          const col = cols[i];
+        for (let i = 0; i < tableColumns.length; i++) {
+          const col = tableColumns[i];
           const align = col.align ?? 'left';
           doc.fontSize(HEADER_FONT_SIZE)
             .fillColor('#ffffff')
@@ -308,42 +415,31 @@ export function generatePdfReport(
       for (let rowIdx = 0; rowIdx < section.rows.length; rowIdx++) {
         const row = section.rows[rowIdx];
 
-        const cellData = cols.map((col, i) => {
-          const rawValue = row[col.key];
-          let value: string;
-          if (col.format) {
-            value = col.format(rawValue);
-          } else if (rawValue === null || rawValue === undefined) {
-            value = '';
-          } else if (typeof rawValue === 'object') {
-            // Safely stringify objects/arrays to prevent [object Object]
-            if (Array.isArray(rawValue)) {
-              value = rawValue.map((v) =>
-                typeof v === 'object' && v !== null
-                  ? Object.entries(v as Record<string, unknown>)
-                      .map(([k, v2]) => `${k}: ${String(v2 ?? '')}`)
-                      .join(', ')
-                  : String(v)
-              ).join('\n');
-            } else {
-              value = Object.entries(rawValue as Record<string, unknown>)
-                .map(([k, v]) => `${k}: ${String(v ?? '')}`)
-                .join(', ');
-            }
-          } else {
-            value = String(rawValue);
-          }
-          const lines = measureLines(doc, value, innerWidths[i], fontSize);
-          return { value, lines };
-        });
+        const cellValues = tableColumns.map((col) => cellText(col, row));
+        const cellLines = cellValues.map((value, i) => measureLines(doc, value, innerWidths[i], fontSize));
+        const maxLines = Math.max(...cellLines, 1);
+        const tableRowHeight = Math.max(MIN_ROW_HEIGHT, maxLines * (fontSize + 2) + CELL_PAD_Y * 2);
 
-        const maxLines = Math.max(...cellData.map((c) => c.lines), 1);
-        const rowHeight = Math.max(
-          MIN_ROW_HEIGHT,
-          maxLines * LINE_HEIGHT + CELL_PAD_Y * 2
+        // Detail lines (address, notes, product list...) render full-width below the row.
+        const detailWidth = cw - CELL_PAD_X - DETAIL_LABEL_WIDTH;
+        const detailEntries = detailColumns
+          .map((col) => ({ col, value: cellText(col, row) }))
+          .filter((d) => d.value.trim().length > 0);
+        const detailLineCounts = detailEntries.map((d) => measureLines(doc, d.value, detailWidth, DETAIL_FONT_SIZE));
+        const detailHeight = detailEntries.reduce(
+          (sum, d, i) => sum + Math.max(1, detailLineCounts[i]) * (DETAIL_FONT_SIZE + 2) + 3,
+          0
         );
 
-        if (tableY + rowHeight > bottomLimit) {
+        const rowHeight = tableRowHeight + detailHeight;
+
+        // A single row taller than a full page (e.g. an order with dozens of
+        // products) would never fit anywhere — cap it so pagination logic
+        // below always terminates instead of looping forever.
+        const maxRowHeight = bottomLimit - PAGE_MARGIN - HEADER_HEIGHT;
+        const cappedRowHeight = Math.min(rowHeight, Math.max(maxRowHeight, MIN_ROW_HEIGHT));
+
+        if (tableY + cappedRowHeight > bottomLimit && tableY > PAGE_MARGIN + HEADER_HEIGHT) {
           doc.addPage();
           tableY = PAGE_MARGIN;
           tableY = drawTableHeader(tableY);
@@ -351,28 +447,51 @@ export function generatePdfReport(
 
         const isAlt = rowIdx % 2 === 1;
         if (isAlt) {
-          doc.rect(PAGE_MARGIN, tableY, cw, rowHeight)
+          doc.rect(PAGE_MARGIN, tableY, cw, cappedRowHeight)
             .fillColor('#f1f5f9')
             .fill();
         }
 
         const rowY = tableY;
         let x = PAGE_MARGIN;
-        for (let i = 0; i < cols.length; i++) {
-          const col = cols[i];
-          const { value } = cellData[i];
+        for (let i = 0; i < tableColumns.length; i++) {
+          const col = tableColumns[i];
           const align = col.align ?? 'left';
           doc.fontSize(fontSize)
             .fillColor('#334155')
             .font('Helvetica')
-            .text(value, x + CELL_PAD_X, rowY + CELL_PAD_Y, {
+            .text(cellValues[i], x + CELL_PAD_X, rowY + CELL_PAD_Y, {
               width: innerWidths[i],
+              height: tableRowHeight - CELL_PAD_Y,
               align: align === 'right' ? 'right' : align === 'center' ? 'center' : 'left',
+              ellipsis: true,
             });
           x += colWidths[i];
         }
 
-        tableY += rowHeight;
+        if (detailEntries.length > 0) {
+          let detailY = rowY + tableRowHeight;
+          for (let i = 0; i < detailEntries.length; i++) {
+            const { col, value } = detailEntries[i];
+            const lineCount = Math.max(1, detailLineCounts[i]);
+            const thisHeight = lineCount * (DETAIL_FONT_SIZE + 2) + 3;
+            doc.fontSize(DETAIL_FONT_SIZE)
+              .fillColor(accent)
+              .font('Helvetica-Bold')
+              .text(`${col.header}:`, PAGE_MARGIN + CELL_PAD_X, detailY, { width: DETAIL_LABEL_WIDTH });
+            doc.fontSize(DETAIL_FONT_SIZE)
+              .fillColor('#334155')
+              .font('Helvetica')
+              .text(value, PAGE_MARGIN + CELL_PAD_X + DETAIL_LABEL_WIDTH, detailY, {
+                width: detailWidth,
+                height: thisHeight,
+                ellipsis: true,
+              });
+            detailY += thisHeight;
+          }
+        }
+
+        tableY += cappedRowHeight;
       }
 
       cursorY = tableY + 8;

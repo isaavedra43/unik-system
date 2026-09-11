@@ -71,6 +71,13 @@ function autoColumns(rows: Record<string, unknown>[]): Array<{
     orders: 'Órdenes',
     revenue: 'Ingreso',
     amount: 'Monto',
+    paidStatus: 'Pago',
+    invoicedStatus: 'Facturación',
+    shippedStatus: 'Entrega',
+    items: 'Productos',
+    shippingAddress: 'Dirección',
+    notes: 'Notas',
+    phone: 'Teléfono',
   };
 
   return sortedKeys.map((key) => {
@@ -241,33 +248,43 @@ registerTool({
     const artifactId = `pdf-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const filePath = getArtifactPath(artifactId, 'pdf');
 
-    // Assign column widths based on content type
+    // Relative column width WEIGHTS (the generator normalizes these to always fit the
+    // page — a table can never overflow the page edge regardless of column count).
     const widthMap: Record<string, number> = {
-      number: 70,
-      customer: 150,
-      total: 85,
-      balance: 85,
-      status: 80,
-      date: 80,
-      paymentMethod: 110,
-      salesperson: 110,
-      location: 100,
-      quantity: 70,
-      count: 60,
-      orders: 60,
-      name: 150,
-      totalProducts: 70,
-      deliveryMethod: 130,
-      key: 150,
-      revenue: 85,
-      amount: 85,
+      number: 62,
+      customer: 130,
+      total: 75,
+      balance: 75,
+      status: 65,
+      paidStatus: 70,
+      invoicedStatus: 75,
+      shippedStatus: 70,
+      date: 62,
+      paymentMethod: 95,
+      salesperson: 95,
+      location: 85,
+      quantity: 60,
+      count: 55,
+      orders: 55,
+      name: 130,
+      totalProducts: 60,
+      deliveryMethod: 110,
+      key: 130,
+      revenue: 75,
+      amount: 75,
+      phone: 85,
     };
+
+    // Long free-text fields never fit as a skinny table column without being clipped —
+    // render them as a full-width wrapped line below the row instead.
+    const DETAIL_KEYS = new Set(['items', 'shippingAddress', 'notes', 'description', 'address', 'direccion', 'dirección']);
 
     function buildPdfColumns(cols: Array<{ header: string; key: string; format?: string }>): PdfTableColumn[] {
       return cols.map((c) => ({
         header: c.header,
         key: c.key,
-        width: widthMap[c.key] ?? 90,
+        width: widthMap[c.key] ?? 85,
+        detail: DETAIL_KEYS.has(c.key),
         align: c.format === 'currency' || c.format === 'number'
           ? 'right'
           : c.format === 'date' || c.key === 'status'

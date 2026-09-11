@@ -1,0 +1,99 @@
+import { describe, it, expect, afterEach } from 'vitest';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import { generatePdfReport } from './pdf-generator';
+
+const files: string[] = [];
+function tmpPdf(): string {
+  const p = path.join(os.tmpdir(), `unik-pdf-test-${Date.now()}-${Math.random().toString(36).slice(2)}.pdf`);
+  files.push(p);
+  return p;
+}
+afterEach(() => {
+  for (const f of files.splice(0)) {
+    if (fs.existsSync(f)) fs.unlinkSync(f);
+  }
+});
+
+describe('generatePdfReport — wide table with long free-text columns', () => {
+  it('never produces one page per row (the reported bug: 50 rows across 20 near-empty pages)', async () => {
+    const columns = [
+      { header: 'Orden', key: 'number', width: 62 },
+      { header: 'Fecha', key: 'date', width: 62 },
+      { header: 'Cliente', key: 'customer', width: 130 },
+      { header: 'Vendedor', key: 'salesperson', width: 95 },
+      { header: 'Estado', key: 'status', width: 65 },
+      { header: 'Pago', key: 'paidStatus', width: 70 },
+      { header: 'Facturación', key: 'invoicedStatus', width: 75 },
+      { header: 'Entrega', key: 'shippedStatus', width: 70 },
+      { header: 'Método de Pago', key: 'paymentMethod', width: 95 },
+      { header: 'Método de Entrega', key: 'deliveryMethod', width: 110 },
+      { header: 'Total', key: 'total', width: 75, align: 'right' as const },
+      { header: 'Saldo', key: 'balance', width: 75, align: 'right' as const },
+      { header: 'Productos', key: 'items', detail: true },
+      { header: 'Dirección', key: 'shippingAddress', detail: true },
+    ];
+    const rows = Array.from({ length: 50 }, (_, i) => ({
+      number: `OV-${23300 + i}`,
+      date: '10/09/2026',
+      customer: 'CARMEN HERNANDEZ SANDOVAL',
+      salesperson: 'Axel',
+      status: 'Confirmada',
+      paidStatus: 'Pagada',
+      invoicedStatus: 'Facturada',
+      shippedStatus: 'Pendiente',
+      paymentMethod: 'TRANSFERENCIA',
+      deliveryMethod: 'A PIE DE OBRA (LIBRE DE MANIOBRAS)',
+      total: '$126,730.00',
+      balance: '$0.00',
+      items: 'PISO PORCELANATO 60X60 — 40 m2\nADHESIVO GRIS — 6 sacos\nBOQUILLA — 2 kg',
+      shippingAddress: 'Rancho La Sarteneja, Cueramaro, Guanajuato, CP 36980 (favor de llamar para pedir ubicación)',
+    }));
+
+    const out = tmpPdf();
+    const { pageCount, sizeBytes } = await generatePdfReport(out, {
+      title: 'Ventas (Histórico)',
+      columns,
+      rows,
+      orientation: 'landscape',
+    });
+
+    expect(sizeBytes).toBeGreaterThan(0);
+    // 50 rows with ~4 detail lines each fit comfortably in well under 20 pages;
+    // the bug produced one page per row (≈50), so this guards the fix.
+    expect(pageCount).toBeLessThan(15);
+    expect(pageCount).toBeGreaterThan(0);
+  });
+
+  it('keeps table columns within the page width even with many narrow columns (no clipped last column)', async () => {
+    const columns = Array.from({ length: 16 }, (_, i) => ({ header: `Col ${i}`, key: `c${i}` }));
+    const row: Record<string, string> = {};
+    for (let i = 0; i < 16; i++) row[`c${i}`] = `valor ${i}`;
+
+    const out = tmpPdf();
+    const { pageCount, sizeBytes } = await generatePdfReport(out, {
+      title: 'Reporte ancho',
+      columns,
+      rows: [row, row, row],
+      orientation: 'landscape',
+    });
+    expect(sizeBytes).toBeGreaterThan(0);
+    expect(pageCount).toBe(1);
+  });
+
+  it('handles a single very long detail value without hanging or throwing', async () => {
+    const out = tmpPdf();
+    const longNote = 'x'.repeat(2000);
+    const { pageCount } = await generatePdfReport(out, {
+      title: 'Nota larga',
+      columns: [
+        { header: 'Orden', key: 'number' },
+        { header: 'Notas', key: 'notes', detail: true },
+      ],
+      rows: [{ number: 'OV-1', notes: longNote }],
+    });
+    expect(pageCount).toBeGreaterThan(0);
+    expect(pageCount).toBeLessThan(50);
+  });
+});

@@ -8,6 +8,7 @@ import {
 } from './date-helpers';
 import {
   DELIVERY_TYPES,
+  classifyDeliveryMethod,
   resolveStatusQuery,
   statusDistribution,
   statusLabel,
@@ -245,10 +246,33 @@ registerTool({
       };
     }
 
+    // Reconciliation: deliveryType is a heuristic classifier (only "pickup" vs "delivered to
+    // customer"), so when it's used, surface how many orders matching the OTHER filters were left
+    // out because their deliveryMethod didn't classify — otherwise sub-totals silently don't add
+    // up to the total (e.g. "133 a domicilio + 148 en bodega" without saying 265 were unclassified).
+    let deliveryReconciliation: Record<string, unknown> | null = null;
+    if (args.deliveryType) {
+      const withoutDeliveryType = { ...args, deliveryType: undefined };
+      const sameOtherFilters = applySalesOrderFilters(orders, withoutDeliveryType);
+      const unclassified = sameOtherFilters.filter((o) => classifyDeliveryMethod(o.deliveryMethod).length === 0);
+      if (unclassified.length > 0) {
+        deliveryReconciliation = {
+          totalMatchingOtherFilters: sameOtherFilters.length,
+          matchedThisDeliveryType: filtered.length,
+          unclassifiedDeliveryMethod: unclassified.length,
+          note:
+            `${unclassified.length} de esas órdenes tienen un método de entrega vacío o no reconocido — no cuentan como "${args.deliveryType}" ni como el otro tipo. ` +
+            'Para que la suma cierre, muéstralas aparte o usa groupBy="deliveryMethod" (sin deliveryType) para ver el desglose real por valor exacto.',
+          exampleUnclassifiedDeliveryMethods: valueDistribution(unclassified.map((o) => o.deliveryMethod), 10),
+        };
+      }
+    }
+
     const common = {
       dateFilter: { dateRange: args.dateRange, dateFrom: args.dateFrom ?? null, dateTo: args.dateTo ?? null },
       filters: Object.fromEntries(activeFilters.map((k) => [k, args[k]])),
       ...(filtered.length > 0 && activeFilters.length > 0 ? { interpretation: interpretSalesOrderMatches(filtered, args) } : {}),
+      ...(deliveryReconciliation ? { deliveryReconciliation } : {}),
       ...(truncated
         ? {
             truncated: true,

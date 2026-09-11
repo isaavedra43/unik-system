@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { matchesStatus, resolveStatusQuery, statusLabel, textMatches } from './ai-filter-matching';
+import { matchesLocation, matchesStatus, resolveStatusQuery, statusLabel, textMatches } from './ai-filter-matching';
 import { applySalesOrderFilters, perFilterMatchCounts } from './sales-order-ai-filters';
 
 /** Raw values as stored by the Zoho normalizer, taken from real orders of 2026-09. */
@@ -109,6 +109,23 @@ describe('applySalesOrderFilters — real conversation cases', () => {
   it('per-filter counts reveal which filter emptied the result', () => {
     const counts = perFilterMatchCounts(orders, { deliveryMethod: 'A PIE DE OBRA', shippedStatus: 'Enviado', customer: 'ruben' });
     expect(counts).toEqual({ deliveryMethod: 6, shippedStatus: 1, customer: 1 });
+  });
+});
+
+describe('matchesLocation — "en León o en Silao" (reported bug: always 0 results)', () => {
+  it('matches a single city named directly, without needing a state', () => {
+    expect(matchesLocation(['San Judas león gto, Calle del trabajo #10'], 'Leon')).toBe(true);
+    expect(matchesLocation(['Rancho La sarteneja, Cueramaro, Guanajuato'], 'Silao')).toBe(false);
+  });
+
+  it('splits "León o Silao" into separate places and matches if either one is found', () => {
+    expect(matchesLocation(['San Judas león gto, Calle del trabajo #10'], 'leon o silao')).toBe(true);
+    expect(matchesLocation(['Av. Industrias 200, Silao, Guanajuato'], 'leon o silao')).toBe(true);
+    expect(matchesLocation(['Rancho La sarteneja, Cueramaro, Guanajuato'], 'leon o silao')).toBe(false);
+  });
+
+  it('also splits on comma', () => {
+    expect(matchesLocation(['Av. Industrias 200, Silao, Guanajuato'], 'León, Silao')).toBe(true);
   });
 });
 
