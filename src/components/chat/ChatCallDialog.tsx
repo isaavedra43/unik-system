@@ -90,6 +90,7 @@ export function ChatCallDialog({
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
+  const remoteAudioRef = useRef<HTMLAudioElement>(null);
   const durationTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const signalPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const callStatusPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -179,9 +180,12 @@ export function ChatCallDialog({
           const signalData = JSON.parse(sig.signal);
 
           if (sig.signalType === 'offer' && roleRef.current === 'callee') {
-            // Callee receives offer
-            if (!remoteDescriptionSetRef.current && pcRef.current.signalingState === 'stable') {
-              log('callee: setting remote description from offer');
+            // Callee receives offer (initial or ICE restart)
+            // For initial offer: signalingState is 'stable' and remoteDescription not set
+            // For ICE restart offer: signalingState is 'stable' (after renegotiation)
+            // but remoteDescription was already set — we allow override
+            if (pcRef.current.signalingState === 'stable') {
+              log('callee: setting remote description from offer (initial or restart)');
               await pcRef.current.setRemoteDescription(new RTCSessionDescription(signalData));
               remoteDescriptionSetRef.current = true;
 
@@ -206,8 +210,8 @@ export function ChatCallDialog({
               }
             }
           } else if (sig.signalType === 'answer' && roleRef.current === 'caller') {
-            // Caller receives answer
-            if (!remoteDescriptionSetRef.current && pcRef.current.signalingState === 'have-local-offer') {
+            // Caller receives answer (initial or after ICE restart)
+            if (pcRef.current.signalingState === 'have-local-offer') {
               log('caller: setting remote description from answer');
               await pcRef.current.setRemoteDescription(new RTCSessionDescription(signalData));
               remoteDescriptionSetRef.current = true;
@@ -308,8 +312,14 @@ export function ChatCallDialog({
       // Handle remote tracks
       const remoteStream = new MediaStream();
       remoteStreamRef.current = remoteStream;
+      // Attach to video element (for video calls)
       if (remoteVideoRef.current) {
         remoteVideoRef.current.srcObject = remoteStream;
+      }
+      // Attach to audio element (for audio-only calls — this is critical:
+      // without an audio element playing the stream, remote audio is silent)
+      if (remoteAudioRef.current) {
+        remoteAudioRef.current.srcObject = remoteStream;
       }
       pc.ontrack = (event) => {
         log('ontrack received, kind:', event.track.kind);
@@ -320,8 +330,16 @@ export function ChatCallDialog({
         if (event.streams[0] === undefined) {
           remoteStream.addTrack(event.track);
         }
+        // Ensure both elements have the stream
         if (remoteVideoRef.current) {
           remoteVideoRef.current.srcObject = remoteStream;
+        }
+        if (remoteAudioRef.current) {
+          remoteAudioRef.current.srcObject = remoteStream;
+          // Force play — browsers block autoplay unless explicitly triggered
+          remoteAudioRef.current.play().catch(() => {
+            log('audio autoplay blocked — will retry on user interaction');
+          });
         }
         setCallState((prev) => ({
           ...prev,
@@ -368,9 +386,21 @@ export function ChatCallDialog({
           // Attempt ICE restart once before giving up
           if (!restartAttemptedRef.current && roleRef.current === 'caller') {
             restartAttemptedRef.current = true;
-            log('ICE failed — attempting restart');
+            log('ICE failed — attempting restart with new offer');
             try {
               pc.restartIce();
+              // restartIce() alone doesn't create a new offer — we must
+              // create one with iceRestart and send it to the callee
+              pc.createOffer({ iceRestart: true })
+                .then((restartOffer) => pc.setLocalDescription(restartOffer))
+                .then(() => {
+                  const targetId = calleeUserIdRef.current;
+                  const cId = callIdRef.current;
+                  if (targetId && cId) {
+                    return sendSignal(cId, targetId, 'offer', pc.localDescription);
+                  }
+                })
+                .catch((err) => log('ICE restart offer failed:', err));
             } catch {
               // restartIce not supported, will fall through to failed state
             }
@@ -403,9 +433,19 @@ export function ChatCallDialog({
         } else if (pc.connectionState === 'failed') {
           if (!restartAttemptedRef.current && roleRef.current === 'caller') {
             restartAttemptedRef.current = true;
-            log('PC failed — attempting ICE restart');
+            log('PC failed — attempting ICE restart with new offer');
             try {
               pc.restartIce();
+              pc.createOffer({ iceRestart: true })
+                .then((restartOffer) => pc.setLocalDescription(restartOffer))
+                .then(() => {
+                  const targetId = calleeUserIdRef.current;
+                  const cId = callIdRef.current;
+                  if (targetId && cId) {
+                    return sendSignal(cId, targetId, 'offer', pc.localDescription);
+                  }
+                })
+                .catch((err) => log('ICE restart offer failed:', err));
             } catch {
               // fall through
             }
@@ -683,6 +723,11 @@ export function ChatCallDialog({
         showCloseButton={false}
         className="sm:max-w-md p-0 overflow-hidden gap-0 bg-background"
       >
+        {/* Hidden audio element — ALWAYS rendered so remote audio plays
+            even in audio-only calls. Without this, the remote MediaStream
+            has no element to play through and audio is silent. */}
+        <audio ref={remoteAudioRef} autoPlay playsInline className="hidden" />
+
         <DialogTitle className="sr-only">
           {callType === 'video' ? 'Videollamada' : 'Llamada de voz'}
         </DialogTitle>
