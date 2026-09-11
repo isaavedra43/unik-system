@@ -27,6 +27,9 @@ export interface PdfTableColumn {
   format?: (value: unknown) => string;
   /** Render as a full-width wrapped line below the row instead of a table column (for long text). */
   detail?: boolean;
+  /** Never wrap this column's values: it is guaranteed at least the width of its widest value
+   * (order numbers, dates, amounts) — otherwise "$5,166.72" turns into "$5,166.7 / 2". */
+  nowrap?: boolean;
 }
 
 export interface PdfSection {
@@ -157,7 +160,8 @@ function resolveColumns(
   doc: PDFKit.PDFDocument,
   cols: PdfTableColumn[],
   requestedFontSize: number,
-  totalWidth: number
+  totalWidth: number,
+  rows: Record<string, unknown>[] = []
 ): ResolvedColumns {
   const tableColumns = cols.filter((c) => !c.detail);
   const detailColumns = cols.filter((c) => c.detail);
@@ -178,21 +182,30 @@ function resolveColumns(
   // name column stays wider than a status column) while guaranteeing the
   // total always equals totalWidth exactly.
   let widths = weights.map((w) => (w / weightSum) * totalWidth);
-  const floor = Math.min(MIN_COLUMN_WIDTH, totalWidth / n);
+  // Per-column floor: the generic minimum, or — for nowrap columns — the width of the widest
+  // value they actually have to show (measured with the real font), so they never break mid-word.
+  doc.fontSize(fontSize).font('Helvetica');
+  const floors = tableColumns.map((c) => {
+    const generic = Math.min(MIN_COLUMN_WIDTH, totalWidth / n);
+    if (!c.nowrap) return generic;
+    const widest = rows.reduce((m, r) => Math.max(m, doc.widthOfString(cellText(c, r))), 0);
+    // Never let a single column claim more than 30% of the page even in nowrap mode.
+    return Math.max(generic, Math.min(widest + CELL_PAD_X * 2 + 2, totalWidth * 0.3));
+  });
   let deficit = 0;
-  widths = widths.map((w) => {
-    if (w < floor) {
-      deficit += floor - w;
-      return floor;
+  widths = widths.map((w, i) => {
+    if (w < floors[i]) {
+      deficit += floors[i] - w;
+      return floors[i];
     }
     return w;
   });
   if (deficit > 0) {
-    const aboveFloorIdx = widths.map((w, i) => (w > floor ? i : -1)).filter((i) => i >= 0);
-    const aboveFloorTotal = aboveFloorIdx.reduce((s, i) => s + (widths[i] - floor), 0) || 1;
+    const aboveFloorIdx = widths.map((w, i) => (w > floors[i] ? i : -1)).filter((i) => i >= 0);
+    const aboveFloorTotal = aboveFloorIdx.reduce((s, i) => s + (widths[i] - floors[i]), 0) || 1;
     for (const i of aboveFloorIdx) {
-      const share = ((widths[i] - floor) / aboveFloorTotal) * deficit;
-      widths[i] = Math.max(floor, widths[i] - share);
+      const share = ((widths[i] - floors[i]) / aboveFloorTotal) * deficit;
+      widths[i] = Math.max(floors[i], widths[i] - share);
     }
   }
   // Final correction so widths sum EXACTLY to totalWidth (rounding safety).
@@ -250,6 +263,10 @@ export function generatePdfReport(
     const doc = new PDFDocument({
       size: 'A4',
       layout: orientation,
+      // Keep pages in memory until the end so the footer can say "Página X de N" on EVERY page.
+      // (The previous `doc.on('pageAdded', drawFooter)` was registered after the table was
+      // drawn, so pages 2+ had no footer and pageCount was always reported as 1.)
+      bufferPages: true,
       margins: {
         top: PAGE_MARGIN,
         bottom: PAGE_MARGIN,
@@ -267,17 +284,16 @@ export function generatePdfReport(
     const stream = fs.createWriteStream(outputPath);
     doc.pipe(stream);
 
-    let pageCount = 0;
-    const drawFooter = () => {
-      pageCount++;
+    const generatedAt = new Date().toLocaleString('es-MX');
+    const drawFooter = (pageNumber: number, totalPages: number) => {
       doc.fontSize(7)
         .fillColor(accent)
         .font('Helvetica')
         .text(
-          `Generado por UNIK Asistente IA · ${new Date().toLocaleString('es-MX')} · Página ${pageCount}`,
+          `Generado por UNIK Asistente IA · ${generatedAt} · Página ${pageNumber} de ${totalPages}`,
           PAGE_MARGIN,
           doc.page.height - 25,
-          { width: contentWidth(doc), align: 'center' }
+          { width: contentWidth(doc), align: 'center', lineBreak: false }
         );
     };
 
@@ -388,7 +404,7 @@ export function generatePdfReport(
 
       const cw = contentWidth(doc);
       const { tableColumns, detailColumns, widths: colWidths, innerWidths, fontSize } =
-        resolveColumns(doc, section.columns, requestedFontSize, cw);
+        resolveColumns(doc, section.columns, requestedFontSize, cw, section.rows);
 
       const drawTableHeader = (y: number): number => {
         doc.rect(PAGE_MARGIN, y, cw, HEADER_HEIGHT)
@@ -521,9 +537,13 @@ export function generatePdfReport(
       }
     }
 
-    // Draw footer on first page and subsequent pages
-    drawFooter();
-    doc.on('pageAdded', drawFooter);
+    // Footer on every buffered page, now that the real page count is known.
+    const range = doc.bufferedPageRange();
+    const pageCount = range.count;
+    for (let i = range.start; i < range.start + range.count; i++) {
+      doc.switchToPage(i);
+      drawFooter(i - range.start + 1, pageCount);
+    }
 
     doc.end();
 

@@ -300,10 +300,38 @@ registerTool({
       }
     }
 
+    // Status reconciliation: whenever a status filter narrows the result, report how many orders
+    // matched the same period/non-status filters WITHOUT it, plus the breakdown by ticket status.
+    // This makes "55 pendientes" self-verifying ("55 de 76: 19 cerradas y 2 borradores fuera")
+    // instead of a bare number the user can only check against a manual export.
+    const STATUS_KEYS = ['status', 'subStatus', 'paidStatus', 'invoicedStatus', 'shippedStatus', 'ticketStatus'] as const;
+    const usedStatusFilter = STATUS_KEYS.some((k) => Boolean(args[k]));
+    let statusReconciliation: Record<string, unknown> | null = null;
+    if (usedStatusFilter) {
+      const withoutStatus = { ...args };
+      for (const k of STATUS_KEYS) withoutStatus[k] = undefined;
+      // The SQL pre-filter already excluded other statuses, so fetch the period again without it.
+      const unfilteredPool = Object.keys(statusWhere).length > 0 ? await fetchOrders(dateWhere) : orders;
+      const sameOtherFilters = applySalesOrderFilters(unfilteredPool, withoutStatus);
+      const matchedNumbers = new Set(filtered.map((o) => o.salesOrderNumber));
+      const excluded = sameOtherFilters.filter((o) => !matchedNumbers.has(o.salesOrderNumber));
+      statusReconciliation = {
+        totalWithoutStatusFilters: sameOtherFilters.length,
+        matched: filtered.length,
+        excludedByStatusFilter: excluded.length,
+        excludedBreakdownByTicketStatus: statusDistribution('salesTicket', excluded.map((o) => ticketStatusOf(o).raw)),
+        allBreakdownByTicketStatus: statusDistribution('salesTicket', sameOtherFilters.map((o) => ticketStatusOf(o).raw)),
+        note:
+          `Con los mismos filtros de periodo/entrega/cliente/etc. pero SIN filtro de estado hay ${sameOtherFilters.length} órdenes; ` +
+          `el filtro de estado dejó ${filtered.length} y excluyó ${excluded.length}. Dilo así al usuario ("${filtered.length} de ${sameOtherFilters.length}") y menciona qué quedó fuera.`,
+      };
+    }
+
     const common = {
       dateFilter: { dateRange: args.dateRange, dateFrom: args.dateFrom ?? null, dateTo: args.dateTo ?? null },
       filters: Object.fromEntries(activeFilters.map((k) => [k, args[k]])),
       ...(filtered.length > 0 && activeFilters.length > 0 ? { interpretation: interpretSalesOrderMatches(filtered, args) } : {}),
+      ...(statusReconciliation ? { statusReconciliation } : {}),
       ...(deliveryReconciliation ? { deliveryReconciliation } : {}),
       ...(truncated
         ? {

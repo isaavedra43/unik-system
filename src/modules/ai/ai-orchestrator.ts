@@ -18,6 +18,7 @@ import { checkRateLimit, recordTokenUsage } from './ai-rate-limit';
 import { validateInput, validateOutput } from './ai-guardrails';
 import { processAttachment, type AttachmentResult } from './ai-attachments-service';
 import { prisma } from '@/lib/prisma';
+import { buildReportSubtitle, buildSummaryCards } from './ai-report-helpers';
 
 interface OrchestratorAttachment {
   id: string;
@@ -40,6 +41,54 @@ interface OrchestratorInput {
 interface OrchestratorEvent {
   type: 'token' | 'tool_call_start' | 'tool_call_end' | 'artifact' | 'done' | 'error';
   data?: unknown;
+}
+
+const EXPORT_MAX_ROWS = 5000;
+const EXPORT_PAGE_SIZE = 200; // querySalesOrders' Zod max
+
+function firstRowArray(result: Record<string, unknown> | null | undefined): Record<string, unknown>[] | null {
+  if (!result) return null;
+  for (const key of Object.keys(result)) {
+    const val = result[key];
+    if (Array.isArray(val) && val.length > 0 && typeof val[0] === 'object') {
+      return val as Record<string, unknown>[];
+    }
+  }
+  return null;
+}
+
+/**
+ * Chat tool results are paginated so the model's context stays small, but a report must hold
+ * every matching row. When the last data result was a partial page, re-run the same tool with
+ * the same filters page by page (never through the model) and concatenate the rows.
+ */
+async function fetchAllRowsForExport(
+  toolName: string | null,
+  toolArgs: Record<string, unknown> | null,
+  lastResult: Record<string, unknown> | null,
+  fallbackRows: Record<string, unknown>[],
+  actor: CurrentUser
+): Promise<Record<string, unknown>[]> {
+  if (!toolName || !toolArgs || !lastResult) return fallbackRows;
+  const total = Number(lastResult.total ?? lastResult.totalOrders ?? NaN);
+  const showing = Number(lastResult.showing ?? fallbackRows.length);
+  const totalPages = Number(lastResult.totalPages ?? 1);
+  const paginated = Number.isFinite(total) && (total > showing || totalPages > 1);
+  if (!paginated || !('page' in toolArgs || 'pageSize' in toolArgs || lastResult.mode === 'list')) {
+    return fallbackRows;
+  }
+
+  const all: Record<string, unknown>[] = [];
+  const pages = Math.min(Math.ceil(total / EXPORT_PAGE_SIZE), Math.ceil(EXPORT_MAX_ROWS / EXPORT_PAGE_SIZE));
+  for (let page = 1; page <= pages; page++) {
+    const res = await executeTool(toolName, actor, { ...toolArgs, page, pageSize: EXPORT_PAGE_SIZE });
+    if (!res.success || !res.result || typeof res.result !== 'object') break;
+    const rows = firstRowArray(res.result as Record<string, unknown>);
+    if (!rows || rows.length === 0) break;
+    all.push(...rows);
+    if (rows.length < EXPORT_PAGE_SIZE) break;
+  }
+  return all.length >= fallbackRows.length ? all : fallbackRows;
 }
 
 export async function* runAssistant(
@@ -286,10 +335,59 @@ export async function* runAssistant(
       const parts: string[] = ['Ventas'];
       const paymentMethods = toolArgs?.paymentMethods as string[] | undefined;
       const deliveryMethod = toolArgs?.deliveryMethod as string | undefined;
+      const deliveryType = toolArgs?.deliveryType as string | undefined;
+      const shippingLocation = toolArgs?.shippingLocation as string | undefined;
       const customer = toolArgs?.customer as string | undefined;
       const salesperson = toolArgs?.salesperson as string | undefined;
       const product = toolArgs?.product as string | undefined;
       const groupBy = toolArgs?.groupBy as string | undefined;
+      const ticketStatus = toolArgs?.ticketStatus as string | undefined;
+      const shippedStatus = toolArgs?.shippedStatus as string | undefined;
+      const paidStatus = toolArgs?.paidStatus as string | undefined;
+      const invoicedStatus = toolArgs?.invoicedStatus as string | undefined;
+      const status = toolArgs?.status as string | undefined;
+
+      // A status filter changes WHAT the report is about — it must be visible in the title so a
+      // narrowed result ("55 pendientes") is never mistaken for the full set ("76 ventas").
+      const statusLabel = (v: string | undefined, map: Array<[RegExp, string]>): string | null => {
+        if (!v) return null;
+        const n = v.toLowerCase();
+        for (const [re, label] of map) if (re.test(n)) return label;
+        return v;
+      };
+      const ticketLabel = statusLabel(ticketStatus, [
+        [/pendiente de entrega|por entregar|sin entregar|no entregad|falta/, 'Pendientes de Entrega'],
+        [/no (se ha )?cerrad|sin cerrar|abiert/, 'Abiertas (sin cerrar)'],
+        [/entregad/, 'Entregadas'],
+        [/cerrad|terminad|finalizad/, 'Cerradas'],
+        [/transito/, 'En Tránsito'],
+        [/pendiente de envio/, 'Pendientes de Envío'],
+      ]);
+      const shippedLabel = statusLabel(shippedStatus, [
+        [/por entregar|por enviar|pendiente|no enviad|sin enviar/, 'Sin Salir de Bodega'],
+        [/entregad|enviad/, 'Enviadas'],
+      ]);
+      const paidLabel = statusLabel(paidStatus, [
+        [/con saldo|adeudo|deben|credito/, 'con Saldo Pendiente'],
+        [/sin pagar|no pagad|pendiente|por cobrar/, 'No Pagadas'],
+        [/parcial|abonad/, 'Parcialmente Pagadas'],
+        [/pagad|liquidad|cobrad/, 'Pagadas'],
+      ]);
+      const invoicedLabel = statusLabel(invoicedStatus, [
+        [/sin facturar|no facturad|por facturar|pendiente/, 'Sin Facturar'],
+        [/facturad/, 'Facturadas'],
+      ]);
+      const orderLabel = statusLabel(status, [
+        [/borrador|draft/, 'en Borrador'],
+        [/anulad|cancelad|void/, 'Anuladas'],
+        [/cerrad|closed/, 'Cerradas'],
+        [/confirmad/, 'Confirmadas'],
+      ]);
+      if (ticketLabel) parts.push(ticketLabel);
+      else if (shippedLabel) parts.push(shippedLabel);
+      if (paidLabel) parts.push(paidLabel);
+      if (invoicedLabel) parts.push(invoicedLabel);
+      if (orderLabel && !ticketLabel) parts.push(orderLabel);
 
       if (paymentMethods && paymentMethods.length > 0) {
         if (paymentMethods.length === 1) {
@@ -309,7 +407,16 @@ export async function* runAssistant(
           : deliveryMethod.toLowerCase().includes('recoge') ? 'Recoge en Bodega'
           : deliveryMethod.toLowerCase().includes('instal') ? 'Instalación a Domicilio'
           : deliveryMethod);
+      } else if (deliveryType) {
+        parts.push(
+          deliveryType === 'pie_de_obra' ? 'a Pie de Obra'
+            : deliveryType === 'recoge_en_bodega' ? 'Recoge en Bodega'
+            : deliveryType === 'instalacion' ? 'con Instalación'
+            : deliveryType === 'domicilio' ? 'a Domicilio'
+            : 'con Entrega a Cliente'
+        );
       }
+      if (shippingLocation) parts.push(`en ${shippingLocation}`);
       if (product) parts.push(`de ${product}`);
       if (customer) parts.push(`de ${customer}`);
       if (salesperson) parts.push(`de ${salesperson}`);
@@ -528,8 +635,15 @@ export async function* runAssistant(
         // Auto-inject rows and title for artifact tools when the IA didn't pass them
         if (ARTIFACT_TOOLS.has(tc.name)) {
           if (!argsObj.rows && !argsObj.sections && lastToolRows && lastToolRows.length > 0) {
-            console.log(`[ai-orchestrator] Auto-injecting ${lastToolRows.length} rows from ${lastToolName} into ${tc.name}`);
-            argsObj.rows = lastToolRows;
+            // Chat results are paginated (pageSize ≤ 200) so the model's context stays small,
+            // but a report must contain EVERY matching row — re-run the data tool page by page
+            // (never through the model) when the last result was only a partial page.
+            const exportRows = await fetchAllRowsForExport(lastToolName, lastToolArgs, lastToolResult, lastToolRows, input.actor);
+            console.log(`[ai-orchestrator] Auto-injecting ${exportRows.length} rows from ${lastToolName} into ${tc.name}`);
+            argsObj.rows = exportRows;
+          }
+          if (!argsObj.subtitle && lastToolName === 'querySalesOrders') {
+            argsObj.subtitle = buildReportSubtitle(lastToolArgs, lastToolResult);
           }
           // Auto-inject sections for PDF when the tool result has multiple arrays
           if (tc.name === 'generatePdfReport' && !argsObj.sections && !argsObj.rows && lastToolResult) {
@@ -568,27 +682,7 @@ export async function* runAssistant(
 
           // Auto-inject summary cards from scalar fields in the last tool result
           if (!argsObj.summaryCards && lastToolResult) {
-            const cards: Array<{ label: string; value: string }> = [];
-            const scalarFields: Record<string, string> = {
-              totalRevenue: 'Total',
-              totalOrders: 'Órdenes',
-              totalBalance: 'Saldo',
-              total: 'Total',
-              count: 'Órdenes',
-              totalQuantity: 'Cantidad',
-            };
-            for (const [key, label] of Object.entries(scalarFields)) {
-              const val = lastToolResult[key];
-              if (val !== undefined && val !== null) {
-                const numStr = String(val);
-                if (label === 'Total' || label === 'Saldo') {
-                  cards.push({ label, value: `$${Number(numStr).toLocaleString('es-MX', { minimumFractionDigits: 2 })}` });
-                } else {
-                  cards.push({ label, value: numStr });
-                }
-              }
-              if (cards.length >= 4) break;
-            }
+            const cards = buildSummaryCards(lastToolResult);
             if (cards.length > 0) {
               argsObj.summaryCards = cards;
             }

@@ -98,6 +98,42 @@ describe('generatePdfReport — wide table with long free-text columns', () => {
   });
 });
 
+describe('generatePdfReport — nowrap columns keep ids/amounts on one line', () => {
+  it('a curated sales-order layout with long names and amounts still fits and stays bounded', async () => {
+    const columns = [
+      { header: 'Orden', key: 'number', width: 62, nowrap: true },
+      { header: 'Fecha', key: 'date', width: 62, nowrap: true },
+      { header: 'Cliente', key: 'customer', width: 130 },
+      { header: 'Vendedor', key: 'salesperson', width: 95 },
+      { header: 'Ticket', key: 'ticketStatus', width: 90 },
+      { header: 'Pago', key: 'paidStatus', width: 70 },
+      { header: 'Método', key: 'paymentMethod', width: 95 },
+      { header: 'Entrega', key: 'deliveryMethod', width: 110 },
+      { header: 'Total', key: 'total', width: 75, align: 'right' as const, nowrap: true },
+      { header: 'Saldo', key: 'balance', width: 75, align: 'right' as const, nowrap: true },
+      { header: 'Dirección', key: 'shippingAddress', detail: true },
+    ];
+    const rows = Array.from({ length: 76 }, (_, i) => ({
+      number: `OV-${23300 + i}`,
+      date: '10/09/2026',
+      customer: 'MA. GUADALUPE ESTRADA AVILA DE LA TORRE',
+      salesperson: 'Andrea Gutierrez',
+      ticketStatus: i % 3 === 0 ? 'En tránsito' : i % 3 === 1 ? 'Pendiente de envío' : 'Cerrado',
+      paidStatus: 'Parcial',
+      paymentMethod: 'EFECTIVO Y TRANSFERENCIA',
+      deliveryMethod: 'A PIE DE OBRA (LIBRE DE MANIOBRAS)',
+      total: '$560,833.08',
+      balance: '$290,000.00',
+      shippingAddress: 'CONDOMINIO 1 MANZANA A LOTE 9 EL MOLINO RESIDENCIAL CAMPO DE GOLF, León, Guanajuato',
+    }));
+    const out = tmpPdf();
+    const { pageCount, sizeBytes } = await generatePdfReport(out, { title: 'Ventas Pendientes de Entrega a Pie de Obra de Este Mes', columns, rows });
+    expect(sizeBytes).toBeGreaterThan(0);
+    expect(pageCount).toBeGreaterThan(1);
+    expect(pageCount).toBeLessThan(10); // 76 rows + address lines ≈ 4-6 pages, never 1 row/page
+  });
+});
+
 describe('toneForStatusLabel — colored status badges', () => {
   it('recognizes the real Spanish labels the app and the AI tools produce', () => {
     expect(toneForStatusLabel('Cerrado')).toBe('#15803d');

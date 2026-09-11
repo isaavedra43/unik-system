@@ -37,13 +37,29 @@ function autoColumns(rows: Record<string, unknown>[]): Array<{
   format?: string;
 }> {
   if (rows.length === 0) return [];
-  const keys = Object.keys(rows[0]);
+  let keys = Object.keys(rows[0]);
+
+  // Sales-order rows (from querySalesOrders/auditPendingDeliveries) carry ~16 fields; a report
+  // that prints all of them is unreadable (headers/amounts break mid-word, four status columns
+  // say what the single "Ticket" column already summarizes, "Sucursal" is always the same).
+  // Curate a presentable default set; the model can still pass explicit `columns` for more.
+  const isSalesOrderRow = keys.includes('number') && keys.includes('customer') && keys.includes('ticketStatus');
+  if (isSalesOrderRow) {
+    const curated = [
+      'number', 'date', 'customer', 'salesperson', 'ticketStatus', 'paidStatus',
+      'paymentMethod', 'deliveryMethod', 'total', 'balance',
+      // long text → rendered as detail lines under the row by the PDF generator
+      'shippingAddress', 'items',
+    ];
+    keys = curated.filter((k) => keys.includes(k));
+  }
 
   // Preferred column order for sales data
   const preferredOrder = [
-    'number', 'customer', 'total', 'balance', 'status', 'date',
-    'paymentMethod', 'salesperson', 'location', 'product', 'quantity',
-    'count', 'orders', 'revenue', 'amount',
+    'number', 'date', 'customer', 'salesperson', 'ticketStatus', 'status', 'paidStatus',
+    'invoicedStatus', 'shippedStatus', 'paymentMethod', 'deliveryMethod', 'total', 'balance',
+    'location', 'product', 'quantity', 'count', 'orders', 'revenue', 'amount',
+    'shippingAddress', 'items',
   ];
 
   // Sort keys by preferred order, unknown keys go last
@@ -74,12 +90,17 @@ function autoColumns(rows: Record<string, unknown>[]): Array<{
     revenue: 'Ingreso',
     amount: 'Monto',
     paidStatus: 'Pago',
-    invoicedStatus: 'Facturación',
-    shippedStatus: 'Entrega',
+    invoicedStatus: 'Factura',
+    shippedStatus: 'Envío',
+    ticketStatus: 'Ticket',
+    deliveryMethod: 'Entrega',
+    subStatus: 'Sub-estado',
     items: 'Productos',
     shippingAddress: 'Dirección',
     notes: 'Notas',
     phone: 'Teléfono',
+    key: 'Grupo',
+    groupCount: 'Grupos',
   };
 
   return sortedKeys.map((key) => {
@@ -275,7 +296,11 @@ registerTool({
       revenue: 75,
       amount: 75,
       phone: 85,
+      ticketStatus: 90,
     };
+
+    // Short identifiers/amounts must never wrap mid-word ("OV-233/81", "$5,166.7/2").
+    const NOWRAP_KEYS = new Set(['number', 'date', 'total', 'balance', 'amount', 'revenue', 'quantity', 'count', 'orders', 'phone']);
 
     // Long free-text fields never fit as a skinny table column without being clipped —
     // render them as a full-width wrapped line below the row instead.
@@ -287,6 +312,7 @@ registerTool({
         key: c.key,
         width: widthMap[c.key] ?? 85,
         detail: DETAIL_KEYS.has(c.key),
+        nowrap: NOWRAP_KEYS.has(c.key) || c.format === 'currency' || c.format === 'number' || c.format === 'date',
         align: c.format === 'currency' || c.format === 'number'
           ? 'right'
           : c.format === 'date' || c.key === 'status'
