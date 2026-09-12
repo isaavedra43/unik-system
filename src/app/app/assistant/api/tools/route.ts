@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getCurrentSession, hasPermission } from '@/modules/auth/authorization';
-import { getAvailableTools } from '@/modules/ai/tools';
+import { loadAvailableTools } from '@/modules/ai/tools';
+import { refreshExternalTools } from '@/modules/extensions/external-tools';
 import { getAiSettings } from '@/modules/ai/ai-admin-config-service';
 import { zodToJsonSchema } from '@/modules/ai/tools/zod-to-json-schema';
 
@@ -24,7 +25,8 @@ export async function GET() {
   }
 
   const settings = await getAiSettings();
-  const tools = getAvailableTools(session.user, settings.enabledTools);
+  await refreshExternalTools();
+  const tools = await loadAvailableTools(session.user, settings.enabledTools);
 
   // Group by category
   const categoryLabels: Record<string, string> = {
@@ -33,9 +35,13 @@ export async function GET() {
     finance: 'Finanzas',
     system: 'Sistema',
     export: 'Exportación',
+    extension: 'Extensiones',
+    skill: 'Skills',
+    knowledge: 'Biblioteca',
+    communication: 'Comunicaciones',
   };
 
-  const categoryOrder = ['sales', 'inventory', 'finance', 'export', 'system'];
+  const categoryOrder = ['sales', 'inventory', 'finance', 'export', 'extension', 'skill', 'knowledge', 'communication', 'system'];
 
   const grouped: Record<string, Array<{
     name: string;

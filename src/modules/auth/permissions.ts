@@ -100,6 +100,13 @@ import { SALES_ORDERS_PERMISSIONS } from '@/modules/sales/permissions';
 import { INTEGRATIONS_PERMISSIONS } from '@/modules/integrations/permissions';
 import { AI_PERMISSIONS } from '@/modules/ai/permissions';
 import { CHAT_PERMISSIONS } from '@/modules/chat/permissions';
+import { FILES_PERMISSIONS } from '@/modules/storage/permissions';
+import { EXTENSIONS_PERMISSIONS } from '@/modules/extensions/permissions';
+import { KNOWLEDGE_PERMISSIONS } from '@/modules/copilot/permissions';
+import { STUDIO_PERMISSIONS } from '@/modules/studio/permissions';
+import { COMMS_PERMISSIONS } from '@/modules/comms/permissions';
+import { CAMPAIGNS_PERMISSIONS } from '@/modules/campaigns/permissions';
+import { VOICE_PERMISSIONS } from '@/modules/voice/permissions';
 import { CONTACTS_PERMISSIONS } from '@/modules/contacts/permissions';
 import { PRODUCTS_PERMISSIONS } from '@/modules/products/permissions';
 import { PACKAGES_PERMISSIONS } from '@/modules/packages/permissions';
@@ -125,6 +132,13 @@ export const PERMISSION_REGISTRY: PermissionDefinition[] = [
   ...INTEGRATIONS_PERMISSIONS,
   ...AI_PERMISSIONS,
   ...CHAT_PERMISSIONS,
+  ...FILES_PERMISSIONS,
+  ...EXTENSIONS_PERMISSIONS,
+  ...KNOWLEDGE_PERMISSIONS,
+  ...STUDIO_PERMISSIONS,
+  ...COMMS_PERMISSIONS,
+  ...CAMPAIGNS_PERMISSIONS,
+  ...VOICE_PERMISSIONS,
 ];
 
 const REGISTRY_KEYS = new Set(PERMISSION_REGISTRY.map((p) => p.key));

@@ -1,7 +1,9 @@
 'use client';
 
 import React, { useEffect, useState, useCallback } from 'react';
-import { Plus, Search, Star, Trash2, Pencil } from 'lucide-react';
+import { Plus, Search, Star, Trash2, Pencil, Puzzle, SlidersHorizontal } from 'lucide-react';
+import { AssistantPreferencesPanel } from '@/components/copilot/AssistantPreferencesPanel';
+import Link from 'next/link';
 import {
   createConversationAction,
   deleteConversationAction,
@@ -32,6 +34,7 @@ export function AssistantSidebar({ userId: _userId, activeId, onSelect }: Assist
   const [loading, setLoading] = useState(true);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState('');
+  const [prefsOpen, setPrefsOpen] = useState(false);
 
   const loadConversations = useCallback(async () => {
     try {
@@ -164,6 +167,17 @@ export function AssistantSidebar({ userId: _userId, activeId, onSelect }: Assist
           </div>
         ))}
       </div>
+      <div className="assistant-sidebar-header" style={{ borderTop: '1px solid var(--unik-border)', borderBottom: 'none', marginTop: 'auto' }}>
+        <button type="button" className="assistant-sidebar-new" onClick={() => setPrefsOpen(true)}>
+          <SlidersHorizontal size={16} />
+          <span>Preferencias y memoria</span>
+        </button>
+        <Link href="/app/assistant/extensions" className="assistant-sidebar-new" style={{ textDecoration: 'none' }}>
+          <Puzzle size={16} />
+          <span>Extensiones y skills</span>
+        </Link>
+      </div>
+      <AssistantPreferencesPanel open={prefsOpen} onClose={() => setPrefsOpen(false)} />
     </div>
   );
 }

@@ -3,13 +3,24 @@
 import React, { useRef, useState, useEffect } from 'react';
 import { Send, Paperclip, X, FileText, Image as ImageIcon } from 'lucide-react';
 import { ToolsButton } from './ToolsButton';
+import { uploadFile, UploadError } from '@/lib/upload-client';
 
+/** A file the user attached: only its id travels to the server when sending. */
 export interface AttachmentDraft {
   id: string;
   fileName: string;
   mimeType: string;
   sizeBytes: number;
-  storagePath: string;
+}
+
+interface UploadingDraft {
+  key: string;
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+  percent: number;
+  phase: string;
+  controller: AbortController;
 }
 
 export interface AssistantInputProps {
@@ -37,8 +48,9 @@ export function AssistantInput({
 }: AssistantInputProps) {
   const [value, setValue] = useState('');
   const [attachments, setAttachments] = useState<AttachmentDraft[]>([]);
-  const [uploading, setUploading] = useState(false);
+  const [uploads, setUploads] = useState<UploadingDraft[]>([]);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const uploading = uploads.length > 0;
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -74,45 +86,67 @@ export function AssistantInput({
       return;
     }
 
-    setUploading(true);
     setUploadError(null);
+    const selected = Array.from(files);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
 
-    try {
-      for (const file of Array.from(files)) {
-        const formData = new FormData();
-        formData.append('file', file);
-        formData.append('conversationId', conversationId);
-
-        const res = await fetch('/app/assistant/api/upload', {
-          method: 'POST',
-          body: formData,
-        });
-
-        if (!res.ok) {
-          const err = await res.json().catch(() => ({ error: 'Error al subir archivo' }));
-          throw new Error(err.error || 'Error al subir archivo');
-        }
-
-        const result = await res.json();
-        setAttachments((prev) => [
+    // Direct-to-storage upload: the browser only receives short-lived per-part
+    // authorizations; the server validates the real format before "ready".
+    await Promise.all(
+      selected.map(async (file) => {
+        const key = `up-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        const controller = new AbortController();
+        setUploads((prev) => [
           ...prev,
           {
-            id: result.id,
-            fileName: result.fileName,
-            mimeType: result.mimeType,
-            sizeBytes: result.sizeBytes,
-            storagePath: result.storagePath,
+            key,
+            fileName: file.name,
+            mimeType: file.type || 'application/octet-stream',
+            sizeBytes: file.size,
+            percent: 0,
+            phase: 'initiating',
+            controller,
           },
         ]);
-      }
-    } catch (err) {
-      setUploadError(err instanceof Error ? err.message : 'Error al subir archivo');
-    } finally {
-      setUploading(false);
-      if (fileInputRef.current) {
-        fileInputRef.current.value = '';
-      }
-    }
+        try {
+          const result = await uploadFile(file, {
+            target: { type: 'ai_conversation', id: conversationId },
+            signal: controller.signal,
+            onProgress: (p) =>
+              setUploads((prev) =>
+                prev.map((u) => (u.key === key ? { ...u, percent: p.percent, phase: p.phase } : u))
+              ),
+          });
+          if (result.referenceId) {
+            setAttachments((prev) => [
+              ...prev,
+              {
+                id: result.referenceId as string,
+                fileName: result.fileName,
+                mimeType: result.mimeType,
+                sizeBytes: result.sizeBytes,
+              },
+            ]);
+          }
+        } catch (err) {
+          if (!(err instanceof UploadError && err.code === 'aborted')) {
+            setUploadError(err instanceof Error ? err.message : 'Error al subir archivo');
+          }
+        } finally {
+          setUploads((prev) => prev.filter((u) => u.key !== key));
+        }
+      })
+    );
+  }
+
+  function cancelUpload(key: string) {
+    setUploads((prev) => {
+      const target = prev.find((u) => u.key === key);
+      target?.controller.abort();
+      return prev;
+    });
   }
 
   function removeAttachment(id: string) {
@@ -135,6 +169,31 @@ export function AssistantInput({
 
   return (
     <div className="assistant-input-container">
+      {/* Uploads in progress */}
+      {uploads.length > 0 && (
+        <div className="assistant-attachments-preview" aria-live="polite">
+          {uploads.map((u) => (
+            <div key={u.key} className="attachment-chip attachment-chip-uploading">
+              <span className="spinner" aria-hidden="true" />
+              <span className="attachment-chip-name" title={u.fileName}>
+                {u.fileName}
+              </span>
+              <span className="attachment-chip-size">
+                {u.phase === 'validating' ? 'Validando…' : `${u.percent}%`}
+              </span>
+              <button
+                type="button"
+                className="attachment-chip-remove"
+                onClick={() => cancelUpload(u.key)}
+                aria-label={`Cancelar subida de ${u.fileName}`}
+              >
+                <X size={14} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* Attachment previews */}
       {attachments.length > 0 && (
         <div className="assistant-attachments-preview">

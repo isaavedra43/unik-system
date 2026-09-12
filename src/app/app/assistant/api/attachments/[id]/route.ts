@@ -8,7 +8,8 @@ export const dynamic = 'force-dynamic';
 /**
  * DELETE /app/assistant/api/attachments/[id]?conversationId=xxx
  *
- * Deletes an attachment (DB record + file on disk).
+ * Deletes an attachment (DB record + object when unreferenced). Only the
+ * uploader or the conversation owner may delete it; other ids are ignored.
  * Requires `assistant.upload` permission.
  */
 export async function DELETE(
@@ -29,6 +30,6 @@ export async function DELETE(
     return NextResponse.json({ error: 'Falta conversationId' }, { status: 400 });
   }
 
-  await deleteAttachment(id, conversationId);
+  await deleteAttachment(id, conversationId, session.user.id);
   return NextResponse.json({ success: true });
 }

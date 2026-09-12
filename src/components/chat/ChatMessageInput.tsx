@@ -22,6 +22,7 @@ import { ChatSnippetPicker } from './ChatSnippetPicker';
 import { ChatSlashCommands, SLASH_COMMANDS, type ChatSlashCommand } from './ChatSlashCommands';
 import { ChatAttachMenu } from './ChatAttachMenu';
 import { ChatEmojiPicker } from './ChatEmojiPicker';
+import { uploadFile, UploadError } from '@/lib/upload-client';
 
 export interface ChatMessageInputProps {
   onSend: (
@@ -75,6 +76,7 @@ export function ChatMessageInput({
 }: ChatMessageInputProps) {
   const [text, setText] = useState('');
   const [pendingUploads, setPendingUploads] = useState<PendingUpload[]>([]);
+  const uploadControllersRef = useRef<Map<string, AbortController>>(new Map());
   const [completedAttachmentIds, setCompletedAttachmentIds] = useState<string[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [isSending, setIsSending] = useState(false);
@@ -339,106 +341,78 @@ export function ChatMessageInput({
     }
   };
 
-  const handleFileSelect = useCallback(
-    async (files: FileList) => {
-      for (const file of Array.from(files)) {
-        const uploadId = `upload-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-        setPendingUploads((prev) => [
-          ...prev,
-          {
-            id: uploadId,
-            fileName: file.name,
-            mimeType: file.type || 'application/octet-stream',
-            sizeBytes: file.size,
-            progress: 0,
-          },
-        ]);
-
-        try {
-          const formData = new FormData();
-          formData.append('file', file);
-          formData.append('channelId', channelId);
-
-          const res = await fetch('/app/chat/api/upload', {
-            method: 'POST',
-            body: formData,
-          });
-
-          if (res.ok) {
-            const data = await res.json();
-            setCompletedAttachmentIds((prev) => [...prev, data.id]);
-            setPendingUploads((prev) =>
-              prev.map((u) => (u.id === uploadId ? { ...u, progress: 100 } : u))
-            );
-            setTimeout(() => {
-              setPendingUploads((prev) => prev.filter((u) => u.id !== uploadId));
-            }, 500);
-          } else {
-            const err = await res.json();
+  /**
+   * Direct-to-storage upload with real progress, retry and cancellation. The
+   * server validates the actual file format before the attachment becomes
+   * linkable; no placeholder message is created while uploading.
+   */
+  const uploadOne = useCallback(
+    async (file: Blob, fileName: string, mimeType: string) => {
+      const uploadId = `upload-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const controller = new AbortController();
+      uploadControllersRef.current.set(uploadId, controller);
+      setPendingUploads((prev) => [
+        ...prev,
+        { id: uploadId, fileName, mimeType, sizeBytes: file.size, progress: 0 },
+      ]);
+      try {
+        const result = await uploadFile(file, {
+          target: { type: 'chat_channel', id: channelId },
+          fileName,
+          mimeType,
+          signal: controller.signal,
+          onProgress: (p) =>
             setPendingUploads((prev) =>
               prev.map((u) =>
-                u.id === uploadId ? { ...u, error: err.error || 'Error al subir' } : u
+                u.id === uploadId
+                  ? { ...u, progress: p.phase === 'validating' ? 100 : p.percent }
+                  : u
               )
-            );
-          }
-        } catch {
-          setPendingUploads((prev) =>
-            prev.map((u) => (u.id === uploadId ? { ...u, error: 'Error de red' } : u))
-          );
+            ),
+        });
+        if (result.referenceId) {
+          const referenceId = result.referenceId;
+          setCompletedAttachmentIds((prev) => [...prev, referenceId]);
         }
+        setTimeout(() => {
+          setPendingUploads((prev) => prev.filter((u) => u.id !== uploadId));
+        }, 500);
+      } catch (err) {
+        if (err instanceof UploadError && err.code === 'aborted') {
+          setPendingUploads((prev) => prev.filter((u) => u.id !== uploadId));
+          return;
+        }
+        const message = err instanceof Error ? err.message : 'Error de red';
+        setPendingUploads((prev) => prev.map((u) => (u.id === uploadId ? { ...u, error: message } : u)));
+      } finally {
+        uploadControllersRef.current.delete(uploadId);
       }
     },
     [channelId]
   );
 
+  const handleFileSelect = useCallback(
+    async (files: FileList) => {
+      await Promise.all(
+        Array.from(files).map((file) =>
+          uploadOne(file, file.name, file.type || 'application/octet-stream')
+        )
+      );
+    },
+    [uploadOne]
+  );
+
   const handleVoiceComplete = useCallback(
     async (blob: Blob, durationMs: number) => {
-      const uploadId = `voice-${Date.now()}`;
-      setPendingUploads((prev) => [
-        ...prev,
-        {
-          id: uploadId,
-          fileName: 'mensaje-de-voz.webm',
-          mimeType: 'audio/webm',
-          sizeBytes: blob.size,
-          progress: 0,
-        },
-      ]);
-
-      try {
-        const formData = new FormData();
-        formData.append('file', blob, 'mensaje-de-voz.webm');
-        formData.append('channelId', channelId);
-
-        const res = await fetch('/app/chat/api/upload', {
-          method: 'POST',
-          body: formData,
-        });
-
-        if (res.ok) {
-          const data = await res.json();
-          setCompletedAttachmentIds((prev) => [...prev, data.id]);
-          setPendingUploads((prev) =>
-            prev.map((u) => (u.id === uploadId ? { ...u, progress: 100 } : u))
-          );
-          setTimeout(() => {
-            setPendingUploads((prev) => prev.filter((u) => u.id !== uploadId));
-          }, 500);
-        } else {
-          const err = await res.json();
-          setPendingUploads((prev) =>
-            prev.map((u) =>
-              u.id === uploadId ? { ...u, error: err.error || 'Error al subir audio' } : u
-            )
-          );
-        }
-      } catch {
-        setPendingUploads((prev) =>
-          prev.map((u) => (u.id === uploadId ? { ...u, error: 'Error de red' } : u))
-        );
-      }
+      void durationMs;
+      const isVideo = blob.type.startsWith('video/');
+      await uploadOne(
+        blob,
+        isVideo ? 'mensaje-de-video.webm' : 'mensaje-de-voz.webm',
+        blob.type || (isVideo ? 'video/webm' : 'audio/webm')
+      );
     },
-    [channelId]
+    [uploadOne]
   );
 
   const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {

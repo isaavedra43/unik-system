@@ -901,35 +901,45 @@ model AiApiCall {
 
 /// Archivo adjunto por el usuario (documento o imagen).
 model AiAttachment {
-  id             String     @id @default(cuid())
-  messageId      String?
-  conversationId String
-  fileName       String
-  mimeType       String
-  sizeBytes      Int
-  storagePath    String
-  uploadedBy     String
-  createdAt      DateTime   @default(now())
-  message        AiMessage? @relation(fields: [messageId], references: [id], onDelete: SetNull)
+  id              String         @id @default(cuid())
+  messageId       String?
+  conversationId  String
+  fileName        String
+  mimeType        String
+  sizeBytes       Int
+  /// Legacy disk path. Null for objects stored through StorageObject.
+  storagePath     String?
+  /// Reference to the central object registry (R2 or migrated legacy file).
+  storageObjectId String?
+  uploadedBy      String
+  createdAt       DateTime       @default(now())
+  message         AiMessage?     @relation(fields: [messageId], references: [id], onDelete: SetNull)
+  storageObject   StorageObject? @relation(fields: [storageObjectId], references: [id], onDelete: SetNull)
 
   @@index([conversationId])
   @@index([messageId])
+  @@index([storageObjectId])
 }
 
 /// Artifact generado por la IA (PDF, CSV, XLSX, imagen, tabla, markdown).
 model AiArtifact {
-  id             String         @id @default(cuid())
-  conversationId String
-  messageId      String?
-  type           String
-  storagePath    String?
-  inlineData     Json?
-  meta           Json?
-  createdAt      DateTime       @default(now())
-  conversation   AiConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  id              String         @id @default(cuid())
+  conversationId  String
+  messageId       String?
+  type            String
+  /// Legacy disk path. Null for objects stored through StorageObject.
+  storagePath     String?
+  /// Reference to the central object registry (R2 or migrated legacy file).
+  storageObjectId String?
+  inlineData      Json?
+  meta            Json?
+  createdAt       DateTime       @default(now())
+  conversation    AiConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  storageObject   StorageObject? @relation(fields: [storageObjectId], references: [id], onDelete: SetNull)
 
   @@index([conversationId])
   @@index([type])
+  @@index([storageObjectId])
 }
 
 /// Configuración persistida del asistente (editable desde el panel de admin).
@@ -1029,20 +1039,31 @@ model InternalChatMessage {
 
 /// Archivo adjunto a un mensaje (foto, video, audio, documento).
 model InternalChatAttachment {
-  id            String              @id @default(cuid())
-  messageId     String
-  fileName      String
-  mimeType      String
-  sizeBytes     Int
-  storagePath   String
-  width         Int?
-  height        Int?
-  durationMs    Int?
-  thumbnailPath String?
-  createdAt     DateTime            @default(now())
-  message       InternalChatMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  id              String               @id @default(cuid())
+  /// Null while the file is uploaded but not yet sent as part of a message.
+  messageId       String?
+  /// Channel the upload was authorized for. Set on new uploads; null on legacy rows.
+  channelId       String?
+  /// User who uploaded the file. Set on new uploads; null on legacy rows.
+  uploadedBy      String?
+  fileName        String
+  mimeType        String
+  sizeBytes       Int
+  /// Legacy disk path. Null for objects stored through StorageObject.
+  storagePath     String?
+  /// Reference to the central object registry (R2 or migrated legacy file).
+  storageObjectId String?
+  width           Int?
+  height          Int?
+  durationMs      Int?
+  thumbnailPath   String?
+  createdAt       DateTime             @default(now())
+  message         InternalChatMessage? @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  storageObject   StorageObject?       @relation(fields: [storageObjectId], references: [id], onDelete: SetNull)
 
   @@index([messageId])
+  @@index([channelId, uploadedBy])
+  @@index([storageObjectId])
   @@map("internal_chat_attachment")
 }
 
@@ -1371,4 +1392,997 @@ model InternalChatThread {
   @@unique([rootMessageId])
   @@index([channelId])
   @@map("internal_chat_thread")
+}
+
+// =====================================================
+// Object storage (Cloudflare R2 / legacy disk)
+// =====================================================
+
+/// Central registry of every binary UNIK stores. Authorization never derives
+/// from this table: knowing an id grants nothing — the owning conversation,
+/// channel, document or call is what gets checked.
+model StorageObject {
+  id               String    @id @default(cuid())
+  /// 'r2' | 'disk'
+  provider         String
+  /// Logical bucket: files | recordings | quarantine (resolved per environment)
+  bucketAlias      String
+  /// Server-generated key. Never received from the client.
+  objectKey        String
+  /// Opaque version identifier that is part of the key (documents keep history).
+  versionId        String
+  /// Previous version of the same logical document, if any.
+  parentObjectId   String?
+  originalName     String
+  declaredMimeType String
+  detectedMimeType String?
+  /// Real size. Serialized as string in APIs.
+  sizeBytes        BigInt    @default(0)
+  sha256           String?
+  /// initiated | uploading | validating | ready | rejected | aborted | missing | deleted
+  status           String    @default("initiated")
+  rejectionReason  String?
+  /// User id or service identity (e.g. "service:ai", "service:livekit").
+  createdBy        String?
+  /// chat | ai_attachment | ai_artifact | document | recording | transcript | plugin | knowledge | comm_media
+  purpose          String
+  /// default | protected (approved or shared documents are never removed by generic cleanup)
+  retentionPolicy  String    @default("default")
+  /// Optional technical metadata (width, height, durationMs, pageCount, thumbnails...)
+  metadata         Json?
+  /// Original disk path for files migrated from the legacy directories.
+  legacyPath       String?
+  expiresAt        DateTime?
+  deletedAt        DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  uploadSession   UploadSession?
+  aiAttachments   AiAttachment[]
+  aiArtifacts     AiArtifact[]
+  chatAttachments InternalChatAttachment[]
+
+  @@unique([bucketAlias, objectKey])
+  @@index([status])
+  @@index([purpose, status])
+  @@index([createdBy, createdAt])
+  @@index([expiresAt])
+  @@index([sha256])
+  @@index([parentObjectId])
+}
+
+/// Tracks an in-progress upload (single or multipart). Parts and the provider
+/// upload id are server controlled; the browser only receives short-lived
+/// per-part authorizations.
+model UploadSession {
+  id               String        @id @default(cuid())
+  objectId         String        @unique
+  userId           String
+  /// ai_conversation | chat_channel | document | plugin | knowledge
+  targetType       String
+  targetId         String
+  declaredSize     BigInt
+  partSize         Int
+  partCount        Int
+  multipart        Boolean       @default(false)
+  /// S3 multipart UploadId (R2). Null for single PUT or disk driver.
+  providerUploadId String?
+  /// Quarantine key the browser writes to. The final key is chosen on promotion.
+  quarantineKey    String
+  /// Uploaded parts: [{ partNumber, etag, sizeBytes }]
+  parts            Json?
+  /// initiated | uploading | completing | completed | aborted | expired
+  status           String        @default("initiated")
+  expiresAt        DateTime
+  completedAt      DateTime?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+  object           StorageObject @relation(fields: [objectId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([status, expiresAt])
+}
+
+/// Storage settings bag (quotas, retention, driver flags) — same pattern as AiConfig.
+model StorageConfig {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  settings  Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+/// Durable background job queue backed by PostgreSQL so work survives tab
+/// closes and instance restarts. Processed by the in-process worker
+/// (src/modules/jobs). A Redis/BullMQ driver can replace the executor
+/// without touching producers.
+model BackgroundJob {
+  id          String    @id @default(cuid())
+  type        String
+  payload     Json
+  /// pending | running | completed | failed | cancelled
+  status      String    @default("pending")
+  /// Lower runs first. Human-facing work uses < 100, campaigns > 500.
+  priority    Int       @default(100)
+  runAt       DateTime  @default(now())
+  attempts    Int       @default(0)
+  maxAttempts Int       @default(3)
+  lastError   String?
+  lockedAt    DateTime?
+  lockedBy    String?
+  /// Optional idempotency key (unique while the job is not completed).
+  dedupeKey   String?   @unique
+  /// Optional group for bulk cancel (campaign id, plugin id...).
+  groupKey    String?
+  progress    Int       @default(0)
+  result      Json?
+  createdBy   String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  completedAt DateTime?
+
+  @@index([status, runAt, priority])
+  @@index([type, status])
+  @@index([groupKey])
+  @@index([createdAt])
+}
+
+/// Persisted realtime events. Clients resume with a cursor (last event id),
+/// so a reconnect never loses updates.
+model RealtimeEvent {
+  id        BigInt   @id @default(autoincrement())
+  /// user:{id} | channel:{id} | upload:{objectId} | job:{id} | inbox:{teamId} | call:{id}
+  channel   String
+  type      String
+  payload   Json
+  createdAt DateTime @default(now())
+
+  @@index([channel, id])
+  @@index([createdAt])
+}
+
+// =====================================================
+// Extensions: MCP servers, custom APIs, plugins, skills, connections
+// =====================================================
+
+/// An installed extension (MCP server, custom API, plugin package or skill
+/// bundle). Its capabilities are exposed to the assistant only through an
+/// APPROVED and ENABLED version, and only to the allowed roles.
+model Extension {
+  id               String                @id @default(cuid())
+  /// Stable namespace, e.g. "mcp.books", "api.proveedor". Tool names are "<namespace>__<local>".
+  namespace        String                @unique
+  /// mcp | api | plugin | skill
+  kind             String
+  name             String
+  description      String?
+  createdBy        String
+  /// draft | testing | pending_approval | approved | enabled | suspended | revoked
+  status           String                @default("draft")
+  currentVersionId String?
+  /// Role keys allowed to use the extension. Empty = only super_admin / assistant.admin (testing).
+  allowedRoleKeys  String[]              @default([])
+  /// Approved egress: hosts (exact or *.suffix) and ports.
+  allowedHosts     String[]              @default([])
+  allowedPorts     Int[]                 @default([443])
+  /// Non-secret configuration (base URL, MCP endpoint, auth type, OAuth endpoints...).
+  config           Json?
+  suspendedAt      DateTime?
+  suspendedReason  String?
+  createdAt        DateTime              @default(now())
+  updatedAt        DateTime              @updatedAt
+  versions         ExtensionVersion[]
+  capabilities     ExtensionCapability[]
+  connections      ExtensionConnection[]
+  executions       ExtensionExecution[]
+
+  @@index([kind, status])
+}
+
+/// Immutable version identified by its content hash. Updates create a new
+/// version; the one in use is never replaced until the new one is approved.
+model ExtensionVersion {
+  id             String                @id @default(cuid())
+  extensionId    String
+  version        String
+  contentHash    String
+  /// Declarative manifest: tools/operations, skills, templates, docs, fixtures. Never secrets.
+  manifest       Json
+  /// draft | testing | pending_approval | approved | enabled | suspended | superseded
+  status         String                @default("draft")
+  reviewNotes    String?
+  publishedBy    String
+  approvedBy     String?
+  approvedAt     DateTime?
+  lastTestedAt   DateTime?
+  lastTestResult Json?
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
+  extension      Extension             @relation(fields: [extensionId], references: [id], onDelete: Cascade)
+  capabilities   ExtensionCapability[]
+
+  @@unique([extensionId, version])
+  @@index([extensionId, status])
+}
+
+/// One concrete capability (MCP tool, API operation, plugin tool) with UNIK's
+/// OWN classification. Server annotations and model descriptions never grant trust.
+model ExtensionCapability {
+  id                 String           @id @default(cuid())
+  extensionId        String
+  versionId          String
+  /// Name exposed to the model: "<namespace>__<localName>".
+  name               String
+  localName          String
+  description        String
+  inputSchema        Json
+  outputSchema       Json?
+  /// Fingerprint of name+description+schemas to detect remote changes.
+  schemaHash         String
+  /// read | draft | internal_task | external_send | business_write | destructive
+  effect             String           @default("read")
+  /// auto | require_approval
+  approvalPolicy     String           @default("require_approval")
+  /// Data categories the capability may receive (e.g. "customer_contact", "prices").
+  dataScope          String[]         @default([])
+  requiredPermission String?
+  timeoutMs          Int              @default(15000)
+  maxResultBytes     Int              @default(65536)
+  /// none | team | personal — which connection identity executes it.
+  connectionScope    String           @default("none")
+  /// pending | approved | blocked
+  reviewStatus       String           @default("pending")
+  enabled            Boolean          @default(false)
+  /// True when the remote catalog changed after approval; blocked until re-reviewed.
+  remoteChanged      Boolean          @default(false)
+  /// Operation definition for API extensions (method, path, params, response selection...).
+  operation          Json?
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+  extension          Extension        @relation(fields: [extensionId], references: [id], onDelete: Cascade)
+  version            ExtensionVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+
+  @@unique([versionId, localName])
+  @@index([extensionId, enabled])
+  @@index([name])
+}
+
+/// An authorized account for an extension. Secrets are AES-256-GCM encrypted
+/// with a master key outside PostgreSQL; the browser never receives them back.
+model ExtensionConnection {
+  id                 String    @id @default(cuid())
+  extensionId        String
+  /// oauth2 | api_key | bearer | basic | service
+  authType           String
+  /// team | personal
+  scopeType          String
+  ownerUserId        String?
+  name               String
+  /// active | revoked | expired | error
+  status             String    @default("active")
+  keyId              String?
+  /// Encrypted JSON { accessToken?, refreshToken?, apiKey?, username?, password? }
+  secretCiphertext   String?
+  expiresAt          DateTime?
+  scopes             String[]  @default([])
+  /// Non-secret metadata: account label, token endpoint, provider user id.
+  metadata           Json?
+  /// Per-connection lock to avoid concurrent token refreshes.
+  refreshLockedUntil DateTime?
+  lastUsedAt         DateTime?
+  lastError          String?
+  revokedAt          DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+  extension          Extension @relation(fields: [extensionId], references: [id], onDelete: Cascade)
+
+  @@index([extensionId, scopeType])
+  @@index([ownerUserId])
+}
+
+/// OAuth authorization in flight (state + PKCE verifier), short lived.
+model OAuthState {
+  id           String   @id @default(cuid())
+  state        String   @unique
+  codeVerifier String
+  userId       String
+  extensionId  String
+  scopeType    String
+  redirectUri  String
+  createdAt    DateTime @default(now())
+  expiresAt    DateTime
+
+  @@index([expiresAt])
+}
+
+/// A pending approval for an action with side effects. Bound to the exact
+/// tool, version, connection, arguments, recipient, files and context; any
+/// material change invalidates it.
+model AiProposal {
+  id             String    @id @default(cuid())
+  conversationId String?
+  messageId      String?
+  userId         String
+  toolName       String
+  toolVersion    String?
+  capabilityId   String?
+  connectionId   String?
+  argsHash       String
+  args           Json
+  summary        String
+  recipient      String?
+  fileIds        String[]  @default([])
+  contextHash    String?
+  effect         String
+  /// pending | approved | rejected | executed | failed | expired | invalidated | pending_review
+  status         String    @default("pending")
+  decisionBy     String?
+  decidedAt      DateTime?
+  executedAt     DateTime?
+  result         Json?
+  error          String?
+  expiresAt      DateTime
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([userId, status])
+  @@index([conversationId])
+  @@index([status, expiresAt])
+}
+
+/// Audit of every external execution (the "Ejecuciones" tab). Never stores secrets.
+model ExtensionExecution {
+  id            String     @id @default(cuid())
+  extensionId   String?
+  capabilityId  String?
+  connectionId  String?
+  userId        String?
+  toolName      String
+  /// success | error | denied | timeout | pending_review | needs_approval
+  status        String
+  durationMs    Int        @default(0)
+  requestBytes  Int        @default(0)
+  responseBytes Int        @default(0)
+  errorCode     String?
+  errorMessage  String?
+  proposalId    String?
+  createdAt     DateTime   @default(now())
+  extension     Extension? @relation(fields: [extensionId], references: [id], onDelete: SetNull)
+
+  @@index([extensionId, createdAt])
+  @@index([userId, createdAt])
+  @@index([status, createdAt])
+}
+
+/// A declarative skill (recipe): inputs, instructions, allowed tools, steps,
+/// completion conditions, approval points and limits. No code, ever.
+model Skill {
+  id          String     @id @default(cuid())
+  key         String     @unique
+  name        String
+  purpose     String
+  ownerUserId String
+  /// personal | team
+  scope       String     @default("personal")
+  /// draft | published | suspended
+  status      String     @default("draft")
+  version     Int        @default(1)
+  definition  Json
+  extensionId String?
+  publishedBy String?
+  publishedAt DateTime?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  runs        SkillRun[]
+
+  @@index([ownerUserId, scope])
+  @@index([status, scope])
+}
+
+/// One execution of a skill; survives restarts and waits for approvals.
+model SkillRun {
+  id             String    @id @default(cuid())
+  skillId        String
+  skillVersion   Int
+  userId         String
+  conversationId String?
+  /// running | waiting_approval | completed | failed | cancelled
+  status         String    @default("running")
+  inputs         Json
+  state          Json
+  currentStep    String?
+  proposalId     String?
+  error          String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  completedAt    DateTime?
+  skill          Skill     @relation(fields: [skillId], references: [id], onDelete: Cascade)
+
+  @@index([skillId, status])
+  @@index([userId, createdAt])
+  @@index([proposalId])
+}
+
+/// Consumption per dimension (extension, provider, user, team, storage, job).
+model UsageMeter {
+  id        String   @id @default(cuid())
+  dimension String
+  key       String
+  /// YYYY-MM-DD
+  period    String
+  unit      String
+  count     Int      @default(0)
+  amount    Decimal  @default(0) @db.Decimal(18, 4)
+  updatedAt DateTime @updatedAt
+
+  @@unique([dimension, key, period, unit])
+  @@index([dimension, period])
+}
+
+// =====================================================
+// Copilot: personalization, personal memory, approved knowledge library
+// =====================================================
+
+/// Per-user assistant preferences (mode, tone, language, depth, format).
+model AiUserPreference {
+  userId             String   @id
+  /// paused | on_request | autonomous_verified
+  mode               String   @default("on_request")
+  /// profesional | cercano | directo
+  tone               String   @default("profesional")
+  language           String   @default("es")
+  /// breve | normal | detallado
+  depth              String   @default("normal")
+  /// markdown | texto | tablas
+  format             String   @default("markdown")
+  customInstructions String?
+  memoryEnabled      Boolean  @default(true)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+}
+
+/// Personal memory: visible, editable and deletable by its owner. Corrections
+/// proposed by the assistant stay `pending` until the user confirms them.
+model AiMemory {
+  id         String    @id @default(cuid())
+  userId     String
+  content    String
+  /// user | assistant | correction
+  source     String    @default("user")
+  /// active | pending | archived
+  status     String    @default("active")
+  tags       String[]  @default([])
+  lastUsedAt DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@index([userId, status, createdAt])
+}
+
+/// Approved knowledge library. Internal vs publishable information is
+/// separated by `visibility`; a document received from a customer never
+/// becomes shared knowledge automatically.
+model KnowledgeSource {
+  id               String                   @id @default(cuid())
+  title            String
+  description      String?
+  /// document | url | text
+  kind             String
+  /// internal | publishable
+  visibility       String                   @default("internal")
+  /// draft | approved | archived
+  status           String                   @default("draft")
+  currentVersionId String?
+  tags             String[]                 @default([])
+  createdBy        String
+  approvedBy       String?
+  approvedAt       DateTime?
+  createdAt        DateTime                 @default(now())
+  updatedAt        DateTime                 @updatedAt
+  versions         KnowledgeSourceVersion[]
+
+  @@index([status, visibility])
+}
+
+model KnowledgeSourceVersion {
+  id              String           @id @default(cuid())
+  sourceId        String
+  version         Int
+  storageObjectId String?
+  sourceUrl       String?
+  /// processing | ready | failed
+  status          String           @default("processing")
+  sha256          String?
+  chunkCount      Int              @default(0)
+  error           String?
+  createdBy       String
+  createdAt       DateTime         @default(now())
+  source          KnowledgeSource  @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  chunks          KnowledgeChunk[]
+
+  @@unique([sourceId, version])
+}
+
+model KnowledgeChunk {
+  id        String                 @id @default(cuid())
+  sourceId  String
+  versionId String
+  ordinal   Int
+  section   String?
+  content   String
+  tokens    Int                    @default(0)
+  createdAt DateTime               @default(now())
+  version   KnowledgeSourceVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+
+  @@index([versionId, ordinal])
+  @@index([sourceId])
+}
+
+// =====================================================
+// Visual studio: editable documents, versions, templates, exports
+// =====================================================
+
+model StudioDocument {
+  id                String                  @id @default(cuid())
+  ownerUserId       String
+  title             String
+  /// document | spreadsheet | presentation | image
+  kind              String                  @default("document")
+  /// draft | review | approved | shared | archived
+  status            String                  @default("draft")
+  /// private | team
+  visibility        String                  @default("private")
+  currentVersionId  String?
+  approvedVersionId String?
+  templateId        String?
+  conversationId    String?
+  approvedBy        String?
+  approvedAt        DateTime?
+  sharedAt          DateTime?
+  createdAt         DateTime                @default(now())
+  updatedAt         DateTime                @updatedAt
+  versions          StudioDocumentVersion[]
+  exports           StudioExport[]
+
+  @@index([ownerUserId, updatedAt])
+  @@index([status])
+}
+
+model StudioDocumentVersion {
+  id              String         @id @default(cuid())
+  documentId      String
+  version         Int
+  /// Editable structure (blocks) — the source of truth for exports.
+  content         Json
+  contentHash     String
+  /// Original/rendered binary for images (object storage).
+  storageObjectId String?
+  changeSummary   String?
+  createdBy       String
+  createdAt       DateTime       @default(now())
+  document        StudioDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@unique([documentId, version])
+}
+
+model StudioTemplate {
+  id          String   @id @default(cuid())
+  name        String
+  kind        String   @default("document")
+  description String?
+  content     Json
+  /// personal | team
+  scope       String   @default("personal")
+  ownerUserId String
+  /// draft | published | archived
+  status      String   @default("published")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([scope, status])
+}
+
+model StudioExport {
+  id              String         @id @default(cuid())
+  documentId      String
+  versionId       String
+  /// pdf | docx | xlsx | csv | pptx | html | md | svg | png
+  format          String
+  storageObjectId String?
+  /// processing | ready | failed
+  status          String         @default("processing")
+  /// Render verification result: { ok, checks: [{ name, ok, detail }] }
+  verification    Json?
+  error           String?
+  createdBy       String
+  createdAt       DateTime       @default(now())
+  completedAt     DateTime?
+  document        StudioDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@index([documentId, createdAt])
+}
+
+// =====================================================
+// Omnichannel communications, requests, quotes, campaigns, commitments
+// =====================================================
+
+/// A messaging number/bot (Twilio WhatsApp/SMS, Telegram) assigned to teams.
+model CommAccount {
+  id            String             @id @default(cuid())
+  /// twilio_whatsapp | twilio_sms | telegram
+  provider      String
+  label         String
+  /// Phone number (E.164) or bot username.
+  identifier    String
+  /// Credentials live in an ExtensionConnection (encrypted). Null = env fallback.
+  connectionId  String?
+  teamKeys      String[]           @default([])
+  /// active | paused
+  status        String             @default("active")
+  /// Hashed webhook secret (Telegram secret_token / Twilio auth for signature validation is env based).
+  webhookSecret String?
+  config        Json?
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+  conversations CommConversation[]
+  messages      CommMessage[]
+
+  @@unique([provider, identifier])
+  @@index([status])
+}
+
+model CommContact {
+  id                    String             @id @default(cuid())
+  displayName           String
+  phone                 String?
+  telegramId            String?
+  email                 String?
+  zohoContactId         String?
+  tags                  String[]           @default([])
+  /// Reviewable duplicate detection: points to the surviving contact once merged.
+  duplicateOfId         String?
+  duplicateReviewStatus String? // pending | confirmed | dismissed
+  createdAt             DateTime           @default(now())
+  updatedAt             DateTime           @updatedAt
+  conversations         CommConversation[]
+  consents              ConsentRecord[]
+
+  @@index([phone])
+  @@index([telegramId])
+  @@index([zohoContactId])
+  @@index([duplicateReviewStatus])
+}
+
+model CommConversation {
+  id               String        @id @default(cuid())
+  accountId        String
+  contactId        String
+  /// open | pending | snoozed | resolved
+  status           String        @default("open")
+  assignedToUserId String?
+  subject          String?
+  /// normal | high | urgent
+  priority         String        @default("normal")
+  tags             String[]      @default([])
+  unreadCount      Int           @default(0)
+  lastMessageAt    DateTime      @default(now())
+  lastInboundAt    DateTime?
+  snoozedUntil     DateTime?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+  account          CommAccount   @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  contact          CommContact   @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  messages         CommMessage[]
+  notes            CommNote[]
+
+  @@index([accountId, status, lastMessageAt])
+  @@index([assignedToUserId, status])
+  @@index([contactId])
+}
+
+/// External messages are persisted ONCE: (accountId, externalId) is unique.
+model CommMessage {
+  id             String           @id @default(cuid())
+  accountId      String
+  conversationId String
+  /// inbound | outbound
+  direction      String
+  externalId     String?
+  body           String?
+  mediaObjectIds String[]         @default([])
+  /// received | queued | sent | delivered | read | failed | undelivered
+  status         String           @default("received")
+  error          String?
+  sentByUserId   String?
+  proposalId     String?
+  campaignId     String?
+  templateKey    String?
+  providerMeta   Json?
+  createdAt      DateTime         @default(now())
+  sentAt         DateTime?
+  deliveredAt    DateTime?
+  readAt         DateTime?
+  account        CommAccount      @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  conversation   CommConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@unique([accountId, externalId])
+  @@index([conversationId, createdAt])
+  @@index([campaignId, status])
+}
+
+model CommNote {
+  id             String           @id @default(cuid())
+  conversationId String
+  authorUserId   String
+  body           String
+  createdAt      DateTime         @default(now())
+  conversation   CommConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, createdAt])
+}
+
+/// Directory of responsible people per area (who handles what).
+model Responsible {
+  id           String   @id @default(cuid())
+  area         String   @unique
+  label        String
+  userId       String
+  backupUserId String?
+  description  String?
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+/// Internal request with dossier (expediente) and tracking.
+model InternalRequest {
+  id                 String                 @id @default(cuid())
+  type               String
+  title              String
+  description        String?
+  requesterUserId    String
+  assigneeUserId     String?
+  /// open | in_progress | waiting | done | cancelled
+  status             String                 @default("open")
+  /// normal | high | urgent
+  priority           String                 @default("normal")
+  dueAt              DateTime?
+  fileIds            String[]               @default([])
+  commConversationId String?
+  aiConversationId   String?
+  contactId          String?
+  /// Dossier: structured facts gathered so far.
+  dossier            Json?
+  createdAt          DateTime               @default(now())
+  updatedAt          DateTime               @updatedAt
+  closedAt           DateTime?
+  events             InternalRequestEvent[]
+
+  @@index([assigneeUserId, status])
+  @@index([requesterUserId, status])
+  @@index([status, dueAt])
+}
+
+model InternalRequestEvent {
+  id          String          @id @default(cuid())
+  requestId   String
+  /// created | assigned | status_changed | comment | file_added | ai_note
+  type        String
+  body        String?
+  actorUserId String?
+  metadata    Json?
+  createdAt   DateTime        @default(now())
+  request     InternalRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+
+  @@index([requestId, createdAt])
+}
+
+/// Official quotes: prepared locally, approved by a human, then created in Zoho Books.
+model Quote {
+  id                 String    @id @default(cuid())
+  number             String?
+  customerName       String
+  contactId          String?
+  zohoCustomerId     String?
+  items              Json
+  subtotal           Decimal   @default(0) @db.Decimal(18, 4)
+  tax                Decimal   @default(0) @db.Decimal(18, 4)
+  total              Decimal   @default(0) @db.Decimal(18, 4)
+  currency           String    @default("MXN")
+  /// draft | pending_approval | approved | synced | sent | rejected | invalidated
+  status             String    @default("draft")
+  version            Int       @default(1)
+  contentHash        String?
+  zohoEstimateId     String?
+  documentId         String?
+  requestId          String?
+  proposalId         String?
+  approvedBy         String?
+  approvedAt         DateTime?
+  syncedAt           DateTime?
+  invalidationReason String?
+  notes              String?
+  createdBy          String
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  @@index([status, updatedAt])
+  @@index([contactId])
+}
+
+/// Commitments made to contacts (follow-up tracking).
+model Commitment {
+  id          String    @id @default(cuid())
+  description String
+  ownerUserId String
+  contactId   String?
+  /// comm_message | ai_conversation | call | request | manual
+  sourceType  String    @default("manual")
+  sourceId    String?
+  dueAt       DateTime?
+  /// pending | done | overdue | cancelled
+  status      String    @default("pending")
+  completedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([ownerUserId, status, dueAt])
+  @@index([contactId])
+}
+
+model ConsentRecord {
+  id         String      @id @default(cuid())
+  contactId  String
+  /// whatsapp | sms | telegram
+  channel    String
+  /// opted_in | opted_out
+  status     String
+  source     String
+  note       String?
+  recordedAt DateTime    @default(now())
+  contact    CommContact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@index([contactId, channel, recordedAt])
+}
+
+/// Campaign with FROZEN audience and content, consent checks and budget.
+model Campaign {
+  id               String              @id @default(cuid())
+  name             String
+  /// whatsapp | sms | telegram
+  channel          String
+  accountId        String
+  /// draft | rehearsal | pending_approval | scheduled | running | paused | completed | cancelled
+  status           String              @default("draft")
+  /// Frozen audience: { filter, count, frozenAt }
+  audienceSnapshot Json?
+  /// Frozen content: { templateKey?, body, variables }
+  contentSnapshot  Json?
+  budgetLimit      Decimal?            @db.Decimal(18, 4)
+  budgetSpent      Decimal             @default(0) @db.Decimal(18, 4)
+  costPerMessage   Decimal             @default(0) @db.Decimal(18, 6)
+  batchSize        Int                 @default(500)
+  ratePerMinute    Int                 @default(60)
+  scheduledAt      DateTime?
+  startedAt        DateTime?
+  pausedAt         DateTime?
+  completedAt      DateTime?
+  stats            Json?
+  createdBy        String
+  approvedBy       String?
+  approvedAt       DateTime?
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+  recipients       CampaignRecipient[]
+
+  @@index([status, scheduledAt])
+}
+
+model CampaignRecipient {
+  id              String    @id @default(cuid())
+  campaignId      String
+  contactId       String
+  identifier      String
+  personalization Json?
+  /// pending | queued | sent | delivered | failed | skipped | opted_out
+  status          String    @default("pending")
+  batchNo         Int       @default(0)
+  messageId       String?
+  error           String?
+  sentAt          DateTime?
+  createdAt       DateTime  @default(now())
+  campaign        Campaign  @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@unique([campaignId, contactId])
+  @@index([campaignId, status, batchNo])
+}
+
+// =====================================================
+// Voice: LiveKit rooms, Twilio PSTN, transcription, recording, supervision
+// =====================================================
+
+model VoiceCall {
+  id                  String                   @id @default(cuid())
+  /// internal | inbound | outbound
+  type                String
+  provider            String                   @default("livekit")
+  roomName            String                   @unique
+  /// ringing | active | ended | failed | missed
+  status              String                   @default("ringing")
+  fromIdentity        String?
+  toIdentity          String?
+  externalNumber      String?
+  accountId           String?
+  contactId           String?
+  initiatedByUserId   String?
+  /// active | paused | off — "Pausar IA" stops listening, transcription, analysis and voice.
+  aiState             String                   @default("off")
+  aiPausedAt          DateTime?
+  /// Generation counter: results produced before a pause are discarded.
+  aiGeneration        Int                      @default(0)
+  /// off | recording | stopped
+  recordingState      String                   @default("off")
+  egressId            String?
+  recordingObjectId   String?
+  transcriptObjectId  String?
+  summary             String?
+  startedAt           DateTime?
+  endedAt             DateTime?
+  durationSec         Int?
+  /// Retention: audio 30 days, transcripts/summaries 90 days.
+  recordingExpiresAt  DateTime?
+  transcriptExpiresAt DateTime?
+  createdAt           DateTime                 @default(now())
+  updatedAt           DateTime                 @updatedAt
+  participants        VoiceParticipant[]
+  segments            VoiceTranscriptSegment[]
+  supervisions        VoiceSupervision[]
+
+  @@index([status, createdAt])
+  @@index([initiatedByUserId, createdAt])
+  @@index([contactId])
+}
+
+model VoiceParticipant {
+  id       String    @id @default(cuid())
+  callId   String
+  identity String
+  userId   String?
+  /// caller | callee | agent | ai | supervisor
+  role     String
+  joinedAt DateTime  @default(now())
+  leftAt   DateTime?
+  muted    Boolean   @default(false)
+  call     VoiceCall @relation(fields: [callId], references: [id], onDelete: Cascade)
+
+  @@index([callId])
+  @@index([userId])
+}
+
+model VoiceTranscriptSegment {
+  id              String    @id @default(cuid())
+  callId          String
+  speakerIdentity String
+  text            String
+  startMs         Int
+  endMs           Int
+  generation      Int       @default(0)
+  createdAt       DateTime  @default(now())
+  call            VoiceCall @relation(fields: [callId], references: [id], onDelete: Cascade)
+
+  @@index([callId, startMs])
+}
+
+model VoiceSupervision {
+  id               String    @id @default(cuid())
+  callId           String
+  supervisorUserId String
+  /// listen | whisper | barge
+  mode             String
+  startedAt        DateTime  @default(now())
+  endedAt          DateTime?
+  call             VoiceCall @relation(fields: [callId], references: [id], onDelete: Cascade)
+
+  @@index([callId])
+  @@index([supervisorUserId])
 }

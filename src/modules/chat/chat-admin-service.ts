@@ -160,7 +160,8 @@ export async function getTopChatUsers(limit = 10): Promise<ChatTopUser[]> {
   });
   const userAttachmentMap = new Map<string, number>();
   for (const a of attachmentByUser) {
-    const uid = a.message.senderId;
+    const uid = a.message?.senderId;
+    if (!uid) continue;
     userAttachmentMap.set(uid, (userAttachmentMap.get(uid) ?? 0) + 1);
   }
 
@@ -371,7 +372,9 @@ export async function listChatUsers(): Promise<AdminUserActivity[]> {
   });
   const attachmentMap = new Map<string, number>();
   for (const a of attachmentCounts) {
-    attachmentMap.set(a.message.senderId, (attachmentMap.get(a.message.senderId) ?? 0) + 1);
+    const uid = a.message?.senderId;
+    if (!uid) continue;
+    attachmentMap.set(uid, (attachmentMap.get(uid) ?? 0) + 1);
   }
 
   return users.map((u) => ({

@@ -138,3 +138,14 @@ Rutas web autenticadas por sesión (cookie `unik_session`): `/login`, `/change-p
 ## Next Planned Phase
 
 Activar el scheduler interno en Railway (`ZOHO_SALES_ORDERS_SCHEDULER_ENABLED=true`) y observar el consumo real de API durante varios ciclos antes de decidir la normalización de datos.
+
+## Phase 8 — Almacenamiento seguro, asistente extensible y comunicaciones (implementado, pendiente de migración y validación externa)
+
+Plan maestro ejecutado en 16 entregas (ver `docs/pilot-runbook.md` para el orden de activación):
+
+- **Almacenamiento** (`src/modules/storage`, `docs/storage.md`): Cloudflare R2 privado vía AWS SDK v3, registro central `StorageObject` + `UploadSession`, subida directa multipart a cuarentena, validación por firma real del formato, promoción a clave final, descargas con URL firmada corta o streaming autenticado con `Range`, migración reanudable de archivos heredados, respaldo incremental a cuenta separada y restauración con checksum. Cola durable de jobs en PostgreSQL (`src/modules/jobs`) y eventos SSE con cursor (`src/modules/realtime`).
+- **Extensiones** (`src/modules/extensions`, `docs/extensions.md`): ejecutor común con clasificación de efectos y propuestas de aprobación, conexiones cifradas (AES-256-GCM) con OAuth PKCE, control de egreso (HTTPS, dominios, DNS, redirecciones), MCP remoto (SDK oficial), APIs tipadas desde OpenAPI, skills declarativas y plugins versionados.
+- **Copiloto** (`src/modules/copilot`, `docs/copilot.md`): modos, personalización, memoria personal con aprendizaje controlado, biblioteca aprobada con búsqueda de texto completo, mapa de pendientes.
+- **Estudio visual** (`src/modules/studio`, `docs/studio.md`), **comunicaciones omnicanal** (`src/modules/comms`, `docs/communications.md`), **cotizaciones Books y campañas** (`src/modules/quotes`, `src/modules/campaigns`), **voz LiveKit/Twilio** (`src/modules/voice`, `docs/voice.md`).
+
+Migraciones aditivas: `20260912100000`, `20260912110000`, `20260912120000`. Ninguna aplicada; ningún servicio externo validado.

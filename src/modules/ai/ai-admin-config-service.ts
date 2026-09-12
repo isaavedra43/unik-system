@@ -163,6 +163,12 @@ export const DEFAULT_AI_SETTINGS: AiSettings = {
     'generateTable',
     'listArtifacts',
     'cleanupArtifacts',
+    // Copilot: biblioteca aprobada, memoria personal, comunicación interna (con aprobación)
+    'searchKnowledgeLibrary',
+    'rememberForUser',
+    'listUserMemory',
+    'forgetMemory',
+    'sendInternalChatMessage',
     // System
     'getCurrentUserContext',
     'getModuleList',

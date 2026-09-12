@@ -13,6 +13,7 @@ import {
   getSuggestionsForPage,
 } from './AssistantSuggestions';
 import { VoiceMode } from './VoiceMode';
+import { AssistantProposalCard, type ProposalData } from './AssistantProposalCard';
 import { createConversationAction } from '@/app/app/assistant/actions';
 
 export interface AssistantChatProps {
@@ -40,6 +41,7 @@ export function AssistantChat({
   const [streamingContent, setStreamingContent] = useState('');
   const [activeToolCalls, setActiveToolCalls] = useState<ActiveToolCall[]>([]);
   const [artifacts, setArtifacts] = useState<ArtifactData[]>([]);
+  const [proposals, setProposals] = useState<ProposalData[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loadingConv, setLoadingConv] = useState(false);
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
@@ -66,6 +68,11 @@ export function AssistantChat({
         return;
       }
       const data = await res.json();
+      // Pending approvals of this conversation survive reloads.
+      fetch(`/app/assistant/api/proposals?conversationId=${encodeURIComponent(id)}`)
+        .then((r) => (r.ok ? r.json() : { proposals: [] }))
+        .then((p) => setProposals((p.proposals ?? []) as ProposalData[]))
+        .catch(() => undefined);
       setMessages(
         (data.messages ?? []).map((m: Record<string, unknown>) => ({
           id: m.id as string,
@@ -166,7 +173,8 @@ export function AssistantChat({
           message: text,
           context,
           model: selectedModel ?? undefined,
-          attachments: attachments.length > 0 ? attachments : undefined,
+          // Only ids: the server resolves ownership, conversation and READY state.
+          attachments: attachments.length > 0 ? attachments.map((a) => a.id) : undefined,
         }),
         signal: controller.signal,
       });
@@ -214,6 +222,8 @@ export function AssistantChat({
               }
             } else if (event.type === 'artifact') {
               setArtifacts((prev) => [...prev, event.data as ArtifactData]);
+            } else if (event.type === 'proposal') {
+              setProposals((prev) => [...prev.filter((p) => p.id !== event.data.id), event.data as ProposalData]);
             } else if (event.type === 'done') {
               setStreamingContent('');
               setActiveToolCalls([]);
@@ -300,6 +310,22 @@ export function AssistantChat({
             {artifacts.map((a) => (
               <ArtifactRenderer key={a.artifactId} artifact={a} />
             ))}
+          </div>
+        )}
+        {proposals.filter((p) => p.status === 'pending' || !p.status).length > 0 && (
+          <div className="assistant-artifacts">
+            {proposals
+              .filter((p) => p.status === 'pending' || !p.status)
+              .map((p) => (
+                <AssistantProposalCard
+                  key={p.id}
+                  proposal={p}
+                  onDecided={(updated) => {
+                    setProposals((prev) => prev.map((x) => (x.id === updated.id ? updated : x)));
+                    if (conversationId) loadConversation(conversationId);
+                  }}
+                />
+              ))}
           </div>
         )}
         {error && (

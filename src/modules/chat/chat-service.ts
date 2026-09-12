@@ -593,12 +593,20 @@ export async function sendMessage(
     });
   }
 
-  // Link pre-saved attachments if any
+  // Link pre-uploaded attachments: only the actor's own pending, READY files for this channel.
   if (input.attachmentIds && input.attachmentIds.length > 0) {
-    await prisma.internalChatAttachment.updateMany({
-      where: { id: { in: input.attachmentIds } },
-      data: { messageId: message.id },
-    });
+    const { resolveLinkableAttachmentIds } = await import('./chat-attachments-service');
+    const linkable = await resolveLinkableAttachmentIds(input.channelId, actor.id, input.attachmentIds);
+    if (linkable.length === 0 && !content && !input.location && !input.poll && !input.event) {
+      await prisma.internalChatMessage.delete({ where: { id: message.id } });
+      throw new ChatError('Los archivos adjuntos no están listos o no te pertenecen');
+    }
+    if (linkable.length > 0) {
+      await prisma.internalChatAttachment.updateMany({
+        where: { id: { in: linkable }, messageId: null, uploadedBy: actor.id, channelId: input.channelId },
+        data: { messageId: message.id },
+      });
+    }
   }
 
   // Create location
@@ -823,7 +831,10 @@ export async function forwardMessage(
     include: { attachments: true },
   });
 
-  if (!original) throw new ChatError('Mensaje no encontrado');
+  if (!original || original.deletedAt) throw new ChatError('Mensaje no encontrado');
+
+  // The actor must still be a member of the SOURCE channel to forward from it.
+  await assertChannelMember(original.channelId, actor.id);
 
   const results: ChatMessageDTO[] = [];
   for (const targetId of targetChannelIds) {
@@ -839,15 +850,19 @@ export async function forwardMessage(
       },
     });
 
-    // Copy attachments
+    // Reference the same objects (no binary copy). Deleting one reference never
+    // destroys a file another message still uses — see deleteObjectIfUnreferenced.
     if (original.attachments.length > 0) {
       await prisma.internalChatAttachment.createMany({
         data: original.attachments.map((a) => ({
           messageId: newMsg.id,
+          channelId: targetId,
+          uploadedBy: actor.id,
           fileName: a.fileName,
           mimeType: a.mimeType,
           sizeBytes: a.sizeBytes,
           storagePath: a.storagePath,
+          storageObjectId: a.storageObjectId,
           width: a.width,
           height: a.height,
           durationMs: a.durationMs,
@@ -1821,10 +1836,39 @@ export async function broadcastMessage(
     });
 
     if (input.attachmentIds && input.attachmentIds.length > 0) {
-      await prisma.internalChatAttachment.updateMany({
-        where: { id: { in: input.attachmentIds } },
-        data: { messageId: message.id },
+      // A broadcast fans one upload out to many channels: the original pending rows can
+      // only be linked once, so every extra channel gets its own reference to the SAME
+      // object (no binary copy). Only the actor's own READY uploads are eligible.
+      const sourceRows = await prisma.internalChatAttachment.findMany({
+        where: {
+          id: { in: input.attachmentIds },
+          uploadedBy: actor.id,
+          messageId: null,
+          OR: [{ storageObject: { status: 'ready' } }, { storageObjectId: null, storagePath: { not: null } }],
+        },
       });
+      for (const row of sourceRows) {
+        if (row.channelId === channelId) {
+          await prisma.internalChatAttachment.update({ where: { id: row.id }, data: { messageId: message.id } });
+        } else {
+          await prisma.internalChatAttachment.create({
+            data: {
+              messageId: message.id,
+              channelId,
+              uploadedBy: actor.id,
+              fileName: row.fileName,
+              mimeType: row.mimeType,
+              sizeBytes: row.sizeBytes,
+              storagePath: row.storagePath,
+              storageObjectId: row.storageObjectId,
+              width: row.width,
+              height: row.height,
+              durationMs: row.durationMs,
+              thumbnailPath: row.thumbnailPath,
+            },
+          });
+        }
+      }
     }
 
     await prisma.internalChatChannel.update({

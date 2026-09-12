@@ -25,4 +25,13 @@ export async function register() {
   void productsScheduler.start();
   void packagesScheduler.start();
   void invoicesScheduler.start();
+
+  // Durable background jobs (object storage validation, cleanup, backups,
+  // campaigns...). Handlers register on import; the worker claims jobs from
+  // PostgreSQL with SKIP LOCKED so several instances can share the table.
+  await import('@/modules/jobs/register-handlers');
+  const { startJobWorker } = await import('@/modules/jobs/job-queue');
+  const { startRecurringScheduler } = await import('@/modules/jobs/scheduled-jobs');
+  startJobWorker();
+  startRecurringScheduler();
 }

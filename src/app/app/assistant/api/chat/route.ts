@@ -16,15 +16,19 @@ const chatRequestSchema = z.object({
     })
     .optional(),
   model: z.string().optional(),
+  // Attachments are referenced by ID only. Older clients may still send objects
+  // with fileName/mimeType/storagePath: only the id is used, the rest is ignored.
   attachments: z
     .array(
-      z.object({
-        id: z.string(),
-        fileName: z.string(),
-        mimeType: z.string(),
-        storagePath: z.string(),
-      })
+      z.union([
+        z.string().min(1),
+        z
+          .object({ id: z.string().min(1) })
+          .passthrough()
+          .transform((a) => a.id),
+      ])
     )
+    .max(20)
     .optional(),
 });
 
@@ -62,7 +66,7 @@ export async function POST(request: NextRequest) {
           actor: session.user,
           context: parsed.data.context,
           model: parsed.data.model,
-          attachments: parsed.data.attachments,
+          attachmentIds: parsed.data.attachments,
         })) {
           const data = `data: ${JSON.stringify(event)}\n\n`;
           controller.enqueue(encoder.encode(data));

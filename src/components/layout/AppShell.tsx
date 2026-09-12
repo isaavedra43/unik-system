@@ -12,6 +12,17 @@ import {
   Bell, Bot, ShoppingCart, Plug, MessageCircle, MessageSquare, X,
   FileText, Boxes, Users as UsersIcon, UserCog, Truck,
   CreditCard, Receipt, Wallet,
+  HardDrive,
+  Inbox,
+  ClipboardList,
+  FileSignature,
+  Megaphone,
+  Phone,
+  PhoneCall,
+  PenTool,
+  BookOpen,
+  Radio,
+  ListChecks,
 } from 'lucide-react';
 import { AssistantWidget } from '@/components/assistant/AssistantWidget';
 import { ThemeToggle } from '@/components/layout/ThemeToggle';
@@ -306,6 +317,41 @@ function buildBreadcrumbs(pathname: string): { label: string; href?: string }[] 
       { label: 'Chat' },
     ];
   }
+  if (pathname.startsWith('/app/admin/files')) {
+    return [
+      { label: 'Administración', href: '/app/admin/files' },
+      { label: 'Archivos' },
+    ];
+  }
+  if (pathname.startsWith('/app/admin/extensions')) {
+    return [
+      { label: 'Administración', href: '/app/admin/extensions' },
+      { label: 'Extensiones' },
+    ];
+  }
+  const simple: Array<[string, string[]]> = [
+    ['/app/admin/knowledge', ['Administración', 'Biblioteca aprobada']],
+    ['/app/admin/comms', ['Administración', 'Canales y responsables']],
+    ['/app/admin/voice', ['Administración', 'Telefonía']],
+    ['/app/inbox', ['Comunicaciones', 'Bandeja']],
+    ['/app/requests', ['Comunicaciones', 'Solicitudes']],
+    ['/app/quotes', ['Comunicaciones', 'Cotizaciones']],
+    ['/app/campaigns', ['Comunicaciones', 'Campañas']],
+    ['/app/calls', ['Comunicaciones', 'Llamadas']],
+    ['/app/studio', ['Estudio']],
+    ['/app/pending', ['Pendientes']],
+  ];
+  for (const [prefix, labels] of simple) {
+    if (pathname.startsWith(prefix)) {
+      return labels.map((label, i) => (i < labels.length - 1 ? { label, href: prefix } : { label }));
+    }
+  }
+  if (pathname.startsWith('/app/assistant/extensions')) {
+    return [
+      { label: 'Asistente IA', href: '/app/assistant' },
+      { label: 'Extensiones y skills' },
+    ];
+  }
   if (pathname.startsWith('/app/assistant')) {
     return [{ label: 'Asistente IA' }];
   }
@@ -441,6 +487,12 @@ export default function AppShell({ user, children }: AppShellProps) {
           icon: <Bot size={18} />,
           visible: user.permissionKeys.includes('assistant.use') || user.isSuperAdmin,
         },
+        {
+          href: '/app/pending',
+          label: 'Pendientes',
+          icon: <ListChecks size={18} />,
+          visible: user.permissionKeys.includes('assistant.use') || user.isSuperAdmin,
+        },
       ],
     },
     {
@@ -519,6 +571,56 @@ export default function AppShell({ user, children }: AppShellProps) {
       ],
     },
     {
+      title: 'Comunicaciones',
+      items: [
+        {
+          href: '/app/inbox',
+          label: 'Bandeja',
+          icon: <Inbox size={18} />,
+          visible: user.permissionKeys.includes('inbox.use') || user.isSuperAdmin,
+        },
+        {
+          href: '/app/requests',
+          label: 'Solicitudes',
+          icon: <ClipboardList size={18} />,
+          visible: user.permissionKeys.includes('requests.use') || user.isSuperAdmin,
+        },
+        {
+          href: '/app/quotes',
+          label: 'Cotizaciones',
+          icon: <FileSignature size={18} />,
+          visible:
+            user.permissionKeys.includes('quotes.use') ||
+            user.permissionKeys.includes('quotes.approve') ||
+            user.isSuperAdmin,
+        },
+        {
+          href: '/app/campaigns',
+          label: 'Campañas',
+          icon: <Megaphone size={18} />,
+          visible:
+            user.permissionKeys.includes('campaigns.view') ||
+            user.permissionKeys.includes('campaigns.manage') ||
+            user.isSuperAdmin,
+        },
+        {
+          href: '/app/calls',
+          label: 'Llamadas',
+          icon: <Phone size={18} />,
+          visible:
+            user.permissionKeys.includes('calls.use') ||
+            user.permissionKeys.includes('calls.supervise') ||
+            user.isSuperAdmin,
+        },
+        {
+          href: '/app/studio',
+          label: 'Estudio',
+          icon: <PenTool size={18} />,
+          visible: user.permissionKeys.includes('studio.use') || user.isSuperAdmin,
+        },
+      ],
+    },
+    {
       title: 'Administración',
       items: [
         {
@@ -550,6 +652,40 @@ export default function AppShell({ user, children }: AppShellProps) {
           icon: <MessageSquare size={18} />,
           visible:
             user.permissionKeys.includes('chat.admin') || user.isSuperAdmin,
+        },
+        {
+          href: '/app/admin/files',
+          label: 'Archivos',
+          icon: <HardDrive size={18} />,
+          visible:
+            user.permissionKeys.includes('files.admin') || user.isSuperAdmin,
+        },
+        {
+          href: '/app/admin/extensions',
+          label: 'Extensiones',
+          icon: <Plug size={18} />,
+          visible:
+            user.permissionKeys.includes('extensions.view') ||
+            user.permissionKeys.includes('extensions.manage') ||
+            user.isSuperAdmin,
+        },
+        {
+          href: '/app/admin/knowledge',
+          label: 'Biblioteca aprobada',
+          icon: <BookOpen size={18} />,
+          visible: user.permissionKeys.includes('knowledge.manage') || user.isSuperAdmin,
+        },
+        {
+          href: '/app/admin/comms',
+          label: 'Canales y responsables',
+          icon: <Radio size={18} />,
+          visible: user.permissionKeys.includes('inbox.admin') || user.isSuperAdmin,
+        },
+        {
+          href: '/app/admin/voice',
+          label: 'Telefonía',
+          icon: <PhoneCall size={18} />,
+          visible: user.permissionKeys.includes('calls.admin') || user.isSuperAdmin,
         },
       ],
     },
@@ -587,7 +723,8 @@ export default function AppShell({ user, children }: AppShellProps) {
     !pathname.includes('/api');
   const isAssistantPage = pathname.startsWith('/app/assistant');
   const isChatPage = pathname.startsWith('/app/chat');
-  const isFlush = isWorkspace || isAssistantPage || isChatPage;
+  const isInboxPage = pathname.startsWith('/app/inbox');
+  const isFlush = isWorkspace || isAssistantPage || isChatPage || isInboxPage;
   const canUseAssistant = user.permissionKeys.includes('assistant.use') || user.isSuperAdmin;
   const showWidget = canUseAssistant && !isAssistantPage;
 

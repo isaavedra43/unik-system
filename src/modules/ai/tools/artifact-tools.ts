@@ -1,9 +1,11 @@
 import { z } from 'zod';
 import path from 'path';
+import os from 'os';
 import fs from 'fs/promises';
 import { prisma } from '@/lib/prisma';
 import { registerTool } from './registry';
 import { createArtifact } from '../ai-artifacts-service';
+import { saveGeneratedFile } from '@/modules/storage/storage-service';
 import { generatePdfReport, type PdfTableColumn, type PdfSection } from '../generators/pdf-generator';
 import { generateExcelReport, type ExcelColumn } from '../generators/excel-generator';
 import { generateCsvReport } from '../generators/csv-generator';
@@ -29,14 +31,40 @@ const subsetOnlySchema = z.boolean().optional().describe(
 /* Helpers                                                            */
 /* ------------------------------------------------------------------ */
 
-const ARTIFACTS_DIR = path.join(process.cwd(), 'data', 'ai-artifacts');
-
-async function ensureArtifactsDir(): Promise<void> {
-  await fs.mkdir(ARTIFACTS_DIR, { recursive: true });
+/**
+ * Generators write to a per-job temporary directory; the finished file is then
+ * uploaded to the object storage (R2 in production) and the temporary directory
+ * is removed. Nothing permanent is ever written to the local disk.
+ */
+async function withTempArtifactFile<T>(
+  ext: string,
+  work: (filePath: string) => Promise<T>
+): Promise<T> {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'unik-artifact-'));
+  const filePath = path.join(dir, `artifact.${ext}`);
+  try {
+    return await work(filePath);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true }).catch(() => undefined);
+  }
 }
 
-function getArtifactPath(id: string, ext: string): string {
-  return path.join(ARTIFACTS_DIR, `${id}.${ext}`);
+async function storeArtifactFile(
+  actorId: string,
+  filePath: string,
+  fileName: string,
+  mimeType: string,
+  meta: Record<string, unknown>
+): Promise<{ storageObjectId: string; sizeBytes: number }> {
+  const object = await saveGeneratedFile({
+    createdBy: actorId,
+    purpose: 'ai_artifact',
+    fileName,
+    mimeType,
+    source: { filePath },
+    metadata: meta,
+  });
+  return { storageObjectId: object.id, sizeBytes: Number(object.sizeBytes) };
 }
 
 /**
@@ -277,6 +305,7 @@ const NO_ROWS_ERROR =
 // 1. generatePdfReport
 registerTool({
   name: 'generatePdfReport',
+  effect: 'draft',
   description:
     'Genera un PDF con los datos que le pases. ' +
     'MODO SIMPLE: pasa title y rows (un array de objetos). ' +
@@ -344,9 +373,6 @@ registerTool({
       return { error: NO_ROWS_ERROR };
     }
 
-    await ensureArtifactsDir();
-    const artifactId = `pdf-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const filePath = getArtifactPath(artifactId, 'pdf');
 
     // Relative column width WEIGHTS (the generator normalizes these to always fit the
     // page — a table can never overflow the page edge regardless of column count).
@@ -427,22 +453,30 @@ registerTool({
       }];
     }
 
-    const { sizeBytes, pageCount } = await generatePdfReport(filePath, {
-      title: args.title,
-      subtitle: args.subtitle,
-      brandColor: args.brandColor,
-      logoText: 'UNIK',
-      columns: pdfSections[0]?.columns ?? [],
-      rows: pdfSections[0]?.rows ?? [],
-      sections: pdfSections,
-      summaryCards: args.summaryCards,
-      orientation: 'landscape',
+    const pdfFileName = `${args.title.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`;
+    const { sizeBytes, pageCount, storageObjectId } = await withTempArtifactFile('pdf', async (filePath) => {
+      const generated = await generatePdfReport(filePath, {
+        title: args.title,
+        subtitle: args.subtitle,
+        brandColor: args.brandColor,
+        logoText: 'UNIK',
+        columns: pdfSections[0]?.columns ?? [],
+        rows: pdfSections[0]?.rows ?? [],
+        sections: pdfSections,
+        summaryCards: args.summaryCards,
+        orientation: 'landscape',
+      });
+      const stored = await storeArtifactFile(_actor.id, filePath, pdfFileName, 'application/pdf', {
+        title: args.title,
+        pageCount: generated.pageCount,
+      });
+      return { ...generated, storageObjectId: stored.storageObjectId };
     });
 
     const artifact = await createArtifact({
       conversationId: args.conversationId,
       type: 'pdf',
-      storagePath: filePath,
+      storageObjectId,
       meta: {
         title: args.title,
         filename: `${args.title.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`,
@@ -472,6 +506,7 @@ registerTool({
 // 2. generateExcelReport
 registerTool({
   name: 'generateExcelReport',
+  effect: 'draft',
   description:
     'Genera un Excel (XLSX) con los datos que le pases. SOLO necesitas pasar title y rows.',
   category: 'export',
@@ -507,9 +542,6 @@ registerTool({
       return { error: NO_ROWS_ERROR };
     }
 
-    await ensureArtifactsDir();
-    const artifactId = `xlsx-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const filePath = getArtifactPath(artifactId, 'xlsx');
 
     const cols = args.columns ?? autoColumns(rows);
 
@@ -519,19 +551,25 @@ registerTool({
       type: c.format === 'currency' ? 'currency' : c.format === 'number' ? 'number' : c.format === 'date' ? 'date' : c.format === 'percentage' ? 'percentage' : 'text',
     }));
 
-    const { sizeBytes } = await generateExcelReport(filePath, {
-      title: args.title,
-      subtitle: args.subtitle,
-      brandColor: args.brandColor ? hexToArgb(args.brandColor) : undefined,
-      columns: excelColumns,
-      rows,
-      summaryCards: args.summaryCards,
+    const xlsxFileName = `${args.title.replace(/[^a-zA-Z0-9]/g, '_')}.xlsx`;
+    const xlsxMime = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+    const { sizeBytes, storageObjectId } = await withTempArtifactFile('xlsx', async (filePath) => {
+      const generated = await generateExcelReport(filePath, {
+        title: args.title,
+        subtitle: args.subtitle,
+        brandColor: args.brandColor ? hexToArgb(args.brandColor) : undefined,
+        columns: excelColumns,
+        rows,
+        summaryCards: args.summaryCards,
+      });
+      const stored = await storeArtifactFile(_actor.id, filePath, xlsxFileName, xlsxMime, { title: args.title });
+      return { ...generated, storageObjectId: stored.storageObjectId };
     });
 
     const artifact = await createArtifact({
       conversationId: args.conversationId,
       type: 'xlsx',
-      storagePath: filePath,
+      storageObjectId,
       meta: {
         title: args.title,
         filename: `${args.title.replace(/[^a-zA-Z0-9]/g, '_')}.xlsx`,
@@ -557,6 +595,7 @@ registerTool({
 // 3. generateCsvExport
 registerTool({
   name: 'generateCsvExport',
+  effect: 'draft',
   description:
     'Genera un CSV con los datos que le pases. SOLO necesitas pasar title y rows.',
   category: 'export',
@@ -586,27 +625,29 @@ registerTool({
       return { error: NO_ROWS_ERROR };
     }
 
-    await ensureArtifactsDir();
-    const artifactId = `csv-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const filePath = getArtifactPath(artifactId, 'csv');
 
     const cols = args.columns ?? autoColumns(rows);
 
-    const { sizeBytes } = generateCsvReport(filePath, {
-      title: args.title,
-      columns: cols.map((c) => ({
-        header: c.header,
-        key: c.key,
-        format: (v: unknown) => formatValue(v, c.format),
-      })),
-      rows,
-      includeMetadata: true,
+    const csvFileName = `${args.title.replace(/[^a-zA-Z0-9]/g, '_')}.csv`;
+    const { sizeBytes, storageObjectId } = await withTempArtifactFile('csv', async (filePath) => {
+      const generated = generateCsvReport(filePath, {
+        title: args.title,
+        columns: cols.map((c) => ({
+          header: c.header,
+          key: c.key,
+          format: (v: unknown) => formatValue(v, c.format),
+        })),
+        rows,
+        includeMetadata: true,
+      });
+      const stored = await storeArtifactFile(_actor.id, filePath, csvFileName, 'text/csv', { title: args.title });
+      return { ...generated, storageObjectId: stored.storageObjectId };
     });
 
     const artifact = await createArtifact({
       conversationId: args.conversationId,
       type: 'csv',
-      storagePath: filePath,
+      storageObjectId,
       meta: {
         title: args.title,
         filename: `${args.title.replace(/[^a-zA-Z0-9]/g, '_')}.csv`,
@@ -632,6 +673,7 @@ registerTool({
 // 4. generateChart
 registerTool({
   name: 'generateChart',
+  effect: 'draft',
   description:
     'Genera una gráfica (barras, línea, pie) que se muestra en el chat. Pasa labels y values.',
   category: 'export',
@@ -710,6 +752,7 @@ registerTool({
 // asks for "una imagen del reporte" / "una foto con los datos" / algo para compartir directo.
 registerTool({
   name: 'generateReportImage',
+  effect: 'draft',
   description:
     'Genera IMÁGENES (PNG/SVG) con el reporte: título, KPIs y una tabla — NO es una gráfica de barras/línea/pie (para eso usa generateChart). ' +
     'Úsalo cuando el usuario pida explícitamente "una imagen del reporte", "una foto con los datos", o algo para compartir directo por WhatsApp/redes sin abrir un PDF. ' +
@@ -811,6 +854,7 @@ registerTool({
 // 5. generateTable
 registerTool({
   name: 'generateTable',
+  effect: 'draft',
   description:
     'Genera una tabla dentro del chat, en una caja con scroll propio (no un archivo, no una imagen). ÚSALA por default para cualquier lista de más de ~8 filas en vez de escribir la tabla tú mismo en markdown — ' +
     'el sistema toma las filas de los datos automáticamente (TODAS, sin límite de longitud) en vez de que tengas que escribirlas una por una, así nunca terminas cortando con "..." a medias. SOLO necesitas pasar title y rows.',
@@ -921,6 +965,10 @@ registerTool({
   name: 'cleanupArtifacts',
   description: 'Elimina artefactos expirados.',
   category: 'system',
+  // Maintenance of already-expired artifacts: classified destructive but auto-approved
+  // (nothing a user still relies on is removed; protected artifacts are never touched).
+  effect: 'destructive',
+  approvalPolicy: 'auto',
   enabledByDefault: true,
   parameters: z.object({}),
   execute: async () => {

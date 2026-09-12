@@ -3,10 +3,12 @@ import { chatCompletionStream, type ChatMessage, type ToolSpec, type ContentPart
 import { AiApiError } from './ai-client';
 import { buildSystemPrompt } from './ai-context-builder';
 import {
-  getAvailableTools,
+  loadAvailableTools,
   executeTool,
   toOpenAiTools,
 } from './tools/index';
+import { refreshExternalTools } from '@/modules/extensions/external-tools';
+import { getPreferences, PAUSED_MODE_HIDDEN_EFFECTS } from '@/modules/copilot/preferences-service';
 import { getAiSettings } from './ai-admin-config-service';
 import {
   getMessages,
@@ -16,17 +18,10 @@ import {
 import { recordAiToolCall } from './ai-audit';
 import { checkRateLimit, recordTokenUsage } from './ai-rate-limit';
 import { validateInput, validateOutput } from './ai-guardrails';
-import { processAttachment, type AttachmentResult } from './ai-attachments-service';
+import { processAttachment, resolveAttachmentsForMessage, type AttachmentResult } from './ai-attachments-service';
 import { prisma } from '@/lib/prisma';
 import { buildReportSubtitle, buildSummaryCards } from './ai-report-helpers';
 import { ARTIFACT_TOOL_NAMES, collectRowArrays, findLastDataToolResult } from './ai-history-data';
-
-interface OrchestratorAttachment {
-  id: string;
-  fileName: string;
-  mimeType: string;
-  storagePath: string;
-}
 
 interface OrchestratorInput {
   conversationId: string;
@@ -35,12 +30,16 @@ interface OrchestratorInput {
   context?: { page?: string; voice?: boolean };
   /** Optional model override — user can pick a model in the chat UI. */
   model?: string;
-  /** Optional attachments (images/PDFs uploaded by the user). */
-  attachments?: OrchestratorAttachment[];
+  /**
+   * Optional attachment IDs (images/PDFs uploaded by the user). They are
+   * resolved server-side: must belong to this conversation and user, be
+   * unlinked and READY. Paths are never accepted from the client.
+   */
+  attachmentIds?: string[];
 }
 
 interface OrchestratorEvent {
-  type: 'token' | 'tool_call_start' | 'tool_call_end' | 'artifact' | 'done' | 'error';
+  type: 'token' | 'tool_call_start' | 'tool_call_end' | 'artifact' | 'proposal' | 'done' | 'error';
   data?: unknown;
 }
 
@@ -121,15 +120,35 @@ export async function* runAssistant(
     return;
   }
 
+  // 3.5. Resolve attachments BEFORE persisting anything: only the actor's own,
+  // unlinked, READY files of this conversation are accepted (quarantined or
+  // foreign files are silently dropped).
+  let resolvedAttachments: AttachmentResult[] = [];
+  if (input.attachmentIds && input.attachmentIds.length > 0) {
+    resolvedAttachments = await resolveAttachmentsForMessage(
+      input.conversationId,
+      input.actor.id,
+      input.attachmentIds
+    );
+    if (resolvedAttachments.length < new Set(input.attachmentIds).size) {
+      console.warn('[orchestrator] Some attachments were ignored (not ready or not owned)');
+    }
+  }
+
   // 4. Persist user message
   const userMessage = await addMessage(input.conversationId, 'user', input.message, null, 0, 0, 0);
   await autoTitleConversation(input.conversationId, input.message);
 
-  // 4.5. Associate attachments with the user message
-  if (input.attachments && input.attachments.length > 0) {
+  // 4.5. Associate attachments with the user message (same guard as the resolver)
+  if (resolvedAttachments.length > 0) {
     try {
       await prisma.aiAttachment.updateMany({
-        where: { id: { in: input.attachments.map((a) => a.id) } },
+        where: {
+          id: { in: resolvedAttachments.map((a) => a.id) },
+          conversationId: input.conversationId,
+          uploadedBy: input.actor.id,
+          messageId: null,
+        },
         data: { messageId: userMessage.id },
       });
     } catch (err) {
@@ -178,7 +197,7 @@ export async function* runAssistant(
   ];
 
   // 7.5. Process attachments — inject multimodal content into the last user message
-  if (input.attachments && input.attachments.length > 0) {
+  if (resolvedAttachments.length > 0) {
     // Find the last user message (the one just added)
     let lastUserIdx = -1;
     for (let i = messages.length - 1; i >= 0; i--) {
@@ -193,16 +212,9 @@ export async function* runAssistant(
       const contentParts: ContentPart[] = [{ type: 'text', text: userText }];
 
       // Process each attachment
-      for (const att of input.attachments) {
+      for (const att of resolvedAttachments) {
         try {
-          const attResult: AttachmentResult = {
-            id: att.id,
-            fileName: att.fileName,
-            mimeType: att.mimeType,
-            sizeBytes: 0,
-            storagePath: att.storagePath,
-          };
-          const processed = await processAttachment(attResult);
+          const processed = await processAttachment(att);
 
           if (processed.type === 'image') {
             // Add image content part for OpenAI Vision
@@ -237,8 +249,19 @@ export async function* runAssistant(
     }
   }
 
-  // 8. Get available tools
-  const availableTools = getAvailableTools(input.actor, settings.enabledTools);
+  // 8. Get available tools: built-ins enabled by the admin + external capabilities
+  // (approved, enabled, role-allowed) loaded for this page context so prompts stay small.
+  await refreshExternalTools();
+  const loadedTools = await loadAvailableTools(input.actor, settings.enabledTools, {
+    page: input.context?.page,
+  });
+  // Paused mode: the assistant keeps answering and drafting, but tools with side
+  // effects are not even offered to the model.
+  const preferences = await getPreferences(input.actor.id).catch(() => null);
+  const availableTools =
+    preferences?.mode === 'paused'
+      ? loadedTools.filter((t) => !PAUSED_MODE_HIDDEN_EFFECTS.has(t.effect ?? 'read'))
+      : loadedTools;
   const toolSpecs: ToolSpec[] = toOpenAiTools(availableTools);
 
   // Resolve effective model: user override > default
@@ -698,7 +721,28 @@ export async function* runAssistant(
         }
       }
 
-      const result = await executeTool(tc.name, input.actor, parsedArgs);
+      const result = await executeTool(tc.name, input.actor, parsedArgs, {
+        conversationId: input.conversationId,
+        messageId: assistantMessage.id,
+        enabledToolNames: settings.enabledTools,
+      });
+
+      // Side-effecting action: a proposal was created and the user must approve it.
+      // The model receives an explicit tool result so it asks for confirmation instead
+      // of claiming the action happened.
+      if (result.needsApproval && result.proposal) {
+        yield {
+          type: 'proposal',
+          data: {
+            id: result.proposal.id,
+            toolName: result.proposal.toolName,
+            summary: result.proposal.summary,
+            effect: result.proposal.effect,
+            expiresAt: result.proposal.expiresAt,
+            args: parsedArgs,
+          },
+        };
+      }
 
       // Track the last DATA tool result for auto-injection into artifact tools
       if (
@@ -762,9 +806,21 @@ export async function* runAssistant(
       });
 
       // Add result to context
+      const toolPayload = result.success
+        ? result.result
+        : result.needsApproval && result.proposal
+          ? {
+              needsApproval: true,
+              proposalId: result.proposal.id,
+              summary: result.proposal.summary,
+              effect: result.proposal.effect,
+              instruction:
+                'NO afirmes que la acción se realizó. Explica al usuario qué se hará exactamente y pídele que apruebe la propuesta en la tarjeta mostrada.',
+            }
+          : { error: result.error, ...(result.uncertain ? { uncertain: true } : {}) };
       messages.push({
         role: 'tool',
-        content: JSON.stringify(result.success ? result.result : { error: result.error }),
+        content: JSON.stringify(toolPayload),
         tool_call_id: tc.id,
       });
 
@@ -772,7 +828,7 @@ export async function* runAssistant(
       await addMessage(
         input.conversationId,
         'tool',
-        JSON.stringify(result.success ? result.result : { error: result.error }),
+        JSON.stringify(toolPayload),
         null,
         0,
         0,

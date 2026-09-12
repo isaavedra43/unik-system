@@ -60,5 +60,8 @@ import './audit-tools';
 // Artifact tools (PDF, Excel, CSV, tablas, gráficas)
 import './artifact-tools';
 
+// Copilot tools (biblioteca aprobada, memoria personal, propuestas de comunicación interna)
+import './copilot-tools';
+
 // Export the registry API for consumers
 export * from './registry';

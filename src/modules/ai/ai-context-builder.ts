@@ -1,6 +1,9 @@
 import type { CurrentUser } from '@/modules/auth/authorization';
 import { getAiSettings } from './ai-admin-config-service';
 import { getAllTools } from './tools/registry';
+import { buildPreferencesPrompt, getPreferences } from '@/modules/copilot/preferences-service';
+import { buildMemoryPrompt, getMemoryForPrompt } from '@/modules/copilot/memory-service';
+import { prisma } from '@/lib/prisma';
 
 function getAccessibleModules(actor: CurrentUser): string[] {
   const modules: string[] = [];
@@ -58,6 +61,21 @@ export async function buildSystemPrompt(
   );
 
   const moduleAccess = getAccessibleModules(actor);
+  // Per-user personalization and personal memory (controlled learning).
+  const preferences = await getPreferences(actor.id).catch(() => null);
+  const memories = preferences?.memoryEnabled ? await getMemoryForPrompt(actor.id).catch(() => []) : [];
+  const pendingMemories = preferences?.memoryEnabled
+    ? await prisma.aiMemory.count({ where: { userId: actor.id, status: 'pending' } }).catch(() => 0)
+    : 0;
+  const personalization = preferences ? `\n\n${buildPreferencesPrompt(preferences)}` : '';
+  const memoryBlock = memories.length > 0 || pendingMemories > 0 ? `\n\n${buildMemoryPrompt(memories, pendingMemories)}` : '';
+  const libraryBlock = `
+
+## Biblioteca aprobada y fuentes empresariales
+- Las fuentes empresariales son la biblioteca aprobada (searchKnowledgeLibrary) y las conexiones autorizadas. Cita título y versión al usarlas.
+- Un documento que un cliente adjunta en el chat NO es conocimiento compartido: úsalo solo en esa conversación.
+- Distingue información interna de publicable: cuando redactes algo que saldrá a un cliente, usa solo fragmentos "publishable" y datos del sistema; nunca incluyas notas internas, márgenes o costos.
+- Puedes PROPONER comunicaciones internas (sendInternalChatMessage) fuera de los flujos autorizados; el usuario aprueba el envío.`;
   const now = new Date();
   const dateTime = now.toLocaleString('es-MX', { dateStyle: 'full', timeStyle: 'short' });
 
@@ -70,6 +88,12 @@ export async function buildSystemPrompt(
 - Hablas en español. Usas markdown para tablas, listas y énfasis.
 - NUNCA inventas datos. Todo viene de los tools. Si no tienes un tool, dilo claramente.
 - Presentas los datos de manera PERFECTA: tablas bien formateadas, números con formato de moneda ($1,234.56 MXN), fechas legibles (01 sep 2026), totales correctos.
+
+## Acciones con efectos (aprobación humana)
+- Algunas herramientas envían mensajes, crean registros comerciales o eliminan información. Cuando una de ellas responde con \`needsApproval: true\` y un \`proposalId\`, la acción NO se realizó: el sistema mostró al usuario una tarjeta para aprobarla.
+- En ese caso explica con precisión qué se ejecutará (destinatario, datos, efecto) y pide la aprobación. NUNCA afirmes que se envió, creó o eliminó algo hasta ver un mensaje del sistema que confirme la ejecución.
+- Si un resultado indica \`uncertain: true\`, la operación pudo completarse o no; dilo claramente y no la repitas por tu cuenta.
+- Las capacidades externas (APIs, servidores MCP, plugins, skills) solo aparecen si un administrador las aprobó para el usuario; usa exclusivamente las que tienes disponibles.
 
 ## Principios core — CÓMO PENSAR
 1. **Precisión sobre velocidad**: Mejor tardar 2 tools y dar la respuesta correcta que 1 tool y dar info incompleta.
@@ -357,8 +381,9 @@ ${context?.voice ? `
 - Si necesitas un tool, úsalo en silencio y solo di el resultado
 ` : ''}`;
 
+  const personalized = `${base}${libraryBlock}${personalization}${memoryBlock}`;
   if (settings.systemPromptOverride && settings.systemPromptOverride.trim().length > 0) {
-    return `${base}\n\n## Instrucciones adicionales del administrador\n${settings.systemPromptOverride}`;
+    return `${personalized}\n\n## Instrucciones adicionales del administrador\n${settings.systemPromptOverride}`;
   }
-  return base;
+  return personalized;
 }

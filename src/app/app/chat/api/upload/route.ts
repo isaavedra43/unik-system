@@ -1,24 +1,27 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentSession, hasPermission } from '@/modules/auth/authorization';
-import { validateAttachment } from '@/modules/chat/chat-attachments-service';
-import { chatStorage, getExtensionFromMime } from '@/modules/chat/chat-storage';
+import { validateAttachment, saveAttachment } from '@/modules/chat/chat-attachments-service';
 import { assertChannelMember } from '@/modules/chat/chat-service';
-import { prisma } from '@/lib/prisma';
+import { StorageError } from '@/modules/storage/storage-service';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
 /**
- * POST /app/chat/api/upload
+ * POST /app/chat/api/upload  (compatibility route — whole file through the server)
  *
  * Receives multipart/form-data with:
  * - file: the uploaded file
  * - channelId: the channel to attach to (for membership verification)
  *
- * Creates a ChatAttachment record linked to a placeholder message (sender-only,
- * no content). The client links this attachment to the actual message when
- * sending. Returns { id, fileName, mimeType, sizeBytes }.
+ * The file goes through the object storage pipeline (quarantine → validation →
+ * R2/disk). NO placeholder message is created: the attachment stays pending
+ * until the user sends a message that links it (ownership, channel and READY
+ * state are re-checked at that moment).
+ *
+ * New clients use the direct-to-storage flow under /app/files/api/uploads.
+ * Returns { id, fileName, mimeType, sizeBytes, storageObjectId }.
  */
 export async function POST(request: NextRequest) {
   const session = await getCurrentSession();
@@ -56,45 +59,26 @@ export async function POST(request: NextRequest) {
 
   try {
     const buffer = Buffer.from(await file.arrayBuffer());
-    const ext = getExtensionFromMime(mimeType);
-    const key = `chat-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-    const storagePath = await chatStorage.save(buffer, key, ext);
-
-    // Create a placeholder message (sender only, no content) to link the attachment
-    const message = await prisma.internalChatMessage.create({
-      data: {
-        channelId,
-        senderId: session.user.id,
-        content: null,
-      },
-    });
-
-    const attachment = await prisma.internalChatAttachment.create({
-      data: {
-        messageId: message.id,
-        fileName: file.name,
-        mimeType,
-        sizeBytes,
-        storagePath,
-      },
-    });
-
-    // Update channel lastMessageAt
-    await prisma.internalChatChannel.update({
-      where: { id: channelId },
-      data: { lastMessageAt: message.createdAt },
+    const attachment = await saveAttachment({
+      buffer,
+      fileName: file.name,
+      mimeType,
+      sizeBytes,
+      channelId,
+      uploadedBy: session.user.id,
     });
 
     return NextResponse.json({
       id: attachment.id,
-      messageId: message.id,
       fileName: attachment.fileName,
       mimeType: attachment.mimeType,
       sizeBytes: attachment.sizeBytes,
+      storageObjectId: attachment.storageObjectId,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Error desconocido';
-    console.error('[chat-upload] Error:', message);
-    return NextResponse.json({ error: message }, { status: 500 });
+    const status = err instanceof StorageError ? err.status : 500;
+    if (status >= 500) console.error('[chat-upload] Error:', message);
+    return NextResponse.json({ error: message }, { status });
   }
 }
