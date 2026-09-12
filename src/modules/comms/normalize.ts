@@ -11,7 +11,10 @@ import { createHash, timingSafeEqual } from 'crypto';
  * prefixes, spaces, dashes and parentheses. Numbers without a country code
  * receive the default (Mexico, +52) when they have 10 digits.
  */
-export function normalizePhone(raw: string | null | undefined, defaultCountry = '52'): string | null {
+export function normalizePhone(
+  raw: string | null | undefined,
+  defaultCountry = '52'
+): string | null {
   if (!raw) return null;
   let value = raw.trim();
   if (value.toLowerCase().startsWith('whatsapp:')) value = value.slice('whatsapp:'.length);
@@ -54,7 +57,14 @@ export function stripChannelPrefix(address: string): string {
   return address.replace(/^whatsapp:/i, '').trim();
 }
 
-const OPT_OUT_WORDS = new Set(['BAJA', 'STOP', 'CANCELAR', 'UNSUBSCRIBE', 'DETENER', 'NO MOLESTAR']);
+const OPT_OUT_WORDS = new Set([
+  'BAJA',
+  'STOP',
+  'CANCELAR',
+  'UNSUBSCRIBE',
+  'DETENER',
+  'NO MOLESTAR',
+]);
 const OPT_IN_WORDS = new Set(['ALTA', 'START', 'UNSTOP', 'SUSCRIBIR', 'ACEPTO']);
 
 function normalizeKeyword(body: string): string {
@@ -68,7 +78,9 @@ function normalizeKeyword(body: string): string {
 }
 
 /** Detects explicit consent keywords in an inbound message body. */
-export function detectConsentKeyword(body: string | null | undefined): 'opted_out' | 'opted_in' | null {
+export function detectConsentKeyword(
+  body: string | null | undefined
+): 'opted_out' | 'opted_in' | null {
   if (!body) return null;
   const text = normalizeKeyword(body);
   if (!text || text.length > 40) return null;

@@ -57,7 +57,9 @@ export interface ZohoBooksMode {
 }
 
 /** Resolves the effective mode without throwing (safe to show in the UI). */
-export function getZohoBooksMode(env: NodeJS.ProcessEnv = process.env): ZohoBooksMode {
+export type EnvLike = Record<string, string | undefined>;
+
+export function getZohoBooksMode(env: EnvLike = process.env): ZohoBooksMode {
   const organizationId = env.ZOHO_BOOKS_ORGANIZATION_ID?.trim() || null;
   const flag = env.ZOHO_BOOKS_MOCK?.trim().toLowerCase();
   if (flag === 'true') return { mock: true, organizationId, reason: 'ZOHO_BOOKS_MOCK=true' };
@@ -71,13 +73,21 @@ export function getZohoBooksMode(env: NodeJS.ProcessEnv = process.env): ZohoBook
     };
   }
   if (!organizationId) {
-    return { mock: true, organizationId, reason: 'Falta ZOHO_BOOKS_ORGANIZATION_ID (modo simulado)' };
+    return {
+      mock: true,
+      organizationId,
+      reason: 'Falta ZOHO_BOOKS_ORGANIZATION_ID (modo simulado)',
+    };
   }
   return { mock: false, organizationId, reason: 'ZOHO_BOOKS_ORGANIZATION_ID configurado' };
 }
 
 /** Best-effort Books web URL (data-center suffix derived from the API host). */
-function booksWebUrl(apiBaseUrl: string, organizationId: string, estimateId: string): string | null {
+function booksWebUrl(
+  apiBaseUrl: string,
+  organizationId: string,
+  estimateId: string
+): string | null {
   try {
     const host = new URL(apiBaseUrl).hostname; // www.zohoapis.com | www.zohoapis.eu | ...
     const suffix = host.split('.').slice(-1)[0] ?? 'com';
@@ -91,8 +101,11 @@ interface BooksDeps {
   getAccessToken: () => Promise<string>;
   getApiBaseUrl: () => string;
   fetchImpl?: typeof fetch;
-  env?: NodeJS.ProcessEnv;
+  env?: EnvLike;
   now?: () => number;
+  /** Tests only: DNS override and shorter timeout. */
+  lookup?: (hostname: string) => Promise<string[]>;
+  timeoutMs?: number;
 }
 
 async function defaultDeps(): Promise<BooksDeps> {
@@ -181,7 +194,12 @@ export async function createEstimate(
         },
         body: JSON.stringify(payload),
       },
-      { allowedHosts, timeoutMs: BOOKS_TIMEOUT_MS, maxResponseBytes: 1024 * 1024 },
+      {
+        allowedHosts,
+        timeoutMs: resolved.timeoutMs ?? BOOKS_TIMEOUT_MS,
+        maxResponseBytes: 1024 * 1024,
+        ...(resolved.lookup ? { lookup: resolved.lookup } : {}),
+      },
       resolved.fetchImpl
     );
     const durationMs = now() - startedAt;
@@ -230,7 +248,11 @@ export async function createEstimate(
       path,
       durationMs,
       success: false,
-      errorCode: isTimeout ? 'TIMEOUT' : err instanceof EgressError ? err.code.toUpperCase() : 'FETCH_ERROR',
+      errorCode: isTimeout
+        ? 'TIMEOUT'
+        : err instanceof EgressError
+          ? err.code.toUpperCase()
+          : 'FETCH_ERROR',
     });
     if (isTimeout) {
       // The request may have reached Books: report as uncertain, never retry blindly.

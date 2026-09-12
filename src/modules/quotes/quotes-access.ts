@@ -16,6 +16,9 @@ registerFileAccessResolver('document', async (actor, object) => {
   if (!hasPermission(actor, 'quotes.use') && !hasPermission(actor, 'quotes.approve')) return false;
   // Metadata is server-generated at save time, so the quote link can be trusted;
   // older package versions of the same quote stay readable to quote users.
-  const quote = await prisma.quote.findUnique({ where: { id: meta.quoteId }, select: { id: true } });
+  const quote = await prisma.quote.findUnique({
+    where: { id: meta.quoteId },
+    select: { id: true },
+  });
   return Boolean(quote);
 });

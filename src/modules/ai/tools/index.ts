@@ -63,5 +63,20 @@ import './artifact-tools';
 // Copilot tools (biblioteca aprobada, memoria personal, propuestas de comunicación interna)
 import './copilot-tools';
 
+// Voice tools (llamadas, transcripciones, tareas desde llamadas)
+import './voice-tools';
+
+// Studio tools (documentos editables, versiones, exportaciones verificadas)
+import './studio-tools';
+
+// Quotes tools (borrador, escenarios, paquete comercial, aprobación oficial en Books)
+import './quotes-tools';
+
+// Campaigns tools (listado, estadísticas, contenido, borrador, aprobación de envío masivo)
+import './campaigns-tools';
+
+// Comms tools (bandeja omnicanal, solicitudes internas, responsables, compromisos, duplicados)
+import './comms-tools';
+
 // Export the registry API for consumers
 export * from './registry';

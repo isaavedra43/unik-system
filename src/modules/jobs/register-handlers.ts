@@ -6,3 +6,7 @@
 import '@/modules/storage/storage-jobs';
 import '@/modules/extensions/extensions-jobs';
 import '@/modules/copilot/copilot-jobs';
+import '@/modules/voice/voice-jobs';
+import '@/modules/studio/studio-jobs';
+import '@/modules/campaigns/campaigns-jobs';
+import '@/modules/comms/comms-jobs';

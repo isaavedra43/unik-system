@@ -5,7 +5,8 @@ export const COMMS_PERMISSIONS: PermissionDefinition[] = [
     key: 'inbox.use',
     group: 'Comunicaciones',
     label: 'Usar la bandeja',
-    description: 'Permite ver y responder conversaciones de WhatsApp, SMS y Telegram de sus equipos',
+    description:
+      'Permite ver y responder conversaciones de WhatsApp, SMS y Telegram de sus equipos',
   },
   {
     key: 'inbox.assign',

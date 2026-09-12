@@ -64,7 +64,10 @@ export interface ChannelAdapter {
    * Parses and authenticates an inbound webhook (signature/secret token).
    * Returns null when the payload is not for this adapter or is invalid.
    */
-  parseWebhook(account: CommAccount | null, request: { headers: Record<string, string>; rawBody: string; url: string }): Promise<{ messages: InboundMessage[]; deliveries: DeliveryUpdate[] } | null>;
+  parseWebhook(
+    account: CommAccount | null,
+    request: { headers: Record<string, string>; rawBody: string; url: string }
+  ): Promise<{ messages: InboundMessage[]; deliveries: DeliveryUpdate[] } | null>;
   /** Lightweight configuration check (no message is sent). */
   testConnection(account: CommAccount): Promise<{ ok: boolean; detail: string }>;
 }
@@ -89,7 +92,10 @@ export function listChannelProviders(): CommProvider[] {
 export class MockChannelAdapter implements ChannelAdapter {
   readonly provider: CommProvider;
   readonly sent: Array<{ accountId: string; message: OutboundMessage }> = [];
-  constructor(provider: CommProvider = 'twilio_whatsapp', private readonly failFor: (m: OutboundMessage) => string | null = () => null) {
+  constructor(
+    provider: CommProvider = 'twilio_whatsapp',
+    private readonly failFor: (m: OutboundMessage) => string | null = () => null
+  ) {
     this.provider = provider;
   }
   async send(account: CommAccount, message: OutboundMessage): Promise<OutboundResult> {

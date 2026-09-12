@@ -59,7 +59,10 @@ function formatDate(value: string): string {
  * digits (never scientific notation, never silent truncation beyond 2 decimals
  * of rounding for formatted numbers).
  */
-export function renderCellText(value: StudioCellValue | undefined, format?: StudioColumnFormat): string {
+export function renderCellText(
+  value: StudioCellValue | undefined,
+  format?: StudioColumnFormat
+): string {
   if (value === null || value === undefined) return '';
   if (typeof value === 'boolean') return value ? 'Sí' : 'No';
   switch (format) {

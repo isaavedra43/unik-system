@@ -84,7 +84,9 @@ export const QUOTE_SETTINGS_KEY = 'quotes:settings';
 
 const SCALE = 4;
 
-export function toDecimal(value: Prisma.Decimal | number | string | null | undefined): Prisma.Decimal {
+export function toDecimal(
+  value: Prisma.Decimal | number | string | null | undefined
+): Prisma.Decimal {
   if (value === null || value === undefined) return new Prisma.Decimal(0);
   return value instanceof Prisma.Decimal ? value : new Prisma.Decimal(value);
 }
@@ -194,7 +196,9 @@ export function computeQuoteContentHash(content: QuoteContent): string {
       taxRate: toDecimal(item.taxRate ?? 0).toFixed(6),
     })),
   };
-  return createHash('sha256').update(JSON.stringify(canonicalize(normalized))).digest('hex');
+  return createHash('sha256')
+    .update(JSON.stringify(canonicalize(normalized)))
+    .digest('hex');
 }
 
 /** Parses the `items` JSON column defensively (never trusts stored shape blindly). */

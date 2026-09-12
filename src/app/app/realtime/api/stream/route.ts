@@ -48,7 +48,7 @@ async function authorizeChannel(user: CurrentUser, channel: string): Promise<boo
     case 'inbox':
       return hasPermission(user, 'inbox.use');
     case 'call':
-      return hasPermission(user, 'calls.use');
+      return hasPermission(user, 'calls.use') || hasPermission(user, 'calls.supervise');
     case 'campaign':
       return hasPermission(user, 'campaigns.view');
     default:

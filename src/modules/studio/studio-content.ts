@@ -28,7 +28,13 @@ const blockIdSchema = z
 
 export const studioCellValueSchema = z.union([z.string(), z.number(), z.boolean(), z.null()]);
 
-export const studioColumnFormatSchema = z.enum(['text', 'number', 'currency', 'percentage', 'date']);
+export const studioColumnFormatSchema = z.enum([
+  'text',
+  'number',
+  'currency',
+  'percentage',
+  'date',
+]);
 
 export const studioTableColumnSchema = z.object({
   key: z.string().min(1).max(64),
@@ -324,9 +330,11 @@ export function diffContent(before: StudioContent, after: StudioContent): Conten
   });
 
   const parts: string[] = [];
-  if (changed.length > 0) parts.push(`${changed.length} modificado${changed.length === 1 ? '' : 's'}`);
+  if (changed.length > 0)
+    parts.push(`${changed.length} modificado${changed.length === 1 ? '' : 's'}`);
   if (added.length > 0) parts.push(`${added.length} añadido${added.length === 1 ? '' : 's'}`);
-  if (removed.length > 0) parts.push(`${removed.length} eliminado${removed.length === 1 ? '' : 's'}`);
+  if (removed.length > 0)
+    parts.push(`${removed.length} eliminado${removed.length === 1 ? '' : 's'}`);
   if (moved.length > 0 && changed.length === 0 && added.length === 0 && removed.length === 0) {
     parts.push(`${moved.length} reordenado${moved.length === 1 ? '' : 's'}`);
   }
@@ -468,7 +476,9 @@ export function contentToPlainText(content: StudioContent): string {
         lines.push(block.text);
         break;
       case 'list':
-        block.items.forEach((item, i) => lines.push(`${block.ordered ? `${i + 1}.` : '-'} ${item}`));
+        block.items.forEach((item, i) =>
+          lines.push(`${block.ordered ? `${i + 1}.` : '-'} ${item}`)
+        );
         break;
       case 'kpi':
         lines.push(block.cards.map((c) => `${c.label}: ${c.value}`).join(' | '));

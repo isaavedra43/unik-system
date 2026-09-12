@@ -143,10 +143,7 @@ export function getLiveKitConfig(): LiveKitConfig {
   const env = parsed.data;
   const mock = !env.LIVEKIT_URL;
   if (!mock && (!env.LIVEKIT_API_KEY || !env.LIVEKIT_API_SECRET)) {
-    throw new LiveKitError(
-      'LIVEKIT_URL requires LIVEKIT_API_KEY and LIVEKIT_API_SECRET',
-      'config'
-    );
+    throw new LiveKitError('LIVEKIT_URL requires LIVEKIT_API_KEY and LIVEKIT_API_SECRET', 'config');
   }
   let sipDomain = env.LIVEKIT_SIP_DOMAIN ?? null;
   if (!sipDomain && env.LIVEKIT_URL) {
@@ -349,7 +346,11 @@ export async function createRoom(
   const roomName = roomNameForCall(callId);
   const config = getLiveKitConfig();
   if (config.mock) {
-    mockState().rooms.set(roomName, { name: roomName, createdAt: new Date(), participants: new Map() });
+    mockState().rooms.set(roomName, {
+      name: roomName,
+      createdAt: new Date(),
+      participants: new Map(),
+    });
     return { roomName, mock: true };
   }
   try {
@@ -384,7 +385,10 @@ export async function deleteRoom(roomName: string): Promise<{ mock: boolean }> {
   return { mock: false };
 }
 
-export async function listRooms(): Promise<{ rooms: Array<{ name: string; numParticipants: number }>; mock: boolean }> {
+export async function listRooms(): Promise<{
+  rooms: Array<{ name: string; numParticipants: number }>;
+  mock: boolean;
+}> {
   const config = getLiveKitConfig();
   if (config.mock) {
     return {
@@ -410,7 +414,10 @@ export async function listParticipants(
     const room = mockState().rooms.get(roomName);
     return {
       participants: room
-        ? [...room.participants.values()].map((p) => ({ identity: p.identity, metadata: p.metadata }))
+        ? [...room.participants.values()].map((p) => ({
+            identity: p.identity,
+            metadata: p.metadata,
+          }))
         : [],
       mock: true,
     };
@@ -447,7 +454,11 @@ export async function removeParticipant(
 // Tokens
 // ---------------------------------------------------------------------------
 
-function grantsForRole(role: TokenRole): { canPublish: boolean; canSubscribe: boolean; hidden: boolean } {
+function grantsForRole(role: TokenRole): {
+  canPublish: boolean;
+  canSubscribe: boolean;
+  hidden: boolean;
+} {
   switch (role) {
     case 'listen':
       return { canPublish: false, canSubscribe: true, hidden: true };
@@ -478,7 +489,11 @@ export async function issueToken(input: IssueTokenInput): Promise<IssuedToken> {
   if (config.mock) {
     const room = mockState().rooms.get(input.roomName);
     if (room) {
-      room.participants.set(input.identity, { identity: input.identity, role: input.role, metadata });
+      room.participants.set(input.identity, {
+        identity: input.identity,
+        role: input.role,
+        metadata,
+      });
     }
     const token = `mock.${Buffer.from(
       JSON.stringify({ identity: input.identity, room: input.roomName, role: input.role, grants })
@@ -661,9 +676,7 @@ export async function sipCreateOutbound(
 const mockWebhookSchema = z.object({
   event: z.string().min(1),
   room: z.object({ name: z.string() }).optional(),
-  participant: z
-    .object({ identity: z.string(), metadata: z.string().optional() })
-    .optional(),
+  participant: z.object({ identity: z.string(), metadata: z.string().optional() }).optional(),
   egressInfo: z
     .object({
       egressId: z.string(),

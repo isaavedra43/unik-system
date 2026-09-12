@@ -34,7 +34,13 @@ import type {
   TableBlock,
 } from './studio-content';
 import { parseStudioNumber, renderCellText, type StudioColumnFormat } from './studio-format';
-import { docxImageType, fitImage, isPdfCompatibleImage, readImageSize, toDataUri } from './studio-images';
+import {
+  docxImageType,
+  fitImage,
+  isPdfCompatibleImage,
+  readImageSize,
+  toDataUri,
+} from './studio-images';
 
 /**
  * Renders a StudioContent into every supported file format. Pure file
@@ -144,7 +150,11 @@ export function tableStrings(block: TableBlock): { header: string[]; rows: strin
 }
 
 /** Deterministic, Excel-safe, unique sheet name for the N-th table. */
-export function sheetNameForTable(index: number, title: string | undefined, used: Set<string>): string {
+export function sheetNameForTable(
+  index: number,
+  title: string | undefined,
+  used: Set<string>
+): string {
   const base = (title && title.trim().length > 0 ? title.trim() : `Tabla ${index + 1}`)
     .replace(/[\[\]:*?/\\]/g, ' ')
     .replace(/\s+/g, ' ')
@@ -152,7 +162,10 @@ export function sheetNameForTable(index: number, title: string | undefined, used
     .slice(0, 28);
   let candidate = base.length > 0 ? base : `Tabla ${index + 1}`;
   let n = 2;
-  while (used.has(candidate.toLowerCase()) || candidate.toLowerCase() === KPI_SHEET_NAME.toLowerCase()) {
+  while (
+    used.has(candidate.toLowerCase()) ||
+    candidate.toLowerCase() === KPI_SHEET_NAME.toLowerCase()
+  ) {
     candidate = `${base.slice(0, 24)} (${n})`;
     n++;
   }
@@ -206,7 +219,7 @@ function csvEscape(value: string): string {
 function safeFileStem(title: string): string {
   const stem = title
     .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
+    .replace(/[\u0300-\u036f]/g, '')
     .replace(/[^A-Za-z0-9 _-]/g, '')
     .trim()
     .replace(/\s+/g, '-')
@@ -288,7 +301,10 @@ interface RenderContext extends ExportRenderInput {
   images: ImageMap;
 }
 
-async function writeAndStat(outputPath: string, data: Buffer | string): Promise<ExportRenderResult> {
+async function writeAndStat(
+  outputPath: string,
+  data: Buffer | string
+): Promise<ExportRenderResult> {
   await fsp.writeFile(outputPath, data);
   const stat = await fsp.stat(outputPath);
   return { sizeBytes: stat.size };
@@ -306,9 +322,11 @@ const PDF_FOOTER = 26;
  * report engine of the assistant so both surfaces look identical. Anything with
  * prose, lists or images goes through the block renderer below.
  */
-function reportShape(
-  ctx: RenderContext
-): { sections: PdfSection[]; summaryCards: Array<{ label: string; value: string }>; subtitle?: string } | null {
+function reportShape(ctx: RenderContext): {
+  sections: PdfSection[];
+  summaryCards: Array<{ label: string; value: string }>;
+  subtitle?: string;
+} | null {
   const blocks = ctx.content.blocks;
   if (ctx.title.length > 60) return null;
   if (!blocks.some((b) => b.type === 'table')) return null;
@@ -354,7 +372,10 @@ function reportShape(
     }
   }
   if (pendingHeading !== null) return null;
-  if (summaryCards.length > 6 || summaryCards.some((c) => c.value.length > 16 || c.label.length > 40)) {
+  if (
+    summaryCards.length > 6 ||
+    summaryCards.some((c) => c.value.length > 16 || c.label.length > 40)
+  ) {
     return null;
   }
   if (subtitle && subtitle.length > 90) return null;
@@ -466,7 +487,10 @@ function renderPdfBlocks(ctx: RenderContext): Promise<ExportRenderResult> {
             const size = fitImage(readImageSize(image.buffer, image.mimeType), cw(), 380);
             ensureSpace(size.height + 24);
             try {
-              doc.image(image.buffer, PDF_MARGIN, doc.y, { width: size.width, height: size.height });
+              doc.image(image.buffer, PDF_MARGIN, doc.y, {
+                width: size.width,
+                height: size.height,
+              });
               doc.y += size.height + 4;
             } catch {
               doc.font('Helvetica-Oblique').fontSize(9).fillColor(ACCENT);
@@ -545,7 +569,9 @@ function drawPdfKpis(
   for (let start = 0; start < block.cards.length; start += perRow) {
     const rowCards = block.cards.slice(start, start + perRow);
     doc.font('Helvetica-Bold').fontSize(14);
-    const valueHeights = rowCards.map((c) => doc.heightOfString(c.value, { width: cardWidth - 16 }));
+    const valueHeights = rowCards.map((c) =>
+      doc.heightOfString(c.value, { width: cardWidth - 16 })
+    );
     doc.font('Helvetica-Bold').fontSize(7);
     const labelHeights = rowCards.map((c) =>
       doc.heightOfString(c.label.toUpperCase(), { width: cardWidth - 16 })
@@ -557,7 +583,10 @@ function drawPdfKpis(
       const x = PDF_MARGIN + i * (cardWidth + gap);
       doc.roundedRect(x, y, cardWidth, cardHeight, 5).fillColor(ROW_ALT).fill();
       doc.roundedRect(x, y, cardWidth, cardHeight, 5).lineWidth(0.5).strokeColor(BORDER).stroke();
-      doc.rect(x, y + 6, 3, cardHeight - 12).fillColor(BRAND).fill();
+      doc
+        .rect(x, y + 6, 3, cardHeight - 12)
+        .fillColor(BRAND)
+        .fill();
       doc.font('Helvetica-Bold').fontSize(7).fillColor(ACCENT);
       doc.text(card.label.toUpperCase(), x + 10, y + 7, { width: cardWidth - 16 });
       doc.font('Helvetica-Bold').fontSize(14).fillColor(TEXT_DARK);
@@ -582,7 +611,10 @@ function drawPdfTable(
   if (block.title) {
     doc.font('Helvetica-Bold').fontSize(11).fillColor(TEXT_DARK);
     if (doc.y + 30 > bottom()) doc.addPage();
-    doc.rect(PDF_MARGIN, doc.y + 2, 3, 11).fillColor(BRAND).fill();
+    doc
+      .rect(PDF_MARGIN, doc.y + 2, 3, 11)
+      .fillColor(BRAND)
+      .fill();
     doc.fillColor(TEXT_DARK).text(block.title, PDF_MARGIN + 8, doc.y, { width: total - 8 });
     doc.y += 4;
   }
@@ -604,7 +636,9 @@ function drawPdfTable(
     widths = widths.map((w, i) => w - (flexible[i] / flexSum) * over);
   }
   const inner = widths.map((w) => Math.max(6, w - padX * 2));
-  const aligns = block.columns.map((c) => c.align ?? (isNumericFormat(c.format) ? 'right' : 'left'));
+  const aligns = block.columns.map(
+    (c) => c.align ?? (isNumericFormat(c.format) ? 'right' : 'left')
+  );
 
   const headerHeight = (() => {
     doc.font('Helvetica-Bold').fontSize(fontSize);
@@ -665,7 +699,10 @@ function drawPdfTable(
 
 const ORDERED_LIST_REF = 'studio-ordered';
 
-function docxTextRuns(text: string, options: { bold?: boolean; color?: string; size?: number } = {}) {
+function docxTextRuns(
+  text: string,
+  options: { bold?: boolean; color?: string; size?: number } = {}
+) {
   const lines = text.split('\n');
   return lines.map(
     (line, i) => new TextRun({ text: line, break: i > 0 ? 1 : undefined, ...options })
@@ -677,10 +714,13 @@ async function renderDocx(ctx: RenderContext): Promise<ExportRenderResult> {
   children.push(new Paragraph({ text: ctx.title, heading: HeadingLevel.TITLE }));
   children.push(
     new Paragraph({
-      children: docxTextRuns(`Generado por UNIK Estudio visual · ${formatGeneratedAt(ctx.generatedAt)}`, {
-        color: '64748B',
-        size: 16,
-      }),
+      children: docxTextRuns(
+        `Generado por UNIK Estudio visual · ${formatGeneratedAt(ctx.generatedAt)}`,
+        {
+          color: '64748B',
+          size: 16,
+        }
+      ),
       spacing: { after: 240 },
     })
   );
@@ -702,7 +742,9 @@ async function renderDocx(ctx: RenderContext): Promise<ExportRenderResult> {
         );
         break;
       case 'paragraph':
-        children.push(new Paragraph({ children: docxTextRuns(block.text), spacing: { after: 160 } }));
+        children.push(
+          new Paragraph({ children: docxTextRuns(block.text), spacing: { after: 160 } })
+        );
         break;
       case 'list':
         orderedInstance++;
@@ -711,7 +753,9 @@ async function renderDocx(ctx: RenderContext): Promise<ExportRenderResult> {
             new Paragraph({
               children: docxTextRuns(item),
               ...(block.ordered
-                ? { numbering: { reference: ORDERED_LIST_REF, level: 0, instance: orderedInstance } }
+                ? {
+                    numbering: { reference: ORDERED_LIST_REF, level: 0, instance: orderedInstance },
+                  }
                 : { bullet: { level: 0 } }),
             })
           );
@@ -741,7 +785,11 @@ async function renderDocx(ctx: RenderContext): Promise<ExportRenderResult> {
                   type,
                   data: image.buffer,
                   transformation: { width: size.width, height: size.height },
-                  altText: { title: block.alt, description: block.alt, name: block.alt || 'imagen' },
+                  altText: {
+                    title: block.alt,
+                    description: block.alt,
+                    name: block.alt || 'imagen',
+                  },
                 }),
               ],
             })
@@ -803,9 +851,14 @@ async function renderDocx(ctx: RenderContext): Promise<ExportRenderResult> {
   return writeAndStat(ctx.outputPath, buffer);
 }
 
-function docxCell(text: string, options: { bold?: boolean; fill?: string; color?: string; align?: 'left' | 'right' | 'center' }) {
+function docxCell(
+  text: string,
+  options: { bold?: boolean; fill?: string; color?: string; align?: 'left' | 'right' | 'center' }
+) {
   return new TableCell({
-    shading: options.fill ? { type: ShadingType.CLEAR, fill: options.fill, color: 'auto' } : undefined,
+    shading: options.fill
+      ? { type: ShadingType.CLEAR, fill: options.fill, color: 'auto' }
+      : undefined,
     margins: { top: 60, bottom: 60, left: 90, right: 90 },
     children: [
       new Paragraph({
@@ -823,7 +876,9 @@ function docxCell(text: string, options: { bold?: boolean; fill?: string; color?
 
 function docxDataTable(block: TableBlock): Table {
   const { header, rows } = tableStrings(block);
-  const aligns = block.columns.map((c) => c.align ?? (isNumericFormat(c.format) ? 'right' : 'left'));
+  const aligns = block.columns.map(
+    (c) => c.align ?? (isNumericFormat(c.format) ? 'right' : 'left')
+  );
   return new Table({
     width: { size: 100, type: WidthType.PERCENTAGE },
     rows: [
@@ -857,7 +912,11 @@ function docxKpiTable(block: KpiBlock): Table {
               margins: { top: 100, bottom: 100, left: 120, right: 120 },
               children: [
                 new Paragraph({
-                  children: docxTextRuns(card.label.toUpperCase(), { color: '64748B', size: 14, bold: true }),
+                  children: docxTextRuns(card.label.toUpperCase(), {
+                    color: '64748B',
+                    size: 14,
+                    bold: true,
+                  }),
                 }),
                 new Paragraph({ children: docxTextRuns(card.value, { bold: true, size: 28 }) }),
               ],
@@ -932,13 +991,19 @@ async function renderXlsx(ctx: RenderContext): Promise<ExportRenderResult> {
     // Auto width from rendered strings (never hides digits with ####).
     const { rows } = tableStrings(block);
     block.columns.forEach((col, i) => {
-      const widest = rows.reduce((m, r) => Math.max(m, r[i].length), (col.header || col.key).length);
+      const widest = rows.reduce(
+        (m, r) => Math.max(m, r[i].length),
+        (col.header || col.key).length
+      );
       const column = sheet.getColumn(i + 1);
       column.width = Math.min(80, Math.max(12, widest + 3));
     });
     sheet.views = [{ state: 'frozen', ySplit: 1 }];
     if (block.rows.length > 0) {
-      sheet.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: block.columns.length } };
+      sheet.autoFilter = {
+        from: { row: 1, column: 1 },
+        to: { row: 1, column: block.columns.length },
+      };
     }
   });
   if (tables.length === 0) summary.addRow(['(sin tablas)', '']);
@@ -953,7 +1018,10 @@ async function renderXlsx(ctx: RenderContext): Promise<ExportRenderResult> {
 // ---------------------------------------------------------------------------
 
 async function renderCsv(ctx: RenderContext): Promise<ExportRenderResult> {
-  const lines: string[] = ['﻿' + `# ${ctx.title}`, `# Generado: ${formatGeneratedAt(ctx.generatedAt)}`];
+  const lines: string[] = [
+    `\uFEFF# ${ctx.title}`,
+    `# Generado: ${formatGeneratedAt(ctx.generatedAt)}`,
+  ];
   const kpiCards = ctx.content.blocks.flatMap((b) => (b.type === 'kpi' ? b.cards : []));
   if (kpiCards.length > 0) {
     lines.push('', '## Indicadores', 'Indicador,Valor');
@@ -968,7 +1036,8 @@ async function renderCsv(ctx: RenderContext): Promise<ExportRenderResult> {
     lines.push(header.map(csvEscape).join(','));
     for (const cells of rows) lines.push(cells.map(csvEscape).join(','));
   }
-  if (index === 0 && kpiCards.length === 0) lines.push('', '## Documento sin tablas ni indicadores');
+  if (index === 0 && kpiCards.length === 0)
+    lines.push('', '## Documento sin tablas ni indicadores');
   return writeAndStat(ctx.outputPath, lines.join('\r\n') + '\r\n');
 }
 
@@ -988,7 +1057,13 @@ async function renderPptx(ctx: RenderContext): Promise<ExportRenderResult> {
 
   const titleSlide = pptx.addSlide();
   titleSlide.background = { color: 'FFFFFF' };
-  titleSlide.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: 10, h: 0.18, fill: { color: '2563EB' } });
+  titleSlide.addShape(pptx.ShapeType.rect, {
+    x: 0,
+    y: 0,
+    w: 10,
+    h: 0.18,
+    fill: { color: '2563EB' },
+  });
   titleSlide.addText(ctx.title, {
     x: 0.5,
     y: 1.6,
@@ -1009,8 +1084,12 @@ async function renderPptx(ctx: RenderContext): Promise<ExportRenderResult> {
   });
 
   type TextPart = { text: string; options?: Record<string, unknown> };
-  let current: { slide: ReturnType<typeof pptx.addSlide>; parts: TextPart[]; chars: number; title: string } | null =
-    null;
+  let current: {
+    slide: ReturnType<typeof pptx.addSlide>;
+    parts: TextPart[];
+    chars: number;
+    title: string;
+  } | null = null;
 
   const flushText = () => {
     if (current && current.parts.length > 0) {
@@ -1083,7 +1162,10 @@ async function renderPptx(ctx: RenderContext): Promise<ExportRenderResult> {
           const row = Math.floor(i / perRow);
           slide.addText(
             [
-              { text: card.label.toUpperCase(), options: { fontSize: 10, color: '64748B', breakLine: true } },
+              {
+                text: card.label.toUpperCase(),
+                options: { fontSize: 10, color: '64748B', breakLine: true },
+              },
               { text: card.value, options: { fontSize: 22, bold: true, color: '0F172A' } },
             ],
             {
@@ -1103,19 +1185,29 @@ async function renderPptx(ctx: RenderContext): Promise<ExportRenderResult> {
       }
       case 'table': {
         const { header, rows } = tableStrings(block);
-        const aligns = block.columns.map((c) => c.align ?? (isNumericFormat(c.format) ? 'right' : 'left'));
+        const aligns = block.columns.map(
+          (c) => c.align ?? (isNumericFormat(c.format) ? 'right' : 'left')
+        );
         const chunks: string[][][] = [];
         for (let i = 0; i < Math.max(1, rows.length); i += PPTX_ROWS_PER_SLIDE) {
           chunks.push(rows.slice(i, i + PPTX_ROWS_PER_SLIDE));
         }
         const baseTitle = block.title ?? 'Tabla';
         chunks.forEach((chunk, ci) => {
-          const slide = newSlide(chunks.length > 1 ? `${baseTitle} (${ci + 1}/${chunks.length})` : baseTitle);
+          const slide = newSlide(
+            chunks.length > 1 ? `${baseTitle} (${ci + 1}/${chunks.length})` : baseTitle
+          );
           const fontSize = block.columns.length > 8 ? 8 : block.columns.length > 5 ? 9 : 11;
           const tableRows = [
             header.map((h, i) => ({
               text: h,
-              options: { bold: true, color: 'FFFFFF', fill: { color: '2563EB' }, align: aligns[i], fontSize },
+              options: {
+                bold: true,
+                color: 'FFFFFF',
+                fill: { color: '2563EB' },
+                align: aligns[i],
+                fontSize,
+              },
             })),
             ...chunk.map((cells, r) =>
               cells.map((text, i) => ({
@@ -1154,7 +1246,14 @@ async function renderPptx(ctx: RenderContext): Promise<ExportRenderResult> {
             altText: block.alt,
           });
         } else {
-          slide.addText(imagePlaceholder(block), { x: 0.5, y: 2, w: 9, h: 1, fontSize: 14, color: '64748B' });
+          slide.addText(imagePlaceholder(block), {
+            x: 0.5,
+            y: 2,
+            w: 9,
+            h: 1,
+            fontSize: 14,
+            color: '64748B',
+          });
         }
         current = { slide, parts: [], chars: PPTX_MAX_TEXT_CHARS, title: block.alt };
         break;
@@ -1218,7 +1317,9 @@ function htmlBlocks(ctx: RenderContext): string {
         break;
       case 'list': {
         const tag = block.ordered ? 'ol' : 'ul';
-        out.push(`<${tag}>${block.items.map((i) => `<li>${escapeHtml(i)}</li>`).join('')}</${tag}>`);
+        out.push(
+          `<${tag}>${block.items.map((i) => `<li>${escapeHtml(i)}</li>`).join('')}</${tag}>`
+        );
         break;
       }
       case 'kpi':
@@ -1239,7 +1340,10 @@ function htmlBlocks(ctx: RenderContext): string {
           `${block.title ? `<h3>${escapeHtml(block.title)}</h3>` : ''}<div class="table-wrap"><table><thead><tr>${header
             .map((h, i) => `<th${cls(i)}>${escapeHtml(h)}</th>`)
             .join('')}</tr></thead><tbody>${rows
-            .map((cells) => `<tr>${cells.map((t, i) => `<td${cls(i)}>${escapeHtml(t)}</td>`).join('')}</tr>`)
+            .map(
+              (cells) =>
+                `<tr>${cells.map((t, i) => `<td${cls(i)}>${escapeHtml(t)}</td>`).join('')}</tr>`
+            )
             .join('')}</tbody></table></div>`
         );
         break;
@@ -1298,7 +1402,12 @@ function mdCell(text: string): string {
 }
 
 async function renderMarkdown(ctx: RenderContext): Promise<ExportRenderResult> {
-  const out: string[] = [`# ${ctx.title}`, '', `_Generado por UNIK Estudio visual · ${formatGeneratedAt(ctx.generatedAt)}_`, ''];
+  const out: string[] = [
+    `# ${ctx.title}`,
+    '',
+    `_Generado por UNIK Estudio visual · ${formatGeneratedAt(ctx.generatedAt)}_`,
+    '',
+  ];
   for (const block of ctx.content.blocks) {
     switch (block.type) {
       case 'heading':
@@ -1320,14 +1429,20 @@ async function renderMarkdown(ctx: RenderContext): Promise<ExportRenderResult> {
         const { header, rows } = tableStrings(block);
         if (block.title) out.push(`**${block.title}**`, '');
         out.push(`| ${header.map(mdCell).join(' | ')} |`);
-        out.push(`| ${block.columns.map((c) => (isNumericFormat(c.format) ? '---:' : '---')).join(' | ')} |`);
+        out.push(
+          `| ${block.columns.map((c) => (isNumericFormat(c.format) ? '---:' : '---')).join(' | ')} |`
+        );
         rows.forEach((cells) => out.push(`| ${cells.map(mdCell).join(' | ')} |`));
         out.push('');
         break;
       }
       case 'image': {
         const image = ctx.images.get(block.id) ?? null;
-        out.push(image ? `![${block.alt}](${toDataUri(image.buffer, image.mimeType)})` : `*${imagePlaceholder(block)}*`);
+        out.push(
+          image
+            ? `![${block.alt}](${toDataUri(image.buffer, image.mimeType)})`
+            : `*${imagePlaceholder(block)}*`
+        );
         if (block.caption) out.push('', `_${block.caption}_`);
         out.push('');
         break;
@@ -1432,7 +1547,10 @@ async function renderSvg(ctx: RenderContext): Promise<ExportRenderResult> {
     if (total < contentWidth) {
       // Stretch to fill the line proportionally.
       const scale = contentWidth / total;
-      tableWidths.set(block.id, widths.map((w) => w * scale));
+      tableWidths.set(
+        block.id,
+        widths.map((w) => w * scale)
+      );
     } else {
       tableWidths.set(block.id, widths);
       contentWidth = Math.max(contentWidth, total);
@@ -1446,7 +1564,13 @@ async function renderSvg(ctx: RenderContext): Promise<ExportRenderResult> {
     x: number,
     baseline: number,
     value: string,
-    opts: { size?: number; bold?: boolean; color?: string; anchor?: 'start' | 'middle' | 'end'; italic?: boolean } = {}
+    opts: {
+      size?: number;
+      bold?: boolean;
+      color?: string;
+      anchor?: 'start' | 'middle' | 'end';
+      italic?: boolean;
+    } = {}
   ) => {
     body.push(
       `<text x="${x.toFixed(1)}" y="${baseline.toFixed(1)}" font-size="${opts.size ?? fontSize}"${
@@ -1456,7 +1580,14 @@ async function renderSvg(ctx: RenderContext): Promise<ExportRenderResult> {
       }">${escapeXml(value)}</text>`
     );
   };
-  const paragraphLines = (value: string, size: number, bold: boolean, color: string, x = SVG_MARGIN, maxWidth = contentWidth) => {
+  const paragraphLines = (
+    value: string,
+    size: number,
+    bold: boolean,
+    color: string,
+    x = SVG_MARGIN,
+    maxWidth = contentWidth
+  ) => {
     const lines = wrapText(value, maxWidth, size, bold);
     const lh = size * 1.45;
     for (const line of lines) {
@@ -1468,20 +1599,34 @@ async function renderSvg(ctx: RenderContext): Promise<ExportRenderResult> {
   // Header
   const titleLines = wrapText(ctx.title, contentWidth - 90, 20, true);
   const badgeW = estimateTextWidth('UNIK', 12, true) + 16;
-  body.push(`<rect x="${SVG_MARGIN}" y="${y}" width="${badgeW}" height="24" rx="6" fill="${brand}"/>`);
-  text(SVG_MARGIN + badgeW / 2, y + 16.5, 'UNIK', { size: 12, bold: true, color: '#ffffff', anchor: 'middle' });
+  body.push(
+    `<rect x="${SVG_MARGIN}" y="${y}" width="${badgeW}" height="24" rx="6" fill="${brand}"/>`
+  );
+  text(SVG_MARGIN + badgeW / 2, y + 16.5, 'UNIK', {
+    size: 12,
+    bold: true,
+    color: '#ffffff',
+    anchor: 'middle',
+  });
   let ty = y;
   for (const line of titleLines) {
     ty += 24;
     text(SVG_MARGIN + badgeW + 12, ty - 6, line, { size: 20, bold: true, color: TEXT_DARK });
   }
   y = Math.max(y + 24, ty) + 8;
-  text(SVG_MARGIN, y + 6, `Generado por UNIK Estudio visual · ${formatGeneratedAt(ctx.generatedAt)}`, {
-    size: 9,
-    color: ACCENT,
-  });
+  text(
+    SVG_MARGIN,
+    y + 6,
+    `Generado por UNIK Estudio visual · ${formatGeneratedAt(ctx.generatedAt)}`,
+    {
+      size: 9,
+      color: ACCENT,
+    }
+  );
   y += 14;
-  body.push(`<rect x="${SVG_MARGIN}" y="${y}" width="${contentWidth}" height="2.5" fill="${brand}" rx="1"/>`);
+  body.push(
+    `<rect x="${SVG_MARGIN}" y="${y}" width="${contentWidth}" height="2.5" fill="${brand}" rx="1"/>`
+  );
   y += 18;
 
   for (const block of ctx.content.blocks) {
@@ -1502,7 +1647,9 @@ async function renderSvg(ctx: RenderContext): Promise<ExportRenderResult> {
           const prefix = listItemPrefix(block, i);
           const startY = y;
           paragraphLines(item, fontSize, false, TEXT_BODY, SVG_MARGIN + 26, contentWidth - 26);
-          text(SVG_MARGIN + 6, startY + lineHeight - fontSize * 0.3, prefix.trim(), { color: ACCENT });
+          text(SVG_MARGIN + 6, startY + lineHeight - fontSize * 0.3, prefix.trim(), {
+            color: ACCENT,
+          });
         });
         y += 8;
         break;
@@ -1513,12 +1660,19 @@ async function renderSvg(ctx: RenderContext): Promise<ExportRenderResult> {
         for (let start = 0; start < block.cards.length; start += perRow) {
           const rowCards = block.cards.slice(start, start + perRow);
           const valueLines = rowCards.map((c) => wrapText(c.value, cardW - 20, 16, true));
-          const labelLines = rowCards.map((c) => wrapText(c.label.toUpperCase(), cardW - 20, 8, false));
-          const cardH = Math.max(...valueLines.map((v, i) => v.length * 20 + labelLines[i].length * 11)) + 22;
-          rowCards.forEach((card, i) => {
+          const labelLines = rowCards.map((c) =>
+            wrapText(c.label.toUpperCase(), cardW - 20, 8, false)
+          );
+          const cardH =
+            Math.max(...valueLines.map((v, i) => v.length * 20 + labelLines[i].length * 11)) + 22;
+          rowCards.forEach((_card, i) => {
             const x = SVG_MARGIN + i * (cardW + gap);
-            body.push(`<rect x="${x}" y="${y}" width="${cardW}" height="${cardH}" rx="6" fill="${ROW_ALT}" stroke="${BORDER}"/>`);
-            body.push(`<rect x="${x}" y="${y}" width="${cardW}" height="3" fill="${brand}" rx="1.5"/>`);
+            body.push(
+              `<rect x="${x}" y="${y}" width="${cardW}" height="${cardH}" rx="6" fill="${ROW_ALT}" stroke="${BORDER}"/>`
+            );
+            body.push(
+              `<rect x="${x}" y="${y}" width="${cardW}" height="3" fill="${brand}" rx="1.5"/>`
+            );
             let cy = y + 8;
             for (const line of labelLines[i]) {
               cy += 11;
@@ -1528,7 +1682,6 @@ async function renderSvg(ctx: RenderContext): Promise<ExportRenderResult> {
               cy += 20;
               text(x + 10, cy, line, { size: 16, bold: true, color: TEXT_DARK });
             }
-            void card;
           });
           y += cardH + 12;
         }
@@ -1537,7 +1690,9 @@ async function renderSvg(ctx: RenderContext): Promise<ExportRenderResult> {
       case 'table': {
         const { header, rows } = tableStrings(block);
         const widths = tableWidths.get(block.id) ?? [];
-        const aligns = block.columns.map((c) => c.align ?? (isNumericFormat(c.format) ? 'right' : 'left'));
+        const aligns = block.columns.map(
+          (c) => c.align ?? (isNumericFormat(c.format) ? 'right' : 'left')
+        );
         const tableW = widths.reduce((a, b) => a + b, 0);
         if (block.title) {
           y += 4;
@@ -1545,11 +1700,19 @@ async function renderSvg(ctx: RenderContext): Promise<ExportRenderResult> {
           y += 2;
         }
         const headerH = 30;
-        body.push(`<rect x="${SVG_MARGIN}" y="${y}" width="${tableW}" height="${headerH}" fill="${brand}" rx="4"/>`);
+        body.push(
+          `<rect x="${SVG_MARGIN}" y="${y}" width="${tableW}" height="${headerH}" fill="${brand}" rx="4"/>`
+        );
         let x = SVG_MARGIN;
         header.forEach((h, i) => {
-          const anchor = aligns[i] === 'right' ? 'end' : aligns[i] === 'center' ? 'middle' : 'start';
-          const tx = aligns[i] === 'right' ? x + widths[i] - cellPad : aligns[i] === 'center' ? x + widths[i] / 2 : x + cellPad;
+          const anchor =
+            aligns[i] === 'right' ? 'end' : aligns[i] === 'center' ? 'middle' : 'start';
+          const tx =
+            aligns[i] === 'right'
+              ? x + widths[i] - cellPad
+              : aligns[i] === 'center'
+                ? x + widths[i] / 2
+                : x + cellPad;
           text(tx, y + headerH / 2 + 3.5, h, { size: 10, bold: true, color: '#ffffff', anchor });
           x += widths[i];
         });
@@ -1558,18 +1721,33 @@ async function renderSvg(ctx: RenderContext): Promise<ExportRenderResult> {
         rows.forEach((cells, rowIdx) => {
           const wrapped = cells.map((c, i) => wrapText(c, widths[i] - cellPad * 2, fontSize));
           const rowH = Math.max(...wrapped.map((w) => w.length), 1) * lineHeight + 8;
-          if (rowIdx % 2 === 1) body.push(`<rect x="${SVG_MARGIN}" y="${y}" width="${tableW}" height="${rowH}" fill="#f1f5f9"/>`);
+          if (rowIdx % 2 === 1)
+            body.push(
+              `<rect x="${SVG_MARGIN}" y="${y}" width="${tableW}" height="${rowH}" fill="#f1f5f9"/>`
+            );
           let cx = SVG_MARGIN;
           wrapped.forEach((lines, i) => {
-            const anchor = aligns[i] === 'right' ? 'end' : aligns[i] === 'center' ? 'middle' : 'start';
-            const tx = aligns[i] === 'right' ? cx + widths[i] - cellPad : aligns[i] === 'center' ? cx + widths[i] / 2 : cx + cellPad;
-            lines.forEach((line, li) => text(tx, y + 4 + (li + 1) * lineHeight - fontSize * 0.3, line, { anchor }));
+            const anchor =
+              aligns[i] === 'right' ? 'end' : aligns[i] === 'center' ? 'middle' : 'start';
+            const tx =
+              aligns[i] === 'right'
+                ? cx + widths[i] - cellPad
+                : aligns[i] === 'center'
+                  ? cx + widths[i] / 2
+                  : cx + cellPad;
+            lines.forEach((line, li) =>
+              text(tx, y + 4 + (li + 1) * lineHeight - fontSize * 0.3, line, { anchor })
+            );
             cx += widths[i];
           });
           y += rowH;
-          body.push(`<line x1="${SVG_MARGIN}" y1="${y}" x2="${SVG_MARGIN + tableW}" y2="${y}" stroke="${BORDER}" stroke-width="1"/>`);
+          body.push(
+            `<line x1="${SVG_MARGIN}" y1="${y}" x2="${SVG_MARGIN + tableW}" y2="${y}" stroke="${BORDER}" stroke-width="1"/>`
+          );
         });
-        body.push(`<rect x="${SVG_MARGIN}" y="${tableTop}" width="${tableW}" height="${y - tableTop}" fill="none" stroke="${BORDER}" rx="4"/>`);
+        body.push(
+          `<rect x="${SVG_MARGIN}" y="${tableTop}" width="${tableW}" height="${y - tableTop}" fill="none" stroke="${BORDER}" rx="4"/>`
+        );
         y += 16;
         break;
       }
@@ -1594,12 +1772,16 @@ async function renderSvg(ctx: RenderContext): Promise<ExportRenderResult> {
       }
       case 'divider':
         y += 6;
-        body.push(`<line x1="${SVG_MARGIN}" y1="${y}" x2="${SVG_MARGIN + contentWidth}" y2="${y}" stroke="${BORDER}" stroke-width="1"/>`);
+        body.push(
+          `<line x1="${SVG_MARGIN}" y1="${y}" x2="${SVG_MARGIN + contentWidth}" y2="${y}" stroke="${BORDER}" stroke-width="1"/>`
+        );
         y += 12;
         break;
       case 'pageBreak':
         y += 10;
-        body.push(`<line x1="${SVG_MARGIN}" y1="${y}" x2="${SVG_MARGIN + contentWidth}" y2="${y}" stroke="${BORDER}" stroke-width="1" stroke-dasharray="6 4"/>`);
+        body.push(
+          `<line x1="${SVG_MARGIN}" y1="${y}" x2="${SVG_MARGIN + contentWidth}" y2="${y}" stroke="${BORDER}" stroke-width="1" stroke-dasharray="6 4"/>`
+        );
         y += 14;
         break;
       default:
@@ -1608,7 +1790,11 @@ async function renderSvg(ctx: RenderContext): Promise<ExportRenderResult> {
   }
 
   y += 10;
-  text(width / 2, y + 8, 'Generado por UNIK Estudio visual', { size: 8, color: ACCENT, anchor: 'middle' });
+  text(width / 2, y + 8, 'Generado por UNIK Estudio visual', {
+    size: 8,
+    color: ACCENT,
+    anchor: 'middle',
+  });
   const height = y + SVG_MARGIN;
   const svg =
     `<svg xmlns="http://www.w3.org/2000/svg" width="${Math.ceil(width)}" height="${Math.ceil(height)}" viewBox="0 0 ${Math.ceil(width)} ${Math.ceil(height)}" font-family="Helvetica, Arial, sans-serif">` +

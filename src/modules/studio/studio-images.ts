@@ -26,7 +26,13 @@ export function readImageSize(buffer: Buffer, mimeType: string): ImageSize | nul
       }
       const marker = buffer[offset + 1];
       // SOF0..SOF15 except DHT(0xC4), JPG(0xC8), DAC(0xCC)
-      if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
+      if (
+        marker >= 0xc0 &&
+        marker <= 0xcf &&
+        marker !== 0xc4 &&
+        marker !== 0xc8 &&
+        marker !== 0xcc
+      ) {
         return { height: buffer.readUInt16BE(offset + 5), width: buffer.readUInt16BE(offset + 7) };
       }
       const length = buffer.readUInt16BE(offset + 2);

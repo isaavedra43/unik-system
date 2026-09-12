@@ -39,13 +39,16 @@ export const TELEGRAM_API_HOST = 'api.telegram.org';
 const TELEGRAM_FILE_SCHEME = 'tg://file/';
 const CAPTION_MAX = 1024;
 
-export async function resolveTelegramToken(account: Pick<CommAccount, 'connectionId'> | null): Promise<string> {
+export async function resolveTelegramToken(
+  account: Pick<CommAccount, 'connectionId'> | null
+): Promise<string> {
   if (account?.connectionId) {
     const secret = await readConnectionSecret(account.connectionId);
     if (secret.apiKey) return secret.apiKey;
   }
   const token = process.env.TELEGRAM_BOT_TOKEN?.trim();
-  if (!token) throw new Error('Telegram no está configurado (conexión cifrada o TELEGRAM_BOT_TOKEN)');
+  if (!token)
+    throw new Error('Telegram no está configurado (conexión cifrada o TELEGRAM_BOT_TOKEN)');
   return token;
 }
 
@@ -55,7 +58,10 @@ export function generateTelegramWebhookSecret(): { secret: string; hash: string 
   return { secret, hash: sha256Hex(secret) };
 }
 
-export function verifyTelegramSecret(header: string | undefined, storedHash: string | null | undefined): boolean {
+export function verifyTelegramSecret(
+  header: string | undefined,
+  storedHash: string | null | undefined
+): boolean {
   if (!header || !storedHash) return false;
   return timingSafeEqualString(sha256Hex(header), storedHash);
 }
@@ -246,7 +252,12 @@ class TelegramAdapter implements MediaCapableAdapter {
     request: { headers: Record<string, string>; rawBody: string; url: string }
   ): Promise<{ messages: InboundMessage[]; deliveries: DeliveryUpdate[] } | null> {
     if (!account) return null;
-    if (!verifyTelegramSecret(request.headers['x-telegram-bot-api-secret-token'], account.webhookSecret)) {
+    if (
+      !verifyTelegramSecret(
+        request.headers['x-telegram-bot-api-secret-token'],
+        account.webhookSecret
+      )
+    ) {
       return null;
     }
     let update: { update_id?: number; message?: TelegramMessage; edited_message?: TelegramMessage };
@@ -261,7 +272,11 @@ class TelegramAdapter implements MediaCapableAdapter {
     const media: InboundMessage['media'] = [];
     if (msg.photo && msg.photo.length > 0) {
       const best = msg.photo[msg.photo.length - 1];
-      media.push({ url: `${TELEGRAM_FILE_SCHEME}${best.file_id}`, contentType: 'image/jpeg', fileName: 'foto.jpg' });
+      media.push({
+        url: `${TELEGRAM_FILE_SCHEME}${best.file_id}`,
+        contentType: 'image/jpeg',
+        fileName: 'foto.jpg',
+      });
     }
     if (msg.document) {
       const contentType = msg.document.mime_type ?? 'application/octet-stream';
@@ -272,17 +287,32 @@ class TelegramAdapter implements MediaCapableAdapter {
       });
     }
     if (msg.voice) {
-      media.push({ url: `${TELEGRAM_FILE_SCHEME}${msg.voice.file_id}`, contentType: msg.voice.mime_type ?? 'audio/ogg', fileName: 'nota-de-voz.ogg' });
+      media.push({
+        url: `${TELEGRAM_FILE_SCHEME}${msg.voice.file_id}`,
+        contentType: msg.voice.mime_type ?? 'audio/ogg',
+        fileName: 'nota-de-voz.ogg',
+      });
     }
     if (msg.audio) {
       const contentType = msg.audio.mime_type ?? 'audio/mpeg';
-      media.push({ url: `${TELEGRAM_FILE_SCHEME}${msg.audio.file_id}`, contentType, fileName: msg.audio.file_name ?? fileNameFromContentType('audio', contentType) });
+      media.push({
+        url: `${TELEGRAM_FILE_SCHEME}${msg.audio.file_id}`,
+        contentType,
+        fileName: msg.audio.file_name ?? fileNameFromContentType('audio', contentType),
+      });
     }
     if (msg.video) {
       const contentType = msg.video.mime_type ?? 'video/mp4';
-      media.push({ url: `${TELEGRAM_FILE_SCHEME}${msg.video.file_id}`, contentType, fileName: msg.video.file_name ?? fileNameFromContentType('video', contentType) });
+      media.push({
+        url: `${TELEGRAM_FILE_SCHEME}${msg.video.file_id}`,
+        contentType,
+        fileName: msg.video.file_name ?? fileNameFromContentType('video', contentType),
+      });
     }
-    const fromName = [msg.from?.first_name, msg.from?.last_name].filter(Boolean).join(' ') || msg.chat.title || msg.from?.username;
+    const fromName =
+      [msg.from?.first_name, msg.from?.last_name].filter(Boolean).join(' ') ||
+      msg.chat.title ||
+      msg.from?.username;
     const chatId = String(msg.chat.id);
     return {
       deliveries: [],
@@ -316,17 +346,27 @@ class TelegramAdapter implements MediaCapableAdapter {
     }
     try {
       const me = await telegramCall<{ username?: string; first_name?: string }>(token, 'getMe', {});
-      if (!me.ok || !me.result) return { ok: false, detail: `Telegram: ${me.description ?? 'token inválido'}` };
-      const info = await telegramCall<{ url?: string; pending_update_count?: number; last_error_message?: string }>(
-        token,
-        'getWebhookInfo',
-        {}
-      );
-      const webhook = info.ok && info.result?.url ? `webhook: ${info.result.url}` : 'webhook sin configurar';
-      const lastError = info.result?.last_error_message ? ` · último error: ${info.result.last_error_message}` : '';
-      return { ok: true, detail: `Bot @${me.result.username ?? me.result.first_name} · ${webhook}${lastError}` };
+      if (!me.ok || !me.result)
+        return { ok: false, detail: `Telegram: ${me.description ?? 'token inválido'}` };
+      const info = await telegramCall<{
+        url?: string;
+        pending_update_count?: number;
+        last_error_message?: string;
+      }>(token, 'getWebhookInfo', {});
+      const webhook =
+        info.ok && info.result?.url ? `webhook: ${info.result.url}` : 'webhook sin configurar';
+      const lastError = info.result?.last_error_message
+        ? ` · último error: ${info.result.last_error_message}`
+        : '';
+      return {
+        ok: true,
+        detail: `Bot @${me.result.username ?? me.result.first_name} · ${webhook}${lastError}`,
+      };
     } catch (err) {
-      return { ok: false, detail: err instanceof Error ? err.message : 'Error al conectar con Telegram' };
+      return {
+        ok: false,
+        detail: err instanceof Error ? err.message : 'Error al conectar con Telegram',
+      };
     }
   }
 
@@ -335,12 +375,14 @@ class TelegramAdapter implements MediaCapableAdapter {
     media: { url: string; contentType: string; fileName?: string }
   ): Promise<MediaFetchResult> {
     const token = await resolveTelegramToken(account);
-    if (!media.url.startsWith(TELEGRAM_FILE_SCHEME)) throw new Error('Referencia de archivo Telegram inválida');
+    if (!media.url.startsWith(TELEGRAM_FILE_SCHEME))
+      throw new Error('Referencia de archivo Telegram inválida');
     const fileId = media.url.slice(TELEGRAM_FILE_SCHEME.length);
     const file = await telegramCall<{ file_path?: string; file_size?: number }>(token, 'getFile', {
       json: { file_id: fileId },
     });
-    if (!file.ok || !file.result?.file_path) throw new Error(`Telegram: ${file.description ?? 'archivo no disponible'}`);
+    if (!file.ok || !file.result?.file_path)
+      throw new Error(`Telegram: ${file.description ?? 'archivo no disponible'}`);
     if (file.result.file_size && file.result.file_size > INBOUND_MEDIA_MAX_BYTES) {
       throw new Error('El archivo excede el tamaño máximo permitido');
     }
@@ -360,10 +402,12 @@ class TelegramAdapter implements MediaCapableAdapter {
     } catch (err) {
       throw new Error(redactToken(err instanceof Error ? err.message : 'Error de red', token));
     }
-    if (res.status !== 200) throw new Error(`Telegram devolvió ${res.status} al descargar el archivo`);
-    const contentType = (res.headers['content-type'] && res.headers['content-type'] !== 'application/octet-stream'
-      ? res.headers['content-type']
-      : media.contentType) ?? media.contentType;
+    if (res.status !== 200)
+      throw new Error(`Telegram devolvió ${res.status} al descargar el archivo`);
+    const contentType =
+      (res.headers['content-type'] && res.headers['content-type'] !== 'application/octet-stream'
+        ? res.headers['content-type']
+        : media.contentType) ?? media.contentType;
     return {
       buffer: res.body,
       contentType,

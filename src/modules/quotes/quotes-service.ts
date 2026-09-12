@@ -308,7 +308,9 @@ export async function updateQuote(
             proposalId: null,
           }
         : {}),
-      ...(changed && quote.status === 'rejected' ? { status: 'draft', invalidationReason: null } : {}),
+      ...(changed && quote.status === 'rejected'
+        ? { status: 'draft', invalidationReason: null }
+        : {}),
     },
   });
   if (invalidates) {
@@ -321,7 +323,11 @@ export async function updateQuote(
       action: 'quotes.approval_invalidated',
       targetType: 'quote',
       targetId: id,
-      metadata: { reason: 'Contenido modificado', proposalsInvalidated: count, version: updated.version },
+      metadata: {
+        reason: 'Contenido modificado',
+        proposalsInvalidated: count,
+        version: updated.version,
+      },
     });
   }
   return toQuoteDTO(updated);
@@ -378,13 +384,19 @@ export async function approveQuote(
     throw new QuoteError('La cotización ya está creada en Books', 409);
   }
   if (quote.status !== 'pending_approval' && quote.status !== 'approved') {
-    throw new QuoteError(`La cotización debe estar pendiente de aprobación (estado: ${quote.status})`, 409);
+    throw new QuoteError(
+      `La cotización debe estar pendiente de aprobación (estado: ${quote.status})`,
+      409
+    );
   }
   const items = parseStoredItems(quote.items);
   if (items.length === 0) throw new QuoteError('La cotización no tiene partidas', 400);
   const currentHash = computeQuoteContentHash(contentOf(quote, items));
   if (currentHash !== quote.contentHash) {
-    throw new QuoteError('El contenido almacenado no coincide con su hash; revisa la cotización', 409);
+    throw new QuoteError(
+      'El contenido almacenado no coincide con su hash; revisa la cotización',
+      409
+    );
   }
   if (options.expectedContentHash !== quote.contentHash) {
     throw new QuoteError(
@@ -653,7 +665,8 @@ export async function buildCommercialPackage(
   if (items.length === 0) throw new QuoteError('La cotización no tiene partidas', 400);
   const [settings, products] = await Promise.all([getQuoteSettings(), lookupProductCards(items)]);
   const totals = computeTotals(items);
-  const approved = quote.status === 'approved' || quote.status === 'synced' || quote.status === 'sent';
+  const approved =
+    quote.status === 'approved' || quote.status === 'synced' || quote.status === 'sent';
   const validUntil = new Date(Date.now() + settings.validityDays * 86_400_000);
 
   const itemRows = items.map((item, index) => ({
@@ -662,7 +675,9 @@ export async function buildCommercialPackage(
     description: item.description ?? '',
     quantity: item.quantity,
     unitPrice: money(item.unitPrice, quote.currency),
-    taxRate: `${(toDecimal(item.taxRate ?? 0).mul(100)).toFixed(2)} %`,
+    taxRate: `${toDecimal(item.taxRate ?? 0)
+      .mul(100)
+      .toFixed(2)} %`,
     lineTotal: money(totals.lines[index]?.lineTotal ?? '0', quote.currency),
   }));
 
@@ -709,7 +724,9 @@ export async function buildCommercialPackage(
       columns: [{ header: 'Condiciones', key: 'text', detail: true }],
       rows: [
         { text: settings.conditions || DEFAULT_QUOTE_SETTINGS.conditions },
-        { text: `Vigencia: ${settings.validityDays} días (hasta ${validUntil.toLocaleDateString('es-MX')}).` },
+        {
+          text: `Vigencia: ${settings.validityDays} días (hasta ${validUntil.toLocaleDateString('es-MX')}).`,
+        },
         ...(quote.notes ? [{ text: `Notas: ${quote.notes}` }] : []),
       ],
     },

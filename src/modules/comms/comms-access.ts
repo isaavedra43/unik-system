@@ -16,13 +16,19 @@ export function teamKeysOf(user: CurrentUser): string[] {
   return [...new Set(user.roleKeys)];
 }
 
-export function canAccessAccount(user: CurrentUser, account: Pick<CommAccount, 'teamKeys'>): boolean {
+export function canAccessAccount(
+  user: CurrentUser,
+  account: Pick<CommAccount, 'teamKeys'>
+): boolean {
   if (!hasPermission(user, 'inbox.use') && !isInboxAdmin(user)) return false;
   if (isInboxAdmin(user)) return true;
   return account.teamKeys.some((key) => user.roleKeys.includes(key));
 }
 
-export function assertAccountAccess(user: CurrentUser, account: Pick<CommAccount, 'teamKeys'>): void {
+export function assertAccountAccess(
+  user: CurrentUser,
+  account: Pick<CommAccount, 'teamKeys'>
+): void {
   if (!canAccessAccount(user, account)) {
     throw new CommsError('No tienes acceso a este canal', 403, 'forbidden');
   }

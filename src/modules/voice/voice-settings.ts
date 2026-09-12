@@ -62,7 +62,8 @@ const CATALOG_TYPES = new Set(VOICE_TASK_TYPE_CATALOG.map((t) => t.type));
 
 export function normalizeVoiceSettings(stored: unknown): VoiceSettings {
   const defaults = DEFAULT_VOICE_SETTINGS;
-  if (!stored || typeof stored !== 'object') return { ...defaults, allowedTaskTypes: [...defaults.allowedTaskTypes] };
+  if (!stored || typeof stored !== 'object')
+    return { ...defaults, allowedTaskTypes: [...defaults.allowedTaskTypes] };
   const s = stored as Record<string, unknown>;
   const allowed = Array.isArray(s.allowedTaskTypes)
     ? (s.allowedTaskTypes as unknown[]).filter(
@@ -80,10 +81,13 @@ export function normalizeVoiceSettings(stored: unknown): VoiceSettings {
   return {
     allowedTaskTypes: allowed,
     aiAnswerByAccount: byAccount,
-    aiAnswerDefault: typeof s.aiAnswerDefault === 'boolean' ? s.aiAnswerDefault : defaults.aiAnswerDefault,
-    copilotEnabled: typeof s.copilotEnabled === 'boolean' ? s.copilotEnabled : defaults.copilotEnabled,
+    aiAnswerDefault:
+      typeof s.aiAnswerDefault === 'boolean' ? s.aiAnswerDefault : defaults.aiAnswerDefault,
+    copilotEnabled:
+      typeof s.copilotEnabled === 'boolean' ? s.copilotEnabled : defaults.copilotEnabled,
     copilotEveryNSegments: num(s.copilotEveryNSegments, defaults.copilotEveryNSegments, 1, 50),
-    recordByDefault: typeof s.recordByDefault === 'boolean' ? s.recordByDefault : defaults.recordByDefault,
+    recordByDefault:
+      typeof s.recordByDefault === 'boolean' ? s.recordByDefault : defaults.recordByDefault,
     defaultTaskOwnerUserId:
       typeof s.defaultTaskOwnerUserId === 'string' && s.defaultTaskOwnerUserId.length > 0
         ? s.defaultTaskOwnerUserId

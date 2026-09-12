@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { StorageError } from '@/modules/storage/storage-service';
-// Registers the built-in upload targets and access resolvers (AI, chat).
-import '@/modules/storage/storage-access';
+// Registers upload targets and access resolvers of every module (AI, chat, knowledge, voice…).
+import '@/modules/storage/register-access-resolvers';
 
 /** Maps storage/service errors to stable JSON responses without leaking internals. */
 export function storageErrorResponse(err: unknown): NextResponse {

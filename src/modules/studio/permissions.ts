@@ -5,7 +5,8 @@ export const STUDIO_PERMISSIONS: PermissionDefinition[] = [
     key: 'studio.use',
     group: 'Estudio visual',
     label: 'Usar el estudio',
-    description: 'Permite crear y editar documentos e imágenes, versiones, plantillas y exportaciones',
+    description:
+      'Permite crear y editar documentos e imágenes, versiones, plantillas y exportaciones',
   },
   {
     key: 'studio.approve',

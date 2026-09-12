@@ -102,12 +102,17 @@ export async function listAccountsForUser(user: CurrentUser): Promise<CommAccoun
 
 export async function listAllAccounts(actor: CurrentUser): Promise<CommAccountDTO[]> {
   assertInboxAdmin(actor);
-  const accounts = await prisma.commAccount.findMany({ orderBy: [{ provider: 'asc' }, { label: 'asc' }] });
+  const accounts = await prisma.commAccount.findMany({
+    orderBy: [{ provider: 'asc' }, { label: 'asc' }],
+  });
   return accounts.map(toAccountDTO);
 }
 
 /** Creates or updates the extension that owns the provider credentials. */
-export async function ensureProviderExtension(actor: CurrentUser, provider: string): Promise<{ id: string }> {
+export async function ensureProviderExtension(
+  actor: CurrentUser,
+  provider: string
+): Promise<{ id: string }> {
   const namespace = extensionNamespaceFor(provider);
   const allowedHosts = PROVIDER_HOSTS[provider] ?? [];
   const name = namespace === 'comm.twilio' ? 'Twilio (WhatsApp/SMS)' : 'Telegram Bot API';
@@ -138,7 +143,8 @@ async function storeCredentials(
 ): Promise<string> {
   const extension = await ensureProviderExtension(actor, provider);
   if ('botToken' in credentials) {
-    if (provider !== 'telegram') throw new CommsError('Credenciales no válidas para este proveedor', 400);
+    if (provider !== 'telegram')
+      throw new CommsError('Credenciales no válidas para este proveedor', 400);
     const connection = await createConnection({
       extensionId: extension.id,
       authType: 'api_key',
@@ -149,7 +155,8 @@ async function storeCredentials(
     });
     return connection.id;
   }
-  if (provider === 'telegram') throw new CommsError('Credenciales no válidas para este proveedor', 400);
+  if (provider === 'telegram')
+    throw new CommsError('Credenciales no válidas para este proveedor', 400);
   const connection = await createConnection({
     extensionId: extension.id,
     authType: 'basic',
@@ -201,7 +208,11 @@ export async function createAccount(
     action: 'comms.account.created',
     targetType: 'comm_account',
     targetId: account.id,
-    metadata: { provider: account.provider, identifier: account.identifier, teamKeys: account.teamKeys },
+    metadata: {
+      provider: account.provider,
+      identifier: account.identifier,
+      teamKeys: account.teamKeys,
+    },
   });
   return { account: toAccountDTO(account), webhookSecret: telegramSecret?.secret ?? null };
 }
@@ -212,18 +223,29 @@ export async function updateAccount(
   patch: UpdateAccountInput
 ): Promise<{ account: CommAccountDTO; webhookSecret: string | null }> {
   assertInboxAdmin(actor);
-  const account = assertFound(await prisma.commAccount.findUnique({ where: { id } }), 'Cuenta no encontrada');
+  const account = assertFound(
+    await prisma.commAccount.findUnique({ where: { id } }),
+    'Cuenta no encontrada'
+  );
   const data: Prisma.CommAccountUpdateInput = {};
   if (patch.label !== undefined) data.label = patch.label;
   if (patch.teamKeys !== undefined) data.teamKeys = [...new Set(patch.teamKeys)];
   if (patch.status !== undefined) data.status = patch.status;
   if (patch.config !== undefined) data.config = patch.config as Prisma.InputJsonValue;
   if (patch.credentials) {
-    const connectionId = await storeCredentials(actor, account.provider, patch.label ?? account.label, patch.credentials);
+    const connectionId = await storeCredentials(
+      actor,
+      account.provider,
+      patch.label ?? account.label,
+      patch.credentials
+    );
     data.connectionId = connectionId;
     if (account.connectionId) {
       await prisma.extensionConnection
-        .update({ where: { id: account.connectionId }, data: { status: 'revoked', revokedAt: new Date() } })
+        .update({
+          where: { id: account.connectionId },
+          data: { status: 'revoked', revokedAt: new Date() },
+        })
         .catch(() => undefined);
     }
   }
@@ -250,7 +272,10 @@ export async function updateAccount(
 
 export async function deleteAccount(actor: CurrentUser, id: string): Promise<void> {
   assertInboxAdmin(actor);
-  const account = assertFound(await prisma.commAccount.findUnique({ where: { id } }), 'Cuenta no encontrada');
+  const account = assertFound(
+    await prisma.commAccount.findUnique({ where: { id } }),
+    'Cuenta no encontrada'
+  );
   const messages = await prisma.commMessage.count({ where: { accountId: id } });
   if (messages > 0) {
     throw new CommsError('La cuenta tiene historial; pausa la cuenta en lugar de eliminarla', 409);
@@ -258,7 +283,10 @@ export async function deleteAccount(actor: CurrentUser, id: string): Promise<voi
   await prisma.commAccount.delete({ where: { id } });
   if (account.connectionId) {
     await prisma.extensionConnection
-      .update({ where: { id: account.connectionId }, data: { status: 'revoked', revokedAt: new Date() } })
+      .update({
+        where: { id: account.connectionId },
+        data: { status: 'revoked', revokedAt: new Date() },
+      })
       .catch(() => undefined);
   }
   await recordAuditEvent({
@@ -270,9 +298,15 @@ export async function deleteAccount(actor: CurrentUser, id: string): Promise<voi
   });
 }
 
-export async function testAccount(actor: CurrentUser, id: string): Promise<{ ok: boolean; detail: string }> {
+export async function testAccount(
+  actor: CurrentUser,
+  id: string
+): Promise<{ ok: boolean; detail: string }> {
   assertInboxAdmin(actor);
-  const account = assertFound(await prisma.commAccount.findUnique({ where: { id } }), 'Cuenta no encontrada');
+  const account = assertFound(
+    await prisma.commAccount.findUnique({ where: { id } }),
+    'Cuenta no encontrada'
+  );
   const result = await getChannelAdapter(account.provider).testConnection(account);
   await recordAuditEvent({
     actorUserId: actor.id,
@@ -297,5 +331,7 @@ export async function findAccountForTwilioWebhook(
   const provider = to.toLowerCase().startsWith('whatsapp:') ? 'twilio_whatsapp' : 'twilio_sms';
   const identifier = normalizePhone(to);
   if (!identifier) return null;
-  return prisma.commAccount.findUnique({ where: { provider_identifier: { provider, identifier } } });
+  return prisma.commAccount.findUnique({
+    where: { provider_identifier: { provider, identifier } },
+  });
 }

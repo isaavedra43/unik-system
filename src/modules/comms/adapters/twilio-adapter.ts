@@ -60,7 +60,9 @@ export async function resolveTwilioCredentials(
   const accountSid = process.env.TWILIO_ACCOUNT_SID?.trim();
   const authToken = process.env.TWILIO_AUTH_TOKEN?.trim();
   if (!accountSid || !authToken) {
-    throw new Error('Twilio no está configurado (conexión cifrada o TWILIO_ACCOUNT_SID/TWILIO_AUTH_TOKEN)');
+    throw new Error(
+      'Twilio no está configurado (conexión cifrada o TWILIO_ACCOUNT_SID/TWILIO_AUTH_TOKEN)'
+    );
   }
   return { accountSid, authToken };
 }
@@ -108,7 +110,10 @@ function first(value: string | string[] | undefined): string | undefined {
 }
 
 /** Public URL Twilio signed: configured base + path/query of the received request. */
-export function resolveTwilioWebhookUrl(requestUrl: string, base = process.env.TWILIO_WEBHOOK_BASE_URL): string {
+export function resolveTwilioWebhookUrl(
+  requestUrl: string,
+  base = process.env.TWILIO_WEBHOOK_BASE_URL
+): string {
   if (!base) return requestUrl;
   const incoming = new URL(requestUrl);
   return `${base.replace(/\/+$/, '')}${incoming.pathname}${incoming.search}`;
@@ -318,7 +323,11 @@ class TwilioAdapter implements MediaCapableAdapter {
         const url = first(params[`MediaUrl${i}`]);
         if (!url) continue;
         const contentType = first(params[`MediaContentType${i}`]) ?? 'application/octet-stream';
-        media.push({ url, contentType, fileName: fileNameFromContentType(`media-${i + 1}`, contentType) });
+        media.push({
+          url,
+          contentType,
+          fileName: fileNameFromContentType(`media-${i + 1}`, contentType),
+        });
       }
       const fromE164 = normalizePhone(from) ?? stripChannelPrefix(from);
       messages.push({
@@ -356,13 +365,19 @@ class TwilioAdapter implements MediaCapableAdapter {
       if (res.status !== 200) {
         return { ok: false, detail: `Twilio respondió ${res.status} al consultar la cuenta` };
       }
-      const data = JSON.parse(res.body.toString('utf8')) as { friendly_name?: string; status?: string };
+      const data = JSON.parse(res.body.toString('utf8')) as {
+        friendly_name?: string;
+        status?: string;
+      };
       return {
         ok: (data.status ?? 'active') === 'active',
         detail: `Cuenta ${data.friendly_name ?? creds.accountSid} (${data.status ?? 'active'}) · remitente ${addressFor(this.provider, account.identifier)}`,
       };
     } catch (err) {
-      return { ok: false, detail: err instanceof Error ? err.message : 'Error al conectar con Twilio' };
+      return {
+        ok: false,
+        detail: err instanceof Error ? err.message : 'Error al conectar con Twilio',
+      };
     }
   }
 
@@ -382,7 +397,8 @@ class TwilioAdapter implements MediaCapableAdapter {
         maxRedirects: 3,
       }
     );
-    if (res.status !== 200) throw new Error(`Twilio devolvió ${res.status} al descargar el adjunto`);
+    if (res.status !== 200)
+      throw new Error(`Twilio devolvió ${res.status} al descargar el adjunto`);
     const contentType = res.headers['content-type'] ?? media.contentType;
     return {
       buffer: res.body,
