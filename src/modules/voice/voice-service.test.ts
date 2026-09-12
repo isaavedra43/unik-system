@@ -569,7 +569,7 @@ describe('Llamadas entrantes y webhooks', () => {
     expect(sipUri).toBe(`sip:${call.id}@mock.sip.local`);
     const twiml = buildInboundTwiml(call.id, sipUri);
     expect(twiml).toContain('<Dial');
-    expect(twiml).toContain(`<Sip>sip:${call.id}@mock.sip.local?X-Unik-Call=${call.id}</Sip>`);
+    expect(twiml).toContain(`<Sip>sip:${call.id}@mock.sip.local;transport=udp?X-Unik-Call=${call.id}</Sip>`);
   });
 
   it('egress_ended with a missing file registers the object as missing; present file → ready + transcription job', async () => {

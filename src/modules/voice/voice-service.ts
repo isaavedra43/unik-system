@@ -577,7 +577,9 @@ function escapeXml(value: string): string {
 
 /** TwiML that bridges the PSTN leg into the LiveKit room through SIP. */
 export function buildInboundTwiml(callId: string, sipUri: string): string {
-  const uri = `${sipUri}?X-Unik-Call=${encodeURIComponent(callId)}`;
+  // Force UDP signaling: over TCP the 200 OK from LiveKit Cloud never reaches
+  // Twilio (no ACK → LiveKit hangs up after ~32 s, Twilio reports no-answer).
+  const uri = `${sipUri};transport=udp?X-Unik-Call=${encodeURIComponent(callId)}`;
   return (
     '<?xml version="1.0" encoding="UTF-8"?>' +
     '<Response>' +
