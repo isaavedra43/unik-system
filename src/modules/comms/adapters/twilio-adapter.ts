@@ -112,10 +112,18 @@ function first(value: string | string[] | undefined): string | undefined {
 /** Public URL Twilio signed: configured base + path/query of the received request. */
 export function resolveTwilioWebhookUrl(
   requestUrl: string,
-  base = process.env.TWILIO_WEBHOOK_BASE_URL
+  base = process.env.TWILIO_WEBHOOK_BASE_URL,
+  headers: Record<string, string> = {}
 ): string {
-  if (!base) return requestUrl;
   const incoming = new URL(requestUrl);
+  // Behind Railway/other proxies the internal URL carries http:// and a port;
+  // fall back to the forwarded host/proto when no explicit base is configured.
+  if (!base) {
+    const host = headers['x-forwarded-host'] ?? headers.host;
+    const proto = headers['x-forwarded-proto'] ?? 'https';
+    if (host) base = `${proto.split(',')[0].trim()}://${host.split(',')[0].trim()}`;
+  }
+  if (!base) return requestUrl;
   return `${base.replace(/\/+$/, '')}${incoming.pathname}${incoming.search}`;
 }
 
@@ -289,12 +297,18 @@ class TwilioAdapter implements MediaCapableAdapter {
       return null;
     }
     const params = parseFormBody(request.rawBody);
-    const expected = computeTwilioSignature(
-      creds.authToken,
-      resolveTwilioWebhookUrl(request.url),
-      params
-    );
-    if (!timingSafeEqualString(expected, signature)) return null;
+    const signedUrl = resolveTwilioWebhookUrl(request.url, undefined, request.headers);
+    const expected = computeTwilioSignature(creds.authToken, signedUrl, params);
+    if (!timingSafeEqualString(expected, signature)) {
+      console.warn('[twilio-webhook] firma inválida', {
+        signedUrl,
+        baseConfigured: Boolean(process.env.TWILIO_WEBHOOK_BASE_URL),
+        accountSid: creds.accountSid,
+        credentialLooksLikeApiKey: creds.accountSid.startsWith('SK'),
+        authTokenLength: creds.authToken.length,
+      });
+      return null;
+    }
 
     const messages: InboundMessage[] = [];
     const deliveries: DeliveryUpdate[] = [];
