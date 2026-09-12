@@ -151,9 +151,16 @@ export async function listConversations(
   const convs = await prisma.aiConversation.findMany({
     where,
     orderBy: { updatedAt: 'desc' },
-    take: 100,
+    take: 150,
   });
-  return convs.map(formatConv);
+  // Inbox copilot threads live inside the inbox, not in the assistant sidebar.
+  return convs
+    .filter((c) => {
+      const ctx = c.context as { kind?: string } | null;
+      return ctx?.kind !== 'inbox_copilot';
+    })
+    .slice(0, 100)
+    .map(formatConv);
 }
 
 export async function deleteConversation(id: string, userId: string): Promise<void> {

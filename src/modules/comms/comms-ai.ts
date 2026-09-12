@@ -2,9 +2,11 @@ import { chatCompletion } from '@/modules/ai/ai-client';
 import { previewText } from './normalize';
 
 /**
- * Assistive AI for the inbox: summaries, reply suggestions, translations and
- * the handover brief. Everything here produces TEXT for a human; nothing is
- * sent to a customer without an explicit user action.
+ * Assistive AI helpers for the inbox. Everything here produces TEXT for a
+ * human; nothing is sent to a customer without an explicit user action.
+ * The conversational copilot itself runs through the assistant orchestrator
+ * (see inbox-copilot.ts); this file keeps the transcript builder and the
+ * standalone draft generator used by the `draftReply` tool.
  */
 
 export interface TranscriptMessage {
@@ -34,17 +36,6 @@ export function buildTranscript(messages: TranscriptMessage[], contactName: stri
     .join('\n');
 }
 
-/** Deterministic fallback used when the AI provider is unavailable. */
-export function plainTextDigest(
-  messages: TranscriptMessage[],
-  contactName: string,
-  count = 5
-): string {
-  const last = messages.slice(-count);
-  if (last.length === 0) return 'Sin mensajes previos.';
-  return `Últimos ${last.length} mensajes:\n${buildTranscript(last, contactName)}`;
-}
-
 async function complete(
   system: string,
   user: string,
@@ -64,19 +55,6 @@ async function complete(
   return content;
 }
 
-export async function summarizeConversation(
-  messages: TranscriptMessage[],
-  contactName: string,
-  userId?: string
-): Promise<string> {
-  const transcript = buildTranscript(messages, contactName);
-  return complete(
-    'Eres un asistente de atención al cliente de UNIK. Resume conversaciones de WhatsApp/SMS/Telegram en español, en máximo 6 viñetas: motivo del contacto, lo que se acordó, pendientes y tono del cliente. No inventes datos.',
-    `Contacto: ${contactName}\n\nConversación:\n${transcript}\n\nResumen:`,
-    { userId }
-  );
-}
-
 export async function suggestReply(
   messages: TranscriptMessage[],
   contactName: string,
@@ -88,41 +66,6 @@ export async function suggestReply(
     `Contacto: ${contactName}\n\nConversación:\n${transcript}\n\n${options.instructions ? `Indicaciones del agente: ${options.instructions}\n\n` : ''}Respuesta sugerida:`,
     { userId: options.userId, maxTokens: 400 }
   );
-}
-
-export async function translateText(
-  text: string,
-  targetLanguage: string,
-  userId?: string
-): Promise<string> {
-  return complete(
-    `Traduce el texto al idioma "${targetLanguage}". Devuelve solo la traducción, sin comentarios.`,
-    text,
-    { userId, maxTokens: 800 }
-  );
-}
-
-/**
- * Brief for the operator taking over a conversation. Falls back to a plain
- * digest of the last messages if the AI provider fails.
- */
-export async function handoverBrief(
-  messages: TranscriptMessage[],
-  contactName: string,
-  fromName: string,
-  userId?: string
-): Promise<{ text: string; generatedByAi: boolean }> {
-  try {
-    const transcript = buildTranscript(messages, contactName);
-    const text = await complete(
-      'Eres un asistente que prepara el relevo entre operadores de atención. Escribe en español un resumen operativo (máximo 8 líneas) para quien recibe la conversación: quién es el cliente, qué necesita, qué ya se le respondió, compromisos pendientes y siguiente paso recomendado. Sin inventar datos.',
-      `Operador saliente: ${fromName}\nContacto: ${contactName}\n\nConversación:\n${transcript}\n\nResumen de relevo:`,
-      { userId, maxTokens: 500 }
-    );
-    return { text, generatedByAi: true };
-  } catch {
-    return { text: plainTextDigest(messages, contactName, 5), generatedByAi: false };
-  }
 }
 
 export function messagePreview(body: string | null, hasMedia: boolean): string {

@@ -20,7 +20,7 @@ import {
   isInboxAdmin,
   visibleAccountsWhere,
 } from './comms-access';
-import { handoverBrief, messagePreview, type TranscriptMessage } from './comms-ai';
+import { messagePreview, type TranscriptMessage } from './comms-ai';
 import {
   toContactDTO,
   upsertContactForInbound,
@@ -922,62 +922,6 @@ export async function transcriptFor(
     hasMedia: r.mediaObjectIds.length > 0 || pendingMediaCount(r) > 0,
   }));
   return { messages, contactName: conversation.contact.displayName };
-}
-
-export async function handoverConversation(
-  actor: CurrentUser,
-  conversationId: string,
-  toUserId: string,
-  summary?: string
-): Promise<{ conversation: CommConversationDTO; note: CommNoteDTO; generatedByAi: boolean }> {
-  const conversation = await loadConversation(actor, conversationId);
-  const isAssignee = conversation.assignedToUserId === actor.id;
-  if (!isAssignee) assertInboxAssign(actor);
-  const target = await prisma.user.findUnique({
-    where: { id: toUserId },
-    select: { id: true, name: true, isActive: true },
-  });
-  if (!target || !target.isActive) throw new CommsError('Usuario destino no válido', 400);
-
-  let brief = summary?.trim() ?? '';
-  let generatedByAi = false;
-  if (!brief) {
-    const { messages, contactName } = await transcriptFor(conversationId);
-    const result = await handoverBrief(messages, contactName, actor.name, actor.id);
-    brief = result.text;
-    generatedByAi = result.generatedByAi;
-  }
-  const noteBody = `Relevo de ${actor.name} a ${target.name}${generatedByAi ? ' (resumen generado con IA)' : ''}:\n${brief}`;
-  const note = await prisma.commNote.create({
-    data: { conversationId, authorUserId: actor.id, body: noteBody.slice(0, 4000) },
-  });
-  const updated = await prisma.commConversation.update({
-    where: { id: conversationId },
-    data: {
-      assignedToUserId: toUserId,
-      status: conversation.status === 'resolved' ? 'open' : conversation.status,
-    },
-    include: { account: true, contact: true },
-  });
-  await publishToTeams(
-    updated.account,
-    updated,
-    'handover',
-    { fromUserId: actor.id, toUserId, noteId: note.id },
-    [actor.id, toUserId]
-  );
-  return {
-    conversation: (await toConversationDTOs([updated]))[0],
-    note: {
-      id: note.id,
-      conversationId,
-      authorUserId: actor.id,
-      authorName: actor.name,
-      body: note.body,
-      createdAt: note.createdAt.toISOString(),
-    },
-    generatedByAi,
-  };
 }
 
 // ---------------------------------------------------------------------------

@@ -169,6 +169,11 @@ export const DEFAULT_AI_SETTINGS: AiSettings = {
     'listUserMemory',
     'forgetMemory',
     'sendInternalChatMessage',
+    // Inbox copilot
+    'suggestNextActions',
+    'proposeInboxDraft',
+    'updateInboxConversation',
+    'addInboxNote',
     // System
     'getCurrentUserContext',
     'getModuleList',

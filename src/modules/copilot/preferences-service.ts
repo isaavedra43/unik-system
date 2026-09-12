@@ -20,9 +20,15 @@ export const preferencesSchema = z.object({
   format: z.enum(['markdown', 'texto', 'tablas']).default('markdown'),
   customInstructions: z.string().max(2000).nullable().optional(),
   memoryEnabled: z.boolean().default(true),
+  /**
+   * Inbox copilot: active = analyzes on its own when a conversation opens or the
+   * customer writes; on_demand = only when asked; paused = completely off.
+   */
+  inboxCopilotMode: z.enum(['active', 'on_demand', 'paused']).default('active'),
 });
 
 export type AssistantPreferences = z.infer<typeof preferencesSchema>;
+export type InboxCopilotMode = AssistantPreferences['inboxCopilotMode'];
 
 export const DEFAULT_PREFERENCES: AssistantPreferences = {
   mode: 'on_request',
@@ -32,6 +38,7 @@ export const DEFAULT_PREFERENCES: AssistantPreferences = {
   format: 'markdown',
   customInstructions: null,
   memoryEnabled: true,
+  inboxCopilotMode: 'active',
 };
 
 export async function getPreferences(userId: string): Promise<AssistantPreferences> {
@@ -45,6 +52,7 @@ export async function getPreferences(userId: string): Promise<AssistantPreferenc
     format: row.format,
     customInstructions: row.customInstructions,
     memoryEnabled: row.memoryEnabled,
+    inboxCopilotMode: row.inboxCopilotMode,
   });
   return parsed.success ? parsed.data : { ...DEFAULT_PREFERENCES };
 }

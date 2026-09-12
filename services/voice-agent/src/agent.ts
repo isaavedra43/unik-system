@@ -150,7 +150,16 @@ export default defineAgent({
       goodbye: null,
     };
 
-    await ctx.connect();
+    try {
+      await ctx.connect();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      log(callId, 'cannot join room', message);
+      await unik
+        .event(callId, 'error', `No se pudo entrar a la sala: ${message.slice(0, 300)}`)
+        .catch(() => undefined);
+      return;
+    }
     await unik.event(callId, 'joined').catch(() => undefined);
 
     // Only the phone leg is our interlocutor. Operators may join to listen or
@@ -334,9 +343,23 @@ export default defineAgent({
   },
 });
 
+/**
+ * LiveKit Cloud shows an https:// project URL, but joining a room needs the
+ * WebSocket endpoint. Accept either and normalize so a copied value works.
+ */
+function livekitWsUrl(): string | undefined {
+  const raw = process.env.LIVEKIT_URL?.trim();
+  if (!raw) return undefined;
+  return raw
+    .replace(/^https:\/\//i, 'wss://')
+    .replace(/^http:\/\//i, 'ws://')
+    .replace(/\/+$/, '');
+}
+
 cli.runApp(
   new ServerOptions({
     agent: fileURLToPath(import.meta.url),
     agentName: process.env.VOICE_AGENT_NAME?.trim() || 'unik-voice',
+    wsURL: livekitWsUrl(),
   })
 );

@@ -27,7 +27,12 @@ interface OrchestratorInput {
   conversationId: string;
   message: string;
   actor: CurrentUser;
-  context?: { page?: string; voice?: boolean };
+  context?: {
+    page?: string;
+    voice?: boolean;
+    /** Set when the assistant runs as the inbox copilot of this conversation. */
+    inboxConversationId?: string;
+  };
   /** Optional model override — user can pick a model in the chat UI. */
   model?: string;
   /**
@@ -45,6 +50,21 @@ interface OrchestratorEvent {
 
 const EXPORT_MAX_ROWS = 5000;
 const EXPORT_PAGE_SIZE = 200; // querySalesOrders' Zod max
+
+/** Tools that only exist inside the inbox copilot (take `inboxConversationId`). */
+const INBOX_ONLY_TOOLS = new Set([
+  'suggestNextActions',
+  'proposeInboxDraft',
+  'updateInboxConversation',
+  'addInboxNote',
+]);
+/** Existing comms tools whose `conversationId` means the inbox conversation. */
+const INBOX_CONVERSATION_ID_TOOLS = new Set([
+  'getConversationMessages',
+  'draftReply',
+  'sendInboxMessage',
+  'createCommitment',
+]);
 
 function firstRowArray(result: Record<string, unknown> | null | undefined): Record<string, unknown>[] | null {
   if (!result) return null;
@@ -163,8 +183,13 @@ export async function* runAssistant(
     settings.maxConversationMessages
   );
 
-  // 6. Build system prompt
-  const systemPrompt = await buildSystemPrompt(input.actor, input.context);
+  // 6. Build system prompt (+ the live inbox context when running as copilot)
+  const inboxConversationId = input.context?.inboxConversationId;
+  let systemPrompt = await buildSystemPrompt(input.actor, input.context);
+  if (inboxConversationId) {
+    const { buildInboxCopilotPrompt } = await import('@/modules/comms/inbox-copilot');
+    systemPrompt += `\n\n${await buildInboxCopilotPrompt(input.actor, inboxConversationId)}`;
+  }
 
   // 7. Build messages
   const messages: ChatMessage[] = [
@@ -258,10 +283,11 @@ export async function* runAssistant(
   // Paused mode: the assistant keeps answering and drafting, but tools with side
   // effects are not even offered to the model.
   const preferences = await getPreferences(input.actor.id).catch(() => null);
-  const availableTools =
+  const availableTools = (
     preferences?.mode === 'paused'
       ? loadedTools.filter((t) => !PAUSED_MODE_HIDDEN_EFFECTS.has(t.effect ?? 'read'))
-      : loadedTools;
+      : loadedTools
+  ).filter((t) => inboxConversationId || !INBOX_ONLY_TOOLS.has(t.name));
   const toolSpecs: ToolSpec[] = toOpenAiTools(availableTools);
 
   // Resolve effective model: user override > default
@@ -609,6 +635,15 @@ export async function* runAssistant(
       // Inject conversationId for artifact tools that need it
       if (parsedArgs && typeof parsedArgs === 'object') {
         const argsObj = parsedArgs as Record<string, unknown>;
+        // Inbox tools work on the INBOX conversation, never on this AI thread.
+        if (inboxConversationId) {
+          if (INBOX_ONLY_TOOLS.has(tc.name) && !argsObj.inboxConversationId) {
+            argsObj.inboxConversationId = inboxConversationId;
+          }
+          if (INBOX_CONVERSATION_ID_TOOLS.has(tc.name) && !argsObj.conversationId) {
+            argsObj.conversationId = inboxConversationId;
+          }
+        }
         if (!argsObj.conversationId) {
           argsObj.conversationId = input.conversationId;
         }

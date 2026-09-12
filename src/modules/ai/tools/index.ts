@@ -72,5 +72,8 @@ import './campaigns-tools';
 // Comms tools (bandeja omnicanal, compromisos, duplicados)
 import './comms-tools';
 
+// Inbox copilot tools (acciones sugeridas, borradores, estado/notas de la conversación)
+import './inbox-copilot-tools';
+
 // Export the registry API for consumers
 export * from './registry';

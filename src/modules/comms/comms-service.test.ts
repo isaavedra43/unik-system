@@ -84,7 +84,6 @@ vi.mock('@/modules/comms/adapters', () => ({
 }));
 
 import {
-  handoverConversation,
   listConversations,
   mergeDuplicate,
   recordInboundMessage,
@@ -252,8 +251,8 @@ describe('outbound sending', () => {
   });
 });
 
-describe('assignment and handover', () => {
-  it('assigns, then hands over with a plain-text brief when the AI is unavailable', async () => {
+describe('assignment', () => {
+  it('assigns a conversation to the current agent', async () => {
     const { conversation } = await recordInboundMessage(
       account,
       inbound('SM1', 'Necesito una cotización')
@@ -262,12 +261,6 @@ describe('assignment and handover', () => {
       assignedToUserId: agent.id,
     });
     expect(assigned.assignedToUserId).toBe('u_agent');
-    const result = await handoverConversation(agent, conversation.id, 'u_two');
-    expect(result.generatedByAi).toBe(false);
-    expect(result.conversation.assignedToUserId).toBe('u_two');
-    expect(result.note.body).toContain('Relevo de Agente Uno a Agente Dos');
-    expect(result.note.body).toContain('Necesito una cotización');
-    expect(db.rows('commNote')).toHaveLength(1);
   });
 
   it('lets a plain inbox user take an unassigned conversation but not reassign it', async () => {

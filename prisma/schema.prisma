@@ -1837,6 +1837,8 @@ model AiUserPreference {
   format             String   @default("markdown")
   customInstructions String?
   memoryEnabled      Boolean  @default(true)
+  /// Inbox copilot: active (proactive) | on_demand | paused
+  inboxCopilotMode   String   @default("active")
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 }

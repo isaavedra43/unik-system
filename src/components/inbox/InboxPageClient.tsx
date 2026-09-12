@@ -4,7 +4,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner';
 import { ConversationList } from './ConversationList';
 import { ConversationView } from './ConversationView';
-import { AiPanel } from './AiPanel';
+import { CopilotPanel } from './copilot/CopilotPanel';
 import { NewConversationDialog } from './NewConversationDialog';
 import { useInboxRealtime } from './useInboxRealtime';
 import { useIsMobile } from './useIsMobile';
@@ -20,7 +20,7 @@ import {
 
 /**
  * Omnichannel inbox: conversations (left), thread + composer (center) and the
- * fixed AI panel (right). On mobile one column is visible at a time.
+ * AI copilot (right). On mobile one column is visible at a time.
  * Realtime updates come from the generic SSE stream (team + user channels);
  * payloads only carry ids, so the client re-fetches what it shows.
  */
@@ -147,11 +147,7 @@ export function InboxPageClient({ user }: { user: InboxUserInfo }) {
     const conversationId =
       typeof event.payload.conversationId === 'string' ? event.payload.conversationId : null;
     if (!conversationId) return;
-    if (
-      ['message', 'message_status', 'message_media', 'conversation', 'handover', 'note'].includes(
-        event.type
-      )
-    ) {
+    if (['message', 'message_status', 'message_media', 'conversation', 'note'].includes(event.type)) {
       refreshConversation(conversationId);
       if (conversationId === selectedRef.current) setThreadVersion((v) => v + 1);
     }
@@ -161,9 +157,6 @@ export function InboxPageClient({ user }: { user: InboxUserInfo }) {
       conversationId !== selectedRef.current
     ) {
       toast.message('Nuevo mensaje en la bandeja');
-    }
-    if (event.type === 'handover' && event.payload.toUserId === user.id) {
-      toast.info('Te relevaron una conversación');
     }
   });
 
@@ -239,9 +232,9 @@ export function InboxPageClient({ user }: { user: InboxUserInfo }) {
         )}
         {showAi && selected && (
           <aside
-            aria-label="Panel de IA"
+            aria-label="Copiloto de IA"
             style={{
-              width: isMobile ? '100%' : 340,
+              width: isMobile ? '100%' : 'clamp(340px, 26vw, 400px)',
               flexShrink: 0,
               display: 'flex',
               flexDirection: 'column',
@@ -251,16 +244,15 @@ export function InboxPageClient({ user }: { user: InboxUserInfo }) {
               overflow: 'hidden',
             }}
           >
-            <AiPanel
+            <CopilotPanel
               key={selected.id}
               conversation={selected}
               user={user}
-              users={users}
               onInsertDraft={(text) => {
                 setDraft(text);
                 if (isMobile) setMobileView('conversation');
               }}
-              onConversationChanged={onConversationChanged}
+              onRefreshConversation={() => refreshConversation(selected.id)}
               onBack={isMobile ? () => setMobileView('conversation') : undefined}
             />
           </aside>
