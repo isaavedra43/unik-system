@@ -27,6 +27,22 @@ const log = (callId: string, msg: string, extra?: unknown) => {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/**
+ * With a speech-to-speech model there is no separate TTS, so `session.say`
+ * (plain text) throws. Every fixed phrase goes through `generateReply` with an
+ * instruction to say it verbatim; the returned handle can be awaited.
+ */
+function speakVerbatim(
+  session: voice.AgentSession,
+  phrase: string,
+  allowInterruptions = true
+): ReturnType<voice.AgentSession['generateReply']> {
+  return session.generateReply({
+    instructions: `Di exactamente esto, con naturalidad y sin agregar nada: "${phrase}"`,
+    allowInterruptions,
+  });
+}
+
 function isPhoneParticipant(p: RemoteParticipant): boolean {
   return (
     p.kind === ParticipantKind.SIP || p.identity.startsWith('sip_') || p.identity.startsWith('sip-')
@@ -222,9 +238,10 @@ export default defineAgent({
         });
       } else {
         rt.hangupRequested = true;
-        rt.goodbye = session.say(
+        rt.goodbye = speakVerbatim(
+          session,
           'Parece que se cortó la comunicación. Gracias por llamar a UNIK, que tenga un excelente día.',
-          { allowInterruptions: false }
+          false
         );
       }
     });
@@ -242,7 +259,7 @@ export default defineAgent({
       outputOptions: { transcriptionEnabled: true, syncTranscription: true },
     });
 
-    session.say(brief.greeting, { allowInterruptions: true });
+    speakVerbatim(session, brief.greeting, true);
     await unik.event(callId, 'greeted').catch(() => undefined);
     const startedAt = Date.now();
     let offeredTransferForTime = false;
@@ -312,9 +329,10 @@ export default defineAgent({
         // Transfer completed (AI participant retired) or AI turned off.
         if (state.humanPresent) {
           await interrupt();
-          const handle = session.say(
+          const handle = speakVerbatim(
+            session,
             'Le comunico ahora mismo con un compañero. Gracias por su paciencia.',
-            { allowInterruptions: false }
+            false
           );
           await handle.waitForPlayout().catch(() => undefined);
         }
@@ -323,9 +341,11 @@ export default defineAgent({
       }
       if (rt.transferRequested && state.humanPresent) {
         await interrupt();
-        const handle = session.say('Ya está con usted mi compañero. Hasta luego.', {
-          allowInterruptions: false,
-        });
+        const handle = speakVerbatim(
+          session,
+          'Ya está con usted mi compañero. Hasta luego.',
+          false
+        );
         await handle.waitForPlayout().catch(() => undefined);
         await leave('transfer completed');
         break;
