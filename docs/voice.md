@@ -9,7 +9,7 @@ Teléfono (PSTN) ──▶ Twilio Voice ──(webhook POST /api/webhooks/voice/
                          │                 firma X-Twilio-Signature (HMAC-SHA1 propio)
                          │◀── TwiML <Dial><Sip>sip:{callId}@{LIVEKIT_SIP_DOMAIN}</Sip></Dial>
                          ▼
-                 LiveKit SIP trunk ──▶ sala `call-{callId}` ◀── navegador / agente (token de sala)
+                 LiveKit SIP trunk ──▶ sala `call-_{callId}` ◀── navegador / agente (token de sala)
                                               │
                         webhooks (participant_joined/left, room_finished, egress_ended)
                                               ▼
@@ -57,7 +57,7 @@ Sin `LIVEKIT_URL` el módulo funciona en **mock** (salas, tokens, egress y SIP e
 ## 3. Configuración manual (pendiente del usuario)
 
 1. **LiveKit**: crear proyecto, API key/secret; configurar webhook `https://<app>/api/webhooks/voice/livekit` (firmado con la API key).
-2. **SIP**: en LiveKit crear _inbound trunk_ (números Twilio permitidos) y _outbound trunk_ hacia el dominio SIP de Twilio (`<sid>.sip.twilio.com` o Elastic SIP Trunking) con autenticación; crear _dispatch rule_ individual con prefijo `call-` (la sala es `call-{callId}`; el TwiML manda `sip:{callId}@dominio`, así que la regla debe mapear el usuario SIP `{callId}` a la sala `call-{callId}`; alternativa: regla `direct` leyendo la cabecera `X-Unik-Call`). Anotar `LIVEKIT_SIP_TRUNK_ID`.
+2. **SIP**: en LiveKit crear _inbound trunk_ (números Twilio permitidos) y _outbound trunk_ hacia el dominio SIP de Twilio (`<sid>.sip.twilio.com` o Elastic SIP Trunking) con autenticación; crear _dispatch rule_ de tipo **Callee** con prefijo `call-` y sin aleatorizar (LiveKit une la llamada a `call-_{callee}`; el TwiML manda `sip:{callId}@dominio;transport=udp`, así que la sala resultante es `call-_{callId}`, la misma que crea UNIK). El trunk entrante debe aceptar cualquier número (lista de números vacía) y limitar por IP a los rangos de señalización de Twilio Programmable Voice. Anotar `LIVEKIT_SIP_TRUNK_ID`.
 3. **Twilio**: en el número de voz, "A call comes in" → `POST https://<app>/api/webhooks/voice/twilio`; habilitar SIP hacia el dominio de LiveKit (BYOC/Elastic SIP Trunking); registrar la cuenta como `CommAccount` (`provider` twilio_*, `identifier` = número E.164, `teamKeys` = claves de rol de los equipos).
 4. **R2**: bucket `unik-recordings-*` privado; crear token de solo escritura y ponerlo en `R2_EGRESS_*`. Region `auto`, endpoint `https://<account>.r2.cloudflarestorage.com`.
 5. **IA**: en `/app/admin/assistant` activar voz (`voiceEnabled`, `sttModel`, `ttsVoice`); en `/app/admin/voice` decidir qué cuentas atiende la IA, catálogo de tareas y grabación por defecto.

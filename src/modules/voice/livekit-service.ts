@@ -335,8 +335,16 @@ export function getLiveKitMockState(): {
 // Rooms
 // ---------------------------------------------------------------------------
 
+/**
+ * Room name for a call. Matches what the LiveKit *Callee* dispatch rule
+ * produces for an inbound SIP INVITE to `sip:{callId}@domain` with room
+ * prefix `call-`: LiveKit always joins `<prefix>_<callee>`, i.e.
+ * `call-_{callId}`. Using the same name here means the PSTN leg, the agents
+ * and the AI land in one room for inbound and outbound calls alike.
+ */
+export const ROOM_PREFIX = 'call-';
 export function roomNameForCall(callId: string): string {
-  return `call-${callId}`;
+  return `${ROOM_PREFIX}_${callId}`;
 }
 
 export async function createRoom(
