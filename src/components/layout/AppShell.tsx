@@ -26,6 +26,7 @@ import {
 } from 'lucide-react';
 import { AssistantWidget } from '@/components/assistant/AssistantWidget';
 import { ThemeToggle } from '@/components/layout/ThemeToggle';
+import { SeedDemoDataButton } from '@/components/dev/SeedDemoDataButton';
 
 interface AppShellProps {
   user: CurrentUser;
@@ -199,6 +200,9 @@ function Topbar({ user, onToggleSidebar }: { user: CurrentUser; onToggleSidebar:
         <Breadcrumbs items={crumbs} />
       </div>
       <div className="topbar-right">
+        {process.env.NEXT_PUBLIC_ALLOW_DEMO_SEED === 'true' && user.isSuperAdmin ? (
+          <SeedDemoDataButton />
+        ) : null}
         <ThemeToggle />
         <div style={{ position: 'relative' }}>
           <button

@@ -1057,6 +1057,9 @@ export async function handleLiveKitEvent(
     case 'participant_joined': {
       if (!event.participant) return { handled: false, reason: 'no_participant' };
       const identity = event.participant.identity;
+      // Egress recorders join as hidden participants (identity EG_...): they
+      // are not a party of the call and must not mark it active.
+      if (identity.startsWith('EG_')) return { handled: false, reason: 'egress_participant' };
       const existing = await prisma.voiceParticipant.findFirst({
         where: { callId: call.id, identity },
       });
