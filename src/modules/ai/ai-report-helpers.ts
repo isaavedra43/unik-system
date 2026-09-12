@@ -11,8 +11,56 @@ export const DATE_RANGE_LABELS: Record<string, string> = {
   last_month: 'Mes pasado',
   last_7_days: 'Últimos 7 días',
   last_30_days: 'Últimos 30 días',
+  this_year: 'Este año',
+  last_year: 'Año pasado',
   all: 'Todo el historial',
 };
+
+/**
+ * Parses a numeric value that may arrive as a number, a Prisma Decimal string ("1797.00") or
+ * an already-formatted amount the model typed itself ("$1,797.00 MXN", "1.797,00"). Returns
+ * null when the text has no usable number — callers then print the original text instead of
+ * "$NaN", which is what the report image used to show for hand-typed totals.
+ */
+export function parseNumeric(value: unknown): number | null {
+  if (value === null || value === undefined || value === '') return null;
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  const raw = String(value).trim();
+  if (!raw) return null;
+  const direct = Number(raw);
+  if (Number.isFinite(direct)) return direct;
+  // Strip currency symbols, codes, spaces and thousands separators.
+  let s = raw.replace(/[^\d.,\-()]/g, '');
+  const negative = /^\(.*\)$/.test(s) || s.startsWith('-');
+  s = s.replace(/[()\-]/g, '');
+  if (!s) return null;
+  const lastComma = s.lastIndexOf(',');
+  const lastDot = s.lastIndexOf('.');
+  if (lastComma > lastDot) {
+    // "1.797,00" — European style: dot thousands, comma decimals.
+    s = s.replace(/\./g, '').replace(',', '.');
+  } else {
+    // "1,797.00" — comma thousands.
+    s = s.replace(/,/g, '');
+  }
+  const n = Number(s);
+  if (!Number.isFinite(n)) return null;
+  return negative ? -n : n;
+}
+
+/** Sum of a numeric-like column across rows; null when no row has a usable number. */
+export function sumColumn(rows: Array<Record<string, unknown>>, key: string): number | null {
+  let sum = 0;
+  let any = false;
+  for (const row of rows) {
+    const n = parseNumeric(row[key]);
+    if (n !== null) {
+      sum += n;
+      any = true;
+    }
+  }
+  return any ? sum : null;
+}
 
 /** One line under the title that says exactly what period and filters the numbers cover. */
 export function buildReportSubtitle(
@@ -59,7 +107,9 @@ export function buildReportSubtitle(
 }
 
 export function money(v: unknown): string {
-  return `$${Number(v ?? 0).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const n = parseNumeric(v);
+  if (n === null) return v === null || v === undefined ? '$0.00' : String(v);
+  return `$${n.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 /**

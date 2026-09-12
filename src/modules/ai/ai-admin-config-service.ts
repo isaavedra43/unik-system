@@ -153,6 +153,7 @@ export const DEFAULT_AI_SETTINGS: AiSettings = {
     // Contacts (customers and vendors)
     'queryContacts',
     'getContactDetail',
+    'getContactFile',
     // Artifacts
     'generatePdfReport',
     'generateExcelReport',

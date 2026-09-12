@@ -19,6 +19,7 @@ import { validateInput, validateOutput } from './ai-guardrails';
 import { processAttachment, type AttachmentResult } from './ai-attachments-service';
 import { prisma } from '@/lib/prisma';
 import { buildReportSubtitle, buildSummaryCards } from './ai-report-helpers';
+import { ARTIFACT_TOOL_NAMES, collectRowArrays, findLastDataToolResult } from './ai-history-data';
 
 interface OrchestratorAttachment {
   id: string;
@@ -48,13 +49,9 @@ const EXPORT_PAGE_SIZE = 200; // querySalesOrders' Zod max
 
 function firstRowArray(result: Record<string, unknown> | null | undefined): Record<string, unknown>[] | null {
   if (!result) return null;
-  for (const key of Object.keys(result)) {
-    const val = result[key];
-    if (Array.isArray(val) && val.length > 0 && typeof val[0] === 'object') {
-      return val as Record<string, unknown>[];
-    }
-  }
-  return null;
+  const arrays = collectRowArrays(result);
+  const firstKey = Object.keys(arrays)[0];
+  return firstKey ? arrays[firstKey] : null;
 }
 
 /**
@@ -254,58 +251,17 @@ export async function* runAssistant(
   let totalCompletionTokens = 0;
   let usingFallback = false;
 
-  // Track the last data tool result so we can auto-inject it into artifact tools
-  let lastToolRows: Record<string, unknown>[] | null = null;
-  let lastToolName: string | null = null;
-  let lastToolArgs: Record<string, unknown> | null = null;
-  let lastToolResult: Record<string, unknown> | null = null;
+  // Track the last DATA tool result so we can auto-inject it into artifact tools.
+  // Seeded from the conversation history ("generame un excel con la info que te pedí"), skipping
+  // artifact results and resolving the originating call by toolCallId — see ai-history-data.ts.
+  const seed = findLastDataToolResult(history);
+  let lastToolRows: Record<string, unknown>[] | null = seed?.rows ?? null;
+  let lastToolName: string | null = seed?.toolName ?? null;
+  let lastToolArgs: Record<string, unknown> | null = seed?.toolArgs ?? null;
+  let lastToolResult: Record<string, unknown> | null = seed?.result ?? null;
 
-  // Scan conversation history for the last tool result with data rows
-  // This handles "generame un excel con la info que te pedi" (data from a previous message)
-  for (let i = history.length - 1; i >= 0; i--) {
-    const m = history[i];
-    if (m.role === 'tool' && m.content) {
-      try {
-        const parsed = JSON.parse(m.content);
-        if (parsed && typeof parsed === 'object' && !parsed.error) {
-          lastToolResult = parsed as Record<string, unknown>;
-          // Find ALL arrays of objects in the result
-          const allArrays: Record<string, Record<string, unknown>[]> = {};
-          for (const key of Object.keys(parsed)) {
-            const val = parsed[key];
-            if (Array.isArray(val) && val.length > 0 && typeof val[0] === 'object') {
-              allArrays[key] = val as Record<string, unknown>[];
-            }
-          }
-          // Use the first array as the default rows (for simple mode)
-          const firstKey = Object.keys(allArrays)[0];
-          if (firstKey) {
-            lastToolRows = allArrays[firstKey];
-            // Find the tool name and args from the previous assistant message's toolCalls
-            for (let j = i - 1; j >= 0; j--) {
-              const am = history[j];
-              if (am.role === 'assistant' && am.toolCalls) {
-                const calls = am.toolCalls as Array<{ name: string; arguments: string }>;
-                if (calls.length > 0) {
-                  lastToolName = calls[calls.length - 1].name;
-                  try {
-                    lastToolArgs = JSON.parse(calls[calls.length - 1].arguments);
-                  } catch {
-                    lastToolArgs = null;
-                  }
-                }
-                break;
-              }
-            }
-          }
-          break;
-        }
-      } catch {
-        // Not JSON, skip
-      }
-    }
-  }
-
+  // Tools that consume rows (and therefore get them auto-injected). generateChart is handled
+  // separately (labels/series), listArtifacts/cleanupArtifacts take no data at all.
   const ARTIFACT_TOOLS = new Set([
     'generatePdfReport',
     'generateExcelReport',
@@ -327,6 +283,8 @@ export async function* runAssistant(
       : dateRange === 'last_month' ? ' del Mes Pasado'
       : dateRange === 'last_7_days' ? ' de los Últimos 7 Días'
       : dateRange === 'last_30_days' ? ' de los Últimos 30 Días'
+      : dateRange === 'this_year' ? ' de Este Año'
+      : dateRange === 'last_year' ? ' del Año Pasado'
       : dateRange === 'all' ? ' (Histórico)'
       : '';
 
@@ -632,28 +590,37 @@ export async function* runAssistant(
           argsObj.conversationId = input.conversationId;
         }
 
-        // Auto-inject rows and title for artifact tools when the IA didn't pass them
+        // Auto-inject rows and title for artifact tools
         if (ARTIFACT_TOOLS.has(tc.name)) {
-          if (!argsObj.rows && !argsObj.sections && lastToolRows && lastToolRows.length > 0) {
+          const modelRows = Array.isArray(argsObj.rows) ? (argsObj.rows as Record<string, unknown>[]) : null;
+          const subsetOnly = argsObj.subsetOnly === true;
+          if (!argsObj.sections && !subsetOnly && lastToolRows && lastToolRows.length > 0) {
+            // The rows of a report ALWAYS come from the data tool, never from what the model
+            // re-typed: hand-typed rows are (a) a partial page ("solo algunos renglones"), and
+            // (b) already-formatted strings ("$1,797.00") that break totals ("$NaN").
             // Chat results are paginated (pageSize ≤ 200) so the model's context stays small,
             // but a report must contain EVERY matching row — re-run the data tool page by page
             // (never through the model) when the last result was only a partial page.
             const exportRows = await fetchAllRowsForExport(lastToolName, lastToolArgs, lastToolResult, lastToolRows, input.actor);
-            console.log(`[ai-orchestrator] Auto-injecting ${exportRows.length} rows from ${lastToolName} into ${tc.name}`);
-            argsObj.rows = exportRows;
+            if (modelRows && modelRows.length > exportRows.length) {
+              // The model has more rows than we can reproduce (e.g. it merged several results):
+              // keep its rows rather than silently dropping data.
+              console.log(`[ai-orchestrator] Keeping ${modelRows.length} model rows for ${tc.name} (system has ${exportRows.length})`);
+            } else {
+              if (modelRows) {
+                console.log(`[ai-orchestrator] Replacing ${modelRows.length} model-typed rows with ${exportRows.length} rows from ${lastToolName} for ${tc.name}`);
+              } else {
+                console.log(`[ai-orchestrator] Auto-injecting ${exportRows.length} rows from ${lastToolName} into ${tc.name}`);
+              }
+              argsObj.rows = exportRows;
+            }
           }
           if (!argsObj.subtitle && lastToolName === 'querySalesOrders') {
             argsObj.subtitle = buildReportSubtitle(lastToolArgs, lastToolResult);
           }
           // Auto-inject sections for PDF when the tool result has multiple arrays
           if (tc.name === 'generatePdfReport' && !argsObj.sections && !argsObj.rows && lastToolResult) {
-            const allArrays: Record<string, Record<string, unknown>[]> = {};
-            for (const key of Object.keys(lastToolResult)) {
-              const val = lastToolResult[key];
-              if (Array.isArray(val) && val.length > 0 && typeof val[0] === 'object') {
-                allArrays[key] = val as Record<string, unknown>[];
-              }
-            }
+            const allArrays = collectRowArrays(lastToolResult);
             if (Object.keys(allArrays).length > 1) {
               const sectionLabels: Record<string, string> = {
                 byPaymentMethod: 'Por Método de Pago',
@@ -733,22 +700,21 @@ export async function* runAssistant(
 
       const result = await executeTool(tc.name, input.actor, parsedArgs);
 
-      // Track the last data tool result for auto-injection into artifact tools
-      if (result.success && result.result && typeof result.result === 'object' && !ARTIFACT_TOOLS.has(tc.name)) {
+      // Track the last DATA tool result for auto-injection into artifact tools
+      if (
+        result.success &&
+        result.result &&
+        typeof result.result === 'object' &&
+        !ARTIFACT_TOOL_NAMES.has(tc.name) &&
+        !(result.result as Record<string, unknown>).error
+      ) {
         const toolResult = result.result as Record<string, unknown>;
-        // Preserve the COMPLETE result for multi-section PDF injection
-        lastToolResult = toolResult;
-        // Find ALL arrays of objects in the result (not just the first)
-        const allArrays: Record<string, Record<string, unknown>[]> = {};
-        for (const key of Object.keys(toolResult)) {
-          const val = toolResult[key];
-          if (Array.isArray(val) && val.length > 0 && typeof val[0] === 'object') {
-            allArrays[key] = val as Record<string, unknown>[];
-          }
-        }
-        // Use the first array as the default rows (for simple mode)
+        // Use the first array as the default rows (for simple mode); preserve the COMPLETE
+        // result for multi-section PDF injection and KPI cards.
+        const allArrays = collectRowArrays(toolResult);
         const firstKey = Object.keys(allArrays)[0];
         if (firstKey) {
+          lastToolResult = toolResult;
           lastToolRows = allArrays[firstKey];
           lastToolName = tc.name;
           lastToolArgs = (parsedArgs as Record<string, unknown>) ?? null;

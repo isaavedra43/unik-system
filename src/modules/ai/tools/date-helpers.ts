@@ -70,6 +70,8 @@ export const DATE_SHORTCUTS = [
   'last_month',
   'last_7_days',
   'last_30_days',
+  'this_year',
+  'last_year',
   'custom',
   'all',
 ] as const;
@@ -87,7 +89,7 @@ export const dateRangeSchema = z
   .enum(DATE_SHORTCUTS)
   .default('today')
   .describe(
-    'Período de tiempo. VALORES: "today" (hoy), "yesterday" (ayer), "this_week" (esta semana), "this_month" (este mes), "last_month" (mes pasado), "last_7_days" (últimos 7 días), "last_30_days" (últimos 30 días), "custom" (fecha específica — requiere dateFrom y dateTo), "all" (todo). ' +
+    'Período de tiempo. VALORES: "today" (hoy), "yesterday" (ayer), "this_week" (esta semana), "this_month" (este mes), "last_month" (mes pasado), "last_7_days" (últimos 7 días), "last_30_days" (últimos 30 días), "this_year" (este año, del 1 de enero a hoy), "last_year" (el año pasado completo), "custom" (fecha específica — requiere dateFrom y dateTo), "all" (todo). ' +
     'PARA FECHAS ESPECÍFICAS usa "custom" + dateFrom + dateTo. NUNCA uses "today" cuando el usuario pide una fecha específica. ' +
     'Si no estás seguro del período, usa "today" por defecto.'
   );
@@ -170,6 +172,20 @@ export function resolveDateRange(
     return {
       from: new Date(Date.UTC(thirtyDaysAgo.getUTCFullYear(), thirtyDaysAgo.getUTCMonth(), thirtyDaysAgo.getUTCDate())),
       to: utcEndOfDayFromComponents(today.year, today.month, today.day),
+    };
+  }
+
+  if (range === 'this_year') {
+    return {
+      from: utcDateFromComponents(today.year, 0, 1),
+      to: utcEndOfDayFromComponents(today.year, today.month, today.day),
+    };
+  }
+
+  if (range === 'last_year') {
+    return {
+      from: utcDateFromComponents(today.year - 1, 0, 1),
+      to: utcEndOfDayFromComponents(today.year - 1, 11, 31),
     };
   }
 

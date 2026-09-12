@@ -77,3 +77,22 @@ describe('generateReportImageSvg', () => {
     expect(svg).toContain('&amp;');
   });
 });
+
+describe('generateReportImageSvg — totals row', () => {
+  it('renders the bold TOTAL row after the data rows without touching the label cell', () => {
+    const columns = [
+      { header: 'Orden', key: 'number' },
+      { header: 'Cliente', key: 'customer' },
+      { header: 'Total', key: 'total', align: 'right' as const, format: (v: unknown) => `$${Number(v).toFixed(2)}` },
+    ];
+    const rows = [
+      { number: 'OV-1', customer: 'A', total: '100.00' },
+      { number: 'OV-2', customer: 'B', total: '250.50' },
+    ];
+    const { svg, height } = generateReportImageSvg({ title: 'T', columns, rows, totalsRow: { number: 'TOTAL (2 filas)', total: '350.50' } });
+    expect(svg).toContain('TOTAL (2 filas)');
+    expect(svg).toContain('$350.50');
+    const without = generateReportImageSvg({ title: 'T', columns, rows });
+    expect(height).toBeGreaterThan(without.height);
+  });
+});

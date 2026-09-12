@@ -1,6 +1,12 @@
 import PDFDocument from 'pdfkit';
 import fs from 'fs';
-import { colorForStatusLabel, sanitizeSvgColor } from './status-tone';
+import {
+  colorForStatusLabel,
+  sanitizeSvgColor,
+  toneForStatusLabel as statusTone,
+  TONE_HEX,
+  TONE_TINT_HEX,
+} from './status-tone';
 
 /**
  * Professional PDF Report Generator
@@ -36,6 +42,8 @@ export interface PdfSection {
   title?: string;
   columns: PdfTableColumn[];
   rows: Record<string, unknown>[];
+  /** Optional bold "TOTAL" row drawn after the last data row (values pre-computed by the caller). */
+  totalsRow?: Record<string, unknown>;
 }
 
 interface PdfReportOptions {
@@ -63,8 +71,13 @@ const PAGE_MARGIN = 40;
 const FOOTER_HEIGHT = 30;
 const CELL_PAD_X = 6;
 const CELL_PAD_Y = 4;
-const HEADER_HEIGHT = 22;
+const HEADER_HEIGHT = 24;
 const MIN_ROW_HEIGHT = 20;
+const TEXT_DARK = '#0f172a';
+const TEXT_BODY = '#334155';
+const ROW_ALT_FILL = '#f8fafc';
+const ROW_BORDER = '#e2e8f0';
+const TOTALS_FILL = '#e2e8f0';
 const MIN_COLUMN_WIDTH = 42;
 const MAX_CONTENT_FONT_SIZE = 8;
 const MIN_CONTENT_FONT_SIZE = 6;
@@ -284,86 +297,115 @@ export function generatePdfReport(
     const stream = fs.createWriteStream(outputPath);
     doc.pipe(stream);
 
-    const generatedAt = new Date().toLocaleString('es-MX');
+    const generatedAt = new Date().toLocaleString('es-MX', {
+      dateStyle: 'medium',
+      timeStyle: 'short',
+      timeZone: 'America/Mexico_City',
+    });
+    const totalRows = (options.sections && options.sections.length > 0 ? options.sections : [{ rows: options.rows }])
+      .reduce((s, sec) => s + sec.rows.length, 0);
+
     const drawFooter = (pageNumber: number, totalPages: number) => {
-      doc.fontSize(7)
-        .fillColor(accent)
-        .font('Helvetica')
-        .text(
-          `Generado por UNIK Asistente IA · ${generatedAt} · Página ${pageNumber} de ${totalPages}`,
-          PAGE_MARGIN,
-          doc.page.height - 25,
-          { width: contentWidth(doc), align: 'center', lineBreak: false }
-        );
+      // The footer must sit ABOVE pdfkit's bottom margin (page.height - PAGE_MARGIN): writing
+      // text below it triggers an automatic page break, which silently appended blank pages
+      // (and made the reported pageCount wrong). Content stops at pageBottom(), which reserves
+      // FOOTER_HEIGHT for exactly this strip.
+      const y = doc.page.height - PAGE_MARGIN - 14;
+      const cw = contentWidth(doc);
+      doc.moveTo(PAGE_MARGIN, y - 6)
+        .lineTo(doc.page.width - PAGE_MARGIN, y - 6)
+        .lineWidth(0.5)
+        .strokeColor(ROW_BORDER)
+        .stroke();
+      doc.fontSize(7).font('Helvetica-Bold').fillColor(brand)
+        .text(options.logoText ?? 'UNIK', PAGE_MARGIN, y, { width: cw / 3, align: 'left', lineBreak: false });
+      doc.fontSize(7).font('Helvetica').fillColor(accent)
+        .text(`Generado por UNIK Asistente IA · ${generatedAt}`, PAGE_MARGIN + cw / 3, y, { width: cw / 3, align: 'center', lineBreak: false });
+      doc.fontSize(7).font('Helvetica').fillColor(accent)
+        .text(`Página ${pageNumber} de ${totalPages}`, PAGE_MARGIN + (cw * 2) / 3, y, { width: cw / 3, align: 'right', lineBreak: false });
     };
 
     // ===== HEADER =====
+    // Left: brand badge + title + subtitle. Right: generation meta. Then a brand rule.
     const headerY = PAGE_MARGIN;
+    const cwHeader = contentWidth(doc);
+    let titleX = PAGE_MARGIN;
     if (options.logoText) {
-      doc.fontSize(18)
-        .fillColor(brand)
-        .font('Helvetica-Bold')
-        .text(options.logoText, PAGE_MARGIN, headerY);
+      doc.fontSize(13).font('Helvetica-Bold');
+      const badgeW = doc.widthOfString(options.logoText) + 18;
+      const badgeH = 26;
+      doc.roundedRect(PAGE_MARGIN, headerY, badgeW, badgeH, 6).fillColor(brand).fill();
+      doc.fillColor('#ffffff').text(options.logoText, PAGE_MARGIN + 9, headerY + 7, { width: badgeW - 18, lineBreak: false });
+      titleX = PAGE_MARGIN + badgeW + 12;
     }
-    doc.fontSize(20)
-      .fillColor('#1e293b')
+    const metaWidth = 170;
+    const titleWidth = cwHeader - (titleX - PAGE_MARGIN) - metaWidth - 12;
+    doc.fontSize(18)
+      .fillColor(TEXT_DARK)
       .font('Helvetica-Bold')
-      .text(options.title, PAGE_MARGIN, headerY, {
-        width: contentWidth(doc),
-        align: 'right',
-      });
+      .text(options.title, titleX, headerY + 2, { width: titleWidth, lineBreak: false, ellipsis: true });
 
-    let cursorY = headerY + 26;
+    doc.fontSize(7.5).fillColor(accent).font('Helvetica')
+      .text(`${totalRows} ${totalRows === 1 ? 'registro' : 'registros'}`, doc.page.width - PAGE_MARGIN - metaWidth, headerY + 3, { width: metaWidth, align: 'right', lineBreak: false });
+    doc.text(generatedAt, doc.page.width - PAGE_MARGIN - metaWidth, headerY + 14, { width: metaWidth, align: 'right', lineBreak: false });
+
+    let cursorY = headerY + 30;
 
     if (options.subtitle) {
-      doc.fontSize(10)
+      doc.fontSize(9)
         .fillColor(accent)
         .font('Helvetica')
-        .text(options.subtitle, PAGE_MARGIN, cursorY, {
-          width: contentWidth(doc),
-          align: 'right',
-        });
-      cursorY += 16;
+        .text(options.subtitle, titleX, cursorY, { width: titleWidth, lineBreak: false, ellipsis: true });
+      cursorY += 14;
     }
 
-    // Brand accent line
+    cursorY += 4;
+    // Brand accent rule
     doc.moveTo(PAGE_MARGIN, cursorY)
       .lineTo(doc.page.width - PAGE_MARGIN, cursorY)
-      .lineWidth(2.5)
+      .lineWidth(2)
       .strokeColor(brand)
       .stroke();
-    cursorY += 8;
+    cursorY += 10;
 
     // ===== SUMMARY CARDS (KPIs) =====
     if (options.summaryCards && options.summaryCards.length > 0) {
-      const cardGap = 8;
+      const cardGap = 10;
       const cardWidth =
         (contentWidth(doc) - (options.summaryCards.length - 1) * cardGap) /
         options.summaryCards.length;
-      const cardHeight = 44;
+      const cardHeight = 48;
       options.summaryCards.forEach((card, i) => {
         const x = PAGE_MARGIN + i * (cardWidth + cardGap);
         const cardColor = sanitizeSvgColor(card.color, brand);
         doc.roundedRect(x, cursorY, cardWidth, cardHeight, 6)
-          .fillColor('#f8fafc')
+          .fillColor(ROW_ALT_FILL)
           .fill();
-        doc.roundedRect(x, cursorY, cardWidth, 3, 2)
+        doc.roundedRect(x, cursorY, cardWidth, cardHeight, 6)
+          .lineWidth(0.5)
+          .strokeColor(ROW_BORDER)
+          .stroke();
+        doc.rect(x, cursorY + 8, 3, cardHeight - 16)
           .fillColor(cardColor)
           .fill();
         doc.fontSize(7)
           .fillColor(accent)
-          .font('Helvetica')
-          .text(card.label.toUpperCase(), x + 8, cursorY + 8, {
-            width: cardWidth - 16,
-          });
-        doc.fontSize(14)
-          .fillColor('#1e293b')
           .font('Helvetica-Bold')
-          .text(card.value, x + 8, cursorY + 20, {
-            width: cardWidth - 16,
+          .text(card.label.toUpperCase(), x + 12, cursorY + 9, {
+            width: cardWidth - 20,
+            lineBreak: false,
+            ellipsis: true,
+          });
+        doc.fontSize(15)
+          .fillColor(TEXT_DARK)
+          .font('Helvetica-Bold')
+          .text(card.value, x + 12, cursorY + 22, {
+            width: cardWidth - 20,
+            lineBreak: false,
+            ellipsis: true,
           });
       });
-      cursorY += cardHeight + 12;
+      cursorY += cardHeight + 14;
     }
 
     // ===== TABLE(S) =====
@@ -383,11 +425,12 @@ export function generatePdfReport(
           cursorY = PAGE_MARGIN;
         }
         cursorY += 8;
+        doc.rect(PAGE_MARGIN, cursorY + 1, 3, 12).fillColor(brand).fill();
         doc.fontSize(11)
-          .fillColor('#1e293b')
+          .fillColor(TEXT_DARK)
           .font('Helvetica-Bold')
-          .text(section.title, PAGE_MARGIN, cursorY, {
-            width: contentWidth(doc),
+          .text(section.title, PAGE_MARGIN + 9, cursorY, {
+            width: contentWidth(doc) - 9,
           });
         cursorY += 20;
       }
@@ -417,13 +460,50 @@ export function generatePdfReport(
           doc.fontSize(HEADER_FONT_SIZE)
             .fillColor('#ffffff')
             .font('Helvetica-Bold')
-            .text(col.header, x + CELL_PAD_X, y + 6, {
+            .text(col.header.toUpperCase(), x + CELL_PAD_X, y + 7, {
               width: innerWidths[i],
               align: align === 'right' ? 'right' : align === 'center' ? 'center' : 'left',
+              lineBreak: false,
+              ellipsis: true,
             });
           x += colWidths[i];
         }
         return y + HEADER_HEIGHT;
+      };
+
+      /** Draws a status value as a tinted pill when it is a known status label and fits on one line. */
+      const drawCell = (
+        value: string,
+        x: number,
+        y: number,
+        innerWidth: number,
+        rowHeight: number,
+        align: 'left' | 'right' | 'center',
+        allowPill: boolean
+      ) => {
+        const tone = allowPill ? statusTone(value) : null;
+        doc.fontSize(fontSize);
+        if (tone && !value.includes('\n')) {
+          doc.font('Helvetica-Bold');
+          const textW = doc.widthOfString(value);
+          const pillW = Math.min(innerWidth, textW + 10);
+          if (textW + 10 <= innerWidth) {
+            const pillH = fontSize + 6;
+            const pillX = align === 'right' ? x + innerWidth - pillW : align === 'center' ? x + (innerWidth - pillW) / 2 : x;
+            const pillY = y + CELL_PAD_Y - 2;
+            doc.roundedRect(pillX, pillY, pillW, pillH, pillH / 2).fillColor(TONE_TINT_HEX[tone]).fill();
+            doc.fillColor(TONE_HEX[tone]).text(value, pillX + 5, pillY + 3, { width: pillW - 10, lineBreak: false });
+            return;
+          }
+        }
+        doc.fillColor(tone ? TONE_HEX[tone] : TEXT_BODY)
+          .font(tone ? 'Helvetica-Bold' : 'Helvetica')
+          .text(value, x, y + CELL_PAD_Y, {
+            width: innerWidth,
+            height: rowHeight - CELL_PAD_Y,
+            align,
+            ellipsis: true,
+          });
       };
 
       let tableY = cursorY;
@@ -472,7 +552,7 @@ export function generatePdfReport(
         const isAlt = rowIdx % 2 === 1;
         if (isAlt) {
           doc.rect(PAGE_MARGIN, tableY, cw, cappedRowHeight)
-            .fillColor('#f1f5f9')
+            .fillColor(ROW_ALT_FILL)
             .fill();
         }
 
@@ -482,18 +562,15 @@ export function generatePdfReport(
           const col = tableColumns[i];
           const align = col.align ?? 'left';
           // Never color amount columns even if a value happened to collide with a status word.
-          const statusColor = align !== 'right' ? toneForStatusLabel(cellValues[i]) : null;
-          doc.fontSize(fontSize)
-            .fillColor(statusColor ?? '#334155')
-            .font(statusColor ? 'Helvetica-Bold' : 'Helvetica')
-            .text(cellValues[i], x + CELL_PAD_X, rowY + CELL_PAD_Y, {
-              width: innerWidths[i],
-              height: tableRowHeight - CELL_PAD_Y,
-              align: align === 'right' ? 'right' : align === 'center' ? 'center' : 'left',
-              ellipsis: true,
-            });
+          drawCell(cellValues[i], x + CELL_PAD_X, rowY, innerWidths[i], tableRowHeight, align, align !== 'right');
           x += colWidths[i];
         }
+        // Hairline under every row: keeps long tables readable without heavy zebra stripes.
+        doc.moveTo(PAGE_MARGIN, rowY + cappedRowHeight)
+          .lineTo(PAGE_MARGIN + cw, rowY + cappedRowHeight)
+          .lineWidth(0.4)
+          .strokeColor(ROW_BORDER)
+          .stroke();
 
         if (detailEntries.length > 0) {
           let detailY = rowY + tableRowHeight;
@@ -520,7 +597,40 @@ export function generatePdfReport(
         tableY += cappedRowHeight;
       }
 
-      cursorY = tableY + 8;
+      // ===== TOTALS ROW =====
+      if (section.totalsRow) {
+        const totalsValues = tableColumns.map((col) => {
+          const raw = section.totalsRow![col.key];
+          if (raw === null || raw === undefined) return '';
+          if (typeof raw === 'string' && raw.startsWith('TOTAL')) return raw;
+          return cellText(col, section.totalsRow!);
+        });
+        const totalsHeight = MIN_ROW_HEIGHT + 2;
+        if (tableY + totalsHeight > bottomLimit) {
+          doc.addPage();
+          tableY = PAGE_MARGIN;
+          tableY = drawTableHeader(tableY);
+        }
+        doc.rect(PAGE_MARGIN, tableY, cw, totalsHeight).fillColor(TOTALS_FILL).fill();
+        doc.moveTo(PAGE_MARGIN, tableY).lineTo(PAGE_MARGIN + cw, tableY).lineWidth(1.5).strokeColor(brand).stroke();
+        let tx = PAGE_MARGIN;
+        for (let i = 0; i < tableColumns.length; i++) {
+          const align = tableColumns[i].align ?? 'left';
+          doc.fontSize(fontSize)
+            .fillColor(TEXT_DARK)
+            .font('Helvetica-Bold')
+            .text(totalsValues[i], tx + CELL_PAD_X, tableY + CELL_PAD_Y + 1, {
+              width: innerWidths[i],
+              align: align === 'right' ? 'right' : align === 'center' ? 'center' : 'left',
+              lineBreak: false,
+              ellipsis: true,
+            });
+          tx += colWidths[i];
+        }
+        tableY += totalsHeight;
+      }
+
+      cursorY = tableY + 10;
     }
 
     // ===== METADATA FOOTER =====

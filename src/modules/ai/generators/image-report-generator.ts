@@ -34,6 +34,8 @@ export interface ReportImageOptions {
    * compact snapshot image, not the full export. */
   maxRows?: number;
   fontSize?: number;
+  /** Optional bold "TOTAL" row rendered under the table (values pre-computed by the caller). */
+  totalsRow?: Record<string, unknown>;
 }
 
 export interface ReportImageResult {
@@ -116,10 +118,20 @@ export function generateReportImageSvg(options: ReportImageOptions): ReportImage
 
   // Pre-compute every cell's text once (also used for width estimation).
   const cellsByRow = rows.map((row) => cols.map((col) => cellText(col, row)));
+  const totalsCells = options.totalsRow
+    ? cols.map((col) => {
+        const raw = options.totalsRow![col.key];
+        if (raw === null || raw === undefined) return '';
+        // The label cell ("TOTAL (N filas)") must not go through a currency formatter.
+        if (typeof raw === 'string' && raw.startsWith('TOTAL')) return raw;
+        return cellText(col, options.totalsRow!);
+      })
+    : null;
 
   const colWidths = cols.map((col, i) => {
     const headerW = estimateTextWidth(col.header, fontSize, true) + CELL_PAD_X * 2;
-    const valuesW = cellsByRow.length > 0 ? Math.max(...cellsByRow.map((r) => estimateTextWidth(r[i], fontSize))) + CELL_PAD_X * 2 : 0;
+    const allCells = totalsCells ? [...cellsByRow, totalsCells] : cellsByRow;
+    const valuesW = allCells.length > 0 ? Math.max(...allCells.map((r) => estimateTextWidth(r[i], fontSize, r === totalsCells))) + CELL_PAD_X * 2 : 0;
     return Math.min(MAX_COL_WIDTH, Math.max(MIN_COL_WIDTH, headerW, valuesW));
   });
 
@@ -130,24 +142,34 @@ export function generateReportImageSvg(options: ReportImageOptions): ReportImage
   const rowHeight = fontSize + 14;
   const kpiCount = options.summaryCards?.length ?? 0;
   const kpiAreaHeight = kpiCount > 0 ? KPI_CARD_HEIGHT + 16 : 0;
-  const headerAreaHeight = 34 + (options.subtitle ? 16 : 0) + 12;
-  const tableHeight = HEADER_ROW_HEIGHT + rows.length * rowHeight;
+  const headerAreaHeight = 26 + (options.subtitle ? 14 : 0) + 10 + 16;
+  const totalsHeight = totalsCells ? rowHeight + 2 : 0;
+  const tableHeight = HEADER_ROW_HEIGHT + rows.length * rowHeight + totalsHeight;
   const height =
     MARGIN + headerAreaHeight + kpiAreaHeight + tableHeight + FOOTER_HEIGHT + (rowsOmitted > 0 ? 18 : 0) + MARGIN;
 
   let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" font-family="Helvetica, Arial, sans-serif">`;
   svg += `<rect width="${width}" height="${height}" fill="#ffffff" rx="10"/>`;
 
-  // ===== Header =====
-  let y = MARGIN + 20;
+  // ===== Header ===== (brand badge + title/subtitle at the left, meta at the right — the
+  // title used to be right-anchored, which on wide tables put it far away from the logo)
+  let y = MARGIN;
+  let titleX = MARGIN;
   if (options.logoText) {
-    svg += `<text x="${MARGIN}" y="${y}" font-size="16" font-weight="bold" fill="${brand}">${escapeXml(options.logoText)}</text>`;
+    const badgeW = estimateTextWidth(options.logoText, 13, true) + 18;
+    svg += `<rect x="${MARGIN}" y="${y}" width="${badgeW}" height="26" rx="6" fill="${brand}"/>`;
+    svg += `<text x="${MARGIN + badgeW / 2}" y="${y + 17.5}" text-anchor="middle" font-size="13" font-weight="bold" fill="#ffffff">${escapeXml(options.logoText)}</text>`;
+    titleX = MARGIN + badgeW + 12;
   }
-  svg += `<text x="${width - MARGIN}" y="${y}" text-anchor="end" font-size="18" font-weight="bold" fill="#1e293b">${escapeXml(options.title)}</text>`;
-  y += 6;
+  const metaText = `${allRows.length} ${allRows.length === 1 ? 'registro' : 'registros'} · ${new Date().toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' })}`;
+  const metaW = estimateTextWidth(metaText, 9) + 8;
+  const titleMax = Math.max(80, contentWidth - (titleX - MARGIN) - metaW);
+  svg += `<text x="${titleX}" y="${y + 18}" font-size="18" font-weight="bold" fill="#0f172a">${escapeXml(truncateToWidth(options.title, titleMax, 18, true))}</text>`;
+  svg += `<text x="${width - MARGIN}" y="${y + 12}" text-anchor="end" font-size="9" fill="${accent}">${escapeXml(metaText)}</text>`;
+  y += 26;
   if (options.subtitle) {
-    y += 16;
-    svg += `<text x="${width - MARGIN}" y="${y}" text-anchor="end" font-size="10" fill="${accent}">${escapeXml(options.subtitle)}</text>`;
+    y += 14;
+    svg += `<text x="${titleX}" y="${y}" font-size="10" fill="${accent}">${escapeXml(truncateToWidth(options.subtitle, contentWidth - (titleX - MARGIN), 10))}</text>`;
   }
   y += 10;
   svg += `<rect x="${MARGIN}" y="${y}" width="${contentWidth}" height="2.5" fill="${brand}" rx="1"/>`;
@@ -206,8 +228,25 @@ export function generateReportImageSvg(options: ReportImageOptions): ReportImage
     rowY += rowHeight;
   });
 
+  // Totals row (bold, tinted, separated by a brand-colored rule)
+  if (totalsCells) {
+    svg += `<rect x="${MARGIN}" y="${rowY}" width="${contentWidth}" height="${rowHeight + 2}" fill="#e2e8f0"/>`;
+    svg += `<rect x="${MARGIN}" y="${rowY}" width="${contentWidth}" height="2" fill="${brand}"/>`;
+    let x = MARGIN;
+    cols.forEach((col, i) => {
+      const align = col.align ?? 'left';
+      const innerWidth = colWidths[i] - CELL_PAD_X * 2;
+      const value = truncateToWidth(totalsCells[i], innerWidth, fontSize, true);
+      const tx = align === 'right' ? x + colWidths[i] - CELL_PAD_X : align === 'center' ? x + colWidths[i] / 2 : x + CELL_PAD_X;
+      const anchor = align === 'right' ? 'end' : align === 'center' ? 'middle' : 'start';
+      svg += `<text x="${tx}" y="${rowY + 2 + rowHeight / 2 + fontSize * 0.32}" text-anchor="${anchor}" font-size="${fontSize}" font-weight="bold" fill="#0f172a">${escapeXml(value)}</text>`;
+      x += colWidths[i];
+    });
+    rowY += rowHeight + 2;
+  }
+
   // Table outline
-  svg += `<rect x="${MARGIN}" y="${tableTop}" width="${contentWidth}" height="${HEADER_ROW_HEIGHT + rows.length * rowHeight}" fill="none" stroke="#e2e8f0" stroke-width="1" rx="4"/>`;
+  svg += `<rect x="${MARGIN}" y="${tableTop}" width="${contentWidth}" height="${HEADER_ROW_HEIGHT + rows.length * rowHeight + totalsHeight}" fill="none" stroke="#e2e8f0" stroke-width="1" rx="4"/>`;
 
   let footerY = rowY + 6;
   if (rowsOmitted > 0) {

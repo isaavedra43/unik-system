@@ -12,6 +12,18 @@ import { generateReportImageSvg } from '../generators/image-report-generator';
 import { hexToArgb } from '../generators/status-tone';
 import { generateTableData } from '../generators/table-generator';
 import { getAiSettings } from '../ai-admin-config-service';
+import { parseNumeric, sumColumn } from '../ai-report-helpers';
+
+/**
+ * Shared parameter for every row-consuming artifact tool. The orchestrator ALWAYS replaces the
+ * model's `rows` with the complete result of the last data tool unless this is true — that's
+ * what guarantees a report covers every matching row with raw (unformatted) values.
+ */
+const subsetOnlySchema = z.boolean().optional().describe(
+  'Déjalo vacío casi siempre: el sistema llena rows con TODAS las filas de la última consulta de datos. ' +
+  'Pon true SOLO si el usuario pidió explícitamente un subconjunto pequeño que tú eliges a mano (ej. "solo estas 3 órdenes") — ' +
+  'para subconjuntos por filtro (cerradas, pagadas, de un cliente...) NO uses esto: vuelve a llamar la tool de datos con el filtro y luego genera el reporte.'
+);
 
 /* ------------------------------------------------------------------ */
 /* Helpers                                                            */
@@ -121,10 +133,14 @@ function autoColumns(rows: Record<string, unknown>[]): Array<{
 function formatValue(value: unknown, format?: string): string {
   if (value === null || value === undefined) return '';
   if (format === 'currency') {
-    return `$${Number(value).toLocaleString('es-MX', { minimumFractionDigits: 2 })}`;
+    // Values may be Prisma Decimal strings ("1797.00") or amounts the model already formatted
+    // ("$1,797.00 MXN"); parse both — never print "$NaN".
+    const n = parseNumeric(value);
+    return n === null ? String(value) : `$${n.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   }
   if (format === 'number') {
-    return Number(value).toLocaleString('es-MX');
+    const n = parseNumeric(value);
+    return n === null ? String(value) : n.toLocaleString('es-MX', { maximumFractionDigits: 2 });
   }
   if (format === 'percentage') {
     return `${value}%`;
@@ -194,6 +210,66 @@ function flattenRow(row: Record<string, unknown>): Record<string, unknown> {
   return result;
 }
 
+const SUMMABLE_COUNT_KEYS = new Set(['count', 'quantity', 'orders', 'totalquantity', 'totalproducts']);
+
+/**
+ * Builds the "TOTAL" row for a table: sums every currency column (and count-like numeric
+ * columns) across ALL rows and labels the first text column "TOTAL (N filas)". Returns null when
+ * nothing is summable, so plain text tables don't get an empty totals row.
+ */
+function buildTotalsRow(
+  rows: Record<string, unknown>[],
+  cols: Array<{ header: string; key: string; format?: string }>
+): Record<string, unknown> | null {
+  if (rows.length === 0) return null;
+  const totals: Record<string, unknown> = {};
+  let any = false;
+  for (const c of cols) {
+    const lower = c.key.toLowerCase();
+    const isMoney = c.format === 'currency';
+    const isCount = c.format === 'number' || SUMMABLE_COUNT_KEYS.has(lower);
+    if (!isMoney && !isCount) continue;
+    const sum = sumColumn(rows, c.key);
+    if (sum === null) continue;
+    totals[c.key] = isMoney ? sum.toFixed(2) : String(Math.round(sum * 100) / 100);
+    any = true;
+  }
+  if (!any) return null;
+  // "TOTAL" in the first text column (usually the narrow id column) and the row count in the
+  // next one, so neither label wraps inside a narrow column.
+  const textCols = cols.filter((c) => !(c.key in totals) && c.format !== 'date');
+  const countLabel = `${rows.length} ${rows.length === 1 ? 'fila' : 'filas'}`;
+  if (textCols.length >= 2) {
+    totals[textCols[0].key] = 'TOTAL';
+    totals[textCols[1].key] = countLabel;
+  } else if (textCols.length === 1) {
+    totals[textCols[0].key] = `TOTAL · ${countLabel}`;
+  }
+  return totals;
+}
+
+/** Summary chips for the inline chat table: row count + every summable column, from ALL rows. */
+function tableSummaryFromTotals(
+  rows: Record<string, unknown>[],
+  cols: Array<{ header: string; key: string; format?: string }>
+): Array<{ label: string; value: string }> | undefined {
+  const totals = buildTotalsRow(rows, cols);
+  const summary: Array<{ label: string; value: string }> = [{ label: 'Filas', value: String(rows.length) }];
+  if (totals) {
+    for (const c of cols) {
+      if (!(c.key in totals)) continue;
+      const v = totals[c.key];
+      if (typeof v === 'string' && v.startsWith('TOTAL')) continue;
+      summary.push({ label: c.header, value: formatValue(v, c.format ?? 'number') });
+    }
+  }
+  return summary;
+}
+
+const NO_ROWS_ERROR =
+  'No recibí filas para el reporte. Vuelve a llamar la tool de datos (ej. querySalesOrders con los mismos filtros de la conversación) ' +
+  'y en cuanto tengas su resultado llama esta tool otra vez: el sistema tomará automáticamente TODAS las filas de esa consulta.';
+
 /* ------------------------------------------------------------------ */
 /* Tools                                                              */
 /* ------------------------------------------------------------------ */
@@ -246,6 +322,7 @@ registerTool({
       value: z.string(),
     })).optional().describe('KPIs de resumen (ej: [{label: "Total", value: "$73,987.77"}, {label: "Órdenes", value: "8"}])'),
     brandColor: z.string().optional().describe('Color hex (ej: #2563eb)'),
+    subsetOnly: subsetOnlySchema,
   }),
   execute: async (_actor, rawArgs) => {
     const args = rawArgs as {
@@ -264,7 +341,7 @@ registerTool({
     const hasRows = args.rows && args.rows.length > 0;
 
     if (!hasSections && !hasRows) {
-      return { error: 'No hay datos para generar el PDF. Llama primero una tool de datos (ej: querySalesOrders, getTopProducts).' };
+      return { error: NO_ROWS_ERROR };
     }
 
     await ensureArtifactsDir();
@@ -335,6 +412,7 @@ registerTool({
           title: sec.title,
           columns: buildPdfColumns(cols),
           rows: flatRows,
+          totalsRow: buildTotalsRow(flatRows, cols) ?? undefined,
         };
       });
     } else {
@@ -345,6 +423,7 @@ registerTool({
       pdfSections = [{
         columns: buildPdfColumns(cols),
         rows: flatRows,
+        totalsRow: buildTotalsRow(flatRows, cols) ?? undefined,
       }];
     }
 
@@ -410,6 +489,7 @@ registerTool({
     })).optional().describe('OPCIONAL. Se generan automáticamente si no se pasan.'),
     summaryCards: z.array(z.object({ label: z.string(), value: z.string() })).optional(),
     brandColor: z.string().optional(),
+    subsetOnly: subsetOnlySchema,
   }),
   execute: async (_actor, rawArgs) => {
     const args = rawArgs as {
@@ -424,7 +504,7 @@ registerTool({
 
     const rows = (args.rows ?? []).map((r) => flattenRow(r));
     if (rows.length === 0) {
-      return { error: 'No hay datos para generar el Excel. Llama primero una tool de datos.' };
+      return { error: NO_ROWS_ERROR };
     }
 
     await ensureArtifactsDir();
@@ -491,6 +571,7 @@ registerTool({
       key: z.string(),
       format: z.enum(['currency', 'number', 'percentage', 'date', 'text']).optional(),
     })).optional().describe('OPCIONAL. Se generan automáticamente si no se pasan.'),
+    subsetOnly: subsetOnlySchema,
   }),
   execute: async (_actor, rawArgs) => {
     const args = rawArgs as {
@@ -502,7 +583,7 @@ registerTool({
 
     const rows = (args.rows ?? []).map((r) => flattenRow(r));
     if (rows.length === 0) {
-      return { error: 'No hay datos para generar el CSV. Llama primero una tool de datos.' };
+      return { error: NO_ROWS_ERROR };
     }
 
     await ensureArtifactsDir();
@@ -632,8 +713,8 @@ registerTool({
   description:
     'Genera IMÁGENES (PNG/SVG) con el reporte: título, KPIs y una tabla — NO es una gráfica de barras/línea/pie (para eso usa generateChart). ' +
     'Úsalo cuando el usuario pida explícitamente "una imagen del reporte", "una foto con los datos", o algo para compartir directo por WhatsApp/redes sin abrir un PDF. ' +
-    'Cada imagen muestra hasta ~20 filas (ajustable con maxRows); si hay más filas de las que caben en una imagen, el sistema genera AUTOMÁTICAMENTE varias imágenes ("Parte 1 de 3", "Parte 2 de 3"...) hasta cubrir TODAS las filas (límite de 8 imágenes ≈ 160 filas — si el usuario pidió aún más, ofrece PDF/Excel para el resto). ' +
-    'SOLO necesitas pasar title y rows; columnas y KPIs se auto-generan igual que en generatePdfReport. Los estados (Cerrado, Pendiente, etc.) se colorean automáticamente.',
+    'Cada imagen muestra hasta ~25 filas (ajustable con maxRows); si hay más filas de las que caben en una imagen, el sistema genera AUTOMÁTICAMENTE varias imágenes ("Parte 1 de 3", "Parte 2 de 3"...) hasta cubrir TODAS las filas (límite de 40 imágenes ≈ 1000 filas — si el usuario pidió aún más, ofrece PDF/Excel para el resto). ' +
+    'SOLO necesitas pasar title (las filas las toma el sistema de la última consulta de datos, TODAS, sin que las escribas); columnas y KPIs se auto-generan igual que en generatePdfReport. Los estados (Cerrado, Pendiente, etc.) se colorean automáticamente y la última imagen incluye la fila de TOTALES.',
   category: 'export',
   requiredPermission: 'sales_orders.view',
   enabledByDefault: true,
@@ -649,7 +730,8 @@ registerTool({
     })).optional().describe('OPCIONAL. Se generan automáticamente de las claves de las rows si no se pasan (columnas de texto largo como direcciones/items se omiten para mantener la imagen compacta).'),
     summaryCards: z.array(z.object({ label: z.string(), value: z.string() })).optional().describe('KPIs de resumen del TOTAL (ej: [{label: "Total", value: "$500,000.00"}]) — se muestran solo en la primera imagen.'),
     brandColor: z.string().optional().describe('Color hex (ej: #2563eb).'),
-    maxRows: z.number().int().min(1).max(60).default(20).describe('Filas por imagen (default 20). No limita el total: si hay más filas que esto, se generan más imágenes.'),
+    maxRows: z.number().int().min(1).max(60).default(25).describe('Filas por imagen (default 25). No limita el total: si hay más filas que esto, se generan más imágenes.'),
+    subsetOnly: subsetOnlySchema,
   }),
   execute: async (_actor, rawArgs) => {
     const args = rawArgs as {
@@ -665,7 +747,7 @@ registerTool({
 
     const flatRows = (args.rows ?? []).map((r) => flattenRow(r));
     if (flatRows.length === 0) {
-      return { error: 'No hay datos para generar la imagen. Llama primero una tool de datos (ej: querySalesOrders, getTopProducts).' };
+      return { error: NO_ROWS_ERROR };
     }
 
     // Long free-text fields never fit in a compact image row — keep the snapshot glanceable.
@@ -680,15 +762,18 @@ registerTool({
 
     // If everything doesn't fit in one image, generate as many as needed to cover ALL rows —
     // never silently truncate to a "preview" and push the user to a file instead.
-    const MAX_IMAGE_PARTS = 8;
+    const MAX_IMAGE_PARTS = 40;
     const totalParts = Math.min(MAX_IMAGE_PARTS, Math.ceil(flatRows.length / args.maxRows));
     const rowsCovered = Math.min(flatRows.length, totalParts * args.maxRows);
     const rowsNotCovered = flatRows.length - rowsCovered;
+    // Totals over the WHOLE set, shown once on the last image (KPIs go on the first).
+    const totalsRow = rowsNotCovered === 0 ? buildTotalsRow(flatRows, cols) : null;
 
     const artifacts: Array<Record<string, unknown>> = [];
     for (let part = 0; part < totalParts; part++) {
       const chunk = flatRows.slice(part * args.maxRows, (part + 1) * args.maxRows);
       const partTitle = totalParts > 1 ? `${args.title} — Parte ${part + 1} de ${totalParts}` : args.title;
+      const isLast = part === totalParts - 1;
       const { svg, width, height } = generateReportImageSvg({
         title: partTitle,
         subtitle: part === 0 ? args.subtitle : `Continuación · filas ${part * args.maxRows + 1}–${part * args.maxRows + chunk.length} de ${flatRows.length}`,
@@ -698,6 +783,7 @@ registerTool({
         columns: imageColumns,
         rows: chunk,
         summaryCards: part === 0 ? args.summaryCards : undefined, // KPIs describe the WHOLE set — show once, not per part
+        totalsRow: isLast && totalsRow ? totalsRow : undefined,
       });
 
       const artifact = await createArtifact({
@@ -743,6 +829,7 @@ registerTool({
     })).optional().describe('OPCIONAL. Se generan automáticamente si no se pasan.'),
     summary: z.array(z.object({ label: z.string(), value: z.string() })).optional(),
     brandColor: z.string().optional(),
+    subsetOnly: subsetOnlySchema,
   }),
   execute: async (_actor, rawArgs) => {
     const args = rawArgs as {
@@ -757,7 +844,7 @@ registerTool({
 
     const rows = (args.rows ?? []).map((r) => flattenRow(r));
     if (rows.length === 0) {
-      return { error: 'No hay datos para generar la tabla. Llama primero una tool de datos.' };
+      return { error: NO_ROWS_ERROR };
     }
 
     const cols = args.columns ?? autoColumns(rows);
@@ -771,7 +858,7 @@ registerTool({
         format: c.format as 'currency' | 'number' | 'percentage' | 'date' | 'text' | undefined,
       })),
       rows,
-      summary: args.summary,
+      summary: args.summary ?? tableSummaryFromTotals(rows, cols),
       brandColor: args.brandColor,
     });
 
@@ -792,6 +879,8 @@ registerTool({
       type: 'table',
       title: args.title,
       inlineRender: true,
+      rowCount: rows.length,
+      note: `La tabla muestra las ${rows.length} filas completas dentro del chat. No las repitas en markdown.`,
     };
   },
 });

@@ -347,6 +347,31 @@ registerTool({
 
     if (args.groupBy === 'none') {
       const paginated = filtered.slice((args.page - 1) * args.pageSize, args.page * args.pageSize);
+      // Exact breakdown of the WHOLE result by ticket status (with folios), so "¿cuáles están
+      // cerradas y cuáles no?" is answered from this data — never by the model re-classifying
+      // rows from memory with its own idea of what "cerrada" means.
+      const byTicket = new Map<string, { count: number; total: number; balance: number; orderNumbers: string[] }>();
+      for (const o of filtered) {
+        const label = ticketStatusOf(o).label;
+        const g = byTicket.get(label) ?? { count: 0, total: 0, balance: 0, orderNumbers: [] };
+        g.count++;
+        g.total += toNumber(o.total);
+        g.balance += toNumber(o.balance);
+        if (g.orderNumbers.length < 200 && o.salesOrderNumber) g.orderNumbers.push(o.salesOrderNumber);
+        byTicket.set(label, g);
+      }
+      const ticketStatusBreakdown = [...byTicket.entries()]
+        .map(([ticketStatus, g]) => ({
+          ticketStatus,
+          count: g.count,
+          total: g.total.toFixed(2),
+          balance: g.balance.toFixed(2),
+          orderNumbers: g.orderNumbers,
+        }))
+        .sort((a, b) => b.count - a.count);
+      const closedCount = byTicket.get('Cerrado')?.count ?? 0;
+      const voidCount = byTicket.get('Anulado')?.count ?? 0;
+
       return {
         mode: 'list',
         total: filtered.length,
@@ -357,6 +382,15 @@ registerTool({
         totalSum: totalRevenue,
         balanceSum: totalBalance,
         ...common,
+        ticketStatusBreakdown,
+        closedVsOpen: {
+          cerradas: closedCount,
+          anuladas: voidCount,
+          noCerradas: filtered.length - closedCount - voidCount,
+          note:
+            '"Cerrada" = ticketStatus Cerrado. "No cerrada / abierta / sin cerrar" = todo lo demás excepto Anulado. ' +
+            'Usa ticketStatusBreakdown (con los folios) para decir cuáles son; no clasifiques tú las filas.',
+        },
         orders: paginated.map((o) => formatOrder(o, args.includeItems, args.includeShippingAddress)),
       };
     }

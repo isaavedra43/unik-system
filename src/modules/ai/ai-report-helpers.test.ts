@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildReportSubtitle, buildSummaryCards } from './ai-report-helpers';
+import { buildReportSubtitle, buildSummaryCards, money, parseNumeric, sumColumn } from './ai-report-helpers';
 
 describe('buildSummaryCards — count vs. money (the "$55.00" bug)', () => {
   it('list mode: total is a COUNT of orders, totalSum is the money', () => {
@@ -55,5 +55,35 @@ describe('buildReportSubtitle', () => {
 
   it('returns undefined without args', () => {
     expect(buildReportSubtitle(null, null)).toBeUndefined();
+  });
+});
+
+describe('parseNumeric / sumColumn — no more "$NaN" from hand-typed amounts', () => {
+  it('parses raw Decimal strings, numbers and already-formatted amounts', () => {
+    expect(parseNumeric('1797.00')).toBe(1797);
+    expect(parseNumeric(2500.5)).toBe(2500.5);
+    expect(parseNumeric('$1,797.00 MXN')).toBe(1797);
+    expect(parseNumeric('$ 5,210,244.55')).toBe(5210244.55);
+    expect(parseNumeric('1.797,00')).toBe(1797);
+    expect(parseNumeric('-$20,800.00')).toBe(-20800);
+  });
+
+  it('returns null for text that is not a number', () => {
+    expect(parseNumeric('')).toBeNull();
+    expect(parseNumeric(null)).toBeNull();
+    expect(parseNumeric('OMAR BARAJAS')).toBeNull();
+    expect(parseNumeric('N/A')).toBeNull();
+  });
+
+  it('money() never prints NaN', () => {
+    expect(money('$1,797.00')).toBe('$1,797.00');
+    expect(money('abc')).toBe('abc');
+    expect(money(undefined)).toBe('$0.00');
+  });
+
+  it('sums a column across mixed representations', () => {
+    const rows = [{ total: '100.00' }, { total: '$250.50' }, { total: null }, { total: 'x' }];
+    expect(sumColumn(rows, 'total')).toBe(350.5);
+    expect(sumColumn([{ total: 'x' }], 'total')).toBeNull();
   });
 });
