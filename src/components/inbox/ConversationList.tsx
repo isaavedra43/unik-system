@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { Inbox, RefreshCw, Search } from 'lucide-react';
+import { Inbox, MessageSquarePlus, RefreshCw, Search } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import {
   formatTime,
@@ -26,6 +26,7 @@ interface Props {
   onLoadMore: () => void;
   onRetry: () => void;
   fullWidth?: boolean;
+  onNewConversation?: () => void;
 }
 
 export function ConversationList({
@@ -41,6 +42,7 @@ export function ConversationList({
   onLoadMore,
   onRetry,
   fullWidth,
+  onNewConversation,
 }: Props) {
   const set = <K extends keyof InboxFilters>(key: K, value: InboxFilters[K]) =>
     onFiltersChange({ ...filters, [key]: value });
@@ -59,6 +61,18 @@ export function ConversationList({
               {accounts.length} canal{accounts.length === 1 ? '' : 'es'}
             </p>
           </div>
+          {onNewConversation && (
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              onClick={onNewConversation}
+              disabled={accounts.length === 0}
+              aria-label="Nueva conversación"
+              title="Nueva conversación"
+            >
+              <MessageSquarePlus size={16} /> Nueva
+            </button>
+          )}
         </div>
         <div className="chat-sidebar-search" style={{ position: 'relative' }}>
           <Search

@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import { ConversationList } from './ConversationList';
 import { ConversationView } from './ConversationView';
 import { AiPanel } from './AiPanel';
+import { NewConversationDialog } from './NewConversationDialog';
 import { useInboxRealtime } from './useInboxRealtime';
 import { useIsMobile } from './useIsMobile';
 import {
@@ -47,6 +48,7 @@ export function InboxPageClient({ user }: { user: InboxUserInfo }) {
   const [aiOpen, setAiOpen] = useState(true);
   const [draft, setDraft] = useState('');
   const [threadVersion, setThreadVersion] = useState(0);
+  const [newOpen, setNewOpen] = useState(false);
   const filtersRef = useRef(filters);
   filtersRef.current = filters;
 
@@ -202,6 +204,7 @@ export function InboxPageClient({ user }: { user: InboxUserInfo }) {
               onLoadMore={loadMore}
               onRetry={() => loadConversations(filters)}
               fullWidth={isMobile}
+              onNewConversation={() => setNewOpen(true)}
             />
           </div>
         )}
@@ -263,6 +266,19 @@ export function InboxPageClient({ user }: { user: InboxUserInfo }) {
           </aside>
         )}
       </div>
+      <NewConversationDialog
+        open={newOpen}
+        accounts={accounts}
+        onClose={() => setNewOpen(false)}
+        onCreated={(conversation) => {
+          setConversations((prev) => [
+            conversation,
+            ...prev.filter((c) => c.id !== conversation.id),
+          ]);
+          selectConversation(conversation.id);
+          setThreadVersion((v) => v + 1);
+        }}
+      />
     </div>
   );
 }

@@ -28,7 +28,7 @@ import {
 } from './comms-contacts-service';
 import { CommsError, assertFound } from './comms-errors';
 import { filterReadableObjectIds } from './comms-storage';
-import { channelForProvider, detectConsentKeyword, previewText } from './normalize';
+import { channelForProvider, detectConsentKeyword, normalizePhone, previewText } from './normalize';
 import './comms-storage';
 
 export * from './comms-accounts-service';
@@ -602,6 +602,95 @@ export async function sendOutboundMessage(input: SendOutboundInput): Promise<Com
  * Persists an inbound message exactly once. Returns `created: false` when the
  * provider id was already stored (webhook retries).
  */
+
+// ---------------------------------------------------------------------------
+// Outbound-initiated conversations
+// ---------------------------------------------------------------------------
+
+export const startConversationSchema = z.object({
+  accountId: z.string().min(1),
+  /** Phone (E.164 or 10 digits MX) for Twilio channels; chat id for Telegram. */
+  to: z.string().min(3).max(40),
+  contactName: z.string().max(120).optional(),
+  body: z.string().max(4000).optional(),
+  templateKey: z.string().max(120).optional(),
+  templateVariables: z.record(z.string().max(500)).optional(),
+});
+
+export type StartConversationInput = z.infer<typeof startConversationSchema>;
+
+/**
+ * Starts (or reopens) a conversation with a contact from the inbox and sends
+ * the first message. Same door as every outbound message: consent, account
+ * access and adapter idempotency apply. WhatsApp requires an approved
+ * template when the contact has not written in the last 24 hours; without
+ * `templateKey` the provider will reject it and the message is marked failed.
+ */
+export async function startConversation(
+  actor: CurrentUser,
+  input: StartConversationInput
+): Promise<{ conversation: CommConversationDTO; message: CommMessageDTO | null }> {
+  assertInboxUse(actor);
+  const account = assertFound(
+    await prisma.commAccount.findUnique({ where: { id: input.accountId } }),
+    'Cuenta no encontrada'
+  );
+  assertAccountAccess(actor, account);
+  if (account.status !== 'active')
+    throw new CommsError('La cuenta está pausada', 409, 'account_paused');
+
+  const isTelegram = account.provider === 'telegram';
+  const identifier = isTelegram ? input.to.trim() : normalizePhone(input.to);
+  if (!identifier) throw new CommsError('El número debe estar en formato E.164 (+52...)', 400);
+  if (identifier === account.identifier)
+    throw new CommsError('No puedes escribirte a tu propio número', 400);
+
+  const contact = await upsertContactForInbound(account.provider, identifier, input.contactName);
+  if (input.contactName?.trim() && contact.displayName !== input.contactName.trim()) {
+    await prisma.commContact.update({
+      where: { id: contact.id },
+      data: { displayName: input.contactName.trim() },
+    });
+  }
+
+  let conversation = await prisma.commConversation.findFirst({
+    where: { accountId: account.id, contactId: contact.id },
+    orderBy: { lastMessageAt: 'desc' },
+  });
+  if (!conversation) {
+    conversation = await prisma.commConversation.create({
+      data: {
+        accountId: account.id,
+        contactId: contact.id,
+        status: 'open',
+        assignedToUserId: actor.id,
+        lastMessageAt: new Date(),
+      },
+    });
+  } else if (conversation.status !== 'open') {
+    conversation = await prisma.commConversation.update({
+      where: { id: conversation.id },
+      data: { status: 'open', snoozedUntil: null },
+    });
+  }
+
+  let message: CommMessageDTO | null = null;
+  const hasBody = Boolean(input.body?.trim()) || Boolean(input.templateKey);
+  if (hasBody) {
+    message = await sendOutboundMessage({
+      accountId: account.id,
+      conversationId: conversation.id,
+      body: input.body ?? '',
+      sentByUserId: actor.id,
+      templateKey: input.templateKey,
+      templateVariables: input.templateVariables,
+      actor,
+    });
+  }
+  const dto = await getConversation(actor, conversation.id);
+  return { conversation: dto, message };
+}
+
 export async function recordInboundMessage(
   account: CommAccount,
   inbound: InboundMessage
