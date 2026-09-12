@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { AssistantAdminStatCard } from '@/components/assistant/admin/AssistantAdminStatCard';
 import type { VoiceSettings } from '@/modules/voice/voice-settings';
+import { VoiceAgentSettingsPanel } from './VoiceAgentSettingsPanel';
 
 interface Payload {
   settings: VoiceSettings;
@@ -39,11 +40,12 @@ interface Payload {
   };
 }
 
-type TabId = 'status' | 'ai' | 'recording';
+type TabId = 'status' | 'ai' | 'agent' | 'recording';
 
 const TABS: Array<{ id: TabId; label: string }> = [
   { id: 'status', label: 'Estado' },
   { id: 'ai', label: 'IA por cuenta' },
+  { id: 'agent', label: 'Agente de voz' },
   { id: 'recording', label: 'Grabación y retención' },
 ];
 
@@ -354,6 +356,8 @@ export function VoiceAdminPanel() {
             </button>
           </div>
         )}
+
+        {tab === 'agent' && <VoiceAgentSettingsPanel />}
 
         {tab === 'recording' && (
           <div className="assistant-admin-section">

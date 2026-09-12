@@ -99,6 +99,14 @@ vi.mock('@/modules/voice/voice-settings', () => ({
   getVoiceSettings: async () => ({ maxAiAnswerSeconds: 600 }),
 }));
 
+vi.mock('@/modules/storage/storage-settings-service', () => ({
+  getStorageState: async () => agentSettingsStored,
+  setStorageState: async (_k: string, v: unknown) => {
+    agentSettingsStored = v;
+  },
+}));
+let agentSettingsStored: unknown = null;
+
 vi.mock('@/modules/voice/voice-service', () => ({
   IDENTITY: { ai: (id: string) => `ai-${id}`, sip: (id: string) => `sip-${id}` },
   VoiceError: class VoiceError extends Error {
@@ -121,6 +129,7 @@ vi.mock('@/modules/voice/voice-service', () => ({
 }));
 
 import * as livekit from './livekit-service';
+import { DEFAULT_VOICE_AGENT_SETTINGS } from './voice-agent-settings';
 import {
   buildAgentContext,
   buildAgentInstructions,
@@ -174,6 +183,7 @@ beforeEach(() => {
   executed.length = 0;
   aiSettings = { isEnabled: true, voiceEnabled: true };
   providerKey = 'sk-test';
+  agentSettingsStored = null;
 });
 
 describe('brief', () => {
@@ -201,6 +211,8 @@ describe('brief', () => {
 
   it('instructions carry the honesty and confidentiality rules', () => {
     const text = buildAgentInstructions({
+      settings: DEFAULT_VOICE_AGENT_SETTINGS,
+      enabledTools: ['searchSalesOrders'],
       contactName: null,
       contactPhone: '+52',
       contactKnown: false,
@@ -210,10 +222,53 @@ describe('brief', () => {
     });
     expect(text).toContain('No te presentas como persona');
     expect(text).toContain('asistente virtual de UNIK');
-    expect(text).toContain('Nunca reveles datos de otros clientes');
+    expect(text).toContain('quién es el dueño');
     expect(text).toContain('no está registrado');
     expect(text).toContain('solicitarTransferencia');
     expect(text).toContain('terminarLlamada');
+  });
+});
+
+describe('admin settings', () => {
+  it('filters tools by allowed domains and uses the configured persona/model/voice', async () => {
+    agentSettingsStored = {
+      personaName: 'Sofía',
+      companyName: 'Mi Empresa',
+      model: 'gpt-realtime-mini',
+      voice: 'cedar',
+      allowedDomains: ['products'],
+      publicInfo: 'Horario: lunes a viernes de 9 a 18.',
+      forbiddenTopics: 'competencia\nsalarios',
+    };
+    const id = seedCall();
+    const ctx = await buildAgentContext(id);
+    expect(ctx.personaName).toBe('Sofía');
+    expect(ctx.model).toBe('gpt-realtime-mini');
+    expect(ctx.voice).toBe('cedar');
+    expect(ctx.greeting).toContain('Mi Empresa');
+    // searchSalesOrders belongs to "orders", which is not allowed → only control tools remain.
+    expect(ctx.tools.map((t) => t.name)).toEqual(['solicitarTransferencia', 'terminarLlamada']);
+    expect(ctx.instructions).toContain('Horario: lunes a viernes');
+    expect(ctx.instructions).toContain('competencia; salarios');
+    expect(ctx.instructions).toContain('asistente virtual de Mi Empresa');
+    const res = await runAgentTool({
+      callId: id,
+      name: 'searchSalesOrders',
+      args: {},
+      generation: 3,
+    });
+    expect(res).toMatchObject({ ok: false, code: 'tool_not_allowed' });
+  });
+
+  it('keeps the honesty rule even when the default prompt is replaced', async () => {
+    agentSettingsStored = {
+      replaceDefaultPrompt: true,
+      customInstructions: 'Eres Max, vendes llantas.',
+    };
+    const id = seedCall();
+    const ctx = await buildAgentContext(id);
+    expect(ctx.instructions.startsWith('Eres Max, vendes llantas.')).toBe(true);
+    expect(ctx.instructions).toContain('No te presentas como persona');
   });
 });
 

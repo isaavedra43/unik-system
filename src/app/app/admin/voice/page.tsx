@@ -12,7 +12,7 @@ export default async function VoiceAdminPage() {
     <div className="assistant-admin-page">
       <PageHeader
         title="Telefonía — Voz y supervisión"
-        description="Estado de LiveKit y Twilio, IA por cuenta, catálogo de tareas permitidas, grabación por defecto y retención."
+        description="Estado de LiveKit y Twilio, IA por cuenta, configuración del agente de voz, grabación por defecto y retención."
       />
       <VoiceAdminPanel />
     </div>

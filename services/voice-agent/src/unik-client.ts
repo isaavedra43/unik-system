@@ -21,9 +21,16 @@ export interface AgentContext {
   language: string;
   model: string;
   voice: string;
+  speed: number;
+  reasoningEffort: 'minimal' | 'low' | 'medium' | 'high';
+  turnEagerness: 'auto' | 'low' | 'medium' | 'high';
+  sttModel: string;
+  noiseReduction: 'near_field' | 'far_field' | 'off';
+  silenceCheckSeconds: number;
   openaiApiKey: string | null;
   openaiEndpoint: string | null;
   personaName: string;
+  companyName: string;
   greeting: string;
   instructions: string;
   maxAnswerSeconds: number;

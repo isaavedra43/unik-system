@@ -168,3 +168,16 @@ cotizar, no cambiar condiciones, no enviar documentos; no inventar.
 **Estado.** La tarjeta "Agente de voz" en Telefonía → Estado muestra el nombre del agente y la última vez que un worker
 habló con UNIK. Sin worker desplegado, las llamadas con "IA atiende" siguen entrando (la IA simplemente no habla) y
 Deploy Logs muestran `[voice-agent] dispatch failed` si LiveKit no encuentra un worker registrado.
+
+### Configuración del agente (Telefonía → Agente de voz)
+
+`src/modules/voice/voice-agent-settings.ts` guarda en el estado `voice:agent` la persona (nombre, empresa, descripción,
+saludo con `{empresa}/{asistente}/{nombre}`), modelo (`gpt-realtime`, `gpt-realtime-mini`, `gpt-4o-realtime-preview`),
+voz, velocidad, esfuerzo de razonamiento, avidez de turno, idioma, trato, personalidad, información pública permitida,
+temas prohibidos, instrucciones adicionales (o reemplazo completo del prompt), verificación de identidad, dominios de
+información (`VOICE_AGENT_DATA_DOMAINS` → herramientas del registro) y parámetros de transcripción/ruido/silencio. La
+API es `/app/admin/voice/api/agent` (GET con vista previa del prompt, PATCH auditado). El brief del worker se construye
+en cada llamada con estos valores, así que un cambio aplica en la siguiente llamada sin redeploy. El filtro por dominios
+se aplica dos veces: al anunciar herramientas al modelo y al ejecutarlas (`runAgentTool`). La regla de honestidad se
+añade siempre, incluso con prompt reemplazado. Cada segmento de transcripción lleva `startMs` relativo al inicio de la
+sesión de voz y `createdAt`; la UI muestra ambos.

@@ -187,34 +187,56 @@ export default defineAgent({
       return;
     }
 
+    const sttLanguage =
+      brief.language === 'en' ? 'en' : brief.language === 'auto' ? undefined : 'es';
+    const supportsReasoning = /^gpt-realtime/.test(brief.model);
     const model = new openai.realtime.RealtimeModel({
       model: brief.model,
       voice: brief.voice,
       apiKey: brief.openaiApiKey,
       ...(brief.openaiEndpoint ? { baseURL: brief.openaiEndpoint } : {}),
-      inputAudioTranscription: { model: 'gpt-4o-mini-transcribe', language: 'es' },
-      inputAudioNoiseReduction: { type: 'far_field' },
+      speed: brief.speed,
+      ...(supportsReasoning ? { reasoning: { effort: brief.reasoningEffort } } : {}),
+      inputAudioTranscription: {
+        model: brief.sttModel || 'gpt-4o-transcribe',
+        ...(sttLanguage ? { language: sttLanguage } : {}),
+      },
+      inputAudioNoiseReduction:
+        brief.noiseReduction === 'off' ? null : { type: brief.noiseReduction },
       turnDetection: {
         type: 'semantic_vad',
-        eagerness: 'auto',
+        eagerness: brief.turnEagerness,
         create_response: true,
         interrupt_response: true,
       },
       maxSessionDuration: Math.max(60, brief.maxAnswerSeconds + 120) * 1000,
     });
+    const callStartedAt = Date.now();
+    const elapsedMs = () => Date.now() - callStartedAt;
 
     const agent = new voice.Agent({
       instructions: brief.instructions,
       tools: buildTools(brief, unik, rt),
     });
 
-    const session = new voice.AgentSession({ llm: model });
+    const session = new voice.AgentSession({
+      llm: model,
+      userAwayTimeout: Math.max(5, brief.silenceCheckSeconds) * 1000,
+    });
 
     // Transcript → UNIK (gated there by aiState/aiGeneration).
     session.on(voice.AgentSessionEventTypes.UserInputTranscribed, (ev) => {
       if (!ev.isFinal || !ev.transcript.trim()) return;
+      const at = elapsedMs();
       unik
-        .transcript({ callId, speaker: 'caller', text: ev.transcript, generation: rt.generation })
+        .transcript({
+          callId,
+          speaker: 'caller',
+          text: ev.transcript,
+          generation: rt.generation,
+          startMs: at,
+          endMs: at,
+        })
         .catch(() => undefined);
     });
     session.on(voice.AgentSessionEventTypes.ConversationItemAdded, (ev) => {
@@ -222,8 +244,16 @@ export default defineAgent({
       if (item.role !== 'assistant') return;
       const text = item.textContent?.trim();
       if (!text) return;
+      const at = elapsedMs();
       unik
-        .transcript({ callId, speaker: 'ai', text, generation: rt.generation })
+        .transcript({
+          callId,
+          speaker: 'ai',
+          text,
+          generation: rt.generation,
+          startMs: at,
+          endMs: at,
+        })
         .catch(() => undefined);
     });
 

@@ -432,7 +432,14 @@ export function CallDetail({
                         : s.speakerIdentity === 'recording'
                           ? 'Grabación'
                           : 'Cliente'}{' '}
-                    · {formatDuration(Math.floor(s.startMs / 1000))}
+                    · {formatDuration(Math.floor(s.startMs / 1000))} ·{' '}
+                    {new Date(s.createdAt).toLocaleString('es-MX', {
+                      day: '2-digit',
+                      month: 'short',
+                      hour: '2-digit',
+                      minute: '2-digit',
+                      second: '2-digit',
+                    })}
                   </span>
                   <span>{s.text}</span>
                 </div>
