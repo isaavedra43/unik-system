@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { Prisma } from '@prisma/client';
 import { ZodError } from 'zod';
 import { getCurrentSession, hasPermission, type CurrentUser } from '@/modules/auth/authorization';
 import { CommsError } from '@/modules/comms/comms-errors';
@@ -68,6 +69,31 @@ export function commsErrorResponse(err: unknown): NextResponse {
   }
   const message = err instanceof Error ? err.message : 'Error desconocido';
   console.error('[comms-api]', message);
+  // Configuration problems must be visible to the administrator instead of a bare 500.
+  if (/UNIK_SECRETS_MASTER_KEY/.test(message)) {
+    return NextResponse.json(
+      {
+        error:
+          'UNIK_SECRETS_MASTER_KEY falta o no es válida: debe ser una clave de 32 bytes en base64 (openssl rand -base64 32). Corrígela en Railway y redespliega.',
+      },
+      { status: 503 }
+    );
+  }
+  if (
+    err instanceof Prisma.PrismaClientKnownRequestError &&
+    (err.code === 'P2021' || err.code === 'P2022')
+  ) {
+    return NextResponse.json(
+      {
+        error:
+          'La base de datos no tiene las tablas nuevas: falta aplicar las migraciones (npx prisma migrate deploy en el Pre-deploy de Railway).',
+      },
+      { status: 503 }
+    );
+  }
+  if (err instanceof Prisma.PrismaClientInitializationError) {
+    return NextResponse.json({ error: 'No se pudo conectar a la base de datos' }, { status: 503 });
+  }
   return NextResponse.json({ error: 'Error interno' }, { status: 500 });
 }
 
