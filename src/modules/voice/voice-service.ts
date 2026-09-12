@@ -525,6 +525,20 @@ export async function registerInboundCall(input: {
   });
   const settings = await getVoiceSettings();
   const aiAnswers = aiAnswersAccount(settings, account?.id ?? null);
+  // Idempotent per Twilio CallSid: retries of the voice webhook (timeouts,
+  // fallback handler) must answer the same TwiML instead of creating a new
+  // call for the same PSTN leg.
+  const existing = await prisma.voiceCall.findFirst({
+    where: { fromIdentity: `twilio:${input.providerCallSid}`, type: 'inbound' },
+    select: { id: true },
+  });
+  if (existing) {
+    return {
+      call: await publishCall(await loadCall(existing.id), 'call_updated'),
+      sipUri: livekit.buildInboundSipUri(existing.id),
+      aiAnswers,
+    };
+  }
   const id = newCallId();
   const room = await livekit.createRoom(id);
   await prisma.voiceCall.create({

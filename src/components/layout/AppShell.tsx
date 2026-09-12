@@ -333,7 +333,7 @@ function buildBreadcrumbs(pathname: string): { label: string; href?: string }[] 
     ['/app/admin/knowledge', ['Administración', 'Biblioteca aprobada']],
     ['/app/admin/comms', ['Administración', 'Canales y responsables']],
     ['/app/admin/voice', ['Administración', 'Telefonía']],
-    ['/app/inbox', ['Comunicaciones', 'Bandeja']],
+    ['/app/inbox', ['Comunicaciones', 'Bandeja externa']],
     ['/app/requests', ['Comunicaciones', 'Solicitudes']],
     ['/app/quotes', ['Comunicaciones', 'Cotizaciones']],
     ['/app/campaigns', ['Comunicaciones', 'Campañas']],
@@ -575,7 +575,7 @@ export default function AppShell({ user, children }: AppShellProps) {
       items: [
         {
           href: '/app/inbox',
-          label: 'Bandeja',
+          label: 'Bandeja externa',
           icon: <Inbox size={18} />,
           visible: user.permissionKeys.includes('inbox.use') || user.isSuperAdmin,
         },
