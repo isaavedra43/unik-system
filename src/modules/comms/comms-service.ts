@@ -683,7 +683,12 @@ export async function startConversation(
       body: input.body ?? '',
       sentByUserId: actor.id,
       templateKey: input.templateKey,
-      templateVariables: input.templateVariables,
+      // Default template variables: {{1}} = contact name, {{2}} = agent name.
+      templateVariables:
+        input.templateVariables ??
+        (input.templateKey
+          ? { '1': contact.displayName || identifier, '2': actor.name || 'UNIK' }
+          : undefined),
       actor,
     });
   }
