@@ -22,7 +22,7 @@ import type { IssuedToken } from '@/modules/voice/livekit-service';
 import { Modal } from '@/components/ui/composite';
 import { Button, FormField, Select } from '@/components/ui/primitives';
 import { useCallStream, type CallStreamEvent } from './useCallStream';
-import { CallRoomPlaceholder } from './CallRoomPlaceholder';
+import { CallRoom } from './CallRoom';
 import { AiBadge, formatDuration, RecordingBadge, STATUS_LABEL, TYPE_LABEL } from './CallsList';
 
 interface Suggestion {
@@ -515,7 +515,7 @@ export function CallDetail({
             )}
           </div>
 
-          <CallRoomPlaceholder token={token} />
+          <CallRoom token={token} />
 
           {call.recordingObjectId ? (
             <div className="card">

@@ -96,8 +96,8 @@ export function CallRoomPlaceholder({ token }: { token: IssuedToken | null }) {
           }}
         >
           <Info size={14} aria-hidden="true" />
-          La conexión WebRTC desde el navegador requiere instalar <code>livekit-client</code>;
-          mientras tanto usa este token en un cliente LiveKit.
+          Modo simulado: sin <code>LIVEKIT_URL</code> no hay audio real. Con LiveKit configurado la
+          sala se conecta automáticamente desde el navegador.
         </span>
       </div>
     </div>

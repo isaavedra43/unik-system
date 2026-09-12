@@ -83,7 +83,7 @@ Los equipos de una cuenta (`CommAccount.teamKeys`) se comparan con las claves de
 
 ### Limitación del susurro
 
-LiveKit no enruta audio a un solo participante. El cliente de cada participante debe ignorar las pistas cuyo `metadata.whisperTo` no coincida con su identidad; el supervisor en `whisper` es `hidden`. Hasta instalar `livekit-client` esta lógica queda documentada, no implementada en el navegador.
+LiveKit no enruta audio a un solo participante. El cliente de cada participante debe ignorar las pistas cuyo `metadata.whisperTo` no coincida con su identidad; el supervisor en `whisper` es `hidden`. `livekit-client` ya está instalado y `CallRoom.tsx` conecta la sala; el filtrado de pistas por `whisperTo` queda documentado, no implementado (hoy el susurro lo oyen todos los que suscriben la pista).
 
 ## 6. IA en llamadas
 
@@ -105,7 +105,7 @@ Canal `call:{id}` (SSE `/app/realtime/api/stream?channels=call:{id}`): `call_upd
 ## 9. Límites conocidos
 
 - **Agente de voz en tiempo real dentro de LiveKit (Agents)**: pendiente de validación externa. Hoy el ciclo STT→LLM→TTS es por HTTP (`/ai/turn`); un worker de LiveKit Agents puede consumir ese endpoint o sustituirlo.
-- **`livekit-client` no está instalado**: la UI muestra sala/identidad/token (`CallRoomPlaceholder`); la conexión WebRTC del navegador requiere instalarlo (no se instaló).
+- **Audio en navegador**: `src/components/calls/CallRoom.tsx` (livekit-client 2.x) conecta con el token emitido, publica micrófono si el rol lo permite y reproduce las pistas remotas; en modo simulado se muestra `CallRoomPlaceholder`. Validado solo por tipos y lint, no contra un servidor LiveKit real.
 - El canal `call:` del SSE se autoriza hoy con `calls.use` (ruta de realtime, fuera de este módulo); pendiente extenderla a `calls.supervise` y a la membresía de la llamada.
 - Identidad de participantes SIP entrantes: depende de la regla de despacho configurada en LiveKit.
 
