@@ -7,6 +7,4 @@
 import '@/modules/storage/storage-access';
 import '@/modules/copilot/knowledge-service';
 import '@/modules/voice/voice-access';
-import '@/modules/studio/studio-storage-access';
-import '@/modules/quotes/quotes-access';
 import '@/modules/comms/comms-storage';

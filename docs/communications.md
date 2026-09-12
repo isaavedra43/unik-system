@@ -1,6 +1,6 @@
-# Comunicaciones omnicanal (bandeja, solicitudes internas, compromisos)
+# Comunicaciones omnicanal (bandeja, compromisos)
 
-Única fuente de verdad sobre cómo UNIK recibe y envía mensajes de WhatsApp, SMS y Telegram, y cómo se apoyan en ellos las solicitudes internas, el directorio de responsables y los compromisos.
+Única fuente de verdad sobre cómo UNIK recibe y envía mensajes de WhatsApp, SMS y Telegram, y cómo se apoyan en ellos el directorio de responsables y los compromisos.
 
 ## 1. Arquitectura
 
@@ -31,12 +31,11 @@ Bandeja (/app/inbox) ──POST messages──▶ sendOutboundMessage (consentim
 | Conversaciones, mensajes, notas, relevo              | `src/modules/comms/comms-service.ts`                                            |
 | IA asistiva (resumen, respuesta, traducción, relevo) | `src/modules/comms/comms-ai.ts`                                                 |
 | Directorio de responsables                           | `src/modules/comms/responsibles-service.ts`                                     |
-| Solicitudes internas con expediente                  | `src/modules/comms/requests-service.ts`                                         |
 | Compromisos y sugerencias heurísticas                | `src/modules/comms/commitments-service.ts`                                      |
 | Almacenamiento (upload/acceso)                       | `src/modules/comms/comms-storage.ts`                                            |
 | Jobs                                                 | `src/modules/comms/comms-jobs.ts`                                               |
 | Tools del asistente                                  | `src/modules/ai/tools/comms-tools.ts`                                           |
-| UI bandeja / solicitudes / admin                     | `src/components/inbox`, `src/components/requests`, `src/components/comms-admin` |
+| UI bandeja / admin                                   | `src/components/inbox`, `src/components/comms-admin`                            |
 
 ### Reglas que no cambian
 
@@ -54,8 +53,7 @@ Bandeja (/app/inbox) ──POST messages──▶ sendOutboundMessage (consentim
 | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `inbox.use`    | Ver y responder conversaciones de las cuentas de sus equipos, notas internas, tomar conversaciones sin asignar, compromisos propios, adjuntar archivos |
 | `inbox.assign` | Asignar a otros, cambiar estado de cualquier conversación de sus equipos, relevar, confirmar/descartar duplicados                                      |
-| `inbox.admin`  | Cuentas (números/bots, credenciales, webhooks), responsables, ver todas las cuentas y solicitudes                                                      |
-| `requests.use` | Crear y dar seguimiento a solicitudes internas (ve las propias y las asignadas)                                                                        |
+| `inbox.admin`  | Cuentas (números/bots, credenciales, webhooks), responsables, ver todas las cuentas                                                                    |
 
 El asignado de una conversación puede cambiar su estado y relevarla aunque no tenga `inbox.assign`.
 
@@ -94,13 +92,11 @@ El asignado de una conversación puede cambiar su estado y relevarla aunque no t
 - Tiempo real: SSE `/app/realtime/api/stream` con canales `inbox:{roleKey}` y `user:{id}`. Los eventos solo llevan ids (nunca texto), el cliente vuelve a pedir lo que muestra.
 - Adjuntos: `uploadFile` con destino `{ type: 'comm_conversation', id }` (imagen/PDF/audio/mp4, 25 MB). Los ids viajan como `mediaObjectIds`; el servidor vuelve a validar que el remitente pueda leerlos.
 - **Relevo asistido de operador**: reasigna y añade una nota interna con un resumen generado por IA a partir de los últimos mensajes; si la IA falla, la nota lleva los últimos 5 mensajes en texto plano.
-- Duplicados: al crear/actualizar contactos se buscan coincidencias (teléfono E.164, correo normalizado, o nombre normalizado + mismo dominio). El contacto queda `pending` con el sospechoso en `duplicateOfId`. Un humano confirma (fusión: conversaciones, compromisos, consentimientos y solicitudes pasan al sobreviviente; el duplicado queda `confirmed` apuntando a él) o descarta.
+- Duplicados: al crear/actualizar contactos se buscan coincidencias (teléfono E.164, correo normalizado, o nombre normalizado + mismo dominio). El contacto queda `pending` con el sospechoso en `duplicateOfId`. Un humano confirma (fusión: conversaciones, compromisos y consentimientos pasan al sobreviviente; el duplicado queda `confirmed` apuntando a él) o descarta.
 
-## 6. Solicitudes internas (`/app/requests`) y responsables
+## 6. Responsables
 
-- `InternalRequest` con tipo, prioridad, fecha límite, archivos (`StorageObject` que el usuario pueda leer, validado con `resolveFileAccess`), contacto/conversación de origen, **expediente** (`dossier.facts[]` con `source: user | ai`) y línea de tiempo (`InternalRequestEvent`).
-- Asignación automática: si `type` coincide con un área del directorio (`Responsible.area`, slug), se asigna al titular activo o a su respaldo. El asignado recibe un evento `request` en `user:{id}`.
-- Tablero por estado o lista; detalle con timeline, expediente, adjuntos (destino `internal_request`), asignación y comentarios.
+- Directorio `Responsible` por área (slug) con titular y respaldo; se administra en `/app/admin/comms` y lo consultan la bandeja y el asistente.
 
 ## 7. Compromisos
 
@@ -115,8 +111,6 @@ El asignado de una conversación puede cambiar su estado y relevarla aunque no t
 | `getConversationMessages` | read                                                                               | `inbox.use`    |
 | `draftReply`              | draft                                                                              | `inbox.use`    |
 | `sendInboxMessage`        | **external_send** (propuesta obligatoria; el resumen muestra destinatario y texto) | `inbox.use`    |
-| `createInternalRequest`   | internal_task                                                                      | `requests.use` |
-| `resolveResponsible`      | read                                                                               | `requests.use` |
 | `listCommitments`         | read                                                                               | `inbox.use`    |
 | `createCommitment`        | internal_task                                                                      | `inbox.use`    |
 | `findDuplicateContacts`   | read                                                                               | `inbox.use`    |
@@ -140,6 +134,5 @@ El asignado de una conversación puede cambiar su estado y relevarla aunque no t
 5. Enviar "BAJA" desde el teléfono: la bandeja rechaza el siguiente envío con "baja registrada"; escribir de nuevo desde el teléfono vuelve a permitir responder.
 6. Telegram: `setWebhook` con el secreto mostrado; enviar texto y foto al bot; la foto aparece cuando termina el job `comms.process_inbound`. Un `setWebhook` con otro secreto debe producir 403.
 7. Relevo asistido: asignar a otro operador; la nota interna contiene el resumen (IA o texto plano si la IA no está configurada) y el destinatario recibe el aviso.
-8. Solicitud interna de tipo "instalaciones" con responsable configurado: se asigna sola y el responsable recibe el evento.
-9. Compromiso con vencimiento pasado: tras el job horario queda "Vencido" y el dueño recibe el aviso.
-10. Crear dos contactos con el mismo correo: el segundo aparece en "Duplicados pendientes"; fusionar mueve sus conversaciones.
+8. Compromiso con vencimiento pasado: tras el job horario queda "Vencido" y el dueño recibe el aviso.
+9. Crear dos contactos con el mismo correo: el segundo aparece en "Duplicados pendientes"; fusionar mueve sus conversaciones.

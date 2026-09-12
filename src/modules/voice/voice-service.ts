@@ -25,12 +25,7 @@ import {
 import { getStorageSettings } from '@/modules/storage/storage-settings-service';
 import * as livekit from './livekit-service';
 import type { SupervisionMode } from './livekit-service';
-import {
-  aiAnswersAccount,
-  getVoiceSettings,
-  isTaskTypeAllowed,
-  type VoiceSettings,
-} from './voice-settings';
+import { aiAnswersAccount, getVoiceSettings } from './voice-settings';
 
 /**
  * Voice service — calls over LiveKit (internal, inbound and outbound through
@@ -563,6 +558,12 @@ export async function registerInboundCall(input: {
     callId: id,
     accountId: account?.id ?? null,
   });
+  if (aiAnswers) {
+    // Voice agent worker (services/voice-agent): dispatched now so it is in
+    // the room when the PSTN leg lands. Failures are logged, never fatal.
+    const { dispatchVoiceAgent } = await import('./voice-agent-service');
+    await dispatchVoiceAgent(id, 'inbound');
+  }
   return { call: dto, sipUri: livekit.buildInboundSipUri(id), aiAnswers };
 }
 
@@ -755,6 +756,9 @@ export async function resumeAi(actor: CurrentUser, callId: string): Promise<Voic
     targetType: 'voice_call',
     targetId: callId,
   });
+  // The worker leaves the room on pause; bring a fresh one back on resume.
+  const { dispatchVoiceAgent } = await import('./voice-agent-service');
+  await dispatchVoiceAgent(callId, 'resume');
   return publishCall(await loadCall(callId), 'ai_state', { by: actor.id });
 }
 
@@ -1100,6 +1104,16 @@ export async function handleLiveKitEvent(
       await publishCall(await loadCall(call.id), 'participant_left', {
         identity: event.participant.identity,
       });
+      // The PSTN leg (SIP participant) hanging up ends the call: the agents
+      // and the AI must not stay in an empty room waiting for room_finished.
+      const isExternalLeg =
+        event.participant.identity.startsWith('sip_') ||
+        event.participant.identity === IDENTITY.sip(call.id);
+      if (isExternalLeg && (call.status === 'active' || call.status === 'ringing')) {
+        const status =
+          call.status === 'ringing' ? (call.type === 'inbound' ? 'missed' : 'failed') : 'ended';
+        await finishCall(call.id, status, 'service:livekit');
+      }
       return { handled: true, callId: call.id };
     }
     case 'room_finished': {
@@ -1387,93 +1401,6 @@ export async function transcribeRecording(
   } finally {
     await fsp.rm(dir, { recursive: true, force: true }).catch(() => undefined);
   }
-}
-
-// ---------------------------------------------------------------------------
-// Tasks created from calls (allowed catalog, one task per call+type)
-// ---------------------------------------------------------------------------
-
-export interface CreateTaskFromCallInput {
-  callId: string;
-  type: string;
-  title: string;
-  description?: string;
-  /** User creating the task (human) or null when the AI creates it. */
-  actorUserId: string | null;
-  assigneeUserId?: string | null;
-  priority?: 'normal' | 'high' | 'urgent';
-}
-
-export type CreateTaskResult =
-  | { created: true; requestId: string }
-  | { created: false; requestId: string; reason: 'duplicate' }
-  | { created: false; reason: 'type_not_allowed' | 'no_owner' | 'call_not_found' };
-
-/**
- * A single call request creates ONE task: the same (callId, type) pair is
- * deduplicated. The type must be in the admin-allowed catalog.
- */
-export async function createTaskFromCall(
-  input: CreateTaskFromCallInput,
-  settings?: VoiceSettings
-): Promise<CreateTaskResult> {
-  const voiceSettings = settings ?? (await getVoiceSettings());
-  if (!isTaskTypeAllowed(voiceSettings, input.type))
-    return { created: false, reason: 'type_not_allowed' };
-  const call = await prisma.voiceCall.findUnique({ where: { id: input.callId } });
-  if (!call) return { created: false, reason: 'call_not_found' };
-  const existing = await prisma.internalRequest.findFirst({
-    where: {
-      type: input.type,
-      dossier: { path: ['callId'], equals: input.callId },
-    },
-    select: { id: true },
-  });
-  if (existing) return { created: false, requestId: existing.id, reason: 'duplicate' };
-
-  const owner =
-    input.actorUserId ??
-    input.assigneeUserId ??
-    call.initiatedByUserId ??
-    voiceSettings.defaultTaskOwnerUserId;
-  if (!owner) return { created: false, reason: 'no_owner' };
-  const request = await prisma.internalRequest.create({
-    data: {
-      type: input.type,
-      title: input.title.trim().slice(0, 200),
-      description: input.description?.trim().slice(0, 4000) ?? null,
-      requesterUserId: owner,
-      assigneeUserId: input.assigneeUserId ?? (input.actorUserId ? null : owner),
-      status: 'open',
-      priority: input.priority ?? 'normal',
-      contactId: call.contactId,
-      dossier: {
-        source: 'voice',
-        callId: call.id,
-        callType: call.type,
-        externalNumber: call.externalNumber,
-        createdBy: input.actorUserId ?? 'service:voice',
-      } as Prisma.InputJsonValue,
-      events: {
-        create: [
-          {
-            type: 'created',
-            body: input.actorUserId
-              ? 'Tarea creada desde una llamada'
-              : 'Tarea creada por la IA durante una llamada (pendiente de revisión humana)',
-            actorUserId: input.actorUserId,
-            metadata: { callId: call.id } as Prisma.InputJsonValue,
-          },
-        ],
-      },
-    },
-  });
-  await publishRealtime(REALTIME_CHANNELS.call(call.id), 'task_created', {
-    requestId: request.id,
-    type: input.type,
-    title: request.title,
-  });
-  return { created: true, requestId: request.id };
 }
 
 // ---------------------------------------------------------------------------

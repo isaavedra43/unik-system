@@ -6,10 +6,9 @@ Este documento cierra la Entrega 16 del plan. Nada de lo aquí descrito se ha ej
 
 1. Migraciones y almacenamiento R2 (Entregas 1–6).
 2. Secretos y ejecutor común (7), luego una extensión de prueba (8–10).
-3. Copiloto y biblioteca (11) y estudio (12): no requieren servicios externos.
+3. Copiloto y biblioteca (11): no requieren servicios externos.
 4. Un número de WhatsApp o un bot de Telegram en la bandeja (13-A).
-5. Cotizaciones en Books en modo mock → real (13-B).
-6. Voz con LiveKit + Twilio en una sola cuenta (14).
+5. Voz con LiveKit + Twilio en una sola cuenta (14).
 7. Una campaña de ensayo con 10 destinatarios, después lotes reales (15).
 
 Cada paso se activa por variables de entorno y permisos: sin variables, la funcionalidad queda visible pero inactiva (modo mock o error claro), nunca escribe en proveedores reales.
@@ -26,13 +25,14 @@ Migraciones nuevas (todas aditivas, sin DROP):
 | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `20260912100000_add_object_storage_jobs_realtime` | StorageObject, UploadSession, StorageConfig, BackgroundJob, RealtimeEvent; columnas opcionales en adjuntos/artefactos                                               |
 | `20260912110000_add_extensions_skills_proposals`  | Extension*, ExtensionConnection, OAuthState, AiProposal, ExtensionExecution, Skill, SkillRun, UsageMeter                                                            |
-| `20260912120000_add_copilot_studio_comms_voice`   | AiUserPreference, AiMemory, Knowledge*, Studio*, Comm*, Responsible, InternalRequest*, Quote, Commitment, ConsentRecord, Campaign*, Voice* + índice GIN de búsqueda |
+| `20260912120000_add_copilot_studio_comms_voice`   | AiUserPreference, AiMemory, Knowledge*, Comm*, Responsible, Commitment, ConsentRecord, Campaign*, Voice* + índice GIN de búsqueda (Studio*, InternalRequest* y Quote se eliminan en la siguiente) |
+| `20260912130000_drop_studio_requests_quotes`      | Elimina las tablas del estudio visual, solicitudes internas y cotizaciones locales (módulos retirados)                                                              |
 
 Después de aplicar: `GET /api/health` debe seguir respondiendo `database: connected`.
 
 ## 2. Permisos nuevos (asignar desde /app/admin/access → Roles)
 
-`files.admin` · `extensions.view` · `extensions.manage` · `extensions.connect` · `skills.manage` · `knowledge.manage` · `studio.use` · `studio.approve` · `inbox.use` · `inbox.assign` · `inbox.admin` · `requests.use` · `quotes.use` · `quotes.approve` · `campaigns.view` · `campaigns.manage` · `campaigns.approve` · `calls.use` · `calls.supervise` · `calls.admin`.
+`files.admin` · `extensions.view` · `extensions.manage` · `extensions.connect` · `skills.manage` · `knowledge.manage` · `inbox.use` · `inbox.assign` · `inbox.admin` · `campaigns.view` · `campaigns.manage` · `campaigns.approve` · `calls.use` · `calls.supervise` · `calls.admin`.
 
 `super_admin` los tiene todos automáticamente.
 
@@ -72,21 +72,19 @@ Sigue `docs/extensions.md`. Verificación:
 - [ ] Propuesta aprobada se ejecuta una sola vez; segundo clic → 409.
 - [ ] Suspender extensión con jobs pendientes → jobs cancelados.
 
-## 6. Copiloto, biblioteca y estudio
+## 6. Copiloto y biblioteca
 
 - [ ] Cambiar modo a **Pausada** y comprobar que el asistente no ofrece envíos ni cambios comerciales.
 - [ ] Corrección propuesta por el asistente aparece como pendiente y solo cuenta al confirmarla.
 - [ ] Subir un PDF a la biblioteca, aprobar y verificar que `searchKnowledgeLibrary` lo cita con versión; contenido interno no aparece con `visibility=publishable`.
-- [ ] Estudio: crear documento con tabla de montos, exportar a PDF/DOCX/XLSX/PPTX/CSV/HTML/MD y confirmar verificación "ok" (cifras presentes); modificar tras aprobar → vuelve a borrador e invalida propuestas.
 
-## 7. Comunicaciones (ver `docs/communications.md`, `docs/quotes.md`, `docs/campaigns.md`)
+## 7. Comunicaciones (ver `docs/communications.md`, `docs/campaigns.md`)
 
 - [ ] Registrar un número de WhatsApp (Twilio) con webhook `https://APP/api/webhooks/twilio/messaging?accountId=...` y verificar firma.
 - [ ] Bot de Telegram con `setWebhook` + `secret_token`.
 - [ ] Mensaje entrante duplicado (reintento de webhook) → una sola fila.
 - [ ] Respuesta desde la bandeja; reenvío tras BAJA → bloqueado.
-- [ ] Solicitud interna asignada por responsable; compromiso vencido genera aviso.
-- [ ] Cotización: petición oral/escrita al asistente → propuesta → aprobación humana → creada en Books (primero `ZOHO_BOOKS_MOCK=true`).
+- [ ] Compromiso vencido genera aviso.
 - [ ] Campaña: audiencia y contenido congelados, ensayo con muestras, vista exacta por destinatario, presupuesto, baja durante la campaña evita siguientes envíos, pausa/reanudación sin duplicados.
 
 ## 8. Voz (ver `docs/voice.md`)

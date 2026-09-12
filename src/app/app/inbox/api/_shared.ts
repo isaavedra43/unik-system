@@ -23,20 +23,6 @@ export async function requireInboxUser(): Promise<
   return { user: session.user };
 }
 
-export async function requireRequestsUser(): Promise<
-  { user: CurrentUser } | { response: NextResponse }
-> {
-  const session = await getCurrentSession();
-  if (!session)
-    return { response: NextResponse.json({ error: 'No autenticado' }, { status: 401 }) };
-  if (!hasPermission(session.user, 'requests.use') && !hasPermission(session.user, 'inbox.admin')) {
-    return {
-      response: NextResponse.json({ error: 'Sin permiso para solicitudes' }, { status: 403 }),
-    };
-  }
-  return { user: session.user };
-}
-
 export async function requireInboxAdmin(): Promise<
   { user: CurrentUser } | { response: NextResponse }
 > {

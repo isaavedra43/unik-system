@@ -14,15 +14,11 @@ import {
   CreditCard, Receipt, Wallet,
   HardDrive,
   Inbox,
-  ClipboardList,
-  FileSignature,
   Megaphone,
   Phone,
   PhoneCall,
-  PenTool,
   BookOpen,
   Radio,
-  ListChecks,
 } from 'lucide-react';
 import { AssistantWidget } from '@/components/assistant/AssistantWidget';
 import { ThemeToggle } from '@/components/layout/ThemeToggle';
@@ -338,12 +334,8 @@ function buildBreadcrumbs(pathname: string): { label: string; href?: string }[] 
     ['/app/admin/comms', ['Administración', 'Canales y responsables']],
     ['/app/admin/voice', ['Administración', 'Telefonía']],
     ['/app/inbox', ['Comunicaciones', 'Bandeja externa']],
-    ['/app/requests', ['Comunicaciones', 'Solicitudes']],
-    ['/app/quotes', ['Comunicaciones', 'Cotizaciones']],
     ['/app/campaigns', ['Comunicaciones', 'Campañas']],
     ['/app/calls', ['Comunicaciones', 'Llamadas']],
-    ['/app/studio', ['Estudio']],
-    ['/app/pending', ['Pendientes']],
   ];
   for (const [prefix, labels] of simple) {
     if (pathname.startsWith(prefix)) {
@@ -491,12 +483,6 @@ export default function AppShell({ user, children }: AppShellProps) {
           icon: <Bot size={18} />,
           visible: user.permissionKeys.includes('assistant.use') || user.isSuperAdmin,
         },
-        {
-          href: '/app/pending',
-          label: 'Pendientes',
-          icon: <ListChecks size={18} />,
-          visible: user.permissionKeys.includes('assistant.use') || user.isSuperAdmin,
-        },
       ],
     },
     {
@@ -584,21 +570,6 @@ export default function AppShell({ user, children }: AppShellProps) {
           visible: user.permissionKeys.includes('inbox.use') || user.isSuperAdmin,
         },
         {
-          href: '/app/requests',
-          label: 'Solicitudes',
-          icon: <ClipboardList size={18} />,
-          visible: user.permissionKeys.includes('requests.use') || user.isSuperAdmin,
-        },
-        {
-          href: '/app/quotes',
-          label: 'Cotizaciones',
-          icon: <FileSignature size={18} />,
-          visible:
-            user.permissionKeys.includes('quotes.use') ||
-            user.permissionKeys.includes('quotes.approve') ||
-            user.isSuperAdmin,
-        },
-        {
           href: '/app/campaigns',
           label: 'Campañas',
           icon: <Megaphone size={18} />,
@@ -615,12 +586,6 @@ export default function AppShell({ user, children }: AppShellProps) {
             user.permissionKeys.includes('calls.use') ||
             user.permissionKeys.includes('calls.supervise') ||
             user.isSuperAdmin,
-        },
-        {
-          href: '/app/studio',
-          label: 'Estudio',
-          icon: <PenTool size={18} />,
-          visible: user.permissionKeys.includes('studio.use') || user.isSuperAdmin,
         },
       ],
     },

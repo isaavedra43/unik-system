@@ -24,7 +24,6 @@ export const CALL_EVENT_TYPES = [
   'copilot_suggestion',
   'ai_reply',
   'summary_ready',
-  'task_created',
   'supervision',
   'transfer',
   'call_ended',

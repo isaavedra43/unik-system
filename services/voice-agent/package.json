@@ -1,0 +1,29 @@
+{
+  "name": "unik-voice-agent",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Agente de voz de UNIK: atiende llamadas en LiveKit con OpenAI Realtime bajo las reglas y herramientas de UNIK.",
+  "type": "module",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/agent.js start",
+    "dev": "tsx src/agent.ts dev",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test --import tsx tests/*.test.ts"
+  },
+  "dependencies": {
+    "@livekit/agents": "^1.8.1",
+    "@livekit/agents-plugin-openai": "^1.8.1",
+    "@livekit/rtc-node": "^0.13.34",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/json-schema": "^7.0.15",
+    "@types/node": "^22.0.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.8.0"
+  }
+}

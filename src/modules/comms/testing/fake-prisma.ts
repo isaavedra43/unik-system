@@ -32,7 +32,6 @@ const RELATIONS: Record<string, Record<string, Relation>> = {
     conversation: { model: 'commConversation', fk: 'conversationId' },
   },
   consentRecord: { contact: { model: 'commContact', fk: 'contactId' } },
-  internalRequestEvent: { request: { model: 'internalRequest', fk: 'requestId' } },
   user: { roles: { model: 'userRole', childFk: 'userId' } },
 };
 
@@ -87,20 +86,6 @@ const DEFAULTS: Record<string, () => Row> = {
   commNote: () => ({}),
   consentRecord: () => ({ note: null, recordedAt: new Date() }),
   responsible: () => ({ backupUserId: null, description: null, active: true }),
-  internalRequest: () => ({
-    description: null,
-    assigneeUserId: null,
-    status: 'open',
-    priority: 'normal',
-    dueAt: null,
-    fileIds: [],
-    commConversationId: null,
-    aiConversationId: null,
-    contactId: null,
-    dossier: null,
-    closedAt: null,
-  }),
-  internalRequestEvent: () => ({ body: null, actorUserId: null, metadata: null }),
   commitment: () => ({
     contactId: null,
     sourceType: 'manual',

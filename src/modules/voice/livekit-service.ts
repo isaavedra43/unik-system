@@ -2,6 +2,7 @@ import { randomBytes } from 'crypto';
 import { z } from 'zod';
 import {
   AccessToken,
+  AgentDispatchClient,
   EgressClient,
   EncodedFileOutput,
   EncodedFileType,
@@ -44,6 +45,8 @@ const envSchema = z.object({
   LIVEKIT_SIP_DOMAIN: z.string().min(1).optional(),
   /** Shared secret for webhooks while running in mock mode. */
   LIVEKIT_MOCK_WEBHOOK_SECRET: z.string().min(1).optional(),
+  /** Name the voice agent worker registers with (services/voice-agent). */
+  VOICE_AGENT_NAME: z.string().min(1).max(64).optional(),
   /** Optional write-only R2 token for egress uploads (recommended in production). */
   R2_EGRESS_ACCESS_KEY_ID: z.string().min(1).optional(),
   R2_EGRESS_SECRET_ACCESS_KEY: z.string().min(1).optional(),
@@ -56,6 +59,8 @@ export interface LiveKitConfig {
   apiSecret: string | null;
   sipTrunkId: string | null;
   sipDomain: string | null;
+  /** Agent name used for explicit dispatch of the voice agent worker. */
+  agentName: string;
   mockWebhookSecret: string | null;
   egressCredentials: { accessKeyId: string; secretAccessKey: string } | null;
 }
@@ -163,6 +168,7 @@ export function getLiveKitConfig(): LiveKitConfig {
     apiKey: env.LIVEKIT_API_KEY ?? null,
     apiSecret: env.LIVEKIT_API_SECRET ?? null,
     sipTrunkId: env.LIVEKIT_SIP_TRUNK_ID ?? null,
+    agentName: env.VOICE_AGENT_NAME ?? 'unik-voice',
     sipDomain: mock ? (sipDomain ?? 'mock.sip.local') : sipDomain,
     mockWebhookSecret: env.LIVEKIT_MOCK_WEBHOOK_SECRET ?? null,
     egressCredentials:
@@ -187,6 +193,8 @@ export function getLiveKitStatus(): {
   sipConfigured: boolean;
   sipDomain: string | null;
   egressUsesDedicatedToken: boolean;
+  /** Name the voice agent worker must register with (explicit dispatch). */
+  agentName: string;
   missingVars: string[];
 } {
   let config: LiveKitConfig;
@@ -199,6 +207,7 @@ export function getLiveKitStatus(): {
       sipConfigured: false,
       sipDomain: null,
       egressUsesDedicatedToken: false,
+      agentName: process.env.VOICE_AGENT_NAME ?? 'unik-voice',
       missingVars: ['LIVEKIT_URL', 'LIVEKIT_API_KEY', 'LIVEKIT_API_SECRET'],
     };
   }
@@ -213,6 +222,7 @@ export function getLiveKitStatus(): {
     sipConfigured: Boolean(config.sipTrunkId),
     sipDomain: config.sipDomain,
     egressUsesDedicatedToken: Boolean(config.egressCredentials),
+    agentName: config.agentName,
     missingVars: missing,
   };
 }
@@ -226,6 +236,7 @@ type GlobalWithClients = typeof globalThis & {
     room?: RoomServiceClient;
     egress?: EgressClient;
     sip?: SipClient;
+    dispatch?: AgentDispatchClient;
     webhook?: WebhookReceiver;
   };
 };
@@ -260,6 +271,45 @@ function egressClient(): EgressClient {
     c.egress = new EgressClient(url, apiKey, apiSecret);
   }
   return c.egress;
+}
+
+function dispatchClient(): AgentDispatchClient {
+  const c = clients();
+  if (!c.dispatch) {
+    const { url, apiKey, apiSecret } = requireReal();
+    c.dispatch = new AgentDispatchClient(url, apiKey, apiSecret);
+  }
+  return c.dispatch;
+}
+
+/**
+ * Explicitly dispatches the voice agent worker (services/voice-agent) to a
+ * room. The worker registers with `agentName`; LiveKit starts one job per
+ * dispatch and hands it `metadata` (JSON with the call id). Mock mode records
+ * the dispatch in memory so tests can assert on it.
+ */
+export async function dispatchAgent(
+  roomName: string,
+  metadata: Record<string, unknown>
+): Promise<{ dispatchId: string; agentName: string; mock: boolean }> {
+  const config = getLiveKitConfig();
+  if (config.mock) {
+    const id = `AD_mock_${randomBytes(4).toString('hex')}`;
+    mockState().dispatches.push({ id, roomName, agentName: config.agentName, metadata });
+    return { dispatchId: id, agentName: config.agentName, mock: true };
+  }
+  try {
+    const dispatch = await dispatchClient().createDispatch(roomName, config.agentName, {
+      metadata: JSON.stringify(metadata),
+    });
+    return { dispatchId: dispatch.id, agentName: config.agentName, mock: false };
+  } catch (err) {
+    throw new LiveKitError(
+      `No se pudo despachar el agente de voz: ${err instanceof Error ? err.message : 'error'}`,
+      'provider',
+      502
+    );
+  }
 }
 
 function sipClient(): SipClient {
@@ -297,22 +347,34 @@ interface MockEgress {
   status: 'active' | 'ended';
 }
 
+interface MockDispatch {
+  id: string;
+  roomName: string;
+  agentName: string;
+  metadata: Record<string, unknown>;
+}
+
 type GlobalWithMock = typeof globalThis & {
-  __unikLiveKitMock?: { rooms: Map<string, MockRoom>; egresses: Map<string, MockEgress> };
+  __unikLiveKitMock?: {
+    rooms: Map<string, MockRoom>;
+    egresses: Map<string, MockEgress>;
+    dispatches: MockDispatch[];
+  };
 };
 
 function mockState() {
   const scope = globalThis as GlobalWithMock;
   if (!scope.__unikLiveKitMock) {
-    scope.__unikLiveKitMock = { rooms: new Map(), egresses: new Map() };
+    scope.__unikLiveKitMock = { rooms: new Map(), egresses: new Map(), dispatches: [] };
   }
+  if (!scope.__unikLiveKitMock.dispatches) scope.__unikLiveKitMock.dispatches = [];
   return scope.__unikLiveKitMock;
 }
 
 /** Test helper: clears the in-memory mock server. */
 export function resetLiveKitMockForTests(): void {
   const scope = globalThis as GlobalWithMock;
-  scope.__unikLiveKitMock = { rooms: new Map(), egresses: new Map() };
+  scope.__unikLiveKitMock = { rooms: new Map(), egresses: new Map(), dispatches: [] };
   cachedConfig = null;
 }
 
@@ -320,6 +382,7 @@ export function resetLiveKitMockForTests(): void {
 export function getLiveKitMockState(): {
   rooms: Array<{ name: string; participants: MockParticipant[] }>;
   egresses: MockEgress[];
+  dispatches: MockDispatch[];
 } {
   const state = mockState();
   return {
@@ -328,6 +391,7 @@ export function getLiveKitMockState(): {
       participants: [...r.participants.values()],
     })),
     egresses: [...state.egresses.values()],
+    dispatches: [...state.dispatches],
   };
 }
 

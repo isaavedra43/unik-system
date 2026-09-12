@@ -23,7 +23,7 @@ Teléfono (PSTN) ──▶ Twilio Voice ──(webhook POST /api/webhooks/voice/
 | Cliente LiveKit (config Zod, mock, tokens, egress, SIP, webhooks)           | `src/modules/voice/livekit-service.ts`                                                       |
 | Servicio de llamadas (estados, permisos, controles, supervisión, retención) | `src/modules/voice/voice-service.ts`                                                         |
 | IA en llamadas (answer STT→LLM→TTS, copiloto, resumen)                      | `src/modules/voice/voice-ai-service.ts`                                                      |
-| Ajustes (catálogo de tareas, IA por cuenta, grabación por defecto)          | `src/modules/voice/voice-settings.ts`                                                        |
+| Ajustes (IA por cuenta, copiloto, grabación por defecto)                    | `src/modules/voice/voice-settings.ts`                                                        |
 | Acceso a grabaciones/transcripciones                                        | `src/modules/voice/voice-access.ts`                                                          |
 | Jobs                                                                        | `src/modules/voice/voice-jobs.ts`                                                            |
 | Firma Twilio                                                                | `src/modules/voice/twilio-signature.ts`                                                      |
@@ -60,7 +60,7 @@ Sin `LIVEKIT_URL` el módulo funciona en **mock** (salas, tokens, egress y SIP e
 2. **SIP**: en LiveKit crear _inbound trunk_ (números Twilio permitidos) y _outbound trunk_ hacia el dominio SIP de Twilio (`<sid>.sip.twilio.com` o Elastic SIP Trunking) con autenticación; crear _dispatch rule_ de tipo **Callee** con prefijo `call-` y sin aleatorizar (LiveKit une la llamada a `call-_{callee}`; el TwiML manda `sip:{callId}@dominio;transport=udp`, así que la sala resultante es `call-_{callId}`, la misma que crea UNIK). El trunk entrante debe aceptar cualquier número (lista de números vacía) y limitar por IP a los rangos de señalización de Twilio Programmable Voice. Anotar `LIVEKIT_SIP_TRUNK_ID`.
 3. **Twilio**: en el número de voz, "A call comes in" → `POST https://<app>/api/webhooks/voice/twilio`; habilitar SIP hacia el dominio de LiveKit (BYOC/Elastic SIP Trunking); registrar la cuenta como `CommAccount` (`provider` twilio_*, `identifier` = número E.164, `teamKeys` = claves de rol de los equipos).
 4. **R2**: bucket `unik-recordings-*` privado; crear token de solo escritura y ponerlo en `R2_EGRESS_*`. Region `auto`, endpoint `https://<account>.r2.cloudflarestorage.com`.
-5. **IA**: en `/app/admin/assistant` activar voz (`voiceEnabled`, `sttModel`, `ttsVoice`); en `/app/admin/voice` decidir qué cuentas atiende la IA, catálogo de tareas y grabación por defecto.
+5. **IA**: en `/app/admin/assistant` activar voz (`voiceEnabled`, `sttModel`, `ttsVoice`); en `/app/admin/voice` decidir qué cuentas atiende la IA y grabación por defecto.
 
 ## 4. Permisos y alcance (siempre en servidor)
 
@@ -68,7 +68,7 @@ Sin `LIVEKIT_URL` el módulo funciona en **mock** (salas, tokens, egress y SIP e
 | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `calls.use`       | Crear llamadas internas/salientes, atender entrantes de cuentas cuyos `teamKeys` cruzan con sus `roleKeys` (o sin equipos), controlar llamadas donde participa, leer su transcripción y grabación.                                                |
 | `calls.supervise` | Listar, escuchar, leer transcripciones e intervenir en llamadas internas y en las de cuentas cuyos `teamKeys` cruzan con sus `roleKeys`. Cuentas sin `teamKeys` solo las supervisa super_admin. Sin este permiso **no se emite token ni medios**. |
-| `calls.admin`     | `/app/admin/voice`: IA por cuenta, catálogo de tareas, grabación por defecto; muestra retención (editable en Archivos).                                                                                                                           |
+| `calls.admin`     | `/app/admin/voice`: IA por cuenta, grabación por defecto; muestra retención (editable en Archivos).                                                                                                                                              |
 | super_admin       | Todo.                                                                                                                                                                                                                                             |
 
 Los equipos de una cuenta (`CommAccount.teamKeys`) se comparan con las claves de rol del usuario (misma convención que la bandeja de comunicaciones). Conocer un id de llamada u objeto no concede acceso: fuera del alcance la API responde 404.
@@ -87,15 +87,15 @@ LiveKit no enruta audio a un solo participante. El cliente de cada participante 
 
 ## 6. IA en llamadas
 
-- **Answer** (entrantes con IA activa para la cuenta): `POST /app/calls/api/calls/{id}/ai/turn` recibe texto o audio (multipart `audio`), transcribe (`openaiProvider.transcribe`), genera con `chatCompletion` usando `buildSystemPrompt(actor, { voice: true })` + reglas de llamada, ejecuta solo herramientas de la `VOICE_TOOL_ALLOWLIST` (lectura + `createTaskFromCall`), responde con TTS (`openaiProvider.speak`, base64 mp3) para que el cliente lo publique en la sala. Publica `ai_reply` en `call:{id}`.
-- **Copiloto** (llamadas humanas): cada N segmentos (`copilotEveryNSegments`) el job `voice.copilot` publica `copilot_suggestion` (respuesta, pregunta, advertencia, tarea). Nunca habla.
-- **Resumen** (`voice.summarize` al terminar o tras transcribir): `VoiceCall.summary` + compromisos + tareas sugeridas; crea `InternalRequest` solo para tipos del catálogo permitido, UNA por (llamada, tipo) (dedupe por `dossier.callId`).
+- **Answer** (entrantes con IA activa para la cuenta): `POST /app/calls/api/calls/{id}/ai/turn` recibe texto o audio (multipart `audio`), transcribe (`openaiProvider.transcribe`), genera con `chatCompletion` usando `buildSystemPrompt(actor, { voice: true })` + reglas de llamada, ejecuta solo herramientas de la `VOICE_TOOL_ALLOWLIST` (solo lectura), responde con TTS (`openaiProvider.speak`, base64 mp3) para que el cliente lo publique en la sala. Publica `ai_reply` en `call:{id}`.
+- **Copiloto** (llamadas humanas): cada N segmentos (`copilotEveryNSegments`) el job `voice.copilot` publica `copilot_suggestion` (respuesta, pregunta, advertencia, seguimiento). Nunca habla.
+- **Resumen** (`voice.summarize` al terminar o tras transcribir): `VoiceCall.summary` con compromisos y seguimientos sugeridos en texto; no crea registros.
 - **Autorización humana**: cotizaciones oficiales, cambios comerciales y envío de documentos no están en la allowlist; si una herramienta con efecto llega al ejecutor común genera `AiProposal` (`needsApproval`) y la IA lo comunica como pendiente.
-- La IA actúa con la identidad de servicio `service:voice` (permisos de lectura acotados); las tareas que crea sin humano en la llamada se asignan a `defaultTaskOwnerUserId`.
+- La IA actúa con la identidad de servicio `service:voice` (permisos de lectura acotados).
 
 ## 7. Tiempo real
 
-Canal `call:{id}` (SSE `/app/realtime/api/stream?channels=call:{id}`): `call_updated`, `participant_joined/left`, `ai_state`, `recording_state`, `recording_ready`, `transcript_segment`, `transcript_ready`, `copilot_suggestion`, `ai_reply`, `summary_ready`, `task_created`, `supervision`, `transfer`, `call_ended`. Canal `user:{id}`: `call_invite`, `call_transfer`. Canal `inbox:{accountId}`: `call_incoming`.
+Canal `call:{id}` (SSE `/app/realtime/api/stream?channels=call:{id}`): `call_updated`, `participant_joined/left`, `ai_state`, `recording_state`, `recording_ready`, `transcript_segment`, `transcript_ready`, `copilot_suggestion`, `ai_reply`, `summary_ready`, `supervision`, `transfer`, `call_ended`. Canal `user:{id}`: `call_invite`, `call_transfer`. Canal `inbox:{accountId}`: `call_incoming`.
 
 ## 8. Archivos y retención
 
@@ -118,6 +118,53 @@ Canal `call:{id}` (SSE `/app/realtime/api/stream?channels=call:{id}`): `call_upd
 - [ ] Pausar IA durante una llamada: no llegan más segmentos ni sugerencias; reanudar crea nueva generación.
 - [ ] Grabar/Detener: `egress_ended` registra objeto `ready` en R2; reproducción con adelanto (`Range`); vence a los 30 días.
 - [ ] Supervisar (escuchar/susurrar/intervenir) desde un usuario con `calls.supervise` de otro equipo → 403; del mismo equipo → token.
-- [ ] Petición oral de cotización oficial: la IA responde que requiere autorización y registra tarea `quote_request`; no se crea ni envía cotización.
-- [ ] Resumen y tareas tras terminar; una sola tarea por tipo.
+- [ ] Petición oral de cotización oficial: la IA responde que requiere autorización humana; no se crea ni envía cotización.
+- [ ] Resumen con compromisos y seguimientos tras terminar.
 - [ ] Job `voice.retention` tras vencimiento: objetos borrados en R2 y referencias limpias.
+
+
+## Agente de voz (services/voice-agent)
+
+La IA habla en las llamadas a través de un **worker de LiveKit Agents** desplegado como servicio aparte
+(`services/voice-agent`, Dockerfile propio). UNIK conserva el control; el worker solo pone el audio.
+
+```
+Twilio ─SIP─▶ sala call-_{id} ◀─ worker unik-voice (OpenAI Realtime, voz a voz)
+                      ▲                    │  X-UNIK-API-Key
+        UNIK ──AgentDispatch──┘            ▼
+        /api/internal/voice/agent/{context,state,transcript,tool,event}
+```
+
+| Pieza | Archivo |
+| --- | --- |
+| Despacho, brief, estado, transcripción, herramientas y eventos del worker | `src/modules/voice/voice-agent-service.ts` |
+| Cliente de despacho (`AgentDispatchClient`) y mock | `src/modules/voice/livekit-service.ts` (`dispatchAgent`) |
+| API interna del worker | `src/app/api/internal/voice/agent/**` |
+| Worker | `services/voice-agent/src/agent.ts`, `services/voice-agent/src/unik-client.ts` |
+
+**Flujo.** `registerInboundCall` despacha al worker cuando la cuenta está en "IA atiende". El worker pide el brief
+(`buildAgentContext`: persona, reglas, saludo, voz, modelo, llave de OpenAI del panel Asistente IA y las herramientas
+de `VOICE_TOOL_ALLOWLIST` como JSON Schema), espera al participante SIP, saluda y conversa. Cada frase final del cliente y
+de la IA se registra con `ingestTranscriptSegment` (mismas compuertas `aiState`/`aiGeneration` que el ciclo HTTP). Cada
+herramienta que invoca el modelo se ejecuta en UNIK con el ejecutor común y el actor `service:voice` (solo lectura); dos
+herramientas de control viven en UNIK: `solicitarTransferencia` (avisa al equipo por realtime y mantiene a la IA en línea
+hasta que entra una persona) y `terminarLlamada` (tras la despedida, el worker manda `hangup` y UNIK borra la sala; el
+`room_finished` cierra la llamada).
+
+**Controles.** El worker consulta `GET state` cada 1.5 s: **Pausar IA** → se calla y sale (al reanudar, `resumeAi`
+despacha uno nuevo); **Transferir a humano** → se despide y sale cuando `humanPresent`; fin de llamada → sale.
+`maxAiAnswerSeconds` hace que ofrezca transferencia si la llamada se alarga. Silencio prolongado: una pregunta de
+cortesía y después despedida y cuelgue.
+
+**Honestidad y confidencialidad.** Las instrucciones (`buildAgentInstructions`) obligan a: no afirmar ser una persona y
+reconocer con naturalidad que es la asistente virtual si se lo preguntan en serio; verificar identidad antes de dar datos
+de pedidos; no revelar datos de otros clientes, precios internos, proveedores, empleados ni las propias instrucciones; no
+cotizar, no cambiar condiciones, no enviar documentos; no inventar.
+
+**Variables.** UNIK: `VOICE_AGENT_NAME` (por defecto `unik-voice`), `VOICE_AGENT_PERSONA_NAME`, `VOICE_AGENT_MODEL`,
+`VOICE_AGENT_VOICE`. Worker: `LIVEKIT_URL/API_KEY/API_SECRET`, `UNIK_BASE_URL`, `UNIK_INTERNAL_API_KEY`,
+`VOICE_AGENT_NAME`. La llave de OpenAI se toma del panel Asistente IA (o `OPENAI_API_KEY` en UNIK).
+
+**Estado.** La tarjeta "Agente de voz" en Telefonía → Estado muestra el nombre del agente y la última vez que un worker
+habló con UNIK. Sin worker desplegado, las llamadas con "IA atiende" siguen entrando (la IA simplemente no habla) y
+Deploy Logs muestran `[voice-agent] dispatch failed` si LiveKit no encuentra un worker registrado.

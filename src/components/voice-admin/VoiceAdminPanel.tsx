@@ -16,7 +16,6 @@ import type { VoiceSettings } from '@/modules/voice/voice-settings';
 
 interface Payload {
   settings: VoiceSettings;
-  catalog: Array<{ type: string; label: string }>;
   retention: { recordingRetentionDays: number; transcriptRetentionDays: number };
   accounts: Array<{
     id: string;
@@ -32,18 +31,19 @@ interface Payload {
       sipConfigured: boolean;
       sipDomain: string | null;
       egressUsesDedicatedToken: boolean;
+      agentName?: string;
       missingVars: string[];
     };
     twilioWebhookConfigured: boolean;
+    voiceAgent?: { agentName: string; lastSeenAt: string | null };
   };
 }
 
-type TabId = 'status' | 'ai' | 'tasks' | 'recording';
+type TabId = 'status' | 'ai' | 'recording';
 
 const TABS: Array<{ id: TabId; label: string }> = [
   { id: 'status', label: 'Estado' },
   { id: 'ai', label: 'IA por cuenta' },
-  { id: 'tasks', label: 'Tareas permitidas' },
   { id: 'recording', label: 'Grabación y retención' },
 ];
 
@@ -165,6 +165,23 @@ export function VoiceAdminPanel() {
                 tone={data.status.twilioWebhookConfigured ? 'success' : 'warning'}
               />
               <AssistantAdminStatCard
+                label="Agente de voz"
+                value={
+                  data.status.voiceAgent?.lastSeenAt
+                    ? 'Conectado'
+                    : lk.mock
+                      ? 'Simulado'
+                      : 'Sin actividad'
+                }
+                hint={
+                  data.status.voiceAgent?.lastSeenAt
+                    ? `Último contacto ${new Date(data.status.voiceAgent.lastSeenAt).toLocaleTimeString('es-MX')} · agente "${data.status.voiceAgent.agentName}"`
+                    : `Despliega services/voice-agent con VOICE_AGENT_NAME="${data.status.voiceAgent?.agentName ?? 'unik-voice'}"`
+                }
+                icon={<Bot size={20} />}
+                tone={data.status.voiceAgent?.lastSeenAt ? 'success' : 'warning'}
+              />
+              <AssistantAdminStatCard
                 label="Egress → R2"
                 value={lk.egressUsesDedicatedToken ? 'Token dedicado' : 'Token de almacenamiento'}
                 hint={
@@ -180,8 +197,10 @@ export function VoiceAdminPanel() {
               <h3 className="assistant-admin-section-title">Límites conocidos</h3>
               <ul className="assistant-admin-muted">
                 <li>
-                  Agente de voz en tiempo real dentro de LiveKit (Agents): pendiente de validación
-                  externa. Hoy el ciclo STT→LLM→TTS se ejecuta por HTTP.
+                  La IA habla en las llamadas a través del worker <code>services/voice-agent</code>{' '}
+                  (OpenAI Realtime). Sin worker desplegado, las llamadas con &quot;IA atiende&quot;
+                  entran pero la IA no habla; el ciclo STT→LLM→TTS por HTTP sigue disponible para
+                  pruebas.
                 </li>
                 <li>
                   Cliente WebRTC en el navegador: requiere instalar <code>livekit-client</code>;
@@ -325,76 +344,6 @@ export function VoiceAdminPanel() {
                 </table>
               </div>
             )}
-            <button
-              type="button"
-              className="assistant-admin-save-btn"
-              onClick={save}
-              disabled={saving}
-            >
-              <Save size={16} /> {saving ? 'Guardando…' : 'Guardar'}
-            </button>
-          </div>
-        )}
-
-        {tab === 'tasks' && (
-          <div className="assistant-admin-section">
-            <h3 className="assistant-admin-section-title">
-              Catálogo de tareas que la IA puede crear desde una llamada
-            </h3>
-            <p className="assistant-admin-muted">
-              Una solicitud de llamada crea UNA sola tarea (se deduplica por llamada y tipo).
-              Cotizaciones oficiales, cambios comerciales y envío de documentos nunca se ejecutan
-              desde la voz: requieren autorización humana.
-            </p>
-            <div className="assistant-admin-list">
-              {data.catalog.map((item) => (
-                <label
-                  key={item.type}
-                  className="assistant-admin-list-item"
-                  style={{ cursor: 'pointer' }}
-                >
-                  <div>
-                    <div className="assistant-admin-list-name">{item.label}</div>
-                    <div className="assistant-admin-list-meta">
-                      <code>{item.type}</code>
-                    </div>
-                  </div>
-                  <input
-                    type="checkbox"
-                    aria-label={`Permitir ${item.label}`}
-                    checked={settings.allowedTaskTypes.includes(item.type)}
-                    onChange={(e) =>
-                      setSettings({
-                        ...settings,
-                        allowedTaskTypes: e.target.checked
-                          ? [...settings.allowedTaskTypes, item.type]
-                          : settings.allowedTaskTypes.filter((t) => t !== item.type),
-                      })
-                    }
-                  />
-                </label>
-              ))}
-            </div>
-            <div className="assistant-admin-config-grid">
-              <div className="assistant-admin-config-field">
-                <label htmlFor="voice-defaultOwner">Usuario responsable por defecto (id)</label>
-                <input
-                  id="voice-defaultOwner"
-                  type="text"
-                  value={settings.defaultTaskOwnerUserId ?? ''}
-                  onChange={(e) =>
-                    setSettings({
-                      ...settings,
-                      defaultTaskOwnerUserId: e.target.value.trim() || null,
-                    })
-                  }
-                />
-                <span className="assistant-admin-config-hint">
-                  Dueño de las tareas creadas por la IA cuando ningún humano participó en la
-                  llamada.
-                </span>
-              </div>
-            </div>
             <button
               type="button"
               className="assistant-admin-save-btn"

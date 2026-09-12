@@ -2,23 +2,20 @@ import { z } from 'zod';
 import { registerTool } from './registry';
 import {
   createOutboundCall,
-  createTaskFromCall,
   getTranscript,
   listCalls,
   pauseAi,
 } from '@/modules/voice/voice-service';
-import { VOICE_TASK_TYPE_CATALOG } from '@/modules/voice/voice-settings';
 
 /**
  * Voice tools for the assistant.
  *
  * - listCalls / getCallTranscript: read (scoped by calls.use / calls.supervise).
  * - startOutboundCall: external effect → goes through the approval executor.
- * - pauseCallAi / createTaskFromCall: internal tasks (no approval, audited).
+ * - pauseCallAi: internal task (no approval, audited).
  *
- * `createTaskFromCall` respects the admin catalog and creates ONE task per
- * (call, type). Official quotes, commercial changes and document sending are
- * never available here.
+ * Official quotes, commercial changes and document sending are never
+ * available here.
  */
 
 registerTool({
@@ -146,61 +143,3 @@ registerTool({
   },
 });
 
-const TASK_TYPES = VOICE_TASK_TYPE_CATALOG.map((t) => t.type) as [string, ...string[]];
-
-registerTool({
-  name: 'createTaskFromCall',
-  description:
-    'Crea UNA tarea interna de seguimiento a partir de una llamada, usando solo los tipos permitidos por el administrador ' +
-    `(${VOICE_TASK_TYPE_CATALOG.map((t) => `${t.type}: ${t.label}`).join('; ')}). ` +
-    'Una misma solicitud de llamada genera una sola tarea (se deduplica por llamada y tipo). ' +
-    'NO crea cotizaciones oficiales ni cambios comerciales: eso requiere autorización humana.',
-  category: 'communication',
-  requiredPermission: 'requests.use',
-  enabledByDefault: true,
-  effect: 'internal_task',
-  contextTags: ['all'],
-  parameters: z.object({
-    callId: z.string().min(1),
-    type: z.enum(TASK_TYPES),
-    title: z.string().min(3).max(200),
-    description: z.string().max(4000).optional(),
-    assigneeUserId: z.string().optional(),
-    priority: z.enum(['normal', 'high', 'urgent']).default('normal'),
-  }),
-  summarize: (args) => {
-    const a = args as { type: string; title: string };
-    return `Crear tarea (${a.type}): ${a.title}`;
-  },
-  execute: async (actor, args) => {
-    const a = args as {
-      callId: string;
-      type: string;
-      title: string;
-      description?: string;
-      assigneeUserId?: string;
-      priority: 'normal' | 'high' | 'urgent';
-    };
-    const isService = actor.id.startsWith('service:');
-    const result = await createTaskFromCall({
-      callId: a.callId,
-      type: a.type,
-      title: a.title,
-      description: a.description,
-      actorUserId: isService ? null : actor.id,
-      assigneeUserId: a.assigneeUserId ?? null,
-      priority: a.priority,
-    });
-    if (!result.created) {
-      if (result.reason === 'duplicate') {
-        return {
-          created: false,
-          requestId: result.requestId,
-          message: 'Ya existe una tarea de este tipo para la llamada',
-        };
-      }
-      return { created: false, error: result.reason };
-    }
-    return { created: true, requestId: result.requestId };
-  },
-});

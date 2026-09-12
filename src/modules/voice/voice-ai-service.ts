@@ -10,19 +10,18 @@ import {
 } from '@/modules/ai/tools/registry';
 import {
   aiResultIsCurrent,
-  createTaskFromCall,
   IDENTITY,
   ingestTranscriptSegment,
   VoiceError,
 } from './voice-service';
-import { getVoiceSettings, VOICE_TASK_TYPE_CATALOG } from './voice-settings';
+import { getVoiceSettings } from './voice-settings';
 
 /**
  * AI on calls.
  *
  * Two modes, both gated by `aiState` and `aiGeneration`:
  * - **answer**: the AI attends an inbound call (STT → LLM with read-only tools
- *   + task creation → TTS). This is the HTTP cycle: the client (a LiveKit
+ *   → TTS). This is the HTTP cycle: the client (a LiveKit
  *   Agents worker or, for validation, the browser) sends the caller's speech
  *   and publishes the returned audio into the room. A real-time in-room voice
  *   agent (LiveKit Agents) is pending external validation.
@@ -33,7 +32,7 @@ import { getVoiceSettings, VOICE_TASK_TYPE_CATALOG } from './voice-settings';
  * Official quotes, commercial changes and sending documents are NEVER done by
  * the AI even if requested orally: tools with side effects go through the
  * common executor (approval proposals) and the prompt instructs the model to
- * register a task for a human instead.
+ * tell the caller a person will follow up.
  */
 
 /** Read-only tools plus task creation. Anything else is unavailable on calls. */
@@ -50,11 +49,9 @@ export const VOICE_TOOL_ALLOWLIST: readonly string[] = [
   'getPackageDetail',
   'getSystemTime',
   'searchKnowledgeLibrary',
-  'createTaskFromCall',
-  'createInternalRequest',
 ];
 
-const VOICE_ALLOWED_EFFECTS = new Set(['read', 'internal_task']);
+const VOICE_ALLOWED_EFFECTS = new Set(['read']);
 
 /** Service identity the AI uses when attending calls (limited read permissions). */
 export function voiceAiActor(): CurrentUser {
@@ -70,25 +67,20 @@ export function voiceAiActor(): CurrentUser {
       'customers.view',
       'sales_orders.view',
       'packages.view',
-      'requests.use',
       'calls.use',
     ] as never,
     isSuperAdmin: false,
   };
 }
 
-export function voiceAnswerRules(callId: string, allowedTaskTypes: string[]): string {
-  const catalog = VOICE_TASK_TYPE_CATALOG.filter((t) => allowedTaskTypes.includes(t.type))
-    .map((t) => `${t.type} (${t.label})`)
-    .join(', ');
+export function voiceAnswerRules(): string {
   return `
 ## MODO LLAMADA TELEFÓNICA (voz)
 - Estás atendiendo una llamada telefónica de un cliente en nombre de UNIK. Habla en español, claro y breve: 1 a 3 frases por turno, sin markdown, sin listas, sin emojis.
 - Preséntate una sola vez como asistente virtual de UNIK y pregunta en qué puedes ayudar.
 - Responde ÚNICAMENTE con información obtenida de las herramientas (fuentes autorizadas). Si no la tienes, dilo y ofrece que una persona dé seguimiento.
-- Recopila los datos necesarios para dar seguimiento: nombre, teléfono de contacto, empresa y necesidad concreta. Confirma los datos repitiéndolos.
-- PUEDES crear tareas de seguimiento con la herramienta createTaskFromCall usando SOLO estos tipos permitidos: ${catalog || 'ninguno'}. Usa callId="${callId}". Cada necesidad genera UNA sola tarea; si ya la creaste, no la repitas.
-- NO PUEDES: dar cotizaciones oficiales ni precios comprometidos, prometer descuentos, cambiar pedidos, direcciones o condiciones comerciales, ni enviar documentos por ningún medio. Si te lo piden, explica que una persona del equipo lo confirmará y registra una tarea (por ejemplo quote_request). Aunque una herramienta devuelva needsApproval, di que queda pendiente de autorización humana.
+- Recopila los datos necesarios para dar seguimiento: nombre, teléfono de contacto, empresa y necesidad concreta. Confirma los datos repitiéndolos; quedan en la transcripción y el resumen de la llamada para que una persona dé seguimiento.
+- NO PUEDES: dar cotizaciones oficiales ni precios comprometidos, prometer descuentos, cambiar pedidos, direcciones o condiciones comerciales, ni enviar documentos por ningún medio. Si te lo piden, explica que una persona del equipo lo confirmará. Aunque una herramienta devuelva needsApproval, di que queda pendiente de autorización humana.
 - Si el cliente pide hablar con una persona, se molesta o el tema es complejo, ofrece transferir a un humano y di que lo estás gestionando (el sistema realiza la transferencia).
 - Nunca inventes folios, precios, existencias ni fechas.
 `;
@@ -97,14 +89,12 @@ export function voiceAnswerRules(callId: string, allowedTaskTypes: string[]): st
 const COPILOT_PROMPT = `Eres el copiloto de un agente humano de UNIK durante una llamada telefónica. Recibes la transcripción parcial.
 Responde SOLO con JSON válido con esta forma:
 {"suggestions":[{"kind":"answer|question|warning|task","text":"..."}],"summary":"una frase"}
-Reglas: máximo 3 sugerencias, frases cortas y accionables en español. "warning" cuando el cliente pida cotización oficial, cambios comerciales o envío de documentos (requieren autorización humana). "task" cuando convenga registrar una tarea de seguimiento. Nunca inventes datos.`;
+Reglas: máximo 3 sugerencias, frases cortas y accionables en español. "warning" cuando el cliente pida cotización oficial, cambios comerciales o envío de documentos (requieren autorización humana). "task" cuando convenga anotar un seguimiento. Nunca inventes datos.`;
 
-const SUMMARY_PROMPT = (
-  allowed: string[]
-) => `Resume una llamada telefónica de UNIK a partir de su transcripción.
+const SUMMARY_PROMPT = `Resume una llamada telefónica de UNIK a partir de su transcripción.
 Responde SOLO con JSON válido:
-{"summary":"resumen de 2 a 4 frases","commitments":["compromiso 1"],"tasks":[{"type":"uno de: ${allowed.join(' | ') || 'ninguno'}","title":"título corto","description":"detalle"}]}
-Reglas: incluye en tasks solo seguimientos claramente solicitados; una tarea por necesidad; usa únicamente los tipos permitidos; si un tipo no aplica, omite la tarea. No inventes datos.`;
+{"summary":"resumen de 2 a 4 frases","commitments":["compromiso 1"],"followUps":["seguimiento pendiente 1"]}
+Reglas: incluye en followUps solo seguimientos claramente solicitados por el cliente, en una frase cada uno. No inventes datos.`;
 
 function extractJson(text: string | null): Record<string, unknown> | null {
   if (!text) return null;
@@ -219,11 +209,9 @@ export async function runAnswerTurn(
   if (!ingest.accepted) return { discarded: true, reason: ingest.reason };
 
   const actor = voiceAiActor();
-  const voiceSettings = await getVoiceSettings();
   const { buildSystemPrompt } = await import('@/modules/ai/ai-context-builder');
   const system =
-    (await buildSystemPrompt(actor, { voice: true, page: 'calls' })) +
-    voiceAnswerRules(callId, voiceSettings.allowedTaskTypes);
+    (await buildSystemPrompt(actor, { voice: true, page: 'calls' })) + voiceAnswerRules();
   const history = await recentSegments(callId, 30);
   const messages: ChatMessage[] = [{ role: 'system', content: system }];
   for (const seg of history) {
@@ -266,9 +254,6 @@ export async function runAnswerTurn(
           args = tc.arguments ? JSON.parse(tc.arguments) : {};
         } catch {
           args = {};
-        }
-        if (tc.name === 'createTaskFromCall' && args && typeof args === 'object') {
-          (args as Record<string, unknown>).callId = callId;
         }
         const exec = await executeTool(tc.name, actor, args, {
           enabledToolNames,
@@ -406,19 +391,15 @@ export async function runCopilot(
   return { suggestions };
 }
 
-/** Post-call summary, commitments and follow-up tasks (allowed catalog only). */
+/** Post-call summary with commitments and follow-ups (text only, no records created). */
 export async function summarizeCall(
   callId: string,
   generation: number
 ): Promise<{
   skipped?: string;
   summary?: string;
-  tasks?: Array<{ type: string; created: boolean; requestId?: string }>;
 }> {
-  const call = await prisma.voiceCall.findUnique({
-    where: { id: callId },
-    include: { participants: true },
-  });
+  const call = await prisma.voiceCall.findUnique({ where: { id: callId } });
   if (!call) return { skipped: 'call_not_found' };
   if (call.aiState !== 'active') return { skipped: 'ai_not_active' };
   if (generation < call.aiGeneration) return { skipped: 'stale_generation' };
@@ -431,11 +412,10 @@ export async function summarizeCall(
     take: 400,
   });
   if (segments.length === 0) return { skipped: 'no_segments' };
-  const settings = await getVoiceSettings();
 
   const result = await chatCompletion({
     messages: [
-      { role: 'system', content: SUMMARY_PROMPT(settings.allowedTaskTypes) },
+      { role: 'system', content: SUMMARY_PROMPT },
       { role: 'user', content: segmentsAsText(segments).slice(0, 60_000) },
     ],
     temperature: 0.2,
@@ -451,44 +431,18 @@ export async function summarizeCall(
         .filter((c): c is string => typeof c === 'string')
         .slice(0, 10)
     : [];
+  const followUps = Array.isArray(json?.followUps)
+    ? (json!.followUps as unknown[]).filter((c): c is string => typeof c === 'string').slice(0, 10)
+    : [];
   const summary = [
     summaryText,
     ...(commitments.length ? ['Compromisos:', ...commitments.map((c) => `- ${c}`)] : []),
+    ...(followUps.length ? ['Seguimientos:', ...followUps.map((c) => `- ${c}`)] : []),
   ]
     .join('\n')
     .slice(0, 8000);
   await prisma.voiceCall.update({ where: { id: callId }, data: { summary } });
 
-  const humanAgent = call.participants.find(
-    (p) => p.userId && p.role !== 'supervisor' && p.role !== 'ai'
-  );
-  const assignee = call.initiatedByUserId ?? humanAgent?.userId ?? null;
-  const tasksRaw = Array.isArray(json?.tasks) ? (json!.tasks as unknown[]) : [];
-  const tasks: Array<{ type: string; created: boolean; requestId?: string }> = [];
-  const seenTypes = new Set<string>();
-  for (const t of tasksRaw.slice(0, 5)) {
-    if (!t || typeof t !== 'object') continue;
-    const task = t as { type?: string; title?: string; description?: string };
-    const type = String(task.type ?? '');
-    if (!type || seenTypes.has(type)) continue;
-    seenTypes.add(type);
-    const res = await createTaskFromCall(
-      {
-        callId,
-        type,
-        title: String(task.title ?? `Seguimiento de llamada (${type})`),
-        description: typeof task.description === 'string' ? task.description : undefined,
-        actorUserId: null,
-        assigneeUserId: assignee,
-      },
-      settings
-    );
-    tasks.push({
-      type,
-      created: res.created,
-      requestId: 'requestId' in res ? res.requestId : undefined,
-    });
-  }
-  await publishRealtime(REALTIME_CHANNELS.call(callId), 'summary_ready', { summary, tasks });
-  return { summary, tasks };
+  await publishRealtime(REALTIME_CHANNELS.call(callId), 'summary_ready', { summary });
+  return { summary };
 }

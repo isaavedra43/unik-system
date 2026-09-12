@@ -130,7 +130,6 @@ export function CallDetail({
         case 'recording_ready':
         case 'summary_ready':
         case 'transcript_ready':
-        case 'task_created':
           load();
           break;
         default:

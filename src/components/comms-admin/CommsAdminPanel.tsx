@@ -696,8 +696,8 @@ function ResponsiblesTab({ users }: { users: UserOption[] }) {
         </button>
       </div>
       <p className="assistant-admin-muted">
-        Las solicitudes internas cuyo tipo coincide con un área se asignan automáticamente; si el
-        titular está inactivo se usa el respaldo.
+        Directorio de responsables por área para la bandeja y el asistente; si el titular está
+        inactivo se usa el respaldo.
       </p>
       {loading && <div className="assistant-admin-loading">Cargando…</div>}
       {error && (

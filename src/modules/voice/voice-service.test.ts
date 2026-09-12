@@ -119,9 +119,8 @@ function applyUpdate(row: Row, data: Row): Row {
 function model(name: string, defaults: () => Row = () => ({})) {
   return {
     create: async ({ data, include }: { data: Row; include?: Row }) => {
-      const { participants, events, ...scalars } = data as Row & {
+      const { participants, ...scalars } = data as Row & {
         participants?: { create: Row[] };
-        events?: { create: Row[] };
       };
       const row: Row = {
         id: nextId(),
@@ -143,15 +142,6 @@ function model(name: string, defaults: () => Row = () => ({})) {
             ...p,
           });
         }
-      }
-      if (events?.create) {
-        for (const e of events.create)
-          table('internalRequestEvent').push({
-            id: nextId(),
-            requestId: row.id,
-            createdAt: new Date(),
-            ...e,
-          });
       }
       return withInclude(name, row, include);
     },
@@ -251,8 +241,6 @@ vi.mock('@/lib/prisma', () => ({
     voiceSupervision: model('voiceSupervision', () => ({ startedAt: new Date(), endedAt: null })),
     commAccount: model('commAccount', () => ({ status: 'active', teamKeys: [] })),
     commContact: model('commContact'),
-    internalRequest: model('internalRequest', () => ({ status: 'open' })),
-    internalRequestEvent: model('internalRequestEvent'),
     storageObject: model('storageObject'),
     user: model('user', () => ({ isActive: true })),
     auditLog: { create: async ({ data }: { data: Row }) => audit.push(data) },
@@ -326,7 +314,6 @@ import {
   buildInboundTwiml,
   createInternalCall,
   createOutboundCall,
-  createTaskFromCall,
   handleLiveKitEvent,
   ingestTranscriptSegment,
   pauseAi,
@@ -438,37 +425,6 @@ describe('Pausar IA y generaciones', () => {
   });
 });
 
-describe('Tareas desde llamadas', () => {
-  it('creates a single task per call request and respects the allowed catalog', async () => {
-    const { call } = await createInternalCall(user(), { calleeUserIds: ['u2'] });
-    const first = await createTaskFromCall({
-      callId: call.id,
-      type: 'callback',
-      title: 'Devolver llamada',
-      actorUserId: 'u1',
-    });
-    expect(first.created).toBe(true);
-    const second = await createTaskFromCall({
-      callId: call.id,
-      type: 'callback',
-      title: 'Devolver llamada otra vez',
-      actorUserId: null,
-    });
-    expect(second).toMatchObject({ created: false, reason: 'duplicate' });
-    expect(table('internalRequest')).toHaveLength(1);
-    expect((table('internalRequest')[0].dossier as Row).callId).toBe(call.id);
-
-    const notAllowed = await createTaskFromCall({
-      callId: call.id,
-      type: 'delivery_change',
-      title: 'Cambiar entrega',
-      actorUserId: 'u1',
-    });
-    expect(notAllowed).toEqual({ created: false, reason: 'type_not_allowed' });
-    expect(table('internalRequest')).toHaveLength(1);
-  });
-});
-
 describe('Cotización oficial pedida oralmente', () => {
   it('goes through the approval executor and is not offered to the voice AI', async () => {
     if (!quoteToolRegistered) {
@@ -500,7 +456,7 @@ describe('Cotización oficial pedida oralmente', () => {
     expect(tools.map((t) => t.name)).not.toContain('approveOfficialQuoteTest');
     expect(
       tools.every(
-        (t) => t.effect === 'read' || t.effect === 'internal_task' || t.effect === undefined
+        (t) => t.effect === 'read' || t.effect === undefined
       )
     ).toBe(true);
   });

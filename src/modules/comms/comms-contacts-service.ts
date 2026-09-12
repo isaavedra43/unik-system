@@ -317,7 +317,7 @@ export async function listPendingDuplicates(actor: CurrentUser): Promise<Duplica
 }
 
 /**
- * Confirms a duplicate: conversations, commitments, consents and requests of
+ * Confirms a duplicate: conversations, commitments and consents of
  * `duplicateId` move to the survivor; the survivor gains any identifier it
  * was missing; the duplicate stays as a confirmed pointer (never deleted).
  */
@@ -327,7 +327,7 @@ export async function mergeDuplicate(
   survivorId?: string
 ): Promise<{
   survivor: CommContactDTO;
-  moved: { conversations: number; commitments: number; consents: number; requests: number };
+  moved: { conversations: number; commitments: number; consents: number };
 }> {
   assertInboxAssign(actor);
   const duplicate = assertFound(
@@ -354,10 +354,6 @@ export async function mergeDuplicate(
     data: { contactId: survivor.id },
   });
   const consents = await prisma.consentRecord.updateMany({
-    where: { contactId: duplicateId },
-    data: { contactId: survivor.id },
-  });
-  const requests = await prisma.internalRequest.updateMany({
     where: { contactId: duplicateId },
     data: { contactId: survivor.id },
   });
@@ -405,7 +401,6 @@ export async function mergeDuplicate(
       conversations: conversations.count,
       commitments: commitments.count,
       consents: consents.count,
-      requests: requests.count,
     },
   };
 }

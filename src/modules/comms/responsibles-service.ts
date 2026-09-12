@@ -9,7 +9,7 @@ import { normalizeName } from './normalize';
 /**
  * Directory of responsible people per area ("ventas", "instalaciones",
  * "cobranza", "soporte"...). Areas are free text normalized to a slug so
- * requests and the assistant can resolve "who handles X" with a backup.
+ * the inbox can resolve "who handles X" with a backup.
  */
 
 export const responsibleInputSchema = z.object({
@@ -56,7 +56,7 @@ export async function listResponsibles(
 ): Promise<ResponsibleDTO[]> {
   const canRead =
     actor.isSuperAdmin ||
-    ['inbox.use', 'inbox.admin', 'requests.use'].some((key) =>
+    ['inbox.use', 'inbox.admin'].some((key) =>
       actor.permissionKeys.includes(key as never)
     );
   if (!canRead) throw new CommsError('Sin permiso', 403);

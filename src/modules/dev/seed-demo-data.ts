@@ -47,8 +47,6 @@ export async function clearDemoData() {
     prisma.commConversation.deleteMany({ where: { id: { startsWith: 'demo-' } } }),
     prisma.commContact.deleteMany({ where: { id: { startsWith: 'demo-' } } }),
     prisma.commAccount.deleteMany({ where: { id: { startsWith: 'demo-' } } }),
-    prisma.internalRequest.deleteMany({ where: { id: { startsWith: 'demo-' } } }),
-    prisma.quote.deleteMany({ where: { id: { startsWith: 'demo-' } } }),
     prisma.campaign.deleteMany({ where: { id: { startsWith: 'demo-' } } }),
     prisma.internalChatChannel.deleteMany({ where: { id: { startsWith: 'demo-' } } }),
     prisma.aiConversation.deleteMany({ where: { id: { startsWith: 'demo-' } } }),
@@ -700,76 +698,6 @@ export async function seedDemoData(actorUserId: string) {
   }
 
   // ---------------------------------------------------------------------
-  // Requests
-  // ---------------------------------------------------------------------
-  const requestsSpec = [
-    { id: 'demo-req-1', type: 'cotizacion', title: 'Cotización para Grupo Industrial Pacífico', status: 'open', priority: 'high' },
-    { id: 'demo-req-2', type: 'soporte', title: 'Cliente reporta factura duplicada', status: 'in_progress', priority: 'urgent' },
-    { id: 'demo-req-3', type: 'compra', title: 'Solicitud de compra de cemento', status: 'waiting', priority: 'normal' },
-    { id: 'demo-req-4', type: 'incidencia', title: 'Retraso en entrega PKG-00003', status: 'done', priority: 'normal' },
-  ];
-
-  for (const r of requestsSpec) {
-    await prisma.internalRequest.create({
-      data: {
-        id: r.id,
-        type: r.type,
-        title: r.title,
-        description: 'Solicitud generada por el seed de datos demo.',
-        requesterUserId: actorUserId,
-        assigneeUserId: actorUserId,
-        status: r.status,
-        priority: r.priority,
-        dueAt: daysFromNow(5),
-        events: {
-          create: [
-            { type: 'created', body: 'Solicitud creada.', actorUserId },
-            ...(r.status !== 'open' ? [{ type: 'status_changed', body: `Estado cambiado a ${r.status}.`, actorUserId }] : []),
-          ],
-        },
-      },
-    });
-  }
-
-  // ---------------------------------------------------------------------
-  // Quotes
-  // ---------------------------------------------------------------------
-  const quotesSpec = [
-    { id: 'demo-quote-1', number: 'Q-00001', customer: customers[0], status: 'draft' },
-    { id: 'demo-quote-2', number: 'Q-00002', customer: customers[1], status: 'pending_approval' },
-    { id: 'demo-quote-3', number: 'Q-00003', customer: customers[2], status: 'approved' },
-  ];
-
-  for (const q of quotesSpec) {
-    const items = lineItems(2, 0);
-    const { subtotal, taxTotal, total } = totals(items);
-    await prisma.quote.create({
-      data: {
-        id: q.id,
-        number: q.number,
-        customerName: q.customer.name,
-        zohoCustomerId: q.customer.id,
-        items: items.map((it) => ({
-          name: it.product.name,
-          sku: it.product.sku,
-          quantity: it.quantity,
-          rate: it.rate,
-          total: it.lineTotal,
-        })),
-        subtotal,
-        tax: taxTotal,
-        total,
-        currency: 'MXN',
-        status: q.status,
-        notes: 'Cotización generada por el seed de datos demo.',
-        createdBy: actorUserId,
-        approvedBy: q.status === 'approved' ? actorUserId : null,
-        approvedAt: q.status === 'approved' ? daysAgo(1) : null,
-      },
-    });
-  }
-
-  // ---------------------------------------------------------------------
   // Campaigns
   // ---------------------------------------------------------------------
   const campaign = await prisma.campaign.create({
@@ -855,8 +783,6 @@ export async function seedDemoData(actorUserId: string) {
     packages: packagesSpec.length,
     notifications: notificationsSpec.length,
     conversations: conversationsSpec.length,
-    requests: requestsSpec.length,
-    quotes: quotesSpec.length,
     campaigns: 1,
     campaignId: campaign.id,
     chatChannels: 1,

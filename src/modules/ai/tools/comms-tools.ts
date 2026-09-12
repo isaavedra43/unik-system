@@ -9,14 +9,11 @@ import {
   transcriptFor,
 } from '@/modules/comms/comms-service';
 import { suggestReply } from '@/modules/comms/comms-ai';
-import { createRequest } from '@/modules/comms/requests-service';
-import { resolveResponsible } from '@/modules/comms/responsibles-service';
 import { createCommitment, listCommitments } from '@/modules/comms/commitments-service';
 import { previewText } from '@/modules/comms/normalize';
 
 /**
- * Assistant tools for the omnichannel inbox, internal requests, responsible
- * directory and commitments. Reads run directly; `sendInboxMessage` is an
+ * Assistant tools for the omnichannel inbox and commitments. Reads run directly; `sendInboxMessage` is an
  * `external_send` so the common executor ALWAYS creates a proposal that the
  * user approves in the chat before anything leaves UNIK.
  */
@@ -172,83 +169,6 @@ registerTool({
       uncertain: message.uncertain,
       error: message.error,
     };
-  },
-});
-
-registerTool({
-  name: 'createInternalRequest',
-  description:
-    'Crea una solicitud interna (con expediente y seguimiento) y la asigna automáticamente al responsable del área si existe. ' +
-    'Tipos habituales: ventas, instalaciones, cobranza, soporte, compras.',
-  category: 'communication',
-  requiredPermission: 'requests.use',
-  enabledByDefault: true,
-  effect: 'internal_task',
-  contextTags: ['all'],
-  parameters: z.object({
-    type: z.string().min(2).max(60),
-    title: z.string().min(3).max(200),
-    description: z.string().max(5000).optional(),
-    priority: z.enum(['normal', 'high', 'urgent']).default('normal'),
-    dueAt: z.string().datetime().optional(),
-    contactId: z.string().optional(),
-    commConversationId: z.string().optional(),
-    facts: z
-      .array(z.object({ key: z.string().max(80), value: z.string().max(2000) }))
-      .max(20)
-      .optional(),
-  }),
-  summarize: (args) => {
-    const a = args as { type: string; title: string };
-    return `Crear solicitud interna de ${a.type}: "${a.title}"`;
-  },
-  execute: async (actor, args, ctx) => {
-    const a = args as {
-      type: string;
-      title: string;
-      description?: string;
-      priority: 'normal' | 'high' | 'urgent';
-      dueAt?: string;
-      contactId?: string;
-      commConversationId?: string;
-      facts?: Array<{ key: string; value: string }>;
-    };
-    const request = await createRequest(actor, {
-      type: a.type,
-      title: a.title,
-      description: a.description,
-      priority: a.priority,
-      dueAt: a.dueAt ?? null,
-      contactId: a.contactId ?? null,
-      commConversationId: a.commConversationId ?? null,
-      aiConversationId: ctx.conversationId ?? null,
-      facts: (a.facts ?? []).map((f) => ({ ...f, source: 'ai' as const })),
-    });
-    return {
-      requestId: request.id,
-      status: request.status,
-      assignedTo: request.assigneeName,
-      url: `/app/requests?id=${request.id}`,
-    };
-  },
-});
-
-registerTool({
-  name: 'resolveResponsible',
-  description:
-    'Indica quién es el responsable (y su respaldo) de un área: ventas, instalaciones, cobranza, soporte, etc.',
-  category: 'communication',
-  requiredPermission: 'requests.use',
-  enabledByDefault: true,
-  effect: 'read',
-  contextTags: ['all'],
-  parameters: z.object({ area: z.string().min(2).max(60) }),
-  execute: async (_actor, args) => {
-    const a = args as { area: string };
-    const resolved = await resolveResponsible(a.area);
-    if (!resolved)
-      return { found: false, message: `No hay responsable configurado para "${a.area}"` };
-    return { found: true, ...resolved };
   },
 });
 

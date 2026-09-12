@@ -15,7 +15,6 @@ import { canAccessAccount, isInboxAdmin } from './comms-access';
  *   (image / PDF / audio, 25 MB). No module record is created at upload
  *   time; the object ids travel as `mediaObjectIds` when the message is sent
  *   and the service re-validates that the sender may read them.
- * - Upload target `internal_request`: files attached to internal requests.
  * - Access resolver `comm_media`: readable by inbox users whose teams share
  *   the account of a message referencing the object, by the uploader while
  *   the file is still unsent, by requester/assignee of a request referencing
@@ -68,58 +67,19 @@ export function registerCommsStorageResolvers(): void {
     };
   });
 
-  registerUploadTargetResolver('internal_request', async (actor, requestId) => {
-    if (!hasPermission(actor, 'requests.use')) {
-      throw new StorageError('Sin permiso para adjuntar archivos', 'forbidden', 403);
-    }
-    if (requestId !== 'new') {
-      const request = await prisma.internalRequest.findUnique({
-        where: { id: requestId },
-        select: { requesterUserId: true, assigneeUserId: true },
-      });
-      const allowed =
-        request &&
-        (request.requesterUserId === actor.id ||
-          request.assigneeUserId === actor.id ||
-          isInboxAdmin(actor));
-      if (!allowed) throw new StorageError('Solicitud no encontrada', 'not_found', 404);
-    }
-    return {
-      policy: {
-        purpose: 'comm_media',
-        maxBytes: COMM_MEDIA_MAX_BYTES,
-        allowedMimeTypes: [...COMM_MEDIA_MIME_TYPES, 'text/plain', 'text/csv'],
-      },
-    };
-  });
-
   registerFileAccessResolver('comm_media', async (actor, object) => {
     const inboxUser = hasPermission(actor, 'inbox.use') || isInboxAdmin(actor);
-    const requestsUser = hasPermission(actor, 'requests.use');
-    if (!inboxUser && !requestsUser) return false;
+    if (!inboxUser) return false;
     if (isInboxAdmin(actor)) return true;
     // The uploader may always see their own file (pending or sent).
     if (object.createdBy === actor.id) return true;
 
-    if (inboxUser) {
-      const messages = await prisma.commMessage.findMany({
-        where: { mediaObjectIds: { has: object.id } },
-        select: { account: { select: { teamKeys: true } } },
-        take: 20,
-      });
-      if (messages.some((m) => canAccessAccount(actor, m.account))) return true;
-    }
-    if (requestsUser) {
-      const request = await prisma.internalRequest.findFirst({
-        where: {
-          fileIds: { has: object.id },
-          OR: [{ requesterUserId: actor.id }, { assigneeUserId: actor.id }],
-        },
-        select: { id: true },
-      });
-      if (request) return true;
-    }
-    return false;
+    const messages = await prisma.commMessage.findMany({
+      where: { mediaObjectIds: { has: object.id } },
+      select: { account: { select: { teamKeys: true } } },
+      take: 20,
+    });
+    return messages.some((m) => canAccessAccount(actor, m.account));
   });
 }
 
