@@ -419,7 +419,14 @@ const E164 = /^\+[1-9]\d{6,14}$/;
 
 export async function createOutboundCall(
   actor: CurrentUser,
-  input: { toNumber: string; accountId?: string | null; contactId?: string | null }
+  input: {
+    toNumber: string;
+    accountId?: string | null;
+    contactId?: string | null;
+    /** The voice agent makes the call alone (with `aiBrief` as its mission). */
+    aiAnswers?: boolean;
+    aiBrief?: string | null;
+  }
 ): Promise<{ call: VoiceCallDTO; token: livekit.IssuedToken }> {
   if (!actorHas(actor, 'calls.use')) throw new VoiceError('Sin permiso', 'forbidden', 403);
   if (!E164.test(input.toNumber)) {
@@ -463,10 +470,14 @@ export async function createOutboundCall(
       accountId,
       contactId,
       initiatedByUserId: actor.id,
-      aiState: settings.copilotEnabled ? 'active' : 'off',
+      aiState: input.aiAnswers || settings.copilotEnabled ? 'active' : 'off',
+      aiBrief: input.aiBrief?.trim() || null,
       recordingState: 'off',
       participants: {
-        create: [{ identity: IDENTITY.user(actor.id), userId: actor.id, role: 'agent' }],
+        create: [
+          { identity: IDENTITY.user(actor.id), userId: actor.id, role: 'agent' },
+          ...(input.aiAnswers ? [{ identity: IDENTITY.ai(id), role: 'ai' }] : []),
+        ],
       },
     },
   });
@@ -482,6 +493,11 @@ export async function createOutboundCall(
   await prisma.voiceParticipant.create({
     data: { callId: id, identity: IDENTITY.sip(id), role: 'callee' },
   });
+  if (input.aiAnswers) {
+    // The voice agent worker joins the room and follows `aiBrief`.
+    const { dispatchVoiceAgent } = await import('./voice-agent-service');
+    await dispatchVoiceAgent(id, 'manual');
+  }
   const call = await loadCall(id);
   const token = await livekit.issueToken({
     identity: IDENTITY.user(actor.id),

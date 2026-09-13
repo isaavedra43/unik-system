@@ -1,5 +1,8 @@
 import { z } from 'zod';
 import { registerTool } from './registry';
+import { absoluteUrl } from '@/lib/app-url';
+import { resolveContact } from '@/modules/comms/contact-resolver';
+import { prisma } from '@/lib/prisma';
 import {
   createOutboundCall,
   getTranscript,
@@ -143,3 +146,85 @@ registerTool({
   },
 });
 
+
+
+registerTool({
+  name: 'callContact',
+  description:
+    'Llama por teléfono a un contacto (nombre o número). mode="me": marcas y el usuario contesta desde UNIK (devuelve joinUrl). mode="ai": la asistente de voz hace la llamada sola y dice/pregunta lo indicado en "brief" (ej. "avísale que su pedido está listo para recoger y pregúntale a qué hora pasa"); al terminar hay transcripción y resumen. Requiere aprobación.',
+  category: 'communication',
+  requiredPermission: 'calls.use',
+  enabledByDefault: true,
+  effect: 'external_send',
+  approvalPolicy: 'require_approval',
+  contextTags: ['all'],
+  parameters: z.object({
+    contact: z.string().min(1).describe('Nombre, teléfono (+52…) o id del contacto'),
+    mode: z.enum(['me', 'ai']).default('me'),
+    brief: z.string().max(1500).optional().describe('Solo mode="ai": qué debe decir/preguntar la asistente'),
+    accountId: z.string().optional().describe('Cuenta telefónica desde la que marcar (opcional)'),
+  }),
+  summarize: (args) => {
+    const a = args as { contact: string; mode: 'me' | 'ai'; brief?: string };
+    return a.mode === 'ai'
+      ? `Que la asistente de voz llame a ${a.contact} y: ${(a.brief ?? '').slice(0, 160)}`
+      : `Llamar a ${a.contact} (tú contestas desde UNIK)`;
+  },
+  execute: async (actor, args) => {
+    const a = args as { contact: string; mode: 'me' | 'ai'; brief?: string; accountId?: string };
+    if (a.mode === 'ai' && !a.brief?.trim()) return { error: 'Para que la IA llame necesitas indicar qué debe decir (brief).' };
+    const contact = await resolveContact(a.contact);
+    if (!contact.phone) return { error: `${contact.displayName} no tiene teléfono registrado` };
+    const { call, mock } = await createOutboundCall(actor, {
+      toNumber: contact.phone,
+      accountId: a.accountId ?? null,
+      contactId: contact.commContactId ?? null,
+      aiAnswers: a.mode === 'ai',
+      aiBrief: a.mode === 'ai' ? a.brief ?? null : null,
+    }).then((r) => ({ call: r.call, mock: r.call.mock }));
+    return {
+      callId: call.id,
+      to: contact.displayName,
+      phone: contact.phone,
+      status: call.status,
+      mode: a.mode,
+      mock,
+      joinUrl: absoluteUrl(`/app/calls?call=${call.id}`),
+      note:
+        a.mode === 'ai'
+          ? 'La asistente de voz está marcando. El usuario puede escuchar o intervenir desde joinUrl; al terminar usa getCallTranscript para el resumen.'
+          : 'La llamada está sonando: pide al usuario que abra joinUrl para contestar desde el navegador.',
+    };
+  },
+});
+
+registerTool({
+  name: 'startInternalCall',
+  description:
+    'Prepara una llamada interna (voz o video) con otro usuario de UNIK: abre el chat directo con esa persona y devuelve el enlace que inicia la llamada desde el navegador. La IA no participa en llamadas internas.',
+  category: 'communication',
+  requiredPermission: 'chat.use',
+  enabledByDefault: true,
+  effect: 'internal_task',
+  contextTags: ['all'],
+  parameters: z.object({
+    user: z.string().min(1).describe('Nombre o usuario de la persona'),
+    type: z.enum(['audio', 'video']).default('audio'),
+  }),
+  execute: async (actor, args) => {
+    const a = args as { user: string; type: 'audio' | 'video' };
+    const target = await prisma.user.findFirst({
+      where: { isActive: true, id: { not: actor.id }, OR: [{ name: { contains: a.user, mode: 'insensitive' } }, { username: { equals: a.user, mode: 'insensitive' } }] },
+      select: { id: true, name: true },
+    });
+    if (!target) return { error: `No encontré al usuario "${a.user}"` };
+    const { createDmChannel } = await import('@/modules/chat/chat-service');
+    const channel = await createDmChannel(actor, target.id);
+    return {
+      user: target.name,
+      chatChannelId: channel.id,
+      openUrl: absoluteUrl(`/app/chat?channel=${channel.id}&call=${a.type}`),
+      note: 'Pide al usuario que abra openUrl: la llamada se inicia al instante desde su navegador.',
+    };
+  },
+});

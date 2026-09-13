@@ -35,7 +35,7 @@ export const INTEGRATION_DISPLAY_NAMES: Record<IntegrationSourceKey, string> = {
  * plain JSON column so no migration is needed to add a new knob.
  */
 export interface ZohoSettings {
-  /** Scheduler: minimum time between full sync runs, in ms. */
+  /** Scheduler: minimum time between full sync runs, in ms (fallback). */
   syncIntervalMs: number;
   /** Scheduler: local DB check cadence, in ms (does NOT consume API calls). */
   checkIntervalMs: number;
@@ -71,6 +71,20 @@ export interface ZohoSettings {
   staleRunThresholdMs: number;
   /** Whether the internal scheduler is enabled. */
   schedulerEnabled: boolean;
+  /** Scheduler mode for automatic runs: 'quick' (recent pages only) or 'sync' (full scan). */
+  schedulerMode: 'quick' | 'sync';
+  /** Start of business hours (hour 0-23 in America/Mexico_City). */
+  businessHoursStart: number;
+  /** End of business hours (hour 0-23 in America/Mexico_City). */
+  businessHoursEnd: number;
+  /** Sync interval during business hours, in ms. */
+  businessHoursIntervalMs: number;
+  /** Sync interval outside business hours, in ms. */
+  offHoursIntervalMs: number;
+  /** Maximum Zoho API calls per day (shared rate budget). */
+  maxDailyCalls: number;
+  /** Maximum Zoho API calls per minute (shared rate budget). */
+  maxCallsPerMinute: number;
 }
 
 export type IntegrationSettings = ZohoSettings;
@@ -80,7 +94,7 @@ export const DEFAULT_SETTINGS: Record<IntegrationSourceKey, IntegrationSettings>
     syncIntervalMs: 60 * 60 * 1000,
     checkIntervalMs: 5 * 60 * 1000,
     startupDelayMs: 30 * 1000,
-    schedulerMaxDetailFetches: 100,
+    schedulerMaxDetailFetches: 30,
     failedRetryCooldownMs: 30 * 60 * 1000,
     quickScanPages: 2,
     quickMaxDetailFetches: 20,
@@ -95,6 +109,13 @@ export const DEFAULT_SETTINGS: Record<IntegrationSourceKey, IntegrationSettings>
     fullSyncTimeoutMs: 60 * 60 * 1000,
     staleRunThresholdMs: 10 * 60 * 1000,
     schedulerEnabled: false,
+    schedulerMode: 'quick',
+    businessHoursStart: 8,
+    businessHoursEnd: 19,
+    businessHoursIntervalMs: 30 * 60 * 1000,
+    offHoursIntervalMs: 2 * 60 * 60 * 1000,
+    maxDailyCalls: 5000,
+    maxCallsPerMinute: 40,
   },
 };
 
@@ -227,4 +248,40 @@ export async function updateIntegrationConfig(
   });
 
   invalidateIntegrationConfigCache(source);
+}
+
+// ---------------------------------------------------------------------------
+// Time-of-day aware sync interval
+// ---------------------------------------------------------------------------
+
+/**
+ * Timezone used for business-hours calculations.
+ * UNIK operates in Mexico, so we use America/Mexico_City (UTC-6, no DST).
+ */
+export const UNIK_TIMEZONE = 'America/Mexico_City';
+
+/**
+ * Returns the current hour (0-23) in the UNIK timezone (America/Mexico_City),
+ * regardless of the server's local timezone.
+ */
+export function getUnikHour(now: Date = new Date()): number {
+  const fmt = new Intl.DateTimeFormat('en-US', {
+    timeZone: UNIK_TIMEZONE,
+    hour: '2-digit',
+    hour12: false,
+  });
+  const parts = fmt.formatToParts(now);
+  const hourStr = parts.find((p) => p.type === 'hour')?.value ?? '0';
+  return parseInt(hourStr, 10) % 24;
+}
+
+/**
+ * Returns the effective sync interval based on the current hour in the UNIK
+ * timezone. During business hours (businessHoursStart..businessHoursEnd-1)
+ * the shorter interval applies; outside, the longer one.
+ */
+export function getEffectiveSyncInterval(settings: ZohoSettings, now: Date = new Date()): number {
+  const hour = getUnikHour(now);
+  const inBusinessHours = hour >= settings.businessHoursStart && hour < settings.businessHoursEnd;
+  return inBusinessHours ? settings.businessHoursIntervalMs : settings.offHoursIntervalMs;
 }

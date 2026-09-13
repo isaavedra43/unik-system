@@ -23,6 +23,8 @@ import { prisma } from '@/lib/prisma';
 import { buildReportSubtitle, buildSummaryCards } from './ai-report-helpers';
 import { ARTIFACT_TOOL_NAMES, collectRowArrays, findLastDataToolResult } from './ai-history-data';
 import { maybeSummarizeConversation } from './ai-conversation-summary';
+import { absoluteUrl } from '@/lib/app-url';
+import type { Prisma } from '@prisma/client';
 
 interface OrchestratorInput {
   conversationId: string;
@@ -79,6 +81,55 @@ const INBOX_CONVERSATION_ID_TOOLS = new Set([
   'sendInboxMessage',
   'createCommitment',
 ]);
+
+/**
+ * Drops orphan tool replies (no preceding assistant tool_calls in the window)
+ * and strips tool_calls whose replies were cut off, so the provider always sees
+ * a valid sequence. Pure; keeps everything else untouched.
+ */
+export function sanitizeHistory<T extends { role: string; toolCalls: unknown; toolCallId: string | null }>(history: T[]): T[] {
+  const out: T[] = [];
+  let i = 0;
+  while (i < history.length) {
+    const m = history[i];
+    if (m.role === 'tool') {
+      i += 1; // orphan: nothing with tool_calls precedes it inside the window
+      continue;
+    }
+    if (m.role === 'assistant' && Array.isArray(m.toolCalls) && (m.toolCalls as unknown[]).length > 0) {
+      const ids = new Set((m.toolCalls as Array<{ id: string }>).map((tc) => tc.id));
+      const replies: T[] = [];
+      let j = i + 1;
+      while (j < history.length && history[j].role === 'tool') {
+        replies.push(history[j]);
+        j += 1;
+      }
+      const answered = replies.filter((r) => r.toolCallId && ids.has(r.toolCallId));
+      if (answered.length === ids.size) {
+        out.push(m, ...answered);
+      } else {
+        // Incomplete pair: keep the assistant text without tool_calls.
+        out.push({ ...m, toolCalls: null });
+      }
+      i = j;
+      continue;
+    }
+    out.push(m);
+    i += 1;
+  }
+  return out;
+}
+
+async function linkArtifactToMessage(artifactId: string, messageId: string, spec: Record<string, unknown>): Promise<void> {
+  try {
+    const row = await prisma.aiArtifact.findUnique({ where: { id: artifactId }, select: { meta: true } });
+    if (!row) return;
+    const meta = { ...((row.meta as Record<string, unknown> | null) ?? {}), spec };
+    await prisma.aiArtifact.update({ where: { id: artifactId }, data: { messageId, meta: meta as Prisma.InputJsonValue } });
+  } catch (error) {
+    console.warn(JSON.stringify({ event: 'ai.artifact.link_failed', artifactId, message: error instanceof Error ? error.message : 'unknown' }));
+  }
+}
 
 function firstRowArray(result: Record<string, unknown> | null | undefined): Record<string, unknown>[] | null {
   if (!result) return null;
@@ -209,10 +260,12 @@ export async function* runAssistant(
     systemPrompt += `\n\n${await buildChatCopilotPrompt(input.actor, chatChannelId)}`;
   }
 
-  // 7. Build messages
+  // 7. Build messages (history is sanitized so every `tool` reply follows its
+  // `tool_calls` message — the context window can otherwise cut a pair in half
+  // and the provider rejects the request with a 400).
   const messages: ChatMessage[] = [
     { role: 'system', content: systemPrompt },
-    ...history.map((m) => {
+    ...sanitizeHistory(history).map((m) => {
       if (m.role === 'tool') {
         return {
           role: 'tool' as const,
@@ -338,7 +391,8 @@ export async function* runAssistant(
     'generateCsvExport',
     'generateReportImage',
     'generateTable',
-  ]);
+  'generateWordReport',
+]);
 
   /**
    * Builds a dynamic report title based on the tool name and its arguments.
@@ -842,6 +896,24 @@ export async function* runAssistant(
           : toolResult.artifactId && toolResult.type
             ? [toolResult]
             : [];
+        if (artifactList.length > 0) {
+          // Persist provenance so a later "cámbiale X al reporte" can rebuild it, and
+          // attach the artifacts to this assistant message so they render forever.
+          const generatorArgs = { ...((parsedArgs as Record<string, unknown>) ?? {}) };
+          delete generatorArgs.rows;
+          delete generatorArgs.sections;
+          const spec = {
+            generatedBy: tc.name,
+            generatorArgs,
+            sourceTool: lastToolName,
+            sourceArgs: lastToolArgs,
+            generatedAt: new Date().toISOString(),
+          };
+          for (const a of artifactList) {
+            if (typeof a.artifactId !== 'string') continue;
+            await linkArtifactToMessage(a.artifactId, assistantMessage.id, spec);
+          }
+        }
         for (const a of artifactList) {
           yield {
             type: 'artifact',
@@ -850,7 +922,7 @@ export async function* runAssistant(
               type: a.type,
               title: a.title,
               filename: a.filename,
-              downloadUrl: a.downloadUrl,
+              downloadUrl: typeof a.downloadUrl === 'string' ? absoluteUrl(a.downloadUrl) : a.downloadUrl,
               inlineRender: a.inlineRender,
               rowCount: a.rowCount,
               sizeBytes: a.sizeBytes,
@@ -869,7 +941,7 @@ export async function* runAssistant(
         result: result.result,
         durationMs: result.durationMs,
         success: result.success,
-        errorCode: result.error,
+        errorCode: result.needsApproval ? 'needs_approval' : (result.errorCode ?? result.error),
       });
 
       // Add result to context
@@ -908,6 +980,8 @@ export async function* runAssistant(
         data: {
           name: tc.name,
           success: result.success,
+          needsApproval: Boolean(result.needsApproval),
+          errorCode: result.errorCode ?? null,
           durationMs: result.durationMs,
         },
       };

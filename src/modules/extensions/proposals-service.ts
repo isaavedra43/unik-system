@@ -241,12 +241,12 @@ export async function approveProposal(
         : `falló: ${execution.error ?? 'error'}`;
     const resultText =
       execution.result !== undefined
-        ? JSON.stringify(redactDeep(execution.result)).slice(0, 4000)
+        ? JSON.stringify(redactDeep(execution.result)).slice(0, 600)
         : '';
     await addMessage(
       proposal.conversationId,
       'system',
-      `[Sistema] El usuario APROBÓ la propuesta ${id} (${proposal.toolName}): ${outcome}.${resultText ? ` Resultado: ${resultText}` : ''}`,
+      `[Sistema] El usuario APROBÓ la propuesta ${id} (${proposal.toolName}): ${outcome}. Acción: ${proposal.summary.slice(0, 200)}${resultText ? ` Resultado: ${resultText}` : ''}`,
       null,
       0,
       0,

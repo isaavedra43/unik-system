@@ -583,6 +583,21 @@ model InvoiceItem {
   @@index([zohoSalesOrderId])
 }
 
+/// Daily work digest per user: what they did with UNIK (AI, inbox, chat, sales),
+/// KPIs and a narrative the assistant can recall ("¿cómo voy hoy?").
+model AiUserDigest {
+  id        String   @id @default(cuid())
+  userId    String
+  date      DateTime @db.Date
+  narrative String
+  metrics   Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, date])
+  @@index([date])
+}
+
 /// Business-normalized view of a Zoho Books estimate (cotización).
 /// Synced via /books/v3/estimates (LIST has no line items → HYDRATE per record).
 /// Quotes can also be CREATED/EDITED from UNIK: the write service calls Zoho
@@ -984,6 +999,7 @@ model AiMessage {
   conversation    AiConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   toolCallRecords AiToolCall[]
   attachments     AiAttachment[]
+  artifacts       AiArtifact[]
 
   @@index([conversationId, createdAt])
 }
@@ -1062,9 +1078,11 @@ model AiArtifact {
   meta            Json?
   createdAt       DateTime       @default(now())
   conversation    AiConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  message         AiMessage?     @relation(fields: [messageId], references: [id], onDelete: SetNull)
   storageObject   StorageObject? @relation(fields: [storageObjectId], references: [id], onDelete: SetNull)
 
   @@index([conversationId])
+  @@index([messageId])
   @@index([type])
   @@index([storageObjectId])
 }
@@ -2297,6 +2315,8 @@ model VoiceCall {
   recordingObjectId   String?
   transcriptObjectId  String?
   summary             String?
+  /// Mission for AI-driven outbound calls ("call and tell them X"); read by the voice agent brief.
+  aiBrief             String?
   startedAt           DateTime?
   endedAt             DateTime?
   durationSec         Int?

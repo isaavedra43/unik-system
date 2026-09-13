@@ -8,12 +8,14 @@ import { createArtifact } from '../ai-artifacts-service';
 import { saveGeneratedFile } from '@/modules/storage/storage-service';
 import { generatePdfReport, type PdfTableColumn, type PdfSection } from '../generators/pdf-generator';
 import { generateExcelReport, type ExcelColumn } from '../generators/excel-generator';
+import { generateDocxReport } from '../generators/docx-generator';
 import { generateCsvReport } from '../generators/csv-generator';
 import { generateChartSvg } from '../generators/chart-generator';
 import { generateReportImageSvg } from '../generators/image-report-generator';
 import { hexToArgb } from '../generators/status-tone';
 import { generateTableData } from '../generators/table-generator';
 import { getAiSettings } from '../ai-admin-config-service';
+import { absoluteUrl } from '@/lib/app-url';
 import { parseNumeric, sumColumn } from '../ai-report-helpers';
 
 /**
@@ -500,6 +502,61 @@ registerTool({
       sectionCount: pdfSections.length,
       downloadUrl: `/app/assistant/api/artifacts/${artifact.id}/download`,
     };
+  },
+});
+
+// 2b. generateWordReport (.docx) — same content model as the PDF
+registerTool({
+  name: 'generateWordReport',
+  description:
+    'Genera un reporte en Word (.docx) editable con título, tarjetas KPI y una o varias tablas. Úsalo cuando el usuario pida "en Word", "documento editable" o quiera modificar el texto después. Las filas se llenan automáticamente con la última consulta de datos.',
+  category: 'export',
+  requiredPermission: 'sales_orders.view',
+  enabledByDefault: true,
+  effect: 'draft',
+  parameters: z.object({
+    conversationId: z.string().optional().describe('Se inyecta automáticamente, no lo pongas.'),
+    title: z.string().default('Reporte UNIK'),
+    subtitle: z.string().optional(),
+    rows: z.array(z.record(z.unknown())).optional().describe('Déjalo vacío: el sistema lo llena con TODAS las filas de la última consulta.'),
+    subsetOnly: subsetOnlySchema,
+    columns: z.array(z.object({ header: z.string(), key: z.string(), format: z.enum(['currency', 'number', 'percentage', 'date', 'text']).optional() })).optional(),
+    sections: z.array(z.object({ title: z.string().optional(), rows: z.array(z.record(z.unknown())), columns: z.array(z.object({ header: z.string(), key: z.string(), format: z.enum(['currency', 'number', 'percentage', 'date', 'text']).optional() })).optional() })).optional(),
+    summaryCards: z.array(z.object({ label: z.string(), value: z.string() })).optional(),
+    notes: z.string().max(4000).optional().describe('Texto libre al final (conclusiones, recomendaciones)'),
+    brandColor: z.string().optional(),
+  }),
+  execute: async (_actor, rawArgs) => {
+    const args = rawArgs as {
+      conversationId: string; title: string; subtitle?: string; rows?: Record<string, unknown>[];
+      columns?: Array<{ header: string; key: string; format?: string }>;
+      sections?: Array<{ title?: string; rows: Record<string, unknown>[]; columns?: Array<{ header: string; key: string; format?: string }> }>;
+      summaryCards?: Array<{ label: string; value: string }>; notes?: string; brandColor?: string;
+    };
+    const sections = (args.sections && args.sections.length > 0
+      ? args.sections
+      : [{ title: undefined, rows: args.rows ?? [], columns: args.columns }]
+    ).map((s) => ({
+      title: s.title,
+      rows: s.rows,
+      columns: (s.columns && s.columns.length > 0 ? s.columns : autoColumns(s.rows)).map((c) => ({ header: c.header, key: c.key, format: c.format as 'currency' | 'number' | 'percentage' | 'date' | 'text' | undefined })),
+    }));
+    const totalRows = sections.reduce((n, s) => n + s.rows.length, 0);
+    if (totalRows === 0) return { error: 'No hay filas para el reporte. Primero consulta los datos (querySalesOrders, queryInvoices…) y vuelve a generar.' };
+    const filename = `${args.title.replace(/[^a-zA-Z0-9]/g, '_')}.docx`;
+    const mimeType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    const { sizeBytes, rowCount, storageObjectId } = await withTempArtifactFile('docx', async (filePath) => {
+      const generated = await generateDocxReport({ title: args.title, subtitle: args.subtitle, summaryCards: args.summaryCards, sections, notes: args.notes, brandColor: args.brandColor, author: 'UNIK' }, filePath);
+      const stored = await storeArtifactFile(_actor.id, filePath, filename, mimeType, { title: args.title, rowCount: generated.rowCount });
+      return { ...generated, storageObjectId: stored.storageObjectId };
+    });
+    const artifact = await createArtifact({
+      conversationId: args.conversationId,
+      type: 'docx',
+      storageObjectId,
+      meta: { title: args.title, subtitle: args.subtitle, filename, mimeType, sizeBytes, rowCount, sectionCount: sections.length },
+    });
+    return { artifactId: artifact.id, type: 'docx', title: args.title, filename, sizeBytes, rowCount, downloadUrl: absoluteUrl(`/app/assistant/api/artifacts/${artifact.id}/download`) };
   },
 });
 

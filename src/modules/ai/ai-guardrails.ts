@@ -13,6 +13,14 @@ const PROMPT_INJECTION_PATTERNS = [
   /you\s+are\s+now/i,
   /revela(r)?\s+(tus?\s+)?instrucciones/i,
   /show\s+me\s+(your\s+)?(system\s+)?prompt/i,
+  /olvida\s+(todo|tus|las)\s+/i,
+  /disregard\s+(all|previous|prior)/i,
+  /new\s+instructions?:/i,
+  /nuevas?\s+instrucci[oó]n(es)?:/i,
+  /modo\s+(desarrollador|dios|admin)/i,
+  /developer\s+mode/i,
+  /sin\s+aprobaci[oó]n/i,
+  /(dame|env[ií]a|manda|exporta)\s+(toda\s+)?la\s+(base|lista)\s+de\s+(clientes|contactos|tel[eé]fonos)/i,
 ];
 
 interface InputValidationResult {
@@ -58,4 +66,22 @@ export function validateOutput(text: string): OutputValidationResult {
   }
 
   return { valid: warnings.length === 0, warnings };
+}
+
+
+/** True when the text carries an instruction-like pattern (used to flag untrusted content). */
+export function containsInjection(text: string | null | undefined): boolean {
+  if (!text) return false;
+  return PROMPT_INJECTION_PATTERNS.some((p) => p.test(text));
+}
+
+/**
+ * Wraps external content (customer messages, documents, search results) so the
+ * model treats it as data. Neutralizes closing tags inside the content and adds
+ * a flag when it looks like an injection attempt.
+ */
+export function wrapUntrusted(text: string, source: string): string {
+  const safe = text.replace(/<\/?untrusted[^>]*>/gi, '[tag]');
+  const flagged = containsInjection(safe) ? ' posible_manipulacion="true"' : '';
+  return `<untrusted source="${source}"${flagged}>\n${safe}\n</untrusted>`;
 }

@@ -33,7 +33,14 @@ import { ChatEmojiPicker } from './ChatEmojiPicker';
 import { Users } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ChatAttachmentPreview } from './ChatAttachmentPreview';
-import { ChatLocationMap } from './ChatLocationMap';
+import dynamic from 'next/dynamic';
+
+// Leaflet touches `window` at import time; load the map only in the browser so the
+// chat page can be server-rendered (and preloaded on boot) without a ReferenceError.
+const ChatLocationMap = dynamic(
+  () => import('./ChatLocationMap').then((m) => m.ChatLocationMap),
+  { ssr: false, loading: () => <div className="chat-location-map" style={{ height: 200 }} aria-busy="true" /> }
+);
 import { ChatPollMessage } from './ChatPollMessage';
 import { ChatEventMessage } from './ChatEventMessage';
 import { ChatReadReceiptsDialog } from './ChatReadReceiptsDialog';
@@ -66,18 +73,44 @@ function formatTime(iso: string): string {
   return new Date(iso).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' });
 }
 
+const LINK_TOKEN_RE = /(\[[^\]]+\]\(https?:\/\/[^\s)]+\)|https?:\/\/[^\s<>"']+)/g;
+
+/** Mentions as chips; URLs and markdown links as safe anchors (the assistant shares report links). */
 function renderContentWithMentions(content: string): React.ReactNode {
-  // Split by @username patterns and render as chips
-  const parts = content.split(/(@\w+)/g);
-  return parts.map((part, i) => {
-    if (part.startsWith('@') && part.length > 1) {
+  const segments = content.split(LINK_TOKEN_RE);
+  return segments.map((segment, si) => {
+    if (!segment) return null;
+    const md = /^\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)$/.exec(segment);
+    if (md) {
       return (
-        <span key={i} className="chat-mention-chip">
-          {part}
-        </span>
+        <a key={`l${si}`} href={md[2]} target="_blank" rel="noopener noreferrer" className="chat-msg-link">
+          {md[1]}
+        </a>
       );
     }
-    return part;
+    if (/^https?:\/\//.test(segment)) {
+      const trailing = /[.,;:!?)]+$/.exec(segment)?.[0] ?? '';
+      const url = trailing ? segment.slice(0, -trailing.length) : segment;
+      return (
+        <React.Fragment key={`u${si}`}>
+          <a href={url} target="_blank" rel="noopener noreferrer" className="chat-msg-link">
+            {url.length > 60 ? `${url.slice(0, 57)}…` : url}
+          </a>
+          {trailing}
+        </React.Fragment>
+      );
+    }
+    const parts = segment.split(/(@\w+)/g);
+    return parts.map((part, i) => {
+      if (part.startsWith('@') && part.length > 1) {
+        return (
+          <span key={`m${si}-${i}`} className="chat-mention-chip">
+            {part}
+          </span>
+        );
+      }
+      return <React.Fragment key={`t${si}-${i}`}>{part}</React.Fragment>;
+    });
   });
 }
 

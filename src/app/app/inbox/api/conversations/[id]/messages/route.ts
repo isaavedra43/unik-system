@@ -9,6 +9,7 @@ export const dynamic = 'force-dynamic';
 const sendSchema = z.object({
   body: z.string().max(4000).default(''),
   mediaObjectIds: z.array(z.string()).max(10).optional(),
+  templateKey: z.string().max(120).optional(),
 });
 
 /** GET ?before=<messageId>&limit — chronological page of messages. */
@@ -41,6 +42,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       conversationId: id,
       body: input.body,
       mediaObjectIds: input.mediaObjectIds,
+      templateKey: input.templateKey,
       sentByUserId: auth.user.id,
       actor: auth.user,
     });

@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { registerTool } from './registry';
 import { previewText } from '@/modules/comms/normalize';
+import { markdownLinksToPlain, rewriteArtifactLinksForSharing } from '../artifact-share';
 
 /**
  * Internal-chat tools. `chatChannelId` is injected by the orchestrator when the
@@ -155,8 +156,9 @@ registerTool({
     const { getChannel } = await import('@/modules/chat/chat-service');
     const channel = await getChannel(args.chatChannelId, actor.id);
     if (!channel) throw new Error('Canal no encontrado o sin acceso');
+    const { text } = await rewriteArtifactLinksForSharing(markdownLinksToPlain(args.body), actor.id);
     return {
-      draft: args.body,
+      draft: text,
       rationale: args.rationale ?? null,
       status: 'draft_ready',
       note: 'El borrador se mostró como tarjeta con el botón "Insertar en el redactor". No lo repitas completo en tu respuesta.',

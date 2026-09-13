@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { registerTool } from './registry';
 import { addNote, getConversation, updateConversation } from '@/modules/comms/comms-service';
 import { previewText } from '@/modules/comms/normalize';
+import { markdownLinksToPlain, rewriteArtifactLinksForSharing } from '../artifact-share';
 
 /**
  * Tools that only make sense inside the inbox copilot. They take the INBOX
@@ -58,8 +59,9 @@ registerTool({
   execute: async (actor, rawArgs) => {
     const args = rawArgs as { inboxConversationId: string; body: string; rationale?: string };
     await getConversation(actor, args.inboxConversationId);
+    const { text } = await rewriteArtifactLinksForSharing(markdownLinksToPlain(args.body), actor.id);
     return {
-      draft: args.body,
+      draft: text,
       rationale: args.rationale ?? null,
       status: 'draft_ready',
       note: 'El borrador se mostró como tarjeta con el botón "Insertar en el redactor". No lo repitas completo en tu respuesta.',

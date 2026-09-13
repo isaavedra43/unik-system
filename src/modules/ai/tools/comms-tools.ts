@@ -11,6 +11,7 @@ import {
 import { suggestReply } from '@/modules/comms/comms-ai';
 import { createCommitment, listCommitments } from '@/modules/comms/commitments-service';
 import { previewText } from '@/modules/comms/normalize';
+import { markdownLinksToPlain, rewriteArtifactLinksForSharing } from '../artifact-share';
 
 /**
  * Assistant tools for the omnichannel inbox and commitments. Reads run directly; `sendInboxMessage` is an
@@ -155,10 +156,11 @@ registerTool({
   execute: async (actor, args) => {
     const a = args as { conversationId: string; body: string };
     const conversation = await getConversation(actor, a.conversationId);
+    const { text: body } = await rewriteArtifactLinksForSharing(markdownLinksToPlain(a.body), actor.id);
     const message = await sendOutboundMessage({
       accountId: conversation.accountId,
       conversationId: conversation.id,
-      body: a.body,
+      body,
       sentByUserId: actor.id,
       actor,
     });

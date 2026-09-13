@@ -119,7 +119,7 @@ interface SettingField {
 }
 
 const SETTING_FIELDS: SettingField[] = [
-  { key: 'syncIntervalMs', label: 'Intervalo entre syncs', help: 'Tiempo mínimo entre syncs automáticos', unit: 'ms', min: 60_000, max: 86_400_000, step: 60_000 },
+  { key: 'syncIntervalMs', label: 'Intervalo entre syncs', help: 'Tiempo mínimo entre syncs automáticos (fallback)', unit: 'ms', min: 60_000, max: 86_400_000, step: 60_000 },
   { key: 'checkIntervalMs', label: 'Intervalo de check', help: 'Cada cuánto revisar la DB (no consume API)', unit: 'ms', min: 10_000, max: 3_600_000, step: 10_000 },
   { key: 'startupDelayMs', label: 'Delay de inicio', help: 'Gracia antes del primer check tras boot', unit: 'ms', min: 0, max: 300_000, step: 1000 },
   { key: 'schedulerMaxDetailFetches', label: 'Detalles por sync (scheduler)', help: 'Máximo de detalles a descargar por sync programado', unit: '', min: 1, max: 200, step: 1 },
@@ -136,13 +136,32 @@ const SETTING_FIELDS: SettingField[] = [
   { key: 'scanSyncTimeoutMs', label: 'Timeout total scan', help: 'Wall-clock máximo para scan', unit: 'ms', min: 60_000, max: 1_800_000, step: 60_000 },
   { key: 'fullSyncTimeoutMs', label: 'Timeout total full', help: 'Wall-clock máximo para full sync', unit: 'ms', min: 60_000, max: 3_600_000, step: 60_000 },
   { key: 'staleRunThresholdMs', label: 'Umbral stale run', help: 'RUNNING más antiguo que esto se marca FAILED', unit: 'ms', min: 60_000, max: 3_600_000, step: 60_000 },
+  { key: 'businessHoursStart', label: 'Inicio horario laboral', help: 'Hora (0-23) desde la que aplica cadencia corta (America/Mexico_City)', unit: 'h', min: 0, max: 23, step: 1 },
+  { key: 'businessHoursEnd', label: 'Fin horario laboral', help: 'Hora (0-23) desde la que aplica cadencia larga (America/Mexico_City)', unit: 'h', min: 0, max: 23, step: 1 },
+  { key: 'businessHoursIntervalMs', label: 'Intervalo horario laboral', help: 'Tiempo entre syncs en horario laboral (ej. 8am-7pm)', unit: 'ms', min: 60_000, max: 3_600_000, step: 60_000 },
+  { key: 'offHoursIntervalMs', label: 'Intervalo fuera horario', help: 'Tiempo entre syncs fuera de horario laboral', unit: 'ms', min: 600_000, max: 86_400_000, step: 600_000 },
+  { key: 'maxDailyCalls', label: 'Límite diario', help: 'Máximo de llamadas a Zoho por día (presupuesto compartido)', unit: '', min: 100, max: 10000, step: 100 },
+  { key: 'maxCallsPerMinute', label: 'Límite por minuto', help: 'Máximo de llamadas a Zoho por minuto', unit: '', min: 5, max: 100, step: 5 },
+];
+
+/** String settings that use a Select instead of numeric Input. */
+const STRING_SETTINGS: { key: string; label: string; help: string; options: { value: string; label: string }[] }[] = [
+  {
+    key: 'schedulerMode',
+    label: 'Modo del scheduler',
+    help: 'Quick: escanea páginas recientes (barato). Sync: escanea todas las páginas (costoso).',
+    options: [
+      { value: 'quick', label: 'Quick (páginas recientes)' },
+      { value: 'sync', label: 'Sync (todas las páginas)' },
+    ],
+  },
 ];
 
 const DEFAULT_VALUES: Record<string, number> = {
   syncIntervalMs: 3_600_000,
   checkIntervalMs: 300_000,
   startupDelayMs: 30_000,
-  schedulerMaxDetailFetches: 100,
+  schedulerMaxDetailFetches: 30,
   failedRetryCooldownMs: 1_800_000,
   quickScanPages: 2,
   quickMaxDetailFetches: 20,
@@ -156,6 +175,16 @@ const DEFAULT_VALUES: Record<string, number> = {
   scanSyncTimeoutMs: 300_000,
   fullSyncTimeoutMs: 900_000,
   staleRunThresholdMs: 600_000,
+  businessHoursStart: 8,
+  businessHoursEnd: 19,
+  businessHoursIntervalMs: 1_800_000,
+  offHoursIntervalMs: 7_200_000,
+  maxDailyCalls: 5000,
+  maxCallsPerMinute: 40,
+};
+
+const DEFAULT_STRING_VALUES: Record<string, string> = {
+  schedulerMode: 'quick',
 };
 
 /* ------------------------------------------------------------------ */
@@ -919,18 +948,25 @@ function ConfigTab({
           </div>
           <div className="integrations-config-summary">
             <span>
-              <strong>Sync interval:</strong>{' '}
-              {formatDuration(config.settings.syncIntervalMs as number)}
+              <strong>Modo:</strong> {String(config.settings.schedulerMode ?? 'quick')}
             </span>
             <span>
-              <strong>Check interval:</strong>{' '}
-              {formatDuration(config.settings.checkIntervalMs as number)}
+              <strong>Horario laboral:</strong>{' '}
+              {config.settings.businessHoursStart as number}h–{config.settings.businessHoursEnd as number}h
             </span>
             <span>
-              <strong>Quick pages:</strong> {config.settings.quickScanPages as number}
+              <strong>Intervalo laboral:</strong>{' '}
+              {formatDuration(config.settings.businessHoursIntervalMs as number)}
             </span>
             <span>
-              <strong>Max details:</strong>{' '}
+              <strong>Intervalo fuera:</strong>{' '}
+              {formatDuration(config.settings.offHoursIntervalMs as number)}
+            </span>
+            <span>
+              <strong>Límite diario:</strong> {config.settings.maxDailyCalls as number}
+            </span>
+            <span>
+              <strong>Max detalles:</strong>{' '}
               {config.settings.schedulerMaxDetailFetches as number}
             </span>
           </div>
@@ -968,6 +1004,10 @@ function ConfigDrawer({
         const v = config.settings[field.key];
         values[field.key] = typeof v === 'number' ? String(v) : String(DEFAULT_VALUES[field.key] ?? 0);
       }
+      for (const field of STRING_SETTINGS) {
+        const v = config.settings[field.key];
+        values[field.key] = typeof v === 'string' ? v : DEFAULT_STRING_VALUES[field.key] ?? field.options[0].value;
+      }
       setDraft(values);
     }
   }, [config]);
@@ -977,21 +1017,27 @@ function ConfigDrawer({
     for (const field of SETTING_FIELDS) {
       values[field.key] = String(DEFAULT_VALUES[field.key] ?? 0);
     }
+    for (const field of STRING_SETTINGS) {
+      values[field.key] = DEFAULT_STRING_VALUES[field.key] ?? field.options[0].value;
+    }
     setDraft(values);
   };
 
   const handleSave = () => {
-    const numeric: Record<string, number> = {};
+    const result: Record<string, unknown> = {};
     for (const field of SETTING_FIELDS) {
       const raw = draft[field.key];
       const parsed = parseInt(raw, 10);
       if (Number.isNaN(parsed)) {
-        numeric[field.key] = DEFAULT_VALUES[field.key] ?? 0;
+        result[field.key] = DEFAULT_VALUES[field.key] ?? 0;
       } else {
-        numeric[field.key] = Math.max(field.min, Math.min(field.max, parsed));
+        result[field.key] = Math.max(field.min, Math.min(field.max, parsed));
       }
     }
-    onSave(numeric);
+    for (const field of STRING_SETTINGS) {
+      result[field.key] = draft[field.key] ?? DEFAULT_STRING_VALUES[field.key] ?? field.options[0].value;
+    }
+    onSave(result);
   };
 
   if (!config) return null;
@@ -1030,6 +1076,28 @@ function ConfigDrawer({
       {error ? <Alert variant="error">{error}</Alert> : null}
 
       <div className="integrations-config-form">
+        {STRING_SETTINGS.map((field) => (
+          <FormField
+            key={field.key}
+            label={field.label}
+            htmlFor={`cfg-${field.key}`}
+            help={field.help}
+          >
+            <Select
+              id={`cfg-${field.key}`}
+              value={draft[field.key] ?? ''}
+              onChange={(e) => {
+                setDraft((d) => ({ ...d, [field.key]: e.target.value }));
+              }}
+            >
+              {field.options.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </Select>
+          </FormField>
+        ))}
         {SETTING_FIELDS.map((field) => (
           <FormField
             key={field.key}

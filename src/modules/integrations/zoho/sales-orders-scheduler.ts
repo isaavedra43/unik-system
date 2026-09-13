@@ -11,6 +11,7 @@ import {
   INTEGRATION_SOURCE_ZOHO,
   getIntegrationSettings,
   isIntegrationEnabled,
+  getEffectiveSyncInterval,
 } from '../integration-config-service';
 
 /**
@@ -69,7 +70,7 @@ export async function isSyncDue(now: Date = new Date()): Promise<boolean> {
     where: {
       source: SOURCE,
       entityType: ENTITY_TYPE,
-      mode: 'sync',
+      mode: { in: ['sync', 'quick'] },
       status: SYNC_STATUS.COMPLETED,
     },
     orderBy: { completedAt: 'desc' },
@@ -80,7 +81,8 @@ export async function isSyncDue(now: Date = new Date()): Promise<boolean> {
     return true;
   }
 
-  return now.getTime() - lastCompletedSync.completedAt.getTime() >= settings.syncIntervalMs;
+  const interval = getEffectiveSyncInterval(settings, now);
+  return now.getTime() - lastCompletedSync.completedAt.getTime() >= interval;
 }
 
 /**
@@ -96,7 +98,7 @@ export async function isSyncCoolingDown(now: Date = new Date()): Promise<boolean
     where: {
       source: SOURCE,
       entityType: ENTITY_TYPE,
-      mode: 'sync',
+      mode: { in: ['sync', 'quick'] },
       status: SYNC_STATUS.FAILED,
     },
     orderBy: { startedAt: 'desc' },
@@ -154,7 +156,7 @@ export async function runSchedulerCheck(): Promise<void> {
     log({ event: 'zoho.sales_orders.scheduler.sync_started' });
 
     const result = await syncSalesOrders({
-      mode: 'sync',
+      mode: settings.schedulerMode === 'sync' ? 'sync' : 'quick',
       maxDetailFetches: settings.schedulerMaxDetailFetches,
     });
 
@@ -195,7 +197,7 @@ export async function runSchedulerCheck(): Promise<void> {
  * The check interval is read from IntegrationConfig once at startup. To change
  * it live, restart the process after updating the config from the admin UI.
  */
-export async function startSalesOrdersScheduler(): Promise<void> {
+export async function startSalesOrdersScheduler(startOffsetMs = 0): Promise<void> {
   const state = getSchedulerState();
 
   if (state.started) {
@@ -235,13 +237,14 @@ export async function startSalesOrdersScheduler(): Promise<void> {
   setTimeout(() => {
     tick();
     setInterval(tick, settings.checkIntervalMs);
-  }, settings.startupDelayMs);
+  }, settings.startupDelayMs + startOffsetMs);
 
   log({
     event: 'zoho.sales_orders.scheduler.started',
-    startupDelayMs: settings.startupDelayMs,
+    startupDelayMs: settings.startupDelayMs + startOffsetMs,
     checkIntervalMs: settings.checkIntervalMs,
     syncIntervalMs: settings.syncIntervalMs,
+    schedulerMode: settings.schedulerMode,
     maxDetailFetches: settings.schedulerMaxDetailFetches,
   });
 }

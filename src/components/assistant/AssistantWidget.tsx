@@ -119,7 +119,7 @@ export function AssistantWidget({ user, context }: AssistantWidgetProps) {
         onClick={() => setOpen(!open)}
         aria-label={open ? 'Cerrar asistente' : 'Abrir asistente IA'}
       >
-        {open ? <X size={24} /> : <Bot size={24} />}
+        {open ? <X size={18} /> : <Bot size={18} />}
       </button>
     </>
   );

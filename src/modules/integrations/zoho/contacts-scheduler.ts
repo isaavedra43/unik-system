@@ -2,22 +2,20 @@ import { contactsAdapter } from './contacts-sync';
 import { createZohoScheduler, type ZohoScheduler } from './zoho-scheduler-factory';
 
 /**
- * Scheduler for Zoho Contacts sync.
- *
- * NOT registered in instrumentation.ts during Phases 2-5.
- * Will be enabled in Phase 7 (Sync Orchestration) after manual validation.
+ * Scheduler for Zoho Contacts sync. Registered in instrumentation.ts with
+ * a stagger offset so entities don't all fire at once.
  */
 let scheduler: ZohoScheduler | null = null;
 
-export function getContactsScheduler(): ZohoScheduler {
+export function getContactsScheduler(startOffsetMs = 0): ZohoScheduler {
   if (!scheduler) {
-    scheduler = createZohoScheduler(contactsAdapter);
+    scheduler = createZohoScheduler(contactsAdapter, startOffsetMs);
   }
   return scheduler;
 }
 
-export async function startContactsScheduler(): Promise<void> {
-  await getContactsScheduler().start();
+export async function startContactsScheduler(startOffsetMs = 0): Promise<void> {
+  await getContactsScheduler(startOffsetMs).start();
 }
 
 export function stopContactsScheduler(): void {

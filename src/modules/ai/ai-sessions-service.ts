@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { HIDDEN_CONVERSATION_KINDS } from './copilot-surfaces';
+import { absoluteUrl } from '@/lib/app-url';
 
 export interface ConversationRow {
   id: string;
@@ -37,6 +38,20 @@ export interface MessageRow {
     success: boolean;
     errorCode: string | null;
   }>;
+  artifacts?: Array<{
+    artifactId: string;
+    type: string;
+    title: string;
+    filename?: string;
+    downloadUrl?: string;
+    inlineRender?: boolean;
+    rowCount?: number;
+    sizeBytes?: number;
+    pageCount?: number;
+    chartType?: string;
+    shared?: boolean;
+    createdAt: string;
+  }>;
 }
 
 function formatConv(c: Prisma.AiConversationGetPayload<object>): ConversationRow {
@@ -70,6 +85,9 @@ function formatMsgWithToolCalls(
     include: {
       toolCallRecords: true;
       attachments: { select: { id: true; fileName: true; mimeType: true; sizeBytes: true } };
+      artifacts: {
+        select: { id: true; type: true; meta: true; storageObjectId: true; storagePath: true; createdAt: true };
+      };
     };
   }>
 ): MessageRow {
@@ -98,6 +116,24 @@ function formatMsgWithToolCalls(
       success: tc.success,
       errorCode: tc.errorCode,
     })),
+    artifacts: m.artifacts.map((a) => {
+      const meta = (a.meta as Record<string, unknown> | null) ?? {};
+      const hasFile = Boolean(a.storageObjectId || a.storagePath);
+      return {
+        artifactId: a.id,
+        type: a.type,
+        title: typeof meta.title === 'string' ? meta.title : 'Documento',
+        filename: typeof meta.filename === 'string' ? meta.filename : undefined,
+        downloadUrl: hasFile ? absoluteUrl(`/app/assistant/api/artifacts/${a.id}/download`) : undefined,
+        inlineRender: !hasFile,
+        rowCount: typeof meta.rowCount === 'number' ? meta.rowCount : undefined,
+        sizeBytes: typeof meta.sizeBytes === 'number' ? meta.sizeBytes : undefined,
+        pageCount: typeof meta.pageCount === 'number' ? meta.pageCount : undefined,
+        chartType: typeof meta.chartType === 'string' ? meta.chartType : undefined,
+        shared: meta.protected === true,
+        createdAt: a.createdAt.toISOString(),
+      };
+    }),
   };
 }
 
@@ -134,6 +170,10 @@ export async function getConversation(
           sizeBytes: true,
         },
       },
+      artifacts: {
+        orderBy: { createdAt: 'asc' },
+        select: { id: true, type: true, meta: true, storageObjectId: true, storagePath: true, createdAt: true },
+      },
     },
   });
   const convRow = formatConv(conv);
@@ -149,12 +189,15 @@ export async function listConversations(
   const where: Prisma.AiConversationWhereInput = { userId };
   if (opts?.starredOnly) where.isStarred = true;
   if (opts?.search) where.title = { contains: opts.search, mode: 'insensitive' };
+  // Copilot threads (one per inbox conversation / chat channel the user opens) live
+  // inside their surface. They are filtered in JS because `context` is untyped JSON,
+  // so the window must be wide enough that they can never push the real assistant
+  // threads out of the sidebar.
   const convs = await prisma.aiConversation.findMany({
     where,
     orderBy: { updatedAt: 'desc' },
-    take: 150,
+    take: 2000,
   });
-  // Copilot threads (inbox / internal chat) live inside their surface, not in the assistant sidebar.
   return convs
     .filter((c) => {
       const ctx = c.context as { kind?: string } | null;

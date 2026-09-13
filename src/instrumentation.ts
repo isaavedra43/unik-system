@@ -3,6 +3,8 @@
  * Registers all Zoho entity sync schedulers.
  * Each scheduler uses the shared organization-wide rate budget and
  * checks integration enabled status before starting.
+ *
+ * Schedulers are staggered by 30s so they don't all fire at once.
  */
 export async function register() {
   if (process.env.NEXT_RUNTIME !== 'nodejs') {
@@ -13,21 +15,35 @@ export async function register() {
     await import('@/modules/integrations/zoho/sales-orders-scheduler');
   const { startContactsScheduler } =
     await import('@/modules/integrations/zoho/contacts-scheduler');
-  const { productsScheduler } =
+  const { createProductsScheduler } =
     await import('@/modules/integrations/zoho/products-scheduler');
-  const { packagesScheduler } =
+  const { createPackagesScheduler } =
     await import('@/modules/integrations/zoho/packages-scheduler');
-  const { invoicesScheduler } =
+  const { createInvoicesScheduler } =
     await import('@/modules/integrations/zoho/invoices-scheduler');
-  const { estimatesScheduler } =
+  const { createEstimatesScheduler } =
     await import('@/modules/integrations/zoho/estimates-scheduler');
+  const { createBillsScheduler } =
+    await import('@/modules/integrations/zoho/bills-scheduler');
+  const { createPurchaseOrdersScheduler } =
+    await import('@/modules/integrations/zoho/purchase-orders-scheduler');
+  const { createPaymentsScheduler } =
+    await import('@/modules/integrations/zoho/payments-scheduler');
+  const { createVendorCreditsScheduler } =
+    await import('@/modules/integrations/zoho/vendor-credits-scheduler');
 
-  void startSalesOrdersScheduler();
-  void startContactsScheduler();
-  void productsScheduler.start();
-  void packagesScheduler.start();
-  void invoicesScheduler.start();
-  void estimatesScheduler.start();
+  // Stagger schedulers by 30s to avoid all entities hitting Zoho at once.
+  const STAGGER_MS = 30_000;
+  void startSalesOrdersScheduler(0 * STAGGER_MS);
+  void startContactsScheduler(1 * STAGGER_MS);
+  void createProductsScheduler(2 * STAGGER_MS).start();
+  void createPackagesScheduler(3 * STAGGER_MS).start();
+  void createInvoicesScheduler(4 * STAGGER_MS).start();
+  void createEstimatesScheduler(5 * STAGGER_MS).start();
+  void createBillsScheduler(6 * STAGGER_MS).start();
+  void createPurchaseOrdersScheduler(7 * STAGGER_MS).start();
+  void createPaymentsScheduler(8 * STAGGER_MS).start();
+  void createVendorCreditsScheduler(9 * STAGGER_MS).start();
 
   // Durable background jobs (object storage validation, cleanup, backups,
   // campaigns...). Handlers register on import; the worker claims jobs from

@@ -1,8 +1,9 @@
 'use client';
 
-import React, { useRef, useState, useEffect } from 'react';
+import React, { useRef, useState, useEffect, useCallback } from 'react';
 import { Send, Paperclip, X, FileText, Image as ImageIcon } from 'lucide-react';
 import { ToolsButton } from './ToolsButton';
+import { VoiceDictationButton } from '@/components/voice/VoiceDictationButton';
 import { uploadFile, UploadError } from '@/lib/upload-client';
 
 /** A file the user attached: only its id travels to the server when sending. */
@@ -167,6 +168,27 @@ export function AssistantInput({
     return mimeType.startsWith('image/');
   }
 
+  const insertAtCursor = useCallback((text: string) => {
+    const ta = textareaRef.current;
+    if (!ta) {
+      setValue((prev) => (prev ? `${prev} ${text}` : text));
+      return;
+    }
+    const start = ta.selectionStart;
+    const end = ta.selectionEnd;
+    const before = value.slice(0, start);
+    const after = value.slice(end);
+    const needsSpace = before.length > 0 && !before.endsWith(' ') && !text.startsWith(' ');
+    const insert = (needsSpace ? ' ' : '') + text;
+    const newValue = before + insert + after;
+    setValue(newValue);
+    requestAnimationFrame(() => {
+      ta.focus();
+      const pos = start + insert.length;
+      ta.setSelectionRange(pos, pos);
+    });
+  }, [value]);
+
   return (
     <div className="assistant-input-container">
       {/* Uploads in progress */}
@@ -295,6 +317,11 @@ export function AssistantInput({
                 setValue(prompt);
                 textareaRef.current?.focus();
               }}
+            />
+            <VoiceDictationButton
+              onFinalTranscript={insertAtCursor}
+              disabled={disabled || streaming}
+              iconSize={18}
             />
           </div>
           <button

@@ -16,6 +16,20 @@ export interface CopilotMessage {
   content: string | null;
   toolCalls?: Array<{ id: string; name: string; arguments: string }> | null;
   toolCallRecords?: CopilotToolRecord[];
+  artifacts?: Array<{
+    artifactId: string;
+    type: 'pdf' | 'xlsx' | 'docx' | 'csv' | 'table' | 'chart' | 'image';
+    title: string;
+    filename?: string;
+    downloadUrl?: string;
+    inlineRender?: boolean;
+    rowCount?: number;
+    sizeBytes?: number;
+    pageCount?: number;
+    chartType?: string;
+    shared?: boolean;
+    createdAt?: string;
+  }>;
   createdAt: string;
 }
 
@@ -54,7 +68,7 @@ export interface DraftData {
 export interface LiveStep {
   id: string;
   name: string;
-  status: 'running' | 'done' | 'failed';
+  status: 'running' | 'done' | 'failed' | 'pending';
 }
 
 export const AUTO_PREFIX = '⟦auto:';
@@ -127,7 +141,7 @@ const TOOL_LABELS: Record<string, { running: string; done: string }> = {
   generateTable: { running: 'Armando tabla', done: 'Tabla lista' },
 };
 
-export function toolLabel(name: string, status: LiveStep['status'] | 'done' = 'done'): string {
+export function toolLabel(name: string, status: 'running' | 'done' = 'done'): string {
   const meta = TOOL_LABELS[name];
   if (meta) return status === 'running' ? meta.running : meta.done;
   const pretty = name.replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase();

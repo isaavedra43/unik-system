@@ -1,8 +1,10 @@
-import { createZohoScheduler } from './zoho-scheduler-factory';
+import { createZohoScheduler, type ZohoScheduler } from './zoho-scheduler-factory';
 import { invoicesAdapter } from './invoices-sync';
 
 /**
- * Invoices scheduler — NOT registered in instrumentation.ts during Phase 5.
- * Will be registered in Phase 7 (Sync Orchestration).
+ * Invoices scheduler factory. Registered in instrumentation.ts with a
+ * stagger offset so entities don't all fire at once.
  */
-export const invoicesScheduler = createZohoScheduler(invoicesAdapter);
+export function createInvoicesScheduler(startOffsetMs = 0): ZohoScheduler {
+  return createZohoScheduler(invoicesAdapter, startOffsetMs);
+}

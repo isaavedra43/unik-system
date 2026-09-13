@@ -48,6 +48,13 @@ const SETTING_FIELDS: Array<{ key: string; label: string; type: 'number' | 'stri
   { key: 'autonomousModeEnabled', label: 'Modo autónomo', type: 'boolean' },
   { key: 'dailyReportHour', label: 'Hora reporte diario (0-23)', type: 'number' },
   { key: 'anomalyThreshold', label: 'Umbral anomalía', type: 'number' },
+  // Perfil de la empresa (lo usa la IA para ubicación de recogida, firmas y mensajes)
+  { key: 'companyName', label: 'Nombre de la empresa', type: 'string', hint: 'Cómo se presenta la IA ante clientes' },
+  { key: 'companyPhone', label: 'Teléfono de la empresa', type: 'string' },
+  { key: 'warehouseAddress', label: 'Dirección de bodega / recogida', type: 'textarea', hint: 'Calle, número, colonia, ciudad, CP' },
+  { key: 'warehouseMapsUrl', label: 'Enlace de Google Maps de la bodega', type: 'string', hint: 'Vacío = se genera desde la dirección' },
+  { key: 'warehouseHours', label: 'Horario de recogida', type: 'string', hint: 'Ej. Lun-Vie 9:00-18:00, Sáb 9:00-14:00' },
+  { key: 'pickupInstructions', label: 'Instrucciones para recoger', type: 'textarea', hint: 'Ej. Presentar folio y nombre; entrada por la puerta 2' },
 ];
 
 export function AssistantAdminConfig({ canManage }: { canManage: boolean }) {

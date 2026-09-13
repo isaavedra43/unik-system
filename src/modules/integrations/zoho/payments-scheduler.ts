@@ -1,8 +1,10 @@
-import { createZohoScheduler } from './zoho-scheduler-factory';
+import { createZohoScheduler, type ZohoScheduler } from './zoho-scheduler-factory';
 import { paymentsAdapter } from './payments-sync';
 
 /**
- * Payments scheduler — NOT registered in instrumentation.ts during initial phase.
- * Will be registered after manual validation of the sync.
+ * Payments scheduler factory. Registered in instrumentation.ts with a
+ * stagger offset so entities don't all fire at once.
  */
-export const paymentsScheduler = createZohoScheduler(paymentsAdapter);
+export function createPaymentsScheduler(startOffsetMs = 0): ZohoScheduler {
+  return createZohoScheduler(paymentsAdapter, startOffsetMs);
+}

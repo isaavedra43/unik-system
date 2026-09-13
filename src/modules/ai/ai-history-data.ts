@@ -32,6 +32,7 @@ export interface LastDataToolResult {
 export const ARTIFACT_TOOL_NAMES = new Set([
   'generatePdfReport',
   'generateExcelReport',
+  'generateWordReport',
   'generateCsvExport',
   'generateChart',
   'generateReportImage',

@@ -84,5 +84,11 @@ import './quotes-tools';
 // Skills (recetas del usuario ejecutables desde cualquier superficie)
 import './skills-tools';
 
+// Messaging (WhatsApp/SMS a contactos, envíos masivos, adjuntos, enlaces compartibles, ubicación, seguimientos)
+import './messaging-tools';
+
+// Insights & proactive work (salud del cliente, cobranza, retrasos, scorecards, reactivación, digest)
+import './insights-tools';
+
 // Export the registry API for consumers
 export * from './registry';

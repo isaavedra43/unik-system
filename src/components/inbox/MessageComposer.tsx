@@ -1,7 +1,9 @@
 'use client';
 
-import React, { useRef, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import { Paperclip, Send, X } from 'lucide-react';
+import { VoiceDictationButton } from '@/components/voice/VoiceDictationButton';
+import { TemplatePicker } from './TemplatePicker';
 import { uploadFile, type UploadProgress } from '@/lib/upload-client';
 
 interface PendingAttachment {
@@ -17,9 +19,11 @@ interface Props {
   conversationId: string;
   value: string;
   onChange: (value: string) => void;
-  onSend: (body: string, mediaObjectIds: string[]) => Promise<void>;
+  onSend: (body: string, mediaObjectIds: string[], templateKey?: string) => Promise<void>;
   disabled?: boolean;
   disabledReason?: string | null;
+  /** When true, shows the WhatsApp template picker (Content SID). */
+  showTemplatePicker?: boolean;
 }
 
 const ACCEPT = 'image/png,image/jpeg,image/gif,image/webp,application/pdf,audio/*,video/mp4';
@@ -31,9 +35,11 @@ export function MessageComposer({
   onSend,
   disabled,
   disabledReason,
+  showTemplatePicker,
 }: Props) {
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
   const [sending, setSending] = useState(false);
+  const [templateKey, setTemplateKey] = useState('');
   const fileInput = useRef<HTMLInputElement>(null);
   const textarea = useRef<HTMLTextAreaElement>(null);
 
@@ -75,15 +81,38 @@ export function MessageComposer({
     setAttachments((prev) => prev.filter((a) => a.localId !== localId));
   };
 
+  const insertAtCursor = useCallback((insertText: string) => {
+    const ta = textarea.current;
+    if (!ta) {
+      onChange(value ? `${value} ${insertText}` : insertText);
+      return;
+    }
+    const start = ta.selectionStart;
+    const end = ta.selectionEnd;
+    const before = value.slice(0, start);
+    const after = value.slice(end);
+    const needsSpace = before.length > 0 && !before.endsWith(' ') && !insertText.startsWith(' ');
+    const insert = (needsSpace ? ' ' : '') + insertText;
+    const newValue = before + insert + after;
+    onChange(newValue);
+    requestAnimationFrame(() => {
+      ta.focus();
+      const pos = start + insert.length;
+      ta.setSelectionRange(pos, pos);
+    });
+  }, [value, onChange, textarea]);
+
   const submit = async () => {
     if (!canSend) return;
     setSending(true);
     try {
       await onSend(
         value,
-        attachments.map((a) => a.objectId).filter((id): id is string => Boolean(id))
+        attachments.map((a) => a.objectId).filter((id): id is string => Boolean(id)),
+        templateKey.trim() || undefined
       );
       setAttachments([]);
+      setTemplateKey('');
       textarea.current?.focus();
     } finally {
       setSending(false);
@@ -128,6 +157,20 @@ export function MessageComposer({
           ))}
         </div>
       )}
+      {showTemplatePicker && (
+        <div className="chat-input-template-row">
+          <TemplatePicker
+            value={templateKey}
+            onChange={(sid, templateBody) => {
+              setTemplateKey(sid);
+              if (templateBody && !value.trim()) onChange(templateBody);
+            }}
+            onBodyChange={(b) => onChange(b)}
+            currentBody={value}
+            disabled={disabled || sending}
+          />
+        </div>
+      )}
       <div className="chat-input-row">
         <input
           ref={fileInput}
@@ -166,6 +209,11 @@ export function MessageComposer({
               void submit();
             }
           }}
+        />
+        <VoiceDictationButton
+          onFinalTranscript={insertAtCursor}
+          disabled={disabled || sending}
+          iconSize={18}
         />
         <button
           type="button"

@@ -83,7 +83,7 @@ export async function GET(
     return streamResponse(stream, {
       fileName: filename,
       mimeType,
-      disposition: 'attachment',
+      disposition: request.nextUrl.searchParams.get('inline') === '1' ? 'inline' : 'attachment',
       cacheControl: 'private, no-store',
     });
   } catch (err) {

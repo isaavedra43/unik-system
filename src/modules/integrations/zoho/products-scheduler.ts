@@ -1,8 +1,10 @@
-import { createZohoScheduler } from './zoho-scheduler-factory';
+import { createZohoScheduler, type ZohoScheduler } from './zoho-scheduler-factory';
 import { productsAdapter } from './products-sync';
 
 /**
- * Products scheduler — NOT registered in instrumentation.ts during Phase 3.
- * Will be registered in Phase 7 (Sync Orchestration).
+ * Products scheduler factory. Registered in instrumentation.ts with a
+ * stagger offset so entities don't all fire at once.
  */
-export const productsScheduler = createZohoScheduler(productsAdapter);
+export function createProductsScheduler(startOffsetMs = 0): ZohoScheduler {
+  return createZohoScheduler(productsAdapter, startOffsetMs);
+}

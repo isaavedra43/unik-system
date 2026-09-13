@@ -1,6 +1,6 @@
 'use client';
 
-import React, { ReactNode, useState } from 'react';
+import React, { ReactNode, useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { CurrentUser } from '@/modules/auth/authorization';
@@ -584,6 +584,35 @@ function buildBreadcrumbs(pathname: string): { label: string; href?: string }[] 
 
 export default function AppShell({ user, children }: AppShellProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
+
+  // Detect mobile to choose between overlay (mobile) vs push (desktop) sidebar
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 1023px)');
+    const handler = () => setIsMobile(mq.matches);
+    handler();
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
+  }, []);
+
+  // Persist collapsed state for desktop
+  useEffect(() => {
+    const stored = localStorage.getItem('unik.sidebar.collapsed');
+    if (stored === 'true') setSidebarCollapsed(true);
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem('unik.sidebar.collapsed', String(sidebarCollapsed));
+  }, [sidebarCollapsed]);
+
+  const toggleSidebar = () => {
+    if (isMobile) {
+      setSidebarOpen(!sidebarOpen);
+    } else {
+      setSidebarCollapsed(!sidebarCollapsed);
+    }
+  };
 
   const sections: NavEntry[] = [
     {
@@ -827,10 +856,10 @@ export default function AppShell({ user, children }: AppShellProps) {
   const showWidget = canUseAssistant && !isAssistantPage;
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
       <Sidebar entries={sections} open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
       <div className="app-main">
-        <Topbar user={user} onToggleSidebar={() => setSidebarOpen(!sidebarOpen)} />
+        <Topbar user={user} onToggleSidebar={toggleSidebar} />
         <main className={isFlush ? 'app-content app-content-flush' : 'app-content'}>
           {children}
         </main>

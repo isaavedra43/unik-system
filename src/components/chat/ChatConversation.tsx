@@ -26,9 +26,12 @@ export interface ChatConversationProps {
   insertRequest?: { text: string; nonce: number } | null;
   /** Fired when a message from someone else arrives (drives copilot auto-analysis). */
   onForeignMessage?: (createdAt: string) => void;
+  /** Deep link (?call=audio|video): start a call as soon as the channel loads. */
+  autoStartCall?: 'audio' | 'video' | null;
+  onAutoStartConsumed?: () => void;
 }
 
-export function ChatConversation({ channelId, user, onRefresh, onBack, onIncomingCall, aiOpen, onToggleAi, insertRequest, onForeignMessage }: ChatConversationProps) {
+export function ChatConversation({ channelId, user, onRefresh, onBack, onIncomingCall, aiOpen, onToggleAi, insertRequest, onForeignMessage, autoStartCall, onAutoStartConsumed }: ChatConversationProps) {
   const [channel, setChannel] = useState<ChatChannelDTO | null>(null);
   const [messages, setMessages] = useState<ChatMessageDTO[]>([]);
   const [loading, setLoading] = useState(true);
@@ -439,6 +442,15 @@ export function ChatConversation({ channelId, user, onRefresh, onBack, onIncomin
     },
     [channel, channelId, user.id]
   );
+
+  // Deep link from the assistant (startInternalCall): ring as soon as the channel is ready.
+  const autoStartedRef = useRef(false);
+  useEffect(() => {
+    if (!autoStartCall || !channel || autoStartedRef.current) return;
+    autoStartedRef.current = true;
+    void startCall(autoStartCall);
+    onAutoStartConsumed?.();
+  }, [autoStartCall, channel, startCall, onAutoStartConsumed]);
 
   // Forward
   const handleForward = useCallback(

@@ -1,6 +1,7 @@
 import type { CurrentUser } from '@/modules/auth/authorization';
 import { getAiSettings } from './ai-admin-config-service';
 import { buildRecentContextPrompt } from './ai-conversation-summary';
+import { buildCapabilityRules } from './ai-capability-rules';
 import { getAllTools } from './tools/registry';
 import { buildPreferencesPrompt, getPreferences } from '@/modules/copilot/preferences-service';
 import { buildMemoryPrompt, getMemoryForPrompt } from '@/modules/copilot/memory-service';
@@ -388,6 +389,8 @@ Cuando el usuario pida "junta los mismos productos", "agrupa por producto", "cu�
 - Si el usuario pide "genera un PDF de esa info" (el MISMO conjunto que acabas de consultar), NO re-llames la tool de datos: el sistema inyecta las filas de esa consulta aunque en medio hayas usado generateTable. Si pide un conjunto DISTINTO (otro filtro, otro periodo), consulta primero.
 - Si el usuario pide cambios a un PDF/imagen ("cambia el color", "agrega sección", "quita esa columna"), llama la misma tool NUEVAMENTE con los cambios — no vuelvas a consultar los datos si ya los tienes en contexto.
 - Al entregar un archivo, di cuántas filas contiene (rowCount) y de qué periodo/filtros es; si rowCount no coincide con el total de la consulta, algo falló: repite la consulta y el reporte antes de entregarlo.
+
+${buildCapabilityRules()}
 
 ## Eficiencia y completitud
 - No repitas una tool con los mismos argumentos.

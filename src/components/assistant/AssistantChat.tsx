@@ -1,13 +1,14 @@
 'use client';
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { AlertCircle, Bot } from 'lucide-react';
+import { AlertCircle, Bot, Loader2, Check, X } from 'lucide-react';
 import { AnimatePresence } from 'framer-motion';
 import type { CurrentUser } from '@/modules/auth/authorization';
 import { AssistantMessage, type AssistantMessageData } from './AssistantMessage';
 import { AssistantInput, type AttachmentDraft } from './AssistantInput';
 import { ModelSelector } from './ModelSelector';
 import { ArtifactRenderer, type ArtifactData } from './ArtifactRenderer';
+import { toolLabel } from '@/components/copilot/copilot-types';
 import {
   AssistantSuggestions,
   getSuggestionsForPage,
@@ -81,6 +82,7 @@ export function AssistantChat({
           toolCalls: m.toolCalls as AssistantMessageData['toolCalls'],
           toolCallRecords: m.toolCallRecords as AssistantMessageData['toolCallRecords'],
           attachments: m.attachments as AssistantMessageData['attachments'],
+          artifacts: m.artifacts as AssistantMessageData['artifacts'],
           createdAt: m.createdAt as string,
         }))
       );
@@ -227,6 +229,8 @@ export function AssistantChat({
             } else if (event.type === 'done') {
               setStreamingContent('');
               setActiveToolCalls([]);
+              // Persisted artifacts now render inside their message.
+              setArtifacts([]);
               if (convId) await loadConversation(convId);
             } else if (event.type === 'error') {
               setError(event.data?.message ?? 'Error desconocido');
@@ -284,14 +288,12 @@ export function AssistantChat({
                 </div>
               )}
               {activeToolCalls.length > 0 && (
-                <div className="assistant-msg-toolcalls-pending">
+                <div className="assistant-steps-row">
                   {activeToolCalls.map((tc, idx) => (
-                    <div key={idx} className="assistant-tool-pending">
-                      <span className="assistant-tool-pending-name">{tc.name}</span>
-                      <span className="assistant-tool-pending-spinner">
-                        {tc.success === undefined ? 'ejecutando…' : tc.success ? '✓' : '✗'}
-                      </span>
-                    </div>
+                    <span key={idx} className={`assistant-step ${tc.success === undefined ? 'is-running' : tc.success ? 'is-done' : 'is-failed'}`}>
+                      {tc.success === undefined ? <Loader2 size={11} className="copilot-spin" /> : tc.success ? <Check size={11} /> : <X size={11} />}
+                      {toolLabel(tc.name, tc.success === undefined ? 'running' : 'done')}
+                    </span>
                   ))}
                 </div>
               )}

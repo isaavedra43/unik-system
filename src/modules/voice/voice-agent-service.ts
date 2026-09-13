@@ -392,6 +392,15 @@ export async function buildAgentContext(callId: string): Promise<AgentContext> {
     maxAnswerSeconds: voiceSettings.maxAiAnswerSeconds,
     enabledTools: registryTools.map((t) => t.name),
   });
+  const brief = (call as { aiBrief?: string | null }).aiBrief?.trim();
+  const finalInstructions = brief
+    ? `${instructions}
+
+## Misión de esta llamada saliente (la inició tu compañero desde UNIK)
+${brief}
+- Al contestar: saluda, di que llamas de parte de ${agentSettings.companyName}, explica el motivo y cumple la misión con claridad. Confirma que la persona entendió y toma nota de su respuesta.
+- No prometas precios, existencias ni fechas que no consten en el sistema. Si pide hablar con una persona, usa solicitarTransferencia. Al terminar, despídete y usa terminarLlamada.`
+    : instructions;
   return {
     callId: call.id,
     roomName: call.roomName,
@@ -414,7 +423,7 @@ export async function buildAgentContext(callId: string): Promise<AgentContext> {
     personaName: agentSettings.personaName,
     companyName: agentSettings.companyName,
     greeting: renderGreeting(agentSettings, contactName),
-    instructions,
+    instructions: finalInstructions,
     maxAnswerSeconds: voiceSettings.maxAiAnswerSeconds,
     tools: [...registryTools, ...controlTools],
     contact: { name: contactName, phone: contactPhone, known: Boolean(contact) },

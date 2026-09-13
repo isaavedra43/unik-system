@@ -22,6 +22,7 @@ import { ChatSnippetPicker } from './ChatSnippetPicker';
 import { ChatSlashCommands, SLASH_COMMANDS, type ChatSlashCommand } from './ChatSlashCommands';
 import { ChatAttachMenu } from './ChatAttachMenu';
 import { ChatEmojiPicker } from './ChatEmojiPicker';
+import { VoiceDictationButton } from '@/components/voice/VoiceDictationButton';
 import { uploadFile, UploadError } from '@/lib/upload-client';
 
 export interface ChatMessageInputProps {
@@ -212,6 +213,28 @@ export function ChatMessageInput({
       textareaRef.current?.setSelectionRange(newPos, newPos);
     }, 0);
   };
+
+  const insertAtCursor = useCallback((insertText: string) => {
+    const ta = textareaRef.current;
+    if (!ta) {
+      setText((prev) => (prev ? `${prev} ${insertText}` : insertText));
+      return;
+    }
+    const start = ta.selectionStart;
+    const end = ta.selectionEnd;
+    const before = text.slice(0, start);
+    const after = text.slice(end);
+    const needsSpace = before.length > 0 && !before.endsWith(' ') && !insertText.startsWith(' ');
+    const insert = (needsSpace ? ' ' : '') + insertText;
+    const newText = before + insert + after;
+    setText(newText);
+    sendTyping(true, newText.slice(0, 20));
+    requestAnimationFrame(() => {
+      ta.focus();
+      const pos = start + insert.length;
+      ta.setSelectionRange(pos, pos);
+    });
+  }, [text, sendTyping]);
 
   const handleSend = async () => {
     const trimmed = text.trim();
@@ -692,6 +715,13 @@ export function ChatMessageInput({
             <Smile size={20} />
           </button>
         </ChatEmojiPicker>
+
+        {/* Voice dictation */}
+        <VoiceDictationButton
+          onFinalTranscript={insertAtCursor}
+          disabled={isSending}
+          iconSize={20}
+        />
 
         {/* Send button */}
         <button

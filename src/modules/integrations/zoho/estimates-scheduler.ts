@@ -1,9 +1,11 @@
-import { createZohoScheduler } from './zoho-scheduler-factory';
+import { createZohoScheduler, type ZohoScheduler } from './zoho-scheduler-factory';
 import { estimatesAdapter } from './estimates-sync';
 
 /**
- * Estimates (cotizaciones de Zoho Books) scheduler.
- * Registered in src/instrumentation.ts. Shares the organization-wide rate
- * budget with every other Zoho entity scheduler.
+ * Estimates (cotizaciones de Zoho Books) scheduler factory. Registered in
+ * instrumentation.ts with a stagger offset. Shares the organization-wide
+ * rate budget with every other Zoho entity scheduler.
  */
-export const estimatesScheduler = createZohoScheduler(estimatesAdapter);
+export function createEstimatesScheduler(startOffsetMs = 0): ZohoScheduler {
+  return createZohoScheduler(estimatesAdapter, startOffsetMs);
+}

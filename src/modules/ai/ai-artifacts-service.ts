@@ -20,7 +20,7 @@ import { isLegacyPathAllowed } from '@/modules/storage/storage-keys';
  * (`meta.protected = true`), which the generic cleanup never touches.
  */
 
-type ArtifactType = 'pdf' | 'xlsx' | 'csv' | 'table' | 'chart' | 'image';
+type ArtifactType = 'pdf' | 'xlsx' | 'docx' | 'csv' | 'table' | 'chart' | 'image';
 
 interface ArtifactMeta {
   title: string;

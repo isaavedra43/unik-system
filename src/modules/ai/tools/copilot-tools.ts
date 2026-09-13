@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { registerTool } from './registry';
 import { searchKnowledge } from '@/modules/copilot/knowledge-service';
 import { addMemory, deleteMemory, listMemory } from '@/modules/copilot/memory-service';
+import { markdownLinksToPlain, rewriteArtifactLinksForSharing } from '../artifact-share';
 
 /**
  * Copilot tools: approved knowledge library, personal memory (controlled
@@ -118,7 +119,9 @@ registerTool({
   execute: async (actor, rawArgs) => {
     const args = rawArgs as { channelId: string; content: string };
     const { sendMessage } = await import('@/modules/chat/chat-service');
-    const message = await sendMessage(actor, { channelId: args.channelId, content: args.content });
+    // Reports linked in the message become public share links (the recipient is not the owner).
+    const { text } = await rewriteArtifactLinksForSharing(markdownLinksToPlain(args.content), actor.id);
+    const message = await sendMessage(actor, { channelId: args.channelId, content: text });
     return { messageId: message.id, channelId: message.channelId, sentAt: message.createdAt };
   },
 });

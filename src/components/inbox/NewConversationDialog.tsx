@@ -5,6 +5,7 @@ import { MessageSquarePlus } from 'lucide-react';
 import { Modal } from '@/components/ui/composite';
 import { Button, FormField, Input, Select, Textarea } from '@/components/ui/primitives';
 import { apiJson, type CommAccountDTO, type CommConversationDTO } from './inbox-types';
+import { TemplatePicker } from './TemplatePicker';
 
 /**
  * Starts a conversation from the inbox: pick the account (number/bot), the
@@ -133,15 +134,18 @@ export function NewConversationDialog({
       </FormField>
       {isWhatsApp && (
         <FormField
-          label="Plantilla aprobada (Content SID, opcional)"
+          label="Plantilla aprobada (Content SID)"
           htmlFor="nc-template"
-          help="Twilio → Content Template Builder → copia el SID que empieza con HX."
+          help="Selecciona una plantilla guardada o pega un SID nuevo (empieza con HX)."
         >
-          <Input
-            id="nc-template"
+          <TemplatePicker
             value={templateKey}
-            onChange={(e) => setTemplateKey(e.target.value)}
-            placeholder="HX…"
+            onChange={(sid, templateBody) => {
+              setTemplateKey(sid);
+              if (templateBody && !body.trim()) setBody(templateBody);
+            }}
+            onBodyChange={(b) => setBody(b)}
+            currentBody={body}
           />
         </FormField>
       )}

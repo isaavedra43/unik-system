@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { Phone, RefreshCw } from 'lucide-react';
 import type { CurrentUser } from '@/modules/auth/authorization';
 import type { VoiceCallDTO } from '@/modules/voice/voice-service';
@@ -21,7 +22,8 @@ type StatusFilter = 'all' | 'live' | 'ended';
 
 export function CallsPageClient({ user, canUse, canSupervise }: CallsPageClientProps) {
   const [calls, setCalls] = useState<VoiceCallDTO[]>([]);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const searchParams = useSearchParams();
+  const [selectedId, setSelectedId] = useState<string | null>(() => searchParams.get('call'));
   const [initialToken, setInitialToken] = useState<IssuedToken | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

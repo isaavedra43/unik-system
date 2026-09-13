@@ -11,6 +11,7 @@ import {
   INTEGRATION_SOURCE_ZOHO,
   getIntegrationSettings,
   isIntegrationEnabled,
+  getEffectiveSyncInterval,
 } from '../integration-config-service';
 
 /**
@@ -73,7 +74,8 @@ async function isSyncDue(entityType: string, now: Date = new Date()): Promise<bo
     return true;
   }
 
-  return now.getTime() - lastCompleted.completedAt.getTime() >= settings.syncIntervalMs;
+  const interval = getEffectiveSyncInterval(settings, now);
+  return now.getTime() - lastCompleted.completedAt.getTime() >= interval;
 }
 
 async function isSyncCoolingDown(entityType: string, now: Date = new Date()): Promise<boolean> {
@@ -139,7 +141,7 @@ async function runSchedulerCheck(adapter: ZohoEntityAdapter): Promise<void> {
     log({ event: 'zoho.scheduler.sync_started', entityType: adapter.entityType });
 
     const result = await runSync(adapter, {
-      mode: 'sync' as SyncMode,
+      mode: settings.schedulerMode as SyncMode,
       maxDetailFetches: settings.schedulerMaxDetailFetches,
     });
 
@@ -187,8 +189,14 @@ export interface ZohoScheduler {
  *
  * The scheduler is NOT started automatically. Call `start()` explicitly
  * from instrumentation.ts (Phase 7: Sync Orchestration).
+ *
+ * @param startOffsetMs  Additional delay before the first tick, used to
+ *                      stagger entities so they don't all fire at once.
  */
-export function createZohoScheduler(adapter: ZohoEntityAdapter): ZohoScheduler {
+export function createZohoScheduler(
+  adapter: ZohoEntityAdapter,
+  startOffsetMs = 0
+): ZohoScheduler {
   let intervalId: ReturnType<typeof setInterval> | null = null;
   let startupTimeoutId: ReturnType<typeof setTimeout> | null = null;
 
@@ -232,14 +240,15 @@ export function createZohoScheduler(adapter: ZohoEntityAdapter): ZohoScheduler {
       startupTimeoutId = setTimeout(() => {
         tick();
         intervalId = setInterval(tick, settings.checkIntervalMs);
-      }, settings.startupDelayMs);
+      }, settings.startupDelayMs + startOffsetMs);
 
       log({
         event: 'zoho.scheduler.started',
         entityType: adapter.entityType,
-        startupDelayMs: settings.startupDelayMs,
+        startupDelayMs: settings.startupDelayMs + startOffsetMs,
         checkIntervalMs: settings.checkIntervalMs,
         syncIntervalMs: settings.syncIntervalMs,
+        schedulerMode: settings.schedulerMode,
         maxDetailFetches: settings.schedulerMaxDetailFetches,
       });
     },

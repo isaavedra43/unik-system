@@ -62,6 +62,13 @@ export interface AiSettings {
   dailyReportRoles: string[];
   anomalyThreshold: number;
   anomalyCheckIntervalMinutes: number;
+  // Company profile (used by the AI for pickup location, signatures, catalogs)
+  companyName: string;
+  companyPhone: string;
+  warehouseAddress: string;
+  warehouseMapsUrl: string;
+  warehouseHours: string;
+  pickupInstructions: string;
 }
 
 export const DEFAULT_AI_SETTINGS: AiSettings = {
@@ -212,6 +219,37 @@ export const DEFAULT_AI_SETTINGS: AiSettings = {
     'listSkills',
     'runSkill',
     'getSkillRunStatus',
+    // Word reports
+    'generateWordReport',
+    // Messaging
+    'sendMessageToContact',
+    'sendBulkMessages',
+    'listAttachableDocuments',
+    'shareArtifact',
+    'getPickupLocation',
+    'scheduleFollowUp',
+    // Calls
+    'callContact',
+    'startInternalCall',
+    // Quotes (auto)
+    'draftQuoteFromRequest',
+    'sendQuoteToContact',
+    'findSimilarPastQuotes',
+    'checkStockForRequest',
+    // Insights
+    'getCustomerHealth',
+    'draftCollectionReminders',
+    'notifyDelayedDeliveries',
+    'suggestAssignee',
+    'getRecentActivity',
+    'getSalespersonScorecard',
+    'findReactivationOpportunities',
+    'getCustomerPriceHistory',
+    'getArtifactSpec',
+    'createChatEvent',
+    'draftSatisfactionSurvey',
+    'getWorkDigest',
+    'getDealBlockers',
     // System
     'getCurrentUserContext',
     'getModuleList',
@@ -219,7 +257,7 @@ export const DEFAULT_AI_SETTINGS: AiSettings = {
   ],
   maxAttachmentSizeMb: 10,
   allowedMimeTypes: ['image/png', 'image/jpeg', 'application/pdf', 'text/plain', 'text/csv'],
-  artifactTtlHours: 168, // 7 días
+  artifactTtlHours: 2160, // 90 días (los compartidos quedan protegidos y no se borran)
   voiceEnabled: false,
   sttModel: 'whisper-1',
   ttsVoice: 'coral',
@@ -231,6 +269,12 @@ export const DEFAULT_AI_SETTINGS: AiSettings = {
   dailyReportRoles: ['super_admin'],
   anomalyThreshold: 0.3,
   anomalyCheckIntervalMinutes: 60,
+  companyName: 'UNIK',
+  companyPhone: '',
+  warehouseAddress: '',
+  warehouseMapsUrl: '',
+  warehouseHours: '',
+  pickupInstructions: '',
 };
 
 interface CachedConfig {

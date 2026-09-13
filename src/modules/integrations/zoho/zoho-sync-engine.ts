@@ -213,12 +213,6 @@ function getUtcMidnight(ts: number): number {
   return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
 }
 
-/** Default conservative per-minute limit. Configurable via ZohoSettings. */
-const DEFAULT_MAX_CALLS_PER_MINUTE = 40;
-
-/** Default conservative daily limit. Configurable via ZohoSettings. */
-const DEFAULT_MAX_DAILY_CALLS = 2000;
-
 interface RateBudgetConfig {
   maxCallsPerMinute: number;
   maxDailyCalls: number;
@@ -226,12 +220,8 @@ interface RateBudgetConfig {
 
 function resolveRateBudgetConfig(settings: ZohoSettings): RateBudgetConfig {
   return {
-    maxCallsPerMinute:
-      (settings as unknown as Record<string, unknown>).maxCallsPerMinute as number | undefined ??
-      DEFAULT_MAX_CALLS_PER_MINUTE,
-    maxDailyCalls:
-      (settings as unknown as Record<string, unknown>).maxDailyCalls as number | undefined ??
-      DEFAULT_MAX_DAILY_CALLS,
+    maxCallsPerMinute: settings.maxCallsPerMinute,
+    maxDailyCalls: settings.maxDailyCalls,
   };
 }
 
@@ -969,9 +959,9 @@ export async function runSync(
   const params = resolveParams(settings, adapter);
   const budgetConfig = resolveRateBudgetConfig(settings);
 
-  // QUICK mode requires modified-time sort support.
-  const effectiveMode: SyncMode =
-    mode === 'quick' && !adapter.supportsModifiedTimeSort ? 'sync' : mode;
+  // QUICK mode scans recent pages for all entities. Entities without
+  // modified-time sort skip the sorted pass and use unsorted/last-page passes.
+  const effectiveMode: SyncMode = mode;
 
   lock.inProgress = true;
   const startedAt = new Date();
@@ -1234,8 +1224,7 @@ export async function startSync(
     return { runId: activeRun.runId, alreadyRunning: true };
   }
 
-  const effectiveMode: SyncMode =
-    mode === 'quick' && !adapter.supportsModifiedTimeSort ? 'sync' : mode;
+  const effectiveMode: SyncMode = mode;
 
   lock.inProgress = true;
   const startedAt = new Date();

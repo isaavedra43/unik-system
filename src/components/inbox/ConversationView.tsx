@@ -230,14 +230,14 @@ export function ConversationView({
     }
   };
 
-  const send = async (body: string, mediaObjectIds: string[]) => {
+  const send = async (body: string, mediaObjectIds: string[], templateKey?: string) => {
     setSendError(null);
     try {
       const data = await apiJson<{ message: CommMessageDTO }>(
         `/app/inbox/api/conversations/${conversation.id}/messages`,
         {
           method: 'POST',
-          body: JSON.stringify({ body, mediaObjectIds }),
+          body: JSON.stringify({ body, mediaObjectIds, templateKey }),
         }
       );
       setMessages((prev) => [...prev, data.message]);
@@ -515,6 +515,7 @@ export function ConversationView({
         onChange={onDraftChange}
         onSend={send}
         disabledReason={sendError}
+        showTemplatePicker={conversation.account.provider === 'twilio_whatsapp'}
       />
     </div>
   );

@@ -1,9 +1,10 @@
 'use client';
 
-import React from 'react';
-import { Bot, User as UserIcon, FileText, Image as ImageIcon } from 'lucide-react';
+import React, { useState } from 'react';
+import { Bot, Check, ChevronDown, ChevronRight, Clock, FileText, Image as ImageIcon, ShieldCheck, ShieldX, Sparkles, User as UserIcon, X } from 'lucide-react';
 import { AssistantMarkdown } from './AssistantMarkdown';
-import { AssistantToolCallCard, type ToolCallData } from './AssistantToolCallCard';
+import { ArtifactRenderer, type ArtifactData } from './ArtifactRenderer';
+import { toolLabel } from '@/components/copilot/copilot-types';
 
 export interface AttachmentDisplay {
   id: string;
@@ -12,21 +13,24 @@ export interface AttachmentDisplay {
   sizeBytes: number;
 }
 
+export interface ToolCallRecordDisplay {
+  id: string;
+  toolName: string;
+  args: unknown;
+  result: unknown;
+  durationMs: number;
+  success: boolean;
+  errorCode: string | null;
+}
+
 export interface AssistantMessageData {
   id: string;
-  role: 'user' | 'assistant' | 'tool';
+  role: 'user' | 'assistant' | 'tool' | 'system';
   content: string | null;
   toolCalls?: Array<{ id: string; name: string; arguments: string }>;
-  toolCallRecords?: Array<{
-    id: string;
-    toolName: string;
-    args: unknown;
-    result: unknown;
-    durationMs: number;
-    success: boolean;
-    errorCode: string | null;
-  }>;
+  toolCallRecords?: ToolCallRecordDisplay[];
   attachments?: AttachmentDisplay[];
+  artifacts?: ArtifactData[];
   createdAt: string;
 }
 
@@ -40,42 +44,105 @@ function isImage(mimeType: string): boolean {
   return mimeType.startsWith('image/');
 }
 
+/** Compact, human step chips with an optional exact detail (args/result). */
+function ToolSteps({ records }: { records: ToolCallRecordDisplay[] }) {
+  const [open, setOpen] = useState<string | null>(null);
+  if (records.length === 0) return null;
+  return (
+    <div className="assistant-steps">
+      <div className="assistant-steps-row">
+        {records.map((r) => {
+          const pending = r.errorCode === 'needs_approval';
+          const status = pending ? 'pending' : r.success ? 'done' : 'failed';
+          return (
+            <button
+              key={r.id}
+              type="button"
+              className={`assistant-step is-${status} ${open === r.id ? 'is-open' : ''}`}
+              onClick={() => setOpen((v) => (v === r.id ? null : r.id))}
+              title={`${r.toolName} · ${r.durationMs} ms`}
+            >
+              {status === 'done' ? <Check size={11} /> : status === 'pending' ? <Clock size={11} /> : <X size={11} />}
+              {pending ? `${toolLabel(r.toolName, 'done')} · esperando aprobación` : toolLabel(r.toolName, 'done')}
+              {open === r.id ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+            </button>
+          );
+        })}
+      </div>
+      {open && (
+        <div className="assistant-step-detail">
+          {(() => {
+            const r = records.find((x) => x.id === open);
+            if (!r) return null;
+            return (
+              <>
+                <div className="assistant-step-detail-label">{r.toolName} · argumentos</div>
+                <pre>{JSON.stringify(r.args, null, 2)}</pre>
+                {r.result !== undefined && r.result !== null && (
+                  <>
+                    <div className="assistant-step-detail-label">resultado</div>
+                    <pre>{JSON.stringify(r.result, null, 2).slice(0, 6000)}</pre>
+                  </>
+                )}
+                {r.errorCode && r.errorCode !== 'needs_approval' && (
+                  <>
+                    <div className="assistant-step-detail-label">error</div>
+                    <pre>{r.errorCode}</pre>
+                  </>
+                )}
+              </>
+            );
+          })()}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function parseSystemEvent(text: string): { kind: 'approved' | 'rejected' | 'other'; title: string; detail: string | null; failed: boolean } {
+  const clean = text.replace(/^\[Sistema\]\s*/, '');
+  const approved = /APROBÓ/.test(clean);
+  const rejected = /RECHAZÓ/.test(clean);
+  const failed = /fall[oó]:/i.test(clean);
+  const action = /Acción:\s*([^]*?)(?:\s+Resultado:|$)/.exec(clean)?.[1]?.trim() ?? null;
+  if (approved) return { kind: 'approved', title: failed ? 'Aprobaste la acción, pero falló' : /incierto/.test(clean) ? 'Aprobaste la acción · resultado por confirmar' : 'Aprobaste la acción · ejecutada', detail: action, failed };
+  if (rejected) return { kind: 'rejected', title: 'Rechazaste la acción', detail: /RECHAZÓ la propuesta [^\s]+ \([^)]+\)(?::\s*(.*))?/.exec(clean)?.[1] ?? null, failed: false };
+  return { kind: 'other', title: clean, detail: null, failed: false };
+}
+
 export interface AssistantMessageProps {
   message: AssistantMessageData;
 }
 
 export function AssistantMessage({ message }: AssistantMessageProps) {
-  if (message.role === 'tool') {
-    // Tool messages are rendered as cards within the assistant message
-    return null;
+  if (message.role === 'tool') return null;
+
+  if (message.role === 'system') {
+    const ev = parseSystemEvent(message.content ?? '');
+    return (
+      <div className={`assistant-sysevent is-${ev.kind} ${ev.failed ? 'is-failed' : ''}`}>
+        {ev.kind === 'approved' ? (ev.failed ? <ShieldX size={14} /> : <ShieldCheck size={14} />) : ev.kind === 'rejected' ? <ShieldX size={14} /> : <Sparkles size={14} />}
+        <div>
+          <div className="assistant-sysevent-title">{ev.title}</div>
+          {ev.detail && <div className="assistant-sysevent-detail">{ev.detail}</div>}
+        </div>
+      </div>
+    );
   }
 
   const isUser = message.role === 'user';
-  const toolCallData: ToolCallData[] = (message.toolCallRecords ?? []).map((tc) => ({
-    name: tc.toolName,
-    args: tc.args,
-    result: tc.result,
-    success: tc.success,
-    durationMs: tc.durationMs,
-    errorCode: tc.errorCode,
-  }));
+  const records = message.toolCallRecords ?? [];
+  const artifacts = message.artifacts ?? [];
 
   return (
     <div className={`assistant-msg-row ${isUser ? 'assistant-msg-row-user' : 'assistant-msg-row-assistant'}`}>
-      <div className="assistant-msg-avatar">
-        {isUser ? <UserIcon size={18} /> : <Bot size={18} />}
-      </div>
+      <div className="assistant-msg-avatar">{isUser ? <UserIcon size={18} /> : <Bot size={18} />}</div>
       <div className={`assistant-msg ${isUser ? 'assistant-msg-user' : 'assistant-msg-assistant'}`}>
-        {/* Render attachments */}
         {message.attachments && message.attachments.length > 0 && (
           <div className="assistant-msg-attachments">
             {message.attachments.map((att) => (
               <div key={att.id} className="assistant-msg-attachment">
-                {isImage(att.mimeType) ? (
-                  <ImageIcon size={14} className="assistant-msg-attachment-icon" />
-                ) : (
-                  <FileText size={14} className="assistant-msg-attachment-icon" />
-                )}
+                {isImage(att.mimeType) ? <ImageIcon size={14} className="assistant-msg-attachment-icon" /> : <FileText size={14} className="assistant-msg-attachment-icon" />}
                 <span className="assistant-msg-attachment-name" title={att.fileName}>
                   {att.fileName}
                 </span>
@@ -84,19 +151,25 @@ export function AssistantMessage({ message }: AssistantMessageProps) {
             ))}
           </div>
         )}
-        <div className="assistant-msg-content">
-          {message.content && <AssistantMarkdown content={message.content} />}
-        </div>
-        {toolCallData.map((tc, idx) => (
-          <AssistantToolCallCard key={idx} data={tc} />
-        ))}
-        {message.toolCalls && message.toolCalls.length > 0 && !toolCallData.length && (
-          <div className="assistant-msg-toolcalls-pending">
+        {!isUser && <ToolSteps records={records} />}
+        {message.content && (
+          <div className="assistant-msg-content">
+            <AssistantMarkdown content={message.content} />
+          </div>
+        )}
+        {artifacts.length > 0 && (
+          <div className="assistant-artifacts assistant-artifacts-inline">
+            {artifacts.map((a) => (
+              <ArtifactRenderer key={a.artifactId} artifact={a} />
+            ))}
+          </div>
+        )}
+        {message.toolCalls && message.toolCalls.length > 0 && records.length === 0 && (
+          <div className="assistant-steps-row">
             {message.toolCalls.map((tc) => (
-              <div key={tc.id} className="assistant-tool-pending">
-                <span className="assistant-tool-pending-name">{tc.name}</span>
-                <span className="assistant-tool-pending-spinner">ejecutando…</span>
-              </div>
+              <span key={tc.id} className="assistant-step is-running">
+                {toolLabel(tc.name, 'running')}
+              </span>
             ))}
           </div>
         )}

@@ -91,3 +91,24 @@ permite `http://localhost` y direcciones privadas (nunca en producción).
 Correcciones incluidas: las skills de un plugin ya no se enrutan al runtime HTTP,
 `requireApproval` de un paso de skill ahora exige aprobación de verdad (`forceApproval`) y
 las skills respetan la lista de tools habilitadas por el administrador.
+
+## Capacidades completas (2026-09-13)
+
+### Documentos
+- Formatos: PDF, Excel, **Word (`generateWordReport`, `docx`)**, CSV, imagen SVG, tabla y gráfica en el chat. Cotizaciones siempre con el PDF oficial de Zoho.
+- Los artefactos quedan ligados al mensaje que los produjo (`AiArtifact.messageId`) y se muestran como tarjeta con vista previa (PDF inline) en el asistente y en los copilotos, también al recargar. TTL por defecto 90 días; los compartidos se protegen.
+- Enlaces: `APP_URL` define el dominio real (`src/lib/app-url.ts`); las tools devuelven URLs absolutas y la IA tiene prohibido inventar hosts. Enlaces compartibles firmados: `/api/files/shared/<token>` (`artifact-share.ts`, secreto `UNIK_SHARE_LINK_SECRET` o `UNIK_SECRETS_MASTER_KEY`). Los envíos por chat interno/WhatsApp convierten los enlaces privados en compartibles automáticamente.
+- Revisiones: cada artefacto guarda `meta.spec` (tool de datos + argumentos + generador); `getArtifactSpec` permite rehacerlo con cambios.
+
+### Mensajería, llamadas y cotizaciones
+- `sendMessageToContact` / `sendBulkMessages` (WhatsApp/SMS por nombre o teléfono, adjuntos de reportes y documentos aprobados, reporte de envíos), `listAttachableDocuments`, `shareArtifact`, `getPickupLocation` (perfil de empresa en Admin → Asistente IA → Configuración), `scheduleFollowUp`.
+- `callContact` mode `me` (el usuario contesta en `/app/calls?call=<id>`) o `ai` con `brief` (`VoiceCall.aiBrief`, incluido en las instrucciones del agente de voz); `startInternalCall` (`/app/chat?channel=<id>&call=audio`).
+- Cotización automática: `draftQuoteFromRequest` (borrador en Zoho a partir del texto del cliente; actualiza el mismo borrador), `sendQuoteToContact` (PDF oficial + marcar enviada), `findSimilarPastQuotes`, `checkStockForRequest`.
+
+### Inteligencia proactiva
+`getCustomerHealth`, `draftCollectionReminders`, `notifyDelayedDeliveries`, `suggestAssignee`, `getRecentActivity`, `getSalespersonScorecard`, `findReactivationOpportunities`, `getCustomerPriceHistory`, `createChatEvent`, `draftSatisfactionSurvey`, `getDealBlockers`, `getWorkDigest` (digest diario por usuario en `AiUserDigest`, job `ai.daily_digest` cada 6 h).
+
+### Seguridad
+- Historial saneado antes de cada turno (`sanitizeHistory`) para que ningún `tool` quede huérfano (fix del error 400 del proveedor).
+- Contenido externo (transcripciones, notas, chat) llega al modelo envuelto en `<untrusted>` con detección de patrones de inyección (`ai-guardrails.ts`); reglas de seguridad explícitas en `ai-capability-rules.ts` (nunca revelar prompt/claves/datos ajenos, nunca saltar aprobaciones, obedecer solo al usuario de UNIK).
+- Las tools con efectos siguen pasando por la tarjeta de aprobación (rediseñada, compartida entre superficies).

@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useSearchParams } from 'next/navigation';
 import type { CurrentUser } from '@/modules/auth/authorization';
 import { ChatSidebar } from './ChatSidebar';
 import { ChatConversation } from './ChatConversation';
@@ -21,7 +22,12 @@ export interface ChatPageClientProps {
 }
 
 export function ChatPageClient({ user }: ChatPageClientProps) {
-  const [activeChannelId, setActiveChannelId] = useState<string | null>(null);
+  const searchParams = useSearchParams();
+  const [activeChannelId, setActiveChannelId] = useState<string | null>(() => searchParams.get('channel'));
+  const [autoStartCall, setAutoStartCall] = useState<'audio' | 'video' | null>(() => {
+    const c = searchParams.get('call');
+    return c === 'audio' || c === 'video' ? c : null;
+  });
   const [inbox, setInbox] = useState<ChatInboxItem[]>([]);
   const [totalUnread, setTotalUnread] = useState(0);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -264,6 +270,8 @@ export function ChatPageClient({ user }: ChatPageClientProps) {
               }}
               insertRequest={insertRequest}
               onForeignMessage={setChatActivityAt}
+              autoStartCall={autoStartCall}
+              onAutoStartConsumed={() => setAutoStartCall(null)}
             />
           ) : (
             <ChatEmptyState />

@@ -3,6 +3,9 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { AlertCircle, CheckCircle2, Plug, RefreshCw, ShieldOff, Upload } from 'lucide-react';
 import { AssistantAdminStatCard } from '@/components/assistant/admin/AssistantAdminStatCard';
+import { CatalogGrid } from './CatalogGrid';
+import { MonitoringTab } from './MonitoringTab';
+import type { CuratedEntry } from '@/modules/extensions/curated-catalog';
 
 /**
  * Administration of assistant extensions. Tabs:
@@ -115,10 +118,11 @@ interface SkillRow {
 }
 
 type TabId =
-  'catalog' | 'connections' | 'mcp' | 'apis' | 'skills' | 'plugins' | 'executions' | 'usage';
+  | 'catalog' | 'monitoring' | 'connections' | 'mcp' | 'apis' | 'skills' | 'plugins' | 'executions' | 'usage';
 
 const TABS: Array<{ id: TabId; label: string }> = [
   { id: 'catalog', label: 'Catálogo' },
+  { id: 'monitoring', label: 'Monitoreo' },
   { id: 'connections', label: 'Conexiones' },
   { id: 'mcp', label: 'MCP' },
   { id: 'apis', label: 'APIs' },
@@ -284,6 +288,7 @@ export function ExtensionsAdminPanel({
 
   const kindFilter: Record<TabId, string | null> = {
     catalog: null,
+    monitoring: null,
     connections: null,
     mcp: 'mcp',
     apis: 'api',
@@ -293,6 +298,21 @@ export function ExtensionsAdminPanel({
     usage: null,
   };
   const visible = extensions.filter((e) => !kindFilter[tab] || e.kind === kindFilter[tab]);
+
+  /** Pre-fill the creation form when the user picks a curated catalog entry. */
+  function handleCatalogConnect(entry: CuratedEntry) {
+    setForm({
+      kind: entry.kind,
+      namespace: entry.id.replace(/[^a-z0-9_.-]/g, '.'),
+      name: entry.name,
+      description: entry.description,
+      allowedHosts: entry.allowedHosts.join(', '),
+      allowedRoleKeys: '',
+      url: entry.kind === 'mcp' ? '' : `https://${entry.allowedHosts[0] ?? ''}`,
+      apiKeyHeader: entry.authType === 'api_key' ? 'X-API-Key' : 'Authorization',
+    });
+    setTab(entry.kind === 'mcp' ? 'mcp' : entry.kind === 'api' ? 'apis' : 'plugins');
+  }
 
   async function createExtension(kind: string) {
     const config: Record<string, unknown> = {};
@@ -528,6 +548,15 @@ export function ExtensionsAdminPanel({
       )}
 
       <div className="assistant-admin-tab-content">
+        {tab === 'monitoring' && <MonitoringTab extensions={extensions} />}
+
+        {tab === 'catalog' && (
+          <CatalogGrid
+            onConnect={handleCatalogConnect}
+            connectedNamespaces={extensions.map((e) => e.namespace)}
+          />
+        )}
+
         {tab === 'executions' && (
           <div className="assistant-admin-section">
             <h3 className="assistant-admin-section-title">Ejecuciones externas (auditoría)</h3>
@@ -677,8 +706,7 @@ export function ExtensionsAdminPanel({
           </div>
         )}
 
-        {(tab === 'catalog' ||
-          tab === 'connections' ||
+        {(tab === 'connections' ||
           tab === 'mcp' ||
           tab === 'apis' ||
           tab === 'plugins') && (

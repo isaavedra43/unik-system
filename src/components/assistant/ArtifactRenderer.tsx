@@ -1,12 +1,26 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { FileText, FileSpreadsheet, File, BarChart3, Table, Download, Loader2, Image as ImageIcon } from 'lucide-react';
+import {
+  BarChart3,
+  Check,
+  Copy,
+  Download,
+  Eye,
+  File,
+  FileSpreadsheet,
+  FileText,
+  Image as ImageIcon,
+  Link2,
+  Loader2,
+  Table,
+  X,
+} from 'lucide-react';
 import { colorForStatusLabel } from '@/modules/ai/generators/status-tone';
 
 export interface ArtifactData {
   artifactId: string;
-  type: 'pdf' | 'xlsx' | 'csv' | 'table' | 'chart' | 'image';
+  type: 'pdf' | 'xlsx' | 'docx' | 'csv' | 'table' | 'chart' | 'image';
   title: string;
   filename?: string;
   downloadUrl?: string;
@@ -15,6 +29,8 @@ export interface ArtifactData {
   sizeBytes?: number;
   pageCount?: number;
   chartType?: string;
+  shared?: boolean;
+  createdAt?: string;
 }
 
 interface InlineTableData {
@@ -37,6 +53,16 @@ interface InlineImageData {
   height: number;
 }
 
+const TYPE_LABEL: Record<ArtifactData['type'], string> = {
+  pdf: 'PDF',
+  xlsx: 'Excel',
+  docx: 'Word',
+  csv: 'CSV',
+  table: 'Tabla',
+  chart: 'Gráfica',
+  image: 'Imagen',
+};
+
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -52,28 +78,72 @@ function formatCellValue(value: unknown, format?: string): string {
   return String(value);
 }
 
-function ArtifactIcon({ type }: { type: string }) {
+function ArtifactIcon({ type, size = 20 }: { type: string; size?: number }) {
   switch (type) {
     case 'pdf':
-      return <FileText size={20} />;
+      return <FileText size={size} />;
     case 'xlsx':
-      return <FileSpreadsheet size={20} />;
+      return <FileSpreadsheet size={size} />;
+    case 'docx':
+      return <FileText size={size} />;
     case 'csv':
-      return <File size={20} />;
+      return <File size={size} />;
     case 'chart':
-      return <BarChart3 size={20} />;
+      return <BarChart3 size={size} />;
     case 'image':
-      return <ImageIcon size={20} />;
+      return <ImageIcon size={size} />;
     case 'table':
-      return <Table size={20} />;
+      return <Table size={size} />;
     default:
-      return <File size={20} />;
+      return <File size={size} />;
   }
 }
 
-export function ArtifactRenderer({ artifact }: { artifact: ArtifactData }) {
+/** In-app requests must stay same-origin (session cookie); absolute APP_URL links are for sharing. */
+function localUrl(downloadUrl: string): string {
+  return downloadUrl.replace(/^https?:\/\/[^/]+/, '') || downloadUrl;
+}
+
+function inlineUrl(downloadUrl: string): string {
+  const local = localUrl(downloadUrl);
+  return `${local}${local.includes('?') ? '&' : '?'}inline=1`;
+}
+
+/** Full-screen preview for PDFs (browser viewer) — no download needed to review. */
+function PreviewModal({ artifact, onClose }: { artifact: ArtifactData; onClose: () => void }) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
+  if (!artifact.downloadUrl) return null;
+  return (
+    <div className="artifact-preview-backdrop" role="dialog" aria-modal="true" aria-label={`Vista previa de ${artifact.title}`} onClick={onClose}>
+      <div className="artifact-preview-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="artifact-preview-head">
+          <span className="artifact-preview-icon"><ArtifactIcon type={artifact.type} size={16} /></span>
+          <strong>{artifact.title}</strong>
+          <span className="artifact-preview-meta">{TYPE_LABEL[artifact.type]}{artifact.pageCount ? ` · ${artifact.pageCount} págs` : ''}</span>
+          <a className="artifact-btn artifact-btn-ghost" href={localUrl(artifact.downloadUrl)} download={artifact.filename}>
+            <Download size={14} /> Descargar
+          </a>
+          <button type="button" className="artifact-iconbtn" onClick={onClose} aria-label="Cerrar">
+            <X size={16} />
+          </button>
+        </div>
+        <iframe className="artifact-preview-frame" src={inlineUrl(artifact.downloadUrl)} title={artifact.title} />
+      </div>
+    </div>
+  );
+}
+
+export function ArtifactRenderer({ artifact, compact = false }: { artifact: ArtifactData; compact?: boolean }) {
   const [inlineData, setInlineData] = useState<InlineTableData | InlineChartData | InlineImageData | null>(null);
   const [loading, setLoading] = useState(false);
+  const [preview, setPreview] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     if (artifact.inlineRender) {
@@ -88,12 +158,24 @@ export function ArtifactRenderer({ artifact }: { artifact: ArtifactData }) {
     }
   }, [artifact.artifactId, artifact.inlineRender]);
 
+  const copyLink = async () => {
+    if (!artifact.downloadUrl) return;
+    try {
+      const abs = artifact.downloadUrl.startsWith('http') ? artifact.downloadUrl : `${window.location.origin}${artifact.downloadUrl}`;
+      await navigator.clipboard.writeText(abs);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1800);
+    } catch {
+      /* ignore */
+    }
+  };
+
   // Inline table
   if (artifact.type === 'table' && inlineData && 'columns' in inlineData) {
     const table = inlineData as InlineTableData;
     return (
-      <div className="artifact-card artifact-table-card">
-        <div className="artifact-table-header" style={{ borderTopColor: table.brandColor ?? '#2563eb' }}>
+      <div className={`artifact-card artifact-table-card ${compact ? 'is-compact' : ''}`}>
+        <div className="artifact-table-header" style={{ borderTopColor: table.brandColor ?? 'var(--unik-accent)' }}>
           <div className="artifact-table-title">{table.title}</div>
           {table.subtitle && <div className="artifact-table-subtitle">{table.subtitle}</div>}
         </div>
@@ -102,10 +184,7 @@ export function ArtifactRenderer({ artifact }: { artifact: ArtifactData }) {
             <thead>
               <tr>
                 {table.columns.map((col, i) => (
-                  <th
-                    key={i}
-                    style={{ textAlign: (col.align ?? 'left') as 'left' | 'right' | 'center' }}
-                  >
+                  <th key={i} style={{ textAlign: (col.align ?? 'left') as 'left' | 'right' | 'center' }}>
                     {col.header}
                   </th>
                 ))}
@@ -118,13 +197,7 @@ export function ArtifactRenderer({ artifact }: { artifact: ArtifactData }) {
                     const text = formatCellValue(row[col.key], col.format);
                     const color = colorForStatusLabel(text);
                     return (
-                      <td
-                        key={j}
-                        style={{
-                          textAlign: (col.align ?? 'left') as 'left' | 'right' | 'center',
-                          ...(color ? { color, fontWeight: 600 } : {}),
-                        }}
-                      >
+                      <td key={j} style={{ textAlign: (col.align ?? 'left') as 'left' | 'right' | 'center', ...(color ? { color, fontWeight: 600 } : {}) }}>
                         {text}
                       </td>
                     );
@@ -152,63 +225,69 @@ export function ArtifactRenderer({ artifact }: { artifact: ArtifactData }) {
   if (artifact.type === 'chart' && inlineData && 'svg' in inlineData) {
     const chart = inlineData as InlineChartData;
     return (
-      <div className="artifact-card artifact-chart-card">
-        <div
-          className="artifact-chart-svg"
-          dangerouslySetInnerHTML={{ __html: chart.svg }}
-        />
+      <div className={`artifact-card artifact-chart-card ${compact ? 'is-compact' : ''}`}>
+        <div className="artifact-chart-svg" dangerouslySetInnerHTML={{ __html: chart.svg }} />
       </div>
     );
   }
 
-  // Inline report IMAGE (SVG) — a rendered report snapshot, not a chart.
+  // Inline report IMAGE (SVG)
   if (artifact.type === 'image' && inlineData && 'svg' in inlineData) {
     const image = inlineData as InlineImageData;
     return (
-      <div className="artifact-card artifact-image-card">
-        <div
-          className="artifact-image-svg"
-          dangerouslySetInnerHTML={{ __html: image.svg }}
-        />
+      <div className={`artifact-card artifact-image-card ${compact ? 'is-compact' : ''}`}>
+        <div className="artifact-image-svg" dangerouslySetInnerHTML={{ __html: image.svg }} />
       </div>
     );
   }
 
-  // Loading inline
   if (artifact.inlineRender && loading) {
     return (
       <div className="artifact-card artifact-loading-card">
-        <Loader2 size={20} className="spin" />
-        <span>Cargando artefacto…</span>
+        <Loader2 size={18} className="spin" />
+        <span>Cargando…</span>
       </div>
     );
   }
 
-  // File download card (PDF, XLSX, CSV)
+  const canPreview = artifact.type === 'pdf' && Boolean(artifact.downloadUrl);
+
+  // File card (PDF, XLSX, DOCX, CSV)
   return (
-    <div className="artifact-card artifact-file-card">
-      <div className="artifact-file-icon">
-        <ArtifactIcon type={artifact.type} />
-      </div>
-      <div className="artifact-file-info">
-        <div className="artifact-file-title">{artifact.title}</div>
-        <div className="artifact-file-meta">
-          {artifact.type.toUpperCase()}
-          {artifact.rowCount !== undefined && ` · ${artifact.rowCount} filas`}
-          {artifact.pageCount !== undefined && ` · ${artifact.pageCount} págs`}
-          {artifact.sizeBytes !== undefined && ` · ${formatBytes(artifact.sizeBytes)}`}
+    <>
+      <div className={`artifact-card artifact-file-card is-${artifact.type} ${compact ? 'is-compact' : ''}`}>
+        <div className="artifact-file-icon">
+          <ArtifactIcon type={artifact.type} />
+        </div>
+        <div className="artifact-file-info">
+          <div className="artifact-file-title" title={artifact.title}>{artifact.title}</div>
+          <div className="artifact-file-meta">
+            <span className="artifact-type-pill">{TYPE_LABEL[artifact.type] ?? artifact.type.toUpperCase()}</span>
+            {artifact.rowCount !== undefined && <span>{artifact.rowCount} filas</span>}
+            {artifact.pageCount !== undefined && <span>{artifact.pageCount} págs</span>}
+            {artifact.sizeBytes !== undefined && <span>{formatBytes(artifact.sizeBytes)}</span>}
+            {artifact.shared && <span className="artifact-shared-pill"><Link2 size={11} /> compartido</span>}
+          </div>
+        </div>
+        <div className="artifact-file-actions">
+          {canPreview && (
+            <button type="button" className="artifact-btn artifact-btn-ghost" onClick={() => setPreview(true)} title="Ver antes de enviar">
+              <Eye size={14} /> <span>Ver</span>
+            </button>
+          )}
+          {artifact.downloadUrl && (
+            <button type="button" className="artifact-btn artifact-btn-ghost" onClick={copyLink} title="Copiar enlace">
+              {copied ? <Check size={14} /> : <Copy size={14} />}
+            </button>
+          )}
+          {artifact.downloadUrl && (
+            <a href={localUrl(artifact.downloadUrl)} className="artifact-btn artifact-btn-primary" download={artifact.filename}>
+              <Download size={14} /> <span>Descargar</span>
+            </a>
+          )}
         </div>
       </div>
-      {artifact.downloadUrl && (
-        <a
-          href={artifact.downloadUrl}
-          className="artifact-download-btn"
-          download={artifact.filename}
-        >
-          <Download size={16} />
-          Descargar
-        </a>
-      )}
-    </div>
+      {preview && <PreviewModal artifact={artifact} onClose={() => setPreview(false)} />}
+    </>
   );
 }
