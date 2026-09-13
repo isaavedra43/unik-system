@@ -406,6 +406,87 @@ button {
   gap: var(--unik-space-1);
 }
 
+/* ---------- Sidebar: collapsible group (e.g. Zoho) ---------- */
+.sidebar-group {
+  margin-bottom: var(--unik-space-6);
+}
+
+.sidebar-group-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--unik-space-3);
+  width: 100%;
+  padding: var(--unik-space-2) var(--unik-space-4);
+  border: none;
+  border-radius: var(--unik-radius-md);
+  background: transparent;
+  color: var(--unik-text-secondary);
+  font: inherit;
+  font-size: var(--unik-text-sm);
+  font-weight: var(--unik-weight-semibold);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background var(--unik-transition),
+    color var(--unik-transition);
+}
+
+.sidebar-group-toggle:hover {
+  background: var(--unik-surface-hover);
+  color: var(--unik-text);
+}
+
+.sidebar-group.has-active .sidebar-group-toggle {
+  color: var(--unik-brand-text);
+}
+
+.sidebar-group-icon {
+  display: inline-flex;
+  color: inherit;
+}
+
+.sidebar-group-label {
+  flex: 1;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: var(--unik-text-xs);
+}
+
+.sidebar-group-chevron {
+  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  color: var(--unik-text-muted);
+}
+
+.sidebar-group.open .sidebar-group-chevron {
+  transform: rotate(90deg);
+}
+
+.sidebar-group-body {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.sidebar-group.open .sidebar-group-body {
+  grid-template-rows: 1fr;
+}
+
+.sidebar-group-inner {
+  overflow: hidden;
+  min-height: 0;
+  padding-left: var(--unik-space-2);
+  border-left: 1px solid var(--unik-border-subtle);
+  margin-left: calc(var(--unik-space-4) + 9px);
+}
+
+.sidebar-group-inner .sidebar-section {
+  margin: var(--unik-space-3) 0 var(--unik-space-2);
+}
+
+.sidebar-group-inner .sidebar-children {
+  padding-left: var(--unik-space-3);
+}
+
 .sidebar-toggle {
   display: none;
   width: 36px;
@@ -16096,3 +16177,54 @@ textarea.input {
 
 .copilot-thread::-webkit-scrollbar { width: 6px; }
 .copilot-thread::-webkit-scrollbar-thumb { background: var(--unik-border); border-radius: 999px; }
+
+/* =====================================================
+   Quotes (cotizaciones) — lifecycle segment chips
+   ===================================================== */
+.so-segment-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--unik-space-2);
+  padding: var(--unik-space-2) var(--unik-space-4);
+  border-bottom: 1px solid var(--unik-border-subtle);
+  background: var(--unik-surface);
+}
+
+.so-segment-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--unik-space-2);
+  padding: 0.25rem 0.7rem;
+  border-radius: var(--unik-radius-full);
+  border: 1px solid var(--unik-border);
+  font-size: var(--unik-text-sm);
+  color: var(--unik-text-secondary);
+  background: var(--unik-surface);
+  text-decoration: none;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+
+.so-segment-chip:hover {
+  background: var(--unik-surface-hover);
+  color: var(--unik-text);
+}
+
+.so-segment-chip-active {
+  background: var(--unik-accent-bg, var(--unik-surface-hover));
+  border-color: var(--unik-accent);
+  color: var(--unik-accent);
+  font-weight: var(--unik-weight-semibold);
+}
+
+.so-segment-chip-count {
+  font-size: var(--unik-text-xs);
+  padding: 0 0.4rem;
+  border-radius: var(--unik-radius-full);
+  background: var(--unik-surface-hover);
+  color: var(--unik-text-muted);
+}
+
+.so-segment-chip-active .so-segment-chip-count {
+  background: var(--unik-accent);
+  color: var(--unik-surface);
+}

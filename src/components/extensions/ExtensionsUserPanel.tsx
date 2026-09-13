@@ -414,7 +414,7 @@ export function ExtensionsUserPanel({
         )}
 
         <div className="assistant-admin-config-section">
-          <h4>
+          <h4 className="assistant-admin-section-title">
             <Plus size={14} /> Nueva skill personal
           </h4>
           <div className="assistant-admin-config-grid">
@@ -422,6 +422,7 @@ export function ExtensionsUserPanel({
               <label htmlFor="sk-key">Clave</label>
               <input
                 id="sk-key"
+                type="text"
                 value={skillForm.key}
                 onChange={(e) => setSkillForm({ ...skillForm, key: e.target.value })}
                 placeholder="resumen-cliente"
@@ -431,30 +432,40 @@ export function ExtensionsUserPanel({
               <label htmlFor="sk-name">Nombre</label>
               <input
                 id="sk-name"
+                type="text"
                 value={skillForm.name}
                 onChange={(e) => setSkillForm({ ...skillForm, name: e.target.value })}
+                placeholder="Resumen de cliente"
               />
             </div>
             <div className="assistant-admin-config-field">
               <label htmlFor="sk-purpose">Propósito</label>
               <input
                 id="sk-purpose"
+                type="text"
                 value={skillForm.purpose}
                 onChange={(e) => setSkillForm({ ...skillForm, purpose: e.target.value })}
+                placeholder="Qué problema resuelve esta receta"
               />
             </div>
           </div>
-          <label htmlFor="sk-def" className="assistant-admin-config-hint">
-            Definición (JSON declarativo: inputs, instrucciones, referencias, herramientas
-            admitidas, pasos, condiciones de finalización, límites)
-          </label>
-          <textarea
-            id="sk-def"
-            className="assistant-admin-filter-input"
-            rows={12}
-            value={skillForm.definition}
-            onChange={(e) => setSkillForm({ ...skillForm, definition: e.target.value })}
-          />
+          <div
+            className="assistant-admin-config-field"
+            style={{ marginTop: 'var(--unik-space-4)' }}
+          >
+            <label htmlFor="sk-def">Definición</label>
+            <span className="assistant-admin-config-hint">
+              JSON declarativo: inputs, instrucciones, referencias, herramientas admitidas, pasos,
+              condiciones de finalización y límites.
+            </span>
+            <textarea
+              id="sk-def"
+              rows={12}
+              spellCheck={false}
+              value={skillForm.definition}
+              onChange={(e) => setSkillForm({ ...skillForm, definition: e.target.value })}
+            />
+          </div>
           <button
             type="button"
             className="assistant-admin-save-btn"

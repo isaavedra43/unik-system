@@ -107,6 +107,12 @@ export interface EntityWorkspaceProps<TRow extends { id: string }> {
   unwatchAction: WatchAction;
   bulkWatchAction: BulkWatchAction;
   exportAction: ExportAction;
+  /** Extra buttons rendered in the toolbar before "Actualizar" (e.g. "Nueva cotización"). */
+  headerActions?: React.ReactNode;
+  /** Content rendered between the toolbar and the table (e.g. lifecycle segment chips). */
+  toolbarExtra?: React.ReactNode;
+  /** Extra URL params preserved when the workspace rewrites the URL (e.g. segment). */
+  extraUrlParams?: Record<string, string>;
   // Preview drawer renderer
   renderPreviewDrawer?: (props: {
     entityId: string;
@@ -428,6 +434,9 @@ export function EntityWorkspace<TRow extends { id: string }>({
   unwatchAction,
   bulkWatchAction,
   exportAction,
+  headerActions,
+  toolbarExtra,
+  extraUrlParams,
   renderPreviewDrawer,
 }: EntityWorkspaceProps<TRow>) {
   const router = useRouter();
@@ -471,9 +480,14 @@ export function EntityWorkspace<TRow extends { id: string }>({
       if (newQuery.sort.length > 0) params.set('sort', JSON.stringify(newQuery.sort));
       if (newQuery.filters.rules.length > 0)
         params.set('filters', JSON.stringify(newQuery.filters));
+      if (extraUrlParams) {
+        for (const [key, value] of Object.entries(extraUrlParams)) {
+          if (value) params.set(key, value);
+        }
+      }
       router.replace(`${basePath}?${params.toString()}`, { scroll: false });
     },
-    [router, basePath]
+    [router, basePath, extraUrlParams]
   );
 
   const fetchData = useCallback(async (q: EntityQueryState) => {
@@ -1286,6 +1300,7 @@ export function EntityWorkspace<TRow extends { id: string }>({
                 ) : null}
               </div>
             ) : null}
+            {headerActions ?? null}
             <button
               className="btn btn-secondary btn-sm"
               onClick={handleSyncNow}
@@ -1515,6 +1530,8 @@ export function EntityWorkspace<TRow extends { id: string }>({
           </div>
         </div>
       ) : null}
+
+      {toolbarExtra ?? null}
 
       {/* Table */}
       <div className="so-table-container">

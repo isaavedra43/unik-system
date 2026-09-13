@@ -9,9 +9,24 @@ import { Avatar } from '@/components/ui/primitives';
 import { DropdownMenu } from '@/components/ui/composite';
 import { ChevronDown, Home, LogOut, Menu, Shield, Users } from '@/components/ui/icons';
 import {
-  Bell, Bot, ShoppingCart, Plug, MessageCircle, MessageSquare, X,
-  FileText, Boxes, Users as UsersIcon, UserCog, Truck,
-  CreditCard, Receipt, Wallet,
+  Bell,
+  Bot,
+  ShoppingCart,
+  Plug,
+  MessageCircle,
+  MessageSquare,
+  X,
+  ChevronRight,
+  Database,
+  FileText,
+  FileSignature,
+  Boxes,
+  Users as UsersIcon,
+  UserCog,
+  Truck,
+  CreditCard,
+  Receipt,
+  Wallet,
   HardDrive,
   Inbox,
   Megaphone,
@@ -37,16 +52,133 @@ interface NavItem {
 }
 
 interface NavSection {
+  kind?: 'section';
   title: string;
   items: NavItem[];
 }
 
+/** Collapsible group of sections (e.g. everything synced from Zoho). */
+interface NavGroup {
+  kind: 'group';
+  key: string;
+  title: string;
+  icon: React.ReactNode;
+  sections: NavSection[];
+}
+
+type NavEntry = NavSection | NavGroup;
+
+function visibleItems(section: NavSection): NavItem[] {
+  return section.items.filter((item) => item.visible !== false);
+}
+
+function SidebarSection({
+  section,
+  isActive,
+  onClose,
+}: {
+  section: NavSection;
+  isActive: (href: string) => boolean;
+  onClose: () => void;
+}) {
+  const items = visibleItems(section);
+  if (items.length === 0) return null;
+  return (
+    <div className="sidebar-section">
+      <div className="sidebar-section-title">{section.title}</div>
+      <div className="sidebar-children">
+        {items.map((item) => (
+          <Link
+            key={item.href}
+            href={item.href}
+            className={`sidebar-link ${isActive(item.href) ? 'active' : ''}`}
+            onClick={onClose}
+          >
+            {item.icon}
+            {item.label}
+          </Link>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function SidebarGroup({
+  group,
+  isActive,
+  onClose,
+}: {
+  group: NavGroup;
+  isActive: (href: string) => boolean;
+  onClose: () => void;
+}) {
+  const sections = group.sections.filter((s) => visibleItems(s).length > 0);
+  const hasActive = sections.some((s) => visibleItems(s).some((i) => isActive(i.href)));
+  const storageKey = `unik.sidebar.group.${group.key}`;
+  const [open, setOpen] = useState(hasActive);
+
+  // Remember the user's choice; a group always opens when one of its pages is active.
+  React.useEffect(() => {
+    if (hasActive) {
+      setOpen(true);
+      return;
+    }
+    try {
+      const stored = window.localStorage.getItem(storageKey);
+      if (stored !== null) setOpen(stored === '1');
+    } catch {
+      // storage unavailable
+    }
+  }, [hasActive, storageKey]);
+
+  if (sections.length === 0) return null;
+
+  const toggle = () =>
+    setOpen((v) => {
+      try {
+        window.localStorage.setItem(storageKey, v ? '0' : '1');
+      } catch {
+        // storage unavailable
+      }
+      return !v;
+    });
+
+  const bodyId = `sidebar-group-${group.key}`;
+  return (
+    <div className={`sidebar-group ${open ? 'open' : ''} ${hasActive ? 'has-active' : ''}`}>
+      <button
+        type="button"
+        className="sidebar-group-toggle"
+        onClick={toggle}
+        aria-expanded={open}
+        aria-controls={bodyId}
+      >
+        <span className="sidebar-group-icon">{group.icon}</span>
+        <span className="sidebar-group-label">{group.title}</span>
+        <ChevronRight size={16} className="sidebar-group-chevron" aria-hidden="true" />
+      </button>
+      <div className="sidebar-group-body" id={bodyId} inert={!open}>
+        <div className="sidebar-group-inner">
+          {sections.map((section) => (
+            <SidebarSection
+              key={section.title}
+              section={section}
+              isActive={isActive}
+              onClose={onClose}
+            />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Sidebar({
-  sections,
+  entries,
   open,
   onClose,
 }: {
-  sections: NavSection[];
+  entries: NavEntry[];
   open: boolean;
   onClose: () => void;
 }) {
@@ -75,26 +207,18 @@ function Sidebar({
           </button>
         </div>
         <nav className="sidebar-nav">
-          {sections.map((section) => (
-            <div key={section.title} className="sidebar-section">
-              <div className="sidebar-section-title">{section.title}</div>
-              <div className="sidebar-children">
-                {section.items
-                  .filter((item) => item.visible !== false)
-                  .map((item) => (
-                    <Link
-                      key={item.href}
-                      href={item.href}
-                      className={`sidebar-link ${isActive(item.href) ? 'active' : ''}`}
-                      onClick={onClose}
-                    >
-                      {item.icon}
-                      {item.label}
-                    </Link>
-                  ))}
-              </div>
-            </div>
-          ))}
+          {entries.map((entry) =>
+            entry.kind === 'group' ? (
+              <SidebarGroup key={entry.key} group={entry} isActive={isActive} onClose={onClose} />
+            ) : (
+              <SidebarSection
+                key={entry.title}
+                section={entry}
+                isActive={isActive}
+                onClose={onClose}
+              />
+            )
+          )}
         </nav>
       </aside>
     </>
@@ -306,28 +430,16 @@ function buildBreadcrumbs(pathname: string): { label: string; href?: string }[] 
     ];
   }
   if (pathname.startsWith('/app/admin/assistant')) {
-    return [
-      { label: 'Administración', href: '/app/admin/assistant' },
-      { label: 'Asistente IA' },
-    ];
+    return [{ label: 'Administración', href: '/app/admin/assistant' }, { label: 'Asistente IA' }];
   }
   if (pathname.startsWith('/app/admin/chat')) {
-    return [
-      { label: 'Administración', href: '/app/admin/chat' },
-      { label: 'Chat' },
-    ];
+    return [{ label: 'Administración', href: '/app/admin/chat' }, { label: 'Chat' }];
   }
   if (pathname.startsWith('/app/admin/files')) {
-    return [
-      { label: 'Administración', href: '/app/admin/files' },
-      { label: 'Archivos' },
-    ];
+    return [{ label: 'Administración', href: '/app/admin/files' }, { label: 'Archivos' }];
   }
   if (pathname.startsWith('/app/admin/extensions')) {
-    return [
-      { label: 'Administración', href: '/app/admin/extensions' },
-      { label: 'Extensiones' },
-    ];
+    return [{ label: 'Administración', href: '/app/admin/extensions' }, { label: 'Extensiones' }];
   }
   const simple: Array<[string, string[]]> = [
     ['/app/admin/knowledge', ['Administración', 'Biblioteca aprobada']],
@@ -339,14 +451,13 @@ function buildBreadcrumbs(pathname: string): { label: string; href?: string }[] 
   ];
   for (const [prefix, labels] of simple) {
     if (pathname.startsWith(prefix)) {
-      return labels.map((label, i) => (i < labels.length - 1 ? { label, href: prefix } : { label }));
+      return labels.map((label, i) =>
+        i < labels.length - 1 ? { label, href: prefix } : { label }
+      );
     }
   }
   if (pathname.startsWith('/app/assistant/extensions')) {
-    return [
-      { label: 'Asistente IA', href: '/app/assistant' },
-      { label: 'Extensiones y skills' },
-    ];
+    return [{ label: 'Asistente IA', href: '/app/assistant' }, { label: 'Extensiones y skills' }];
   }
   if (pathname.startsWith('/app/assistant')) {
     return [{ label: 'Asistente IA' }];
@@ -407,6 +518,18 @@ function buildBreadcrumbs(pathname: string): { label: string; href?: string }[] 
       { label: 'Detalle' },
     ];
   }
+  if (pathname === '/app/quotes') {
+    return [{ label: 'Ventas' }, { label: 'Cotizaciones' }];
+  }
+  if (pathname === '/app/quotes/new') {
+    return [{ label: 'Ventas' }, { label: 'Cotizaciones', href: '/app/quotes' }, { label: 'Nueva' }];
+  }
+  if (pathname.startsWith('/app/quotes/') && pathname.endsWith('/edit')) {
+    return [{ label: 'Ventas' }, { label: 'Cotizaciones', href: '/app/quotes' }, { label: 'Editar' }];
+  }
+  if (pathname.startsWith('/app/quotes/')) {
+    return [{ label: 'Ventas' }, { label: 'Cotizaciones', href: '/app/quotes' }, { label: 'Detalle' }];
+  }
   if (pathname === '/app/invoices') {
     return [{ label: 'Ventas' }, { label: 'Facturas' }];
   }
@@ -421,11 +544,7 @@ function buildBreadcrumbs(pathname: string): { label: string; href?: string }[] 
     return [{ label: 'Ventas' }, { label: 'Pagos' }];
   }
   if (pathname.startsWith('/app/payments/')) {
-    return [
-      { label: 'Ventas' },
-      { label: 'Pagos', href: '/app/payments' },
-      { label: 'Detalle' },
-    ];
+    return [{ label: 'Ventas' }, { label: 'Pagos', href: '/app/payments' }, { label: 'Detalle' }];
   }
   if (pathname === '/app/purchase-orders') {
     return [{ label: 'Compras' }, { label: 'Órdenes de compra' }];
@@ -466,17 +585,11 @@ function buildBreadcrumbs(pathname: string): { label: string; href?: string }[] 
 export default function AppShell({ user, children }: AppShellProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
-  const sections: NavSection[] = [
+  const sections: NavEntry[] = [
     {
       title: 'General',
       items: [
         { href: '/app', label: 'Inicio', icon: <Home size={18} />, visible: true },
-        {
-          href: '/app/chat',
-          label: 'Chat',
-          icon: <MessageCircle size={18} />,
-          visible: user.permissionKeys.includes('chat.use') || user.isSuperAdmin,
-        },
         {
           href: '/app/assistant',
           label: 'Asistente IA',
@@ -486,83 +599,14 @@ export default function AppShell({ user, children }: AppShellProps) {
       ],
     },
     {
-      title: 'Ventas',
-      items: [
-        {
-          href: '/app/sales/orders',
-          label: 'Órdenes de venta',
-          icon: <ShoppingCart size={18} />,
-          visible: user.permissionKeys.includes('sales_orders.view') || user.isSuperAdmin,
-        },
-        {
-          href: '/app/contacts/customers',
-          label: 'Clientes',
-          icon: <UsersIcon size={18} />,
-          visible: user.permissionKeys.includes('customers.view') || user.isSuperAdmin,
-        },
-        {
-          href: '/app/invoices',
-          label: 'Facturas',
-          icon: <FileText size={18} />,
-          visible: user.permissionKeys.includes('invoices.view') || user.isSuperAdmin,
-        },
-        {
-          href: '/app/payments',
-          label: 'Pagos',
-          icon: <CreditCard size={18} />,
-          visible: user.permissionKeys.includes('payments.view') || user.isSuperAdmin,
-        },
-      ],
-    },
-    {
-      title: 'Inventario',
-      items: [
-        {
-          href: '/app/products',
-          label: 'Productos',
-          icon: <Boxes size={18} />,
-          visible: user.permissionKeys.includes('products.view') || user.isSuperAdmin,
-        },
-        {
-          href: '/app/packages',
-          label: 'Paquetes',
-          icon: <Truck size={18} />,
-          visible: user.permissionKeys.includes('packages.view') || user.isSuperAdmin,
-        },
-      ],
-    },
-    {
-      title: 'Compras',
-      items: [
-        {
-          href: '/app/contacts/vendors',
-          label: 'Proveedores',
-          icon: <UserCog size={18} />,
-          visible: user.permissionKeys.includes('vendors.view') || user.isSuperAdmin,
-        },
-        {
-          href: '/app/purchase-orders',
-          label: 'Órdenes de compra',
-          icon: <ShoppingCart size={18} />,
-          visible: user.permissionKeys.includes('purchase_orders.view') || user.isSuperAdmin,
-        },
-        {
-          href: '/app/bills',
-          label: 'Facturas de compra',
-          icon: <Receipt size={18} />,
-          visible: user.permissionKeys.includes('bills.view') || user.isSuperAdmin,
-        },
-        {
-          href: '/app/vendor-credits',
-          label: 'Créditos de proveedor',
-          icon: <Wallet size={18} />,
-          visible: user.permissionKeys.includes('vendor_credits.view') || user.isSuperAdmin,
-        },
-      ],
-    },
-    {
       title: 'Comunicaciones',
       items: [
+        {
+          href: '/app/chat',
+          label: 'Chat',
+          icon: <MessageCircle size={18} />,
+          visible: user.permissionKeys.includes('chat.use') || user.isSuperAdmin,
+        },
         {
           href: '/app/inbox',
           label: 'Bandeja externa',
@@ -590,6 +634,95 @@ export default function AppShell({ user, children }: AppShellProps) {
       ],
     },
     {
+      kind: 'group',
+      key: 'zoho',
+      title: 'Zoho',
+      icon: <Database size={18} />,
+      sections: [
+        {
+          title: 'Ventas',
+          items: [
+            {
+              href: '/app/sales/orders',
+              label: 'Órdenes de venta',
+              icon: <ShoppingCart size={18} />,
+              visible: user.permissionKeys.includes('sales_orders.view') || user.isSuperAdmin,
+            },
+            {
+              href: '/app/contacts/customers',
+              label: 'Clientes',
+              icon: <UsersIcon size={18} />,
+              visible: user.permissionKeys.includes('customers.view') || user.isSuperAdmin,
+            },
+            {
+              href: '/app/quotes',
+              label: 'Cotizaciones',
+              icon: <FileSignature size={18} />,
+              visible: user.permissionKeys.includes('quotes.view') || user.isSuperAdmin,
+            },
+            {
+              href: '/app/invoices',
+              label: 'Facturas',
+              icon: <FileText size={18} />,
+              visible: user.permissionKeys.includes('invoices.view') || user.isSuperAdmin,
+            },
+            {
+              href: '/app/payments',
+              label: 'Pagos',
+              icon: <CreditCard size={18} />,
+              visible: user.permissionKeys.includes('payments.view') || user.isSuperAdmin,
+            },
+          ],
+        },
+        {
+          title: 'Inventario',
+          items: [
+            {
+              href: '/app/products',
+              label: 'Productos',
+              icon: <Boxes size={18} />,
+              visible: user.permissionKeys.includes('products.view') || user.isSuperAdmin,
+            },
+            {
+              href: '/app/packages',
+              label: 'Paquetes',
+              icon: <Truck size={18} />,
+              visible: user.permissionKeys.includes('packages.view') || user.isSuperAdmin,
+            },
+          ],
+        },
+        {
+          title: 'Compras',
+          items: [
+            {
+              href: '/app/contacts/vendors',
+              label: 'Proveedores',
+              icon: <UserCog size={18} />,
+              visible: user.permissionKeys.includes('vendors.view') || user.isSuperAdmin,
+            },
+            {
+              href: '/app/purchase-orders',
+              label: 'Órdenes de compra',
+              icon: <ShoppingCart size={18} />,
+              visible: user.permissionKeys.includes('purchase_orders.view') || user.isSuperAdmin,
+            },
+            {
+              href: '/app/bills',
+              label: 'Facturas de compra',
+              icon: <Receipt size={18} />,
+              visible: user.permissionKeys.includes('bills.view') || user.isSuperAdmin,
+            },
+            {
+              href: '/app/vendor-credits',
+              label: 'Créditos de proveedor',
+              icon: <Wallet size={18} />,
+              visible: user.permissionKeys.includes('vendor_credits.view') || user.isSuperAdmin,
+            },
+          ],
+        },
+      ],
+    },
+    {
       title: 'Administración',
       items: [
         {
@@ -605,29 +738,25 @@ export default function AppShell({ user, children }: AppShellProps) {
           href: '/app/admin/integrations',
           label: 'Integraciones',
           icon: <Plug size={18} />,
-          visible:
-            user.permissionKeys.includes('integrations.view') || user.isSuperAdmin,
+          visible: user.permissionKeys.includes('integrations.view') || user.isSuperAdmin,
         },
         {
           href: '/app/admin/assistant',
           label: 'Asistente IA',
           icon: <Bot size={18} />,
-          visible:
-            user.permissionKeys.includes('assistant.admin') || user.isSuperAdmin,
+          visible: user.permissionKeys.includes('assistant.admin') || user.isSuperAdmin,
         },
         {
           href: '/app/admin/chat',
           label: 'Chat',
           icon: <MessageSquare size={18} />,
-          visible:
-            user.permissionKeys.includes('chat.admin') || user.isSuperAdmin,
+          visible: user.permissionKeys.includes('chat.admin') || user.isSuperAdmin,
         },
         {
           href: '/app/admin/files',
           label: 'Archivos',
           icon: <HardDrive size={18} />,
-          visible:
-            user.permissionKeys.includes('files.admin') || user.isSuperAdmin,
+          visible: user.permissionKeys.includes('files.admin') || user.isSuperAdmin,
         },
         {
           href: '/app/admin/extensions',
@@ -699,7 +828,7 @@ export default function AppShell({ user, children }: AppShellProps) {
 
   return (
     <div className="app-shell">
-      <Sidebar sections={sections} open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+      <Sidebar entries={sections} open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
       <div className="app-main">
         <Topbar user={user} onToggleSidebar={() => setSidebarOpen(!sidebarOpen)} />
         <main className={isFlush ? 'app-content app-content-flush' : 'app-content'}>

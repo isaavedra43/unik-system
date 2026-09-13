@@ -583,6 +583,129 @@ model InvoiceItem {
   @@index([zohoSalesOrderId])
 }
 
+/// Business-normalized view of a Zoho Books estimate (cotización).
+/// Synced via /books/v3/estimates (LIST has no line items → HYDRATE per record).
+/// Quotes can also be CREATED/EDITED from UNIK: the write service calls Zoho
+/// first, stores the Zoho response as an IntegrationSnapshot and runs the same
+/// normalizer, so Zoho is always the source of truth (folios, totals, taxes).
+model Quote {
+  id                     String      @id @default(cuid())
+  zohoEstimateId         String      @unique
+  estimateNumber         String?
+  referenceNumber        String?
+  status                 String?
+  date                   DateTime?
+  expiryDate             DateTime?
+  zohoCustomerId         String?
+  customerName           String?
+  currencyId             String?
+  currencyCode           String?
+  exchangeRate           Decimal?    @db.Decimal(18, 6)
+  subTotal               Decimal?    @db.Decimal(18, 4)
+  taxTotal               Decimal?    @db.Decimal(18, 4)
+  discountTotal          Decimal?    @db.Decimal(18, 4)
+  discount               Decimal?    @db.Decimal(18, 4)
+  discountType           String?
+  isDiscountBeforeTax    Boolean?
+  isInclusiveTax         Boolean?
+  shippingCharge         Decimal?    @db.Decimal(18, 4)
+  adjustment             Decimal?    @db.Decimal(18, 4)
+  adjustmentDescription  String?
+  total                  Decimal?    @db.Decimal(18, 4)
+  salespersonId          String?
+  salespersonName        String?
+  templateId             String?
+  templateName           String?
+  // Address fields
+  billingAddress         String?
+  billingStreet2         String?
+  billingCity            String?
+  billingState           String?
+  billingZip             String?
+  billingCountry         String?
+  shippingAddress        String?
+  shippingStreet2        String?
+  shippingCity           String?
+  shippingState          String?
+  shippingZip            String?
+  shippingCountry        String?
+  // Additional fields
+  notes                  String?
+  terms                  String?
+  customFields           Json?
+  isViewedByClient       Boolean?
+  acceptedDate           DateTime?
+  declinedDate           DateTime?
+  zohoCreatedTime        DateTime?
+  zohoLastModifiedTime   DateTime?
+  // UNIK authorship (null when the quote was created directly in Zoho)
+  createdInUnik          Boolean     @default(false)
+  createdByUserId        String?
+  lastEditedByUserId     String?
+  lastEditedInUnikAt     DateTime?
+  // Sync tracking
+  sourceRemoteModifiedAt DateTime
+  sourceSnapshotId       String
+  normalizedAt           DateTime    @default(now())
+  createdAt              DateTime    @default(now())
+  updatedAt              DateTime    @updatedAt
+  items                  QuoteItem[]
+
+  @@index([status])
+  @@index([zohoCustomerId])
+  @@index([date])
+  @@index([expiryDate])
+  @@index([estimateNumber])
+  @@index([sourceSnapshotId])
+}
+
+/// Business-normalized line items of a Zoho Books estimate.
+model QuoteItem {
+  id             String   @id @default(cuid())
+  quoteId        String
+  zohoLineItemId String?
+  zohoItemId     String?
+  sku            String?
+  name           String?
+  description    String?
+  quantity       Decimal? @db.Decimal(18, 4)
+  rate           Decimal? @db.Decimal(18, 4)
+  unit           String?
+  discount       String?
+  discountAmount Decimal? @db.Decimal(18, 4)
+  taxId          String?
+  taxName        String?
+  taxPercentage  Decimal? @db.Decimal(18, 4)
+  taxAmount      Decimal? @db.Decimal(18, 4)
+  lineTotal      Decimal? @db.Decimal(18, 4)
+  sortOrder      Int      @default(0)
+  quote          Quote    @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+
+  @@index([quoteId])
+  @@index([zohoItemId])
+}
+
+/// Idempotency ledger for quote writes that reach Zoho Books.
+/// The client generates `requestKey` once per form submission. A retry (double
+/// click, network timeout, page refresh) reuses the same key, so the write
+/// service can return the already-created quote instead of creating a second
+/// estimate in Zoho. Unique constraint = atomic guard against concurrent sends.
+model QuoteWriteRequest {
+  id             String    @id @default(cuid())
+  requestKey     String    @unique
+  operation      String
+  userId         String
+  quoteId        String?
+  zohoEstimateId String?
+  status         String    @default("pending")
+  errorMessage   String?
+  createdAt      DateTime  @default(now())
+  completedAt    DateTime?
+
+  @@index([userId, createdAt])
+  @@index([status, createdAt])
+}
+
 /// Business-normalized view of a Zoho customer payment.
 /// Synced via /customerpayments with useListAsSnapshot.
 model CustomerPayment {

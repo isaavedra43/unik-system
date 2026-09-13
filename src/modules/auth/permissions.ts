@@ -110,6 +110,7 @@ import { CONTACTS_PERMISSIONS } from '@/modules/contacts/permissions';
 import { PRODUCTS_PERMISSIONS } from '@/modules/products/permissions';
 import { PACKAGES_PERMISSIONS } from '@/modules/packages/permissions';
 import { INVOICES_PERMISSIONS } from '@/modules/invoices/permissions';
+import { QUOTES_PERMISSIONS } from '@/modules/quotes/permissions';
 import { PAYMENTS_PERMISSIONS } from '@/modules/payments/permissions';
 import { PURCHASE_ORDERS_PERMISSIONS } from '@/modules/purchase-orders/permissions';
 import { BILLS_PERMISSIONS } from '@/modules/bills/permissions';
@@ -124,6 +125,7 @@ export const PERMISSION_REGISTRY: PermissionDefinition[] = [
   ...PRODUCTS_PERMISSIONS,
   ...PACKAGES_PERMISSIONS,
   ...INVOICES_PERMISSIONS,
+  ...QUOTES_PERMISSIONS,
   ...PAYMENTS_PERMISSIONS,
   ...PURCHASE_ORDERS_PERMISSIONS,
   ...BILLS_PERMISSIONS,

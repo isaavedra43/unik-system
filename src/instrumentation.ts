@@ -19,12 +19,15 @@ export async function register() {
     await import('@/modules/integrations/zoho/packages-scheduler');
   const { invoicesScheduler } =
     await import('@/modules/integrations/zoho/invoices-scheduler');
+  const { estimatesScheduler } =
+    await import('@/modules/integrations/zoho/estimates-scheduler');
 
   void startSalesOrdersScheduler();
   void startContactsScheduler();
   void productsScheduler.start();
   void packagesScheduler.start();
   void invoicesScheduler.start();
+  void estimatesScheduler.start();
 
   // Durable background jobs (object storage validation, cleanup, backups,
   // campaigns...). Handlers register on import; the worker claims jobs from
