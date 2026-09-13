@@ -18,7 +18,17 @@ interface Preferences {
   format: 'markdown' | 'texto' | 'tablas';
   customInstructions: string | null;
   memoryEnabled: boolean;
+  inboxCopilotMode: 'active' | 'on_demand' | 'paused';
+  chatCopilotMode: 'active' | 'on_demand' | 'paused';
 }
+
+type CopilotMode = Preferences['inboxCopilotMode'];
+
+const COPILOT_MODES: Array<{ value: CopilotMode; label: string; hint: string }> = [
+  { value: 'active', label: 'Activo', hint: 'Analiza por su cuenta al abrir la conversación y cada vez que alguien escribe.' },
+  { value: 'on_demand', label: 'A petición', hint: 'Solo actúa cuando tú le hablas desde el panel.' },
+  { value: 'paused', label: 'Apagado', hint: 'El panel del copiloto queda en pausa en esa superficie.' },
+];
 
 interface Memory {
   id: string;
@@ -168,7 +178,7 @@ export function AssistantPreferencesPanel({
       open={open}
       onClose={onClose}
       title="Preferencias y memoria"
-      subtitle="Cómo debe comportarse el asistente contigo"
+      subtitle="Una sola IA en todo UNIK: aquí se configura para el asistente, la bandeja externa y el chat interno"
       size="lg"
     >
       {loading && <div className="assistant-admin-loading">Cargando…</div>}
@@ -198,6 +208,40 @@ export function AssistantPreferencesPanel({
                   <span className="assistant-admin-list-name">{m.label}</span>
                   <span className="assistant-admin-list-meta">{m.hint}</span>
                 </label>
+              ))}
+            </div>
+          </div>
+          <div className="assistant-admin-section">
+            <h3 className="assistant-admin-section-title">Copiloto en bandeja externa y chat interno</h3>
+            <p className="assistant-admin-muted">
+              Es la misma IA del asistente, con tu memoria y tu contexto. Aquí decides qué tan proactiva es en cada lugar; el modo de
+              trabajo de arriba aplica en todos.
+            </p>
+            <div className="assistant-admin-config-grid">
+              {(
+                [
+                  { key: 'inboxCopilotMode', label: 'Bandeja externa (WhatsApp, SMS, Telegram)' },
+                  { key: 'chatCopilotMode', label: 'Chat interno del equipo' },
+                ] as Array<{ key: 'inboxCopilotMode' | 'chatCopilotMode'; label: string }>
+              ).map((surface) => (
+                <div key={surface.key} className="assistant-admin-config-field">
+                  <label htmlFor={`pref-${surface.key}`}>{surface.label}</label>
+                  <select
+                    id={`pref-${surface.key}`}
+                    className="assistant-admin-select"
+                    value={prefs[surface.key]}
+                    onChange={(e) => savePrefs({ [surface.key]: e.target.value as CopilotMode })}
+                  >
+                    {COPILOT_MODES.map((m) => (
+                      <option key={m.value} value={m.value}>
+                        {m.label}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="assistant-admin-muted">
+                    {COPILOT_MODES.find((m) => m.value === prefs[surface.key])?.hint}
+                  </span>
+                </div>
               ))}
             </div>
           </div>

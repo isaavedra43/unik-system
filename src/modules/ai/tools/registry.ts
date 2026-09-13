@@ -91,6 +91,8 @@ export interface ToolExecutionContext {
   approvedProposalId?: string;
   /** Internal trusted flows only (never from the model). */
   skipApproval?: boolean;
+  /** Skill steps can demand human approval even for read-only tools. */
+  forceApproval?: boolean;
   /** Optional binding context for approvals. */
   recipient?: string;
   fileIds?: string[];
@@ -379,7 +381,7 @@ export async function executeTool(
   }
 
   // 5. Approval for side effects
-  if (requiresApproval(tool) && !ctx.skipApproval && !ctx.approvedProposalId) {
+  if ((requiresApproval(tool) || ctx.forceApproval) && !ctx.skipApproval && !ctx.approvedProposalId) {
     const { createProposal } = await import('@/modules/extensions/proposals-service');
     const proposal = await createProposal({
       actor,

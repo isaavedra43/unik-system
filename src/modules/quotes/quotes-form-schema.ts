@@ -38,6 +38,8 @@ export const quoteFormInputSchema = z.object({
   expiryDate: dateOnly.optional().nullable(),
   referenceNumber: z.string().trim().max(100).optional().nullable(),
   salespersonName: z.string().trim().max(120).optional().nullable(),
+  /** Zoho salesperson_id when picked from the Zoho list (preferred over name). */
+  salespersonId: z.string().trim().max(40).optional().nullable(),
   notes: z.string().trim().max(5000).optional().nullable(),
   terms: z.string().trim().max(5000).optional().nullable(),
   discountMode: z.enum(DISCOUNT_MODES).default('none'),

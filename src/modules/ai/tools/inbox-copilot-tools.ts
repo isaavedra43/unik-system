@@ -16,10 +16,9 @@ registerTool({
     'Muestra al operador tu lectura de la situación y de 2 a 5 acciones concretas que puedes ejecutar ahora (cada una como un botón). ' +
     'Llámala al final de todo análisis automático y siempre que quieras ofrecer opciones. La "instruction" de cada acción es el texto que el operador te enviará al hacer clic, escríbela como una orden directa para ti.',
   category: 'communication',
-  requiredPermission: 'inbox.use',
   enabledByDefault: true,
   effect: 'read',
-  contextTags: ['inbox'],
+  contextTags: ['all'],
   parameters: z.object({
     situation: z.string().max(300).describe('Lectura en una línea: qué quiere el cliente y en qué punto está.'),
     sentiment: z.enum(['positivo', 'neutral', 'negativo', 'molesto']),

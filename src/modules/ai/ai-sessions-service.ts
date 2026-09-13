@@ -1,5 +1,6 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
+import { HIDDEN_CONVERSATION_KINDS } from './copilot-surfaces';
 
 export interface ConversationRow {
   id: string;
@@ -153,11 +154,11 @@ export async function listConversations(
     orderBy: { updatedAt: 'desc' },
     take: 150,
   });
-  // Inbox copilot threads live inside the inbox, not in the assistant sidebar.
+  // Copilot threads (inbox / internal chat) live inside their surface, not in the assistant sidebar.
   return convs
     .filter((c) => {
       const ctx = c.context as { kind?: string } | null;
-      return ctx?.kind !== 'inbox_copilot';
+      return !ctx?.kind || !HIDDEN_CONVERSATION_KINDS.has(ctx.kind);
     })
     .slice(0, 100)
     .map(formatConv);

@@ -955,6 +955,10 @@ model AiConversation {
   title     String       @default("Nueva conversación")
   context   Json?
   isStarred Boolean      @default(false)
+  /// Rolling summary of the thread (shared context across assistant + copilots).
+  summary             String?
+  summaryUpdatedAt    DateTime?
+  summaryMessageCount Int          @default(0)
   createdAt DateTime     @default(now())
   updatedAt DateTime     @updatedAt
   user      User         @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -1962,6 +1966,8 @@ model AiUserPreference {
   memoryEnabled      Boolean  @default(true)
   /// Inbox copilot: active (proactive) | on_demand | paused
   inboxCopilotMode   String   @default("active")
+  /// Internal chat copilot: active (proactive) | on_demand | paused
+  chatCopilotMode    String   @default("active")
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 }

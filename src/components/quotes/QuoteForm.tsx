@@ -9,6 +9,7 @@ import {
   quoteFormInputSchema, estimateTotals, type QuoteFormInput, type DiscountMode,
 } from '@/modules/quotes/quotes-form-schema';
 import type { CustomerLookupRow, ProductLookupRow } from '@/modules/quotes/quotes-service';
+import type { SalespersonOption } from '@/modules/quotes/quotes-salespersons';
 import { formatCurrency } from '@/modules/quotes/quotes-helpers';
 import type { QuoteWriteResult } from '@/app/app/quotes/actions';
 
@@ -34,6 +35,8 @@ export interface QuoteFormProps {
   quoteId?: string;
   initialValues: QuoteFormInput;
   initialCustomer: CustomerLookupRow | null;
+  /** Salespersons from Zoho (merged with local history). */
+  salespersons: SalespersonOption[];
   /** Product tax percentages keyed by zohoItemId (for the totals preview). */
   initialLineTaxes?: Record<string, { taxName: string | null; taxPercent: number | null; sku: string | null }>;
   estimateNumber?: string | null;
@@ -93,7 +96,7 @@ function useDebouncedSearch<T>(url: string, enabled: boolean) {
   return { term, setTerm, results, loading };
 }
 
-export function QuoteForm({ mode, basePath, quoteId, initialValues, initialCustomer, initialLineTaxes, estimateNumber, isMockMode, submitAction }: QuoteFormProps) {
+export function QuoteForm({ mode, basePath, quoteId, initialValues, initialCustomer, salespersons, initialLineTaxes, estimateNumber, isMockMode, submitAction }: QuoteFormProps) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const requestKeyRef = useRef(initialValues.requestKey);
@@ -109,6 +112,15 @@ export function QuoteForm({ mode, basePath, quoteId, initialValues, initialCusto
   const [expiryDate, setExpiryDate] = useState(initialValues.expiryDate ?? '');
   const [referenceNumber, setReferenceNumber] = useState(initialValues.referenceNumber ?? '');
   const [salespersonName, setSalespersonName] = useState(initialValues.salespersonName ?? '');
+  const [salespersonId, setSalespersonId] = useState<string | null>(initialValues.salespersonId ?? null);
+  const salespersonOptions = useMemo(() => {
+    const list = [...salespersons];
+    const current = (initialValues.salespersonName ?? '').trim();
+    if (current && !list.some((s) => s.name.toLowerCase() === current.toLowerCase())) {
+      list.push({ id: initialValues.salespersonId ?? null, name: current, email: null, source: 'local' });
+    }
+    return list;
+  }, [salespersons, initialValues.salespersonName, initialValues.salespersonId]);
   const [notes, setNotes] = useState(initialValues.notes ?? '');
   const [terms, setTerms] = useState(initialValues.terms ?? '');
   const [discountMode, setDiscountMode] = useState<DiscountMode>(initialValues.discountMode ?? 'none');
@@ -159,6 +171,7 @@ export function QuoteForm({ mode, basePath, quoteId, initialValues, initialCusto
     expiryDate: expiryDate || null,
     referenceNumber: referenceNumber || null,
     salespersonName: salespersonName || null,
+    salespersonId: salespersonId || null,
     notes: notes || null,
     terms: terms || null,
     discountMode,
@@ -304,7 +317,22 @@ export function QuoteForm({ mode, basePath, quoteId, initialValues, initialCusto
             </label>
             <label className="form-field" style={{ marginBottom: 0 }}>
               <span className="form-label">Vendedor</span>
-              <input className="input" value={salespersonName} onChange={(e) => setSalespersonName(e.target.value)} maxLength={120} placeholder="Nombre tal como existe en Zoho" />
+              <select
+                className="input"
+                value={salespersonName}
+                onChange={(e) => {
+                  const name = e.target.value;
+                  const match = salespersonOptions.find((s) => s.name === name);
+                  setSalespersonName(name);
+                  setSalespersonId(match?.id ?? null);
+                }}
+              >
+                <option value="">Sin vendedor</option>
+                {salespersonOptions.map((s) => (
+                  <option key={`${s.id ?? 'local'}-${s.name}`} value={s.name}>{s.name}{s.source === 'local' ? ' (historial)' : ''}</option>
+                ))}
+              </select>
+              {salespersonOptions.length === 0 ? <span className="form-help">No hay vendedores disponibles. Se cargan desde Zoho Books al conectar las credenciales.</span> : null}
             </label>
           </div>
         </section>

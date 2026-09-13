@@ -138,6 +138,7 @@ async function buildZohoPayload(values: QuoteFormValues): Promise<ZohoEstimateWr
   };
   if (values.expiryDate) payload.expiry_date = values.expiryDate;
   if (values.referenceNumber) payload.reference_number = values.referenceNumber;
+  if (values.salespersonId) payload.salesperson_id = values.salespersonId;
   if (values.salespersonName) payload.salesperson_name = values.salespersonName;
   if (values.notes !== undefined && values.notes !== null) payload.notes = values.notes;
   if (values.terms !== undefined && values.terms !== null) payload.terms = values.terms;
@@ -272,7 +273,7 @@ async function mockEstimateResponse(
       shipping_charge: payload.shipping_charge ?? 0, adjustment: payload.adjustment ?? 0,
       adjustment_description: payload.adjustment_description ?? '',
       sub_total: round2(subTotal), tax_total: round2(taxTotal), discount_total: round2(discountTotal), total: round2(total),
-      salesperson_name: payload.salesperson_name ?? '', template_id: payload.template_id ?? '', template_name: 'Mock',
+      salesperson_id: payload.salesperson_id ?? '', salesperson_name: payload.salesperson_name ?? '', template_id: payload.template_id ?? '', template_name: 'Mock',
       billing_address: { address: customer?.billingAddress ?? '', city: customer?.billingCity ?? '', state: customer?.billingState ?? '', zip: customer?.billingZip ?? '', country: customer?.billingCountry ?? '' },
       shipping_address: {},
       notes: payload.notes ?? '', terms: payload.terms ?? '',
@@ -477,6 +478,7 @@ export function quoteToFormInput(quote: QuoteDetail, requestKey: string, options
     expiryDate: options.forClone ? null : (quote.expiryDate?.slice(0, 10) ?? null),
     referenceNumber: quote.referenceNumber,
     salespersonName: quote.salespersonName,
+    salespersonId: quote.salespersonId,
     notes: quote.notes,
     terms: quote.terms,
     discountMode: isEntityDiscount ? 'entity' : hasItemDiscount ? 'item' : 'none',

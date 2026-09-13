@@ -89,7 +89,8 @@ function toDefinition(row: CapabilityRow): ToolDefinition {
         const { callMcpTool } = await import('./mcp-client-service');
         return callMcpTool(extension, row, a, actor);
       }
-      if (extension.kind === 'api' || (extension.kind === 'plugin' && operation)) {
+      const isHttpOperation = Boolean((operation as { method?: string } | null)?.method);
+      if (extension.kind === 'api' || (extension.kind === 'plugin' && isHttpOperation)) {
         const { executeApiOperation } = await import('./api-runtime');
         if (!operation) throw new Error('La capacidad no tiene operación definida');
         return executeApiOperation({
@@ -100,7 +101,7 @@ function toDefinition(row: CapabilityRow): ToolDefinition {
           actor,
         });
       }
-      if (extension.kind === 'skill' || (extension.kind === 'plugin' && !operation)) {
+      if (extension.kind === 'skill' || (extension.kind === 'plugin' && !isHttpOperation)) {
         const { runSkillByKey } = await import('./skill-runner');
         const skillKey = (row.operation as { skillKey?: string } | null)?.skillKey ?? row.localName;
         return runSkillByKey(actor, skillKey, a);

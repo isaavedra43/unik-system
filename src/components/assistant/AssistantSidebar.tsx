@@ -4,6 +4,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { Plus, Search, Star, Trash2, Pencil, Puzzle, SlidersHorizontal } from 'lucide-react';
 import { AssistantPreferencesPanel } from '@/components/copilot/AssistantPreferencesPanel';
 import Link from 'next/link';
+import { useRouter, useSearchParams } from 'next/navigation';
 import {
   createConversationAction,
   deleteConversationAction,
@@ -35,6 +36,15 @@ export function AssistantSidebar({ userId: _userId, activeId, onSelect }: Assist
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState('');
   const [prefsOpen, setPrefsOpen] = useState(false);
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  // Deep link used by the copilot panels ("Configurar en Asistente IA").
+  useEffect(() => {
+    if (searchParams.get('settings') === '1') {
+      setPrefsOpen(true);
+      router.replace('/app/assistant', { scroll: false });
+    }
+  }, [searchParams, router]);
 
   const loadConversations = useCallback(async () => {
     try {

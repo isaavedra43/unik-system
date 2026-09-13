@@ -295,11 +295,18 @@ async function continueRun(
       }
       const args = resolveTemplates(step.args, data);
       state.toolCalls++;
+      // Skills respect the admin's enabled-tool list like every other surface
+      // (when the config cannot be read, enablement is simply not enforced).
+      const enabledToolNames = await import('@/modules/ai/ai-admin-config-service')
+        .then((m) => m.getAiSettings())
+        .then((settings) => settings.enabledTools)
+        .catch(() => undefined);
       const result: ToolExecutionResult = await executeTool(step.tool, actor, args, {
         conversationId,
         skillRunId: runId,
+        enabledToolNames,
         // A skill step can demand approval even for read tools.
-        ...(step.requireApproval ? { enabledToolNames: undefined } : {}),
+        forceApproval: step.requireApproval === true,
       });
       if (result.needsApproval && result.proposal) {
         state.steps[step.id] = { status: 'waiting', proposalId: result.proposal.id };

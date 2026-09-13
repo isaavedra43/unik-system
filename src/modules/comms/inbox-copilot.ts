@@ -1,11 +1,20 @@
-import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import type { CurrentUser } from '@/modules/auth/authorization';
 import { CommsError } from './comms-errors';
 import { getConversation, listInboxUsers, listNotes, transcriptFor } from './comms-service';
 import { buildTranscript } from './comms-ai';
 import { listCommitments } from './commitments-service';
-import { getPreferences, type InboxCopilotMode } from '@/modules/copilot/preferences-service';
+import { getCopilotMode, type InboxCopilotMode } from '@/modules/copilot/preferences-service';
+import {
+  AUTO_PREFIX,
+  COPILOT_KIND_BY_SURFACE,
+  autoTriggerMessage as autoTriggerMessageFor,
+  getOrCreateSurfaceConversation,
+  isAutoTurn,
+  relativeTime,
+  shouldRunAutoTurn,
+  type AutoTrigger,
+} from '@/modules/ai/copilot-surfaces';
 
 /**
  * Inbox copilot: a per-user AI thread attached to ONE inbox conversation.
@@ -15,59 +24,32 @@ import { getPreferences, type InboxCopilotMode } from '@/modules/copilot/prefere
  * AUTO_PREFIX; the UI renders them as system events instead of bubbles.
  */
 
-export const INBOX_COPILOT_KIND = 'inbox_copilot';
-export const AUTO_PREFIX = '⟦auto:';
-
-export type AutoTrigger = 'open' | 'inbound';
+export const INBOX_COPILOT_KIND = COPILOT_KIND_BY_SURFACE.inbox;
+export { AUTO_PREFIX, isAutoTurn };
+export type { AutoTrigger };
 
 export function autoTriggerMessage(trigger: AutoTrigger): string {
-  return trigger === 'open'
-    ? `${AUTO_PREFIX}open⟧ El operador acaba de abrir esta conversación. Analízala y sugiere acciones.`
-    : `${AUTO_PREFIX}inbound⟧ El cliente acaba de escribir. Analiza solo lo nuevo y actualiza las acciones sugeridas.`;
+  return autoTriggerMessageFor(trigger, 'inbox');
 }
 
-export function isAutoTurn(content: string | null | undefined): boolean {
-  return typeof content === 'string' && content.startsWith(AUTO_PREFIX);
-}
-
+/** AI thread for (user, inbox conversation). Same orchestrator, tools, approvals and memory as the assistant. */
 export async function getOrCreateCopilotConversation(
   actor: CurrentUser,
   inboxConversationId: string
 ): Promise<{ id: string; created: boolean }> {
   // Visibility check (throws 404 when the user cannot see the conversation).
   await getConversation(actor, inboxConversationId);
-  const existing = await prisma.aiConversation.findFirst({
-    where: {
-      userId: actor.id,
-      context: { path: ['commConversationId'], equals: inboxConversationId },
-    },
-    select: { id: true },
-  });
-  if (existing) return { id: existing.id, created: false };
-  const created = await prisma.aiConversation.create({
-    data: {
-      userId: actor.id,
-      title: 'Copiloto de bandeja',
-      context: {
-        kind: INBOX_COPILOT_KIND,
-        commConversationId: inboxConversationId,
-      } as Prisma.InputJsonValue,
-    },
-    select: { id: true },
-  });
-  return { id: created.id, created: true };
+  return getOrCreateSurfaceConversation(actor, { kind: 'inbox', id: inboxConversationId });
 }
 
+/** Proactivity for the inbox surface — configured in "Asistente IA → Preferencias y memoria". */
 export async function getInboxCopilotMode(userId: string): Promise<InboxCopilotMode> {
-  const prefs = await getPreferences(userId).catch(() => null);
-  return prefs?.inboxCopilotMode ?? 'active';
+  return getCopilotMode(userId, 'inbox');
 }
 
 /**
- * Decides whether an automatic analysis should run. It is skipped when the
- * copilot thread already has ANY turn after the customer's last message
- * (a reply, or an automatic turn that failed), so re-opening a conversation,
- * duplicate realtime events or a misconfigured provider never loop.
+ * Decides whether an automatic analysis should run (skipped when the copilot
+ * thread already has ANY turn after the customer's last message).
  */
 export async function shouldRunAutoAnalysis(
   aiConversationId: string,
@@ -84,22 +66,7 @@ export async function shouldRunAutoAnalysis(
     select: { createdAt: true },
   });
   const anchor = lastInbound?.createdAt ?? conversation.lastMessageAt ?? conversation.createdAt;
-  const turnSince = await prisma.aiMessage.findFirst({
-    where: { conversationId: aiConversationId, createdAt: { gt: anchor } },
-    select: { id: true },
-  });
-  return !turnSince;
-}
-
-function relativeTime(iso: string | Date | null): string {
-  if (!iso) return 'sin actividad';
-  const diff = Date.now() - new Date(iso).getTime();
-  const minutes = Math.round(diff / 60_000);
-  if (minutes < 1) return 'hace un momento';
-  if (minutes < 60) return `hace ${minutes} min`;
-  const hours = Math.round(minutes / 60);
-  if (hours < 24) return `hace ${hours} h`;
-  return `hace ${Math.round(hours / 24)} días`;
+  return shouldRunAutoTurn(aiConversationId, anchor);
 }
 
 const PROVIDER_NAMES: Record<string, string> = {
@@ -147,7 +114,7 @@ export async function buildInboxCopilotPrompt(
   const lines: string[] = [];
   lines.push('## MODO COPILOTO DE BANDEJA — contexto activo');
   lines.push(
-    `Estás trabajando codo a codo con ${actor.name} dentro de UNA conversación de la bandeja omnicanal de UNIK. Eres su colaborador en tiempo real: lees la conversación, entiendes qué necesita el cliente, propones cómo responder y ejecutas tareas del sistema cuando te lo piden. Modo elegido por el usuario: ${
+    `Estás trabajando codo a codo con ${actor.name} dentro de UNA conversación de la bandeja omnicanal de UNIK. Eres su colaborador en tiempo real: lees la conversación, entiendes qué necesita el cliente, propones cómo responder y ejecutas tareas del sistema cuando te lo piden. Proactividad elegida por el usuario: ${
       mode === 'active' ? 'ACTIVO (analizas por tu cuenta al abrir y cuando el cliente escribe)' : 'A PETICIÓN (solo actúas cuando el usuario te habla)'
     }.`
   );
@@ -212,5 +179,6 @@ export async function buildInboxCopilotPrompt(
     '6. Formato: esto es un panel lateral angosto. Párrafos cortos, listas breves, sin encabezados grandes ni tablas anchas. Máximo ~120 palabras salvo que el usuario pida detalle.'
   );
   lines.push('7. Nunca inventes mensajes del cliente, datos ni acuerdos. Si algo no está en la transcripción o en las tools, no existe.');
+  lines.push('8. Tienes el mismo contexto que en el Asistente IA (memoria personal, conversaciones recientes, biblioteca aprobada). Úsalo cuando ayude. El modo de proactividad se cambia en "Asistente IA → Preferencias y memoria".');
   return lines.join('\n');
 }

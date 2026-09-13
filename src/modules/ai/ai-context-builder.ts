@@ -1,5 +1,6 @@
 import type { CurrentUser } from '@/modules/auth/authorization';
 import { getAiSettings } from './ai-admin-config-service';
+import { buildRecentContextPrompt } from './ai-conversation-summary';
 import { getAllTools } from './tools/registry';
 import { buildPreferencesPrompt, getPreferences } from '@/modules/copilot/preferences-service';
 import { buildMemoryPrompt, getMemoryForPrompt } from '@/modules/copilot/memory-service';
@@ -47,9 +48,20 @@ function getAccessibleModules(actor: CurrentUser): string[] {
   return modules;
 }
 
+export interface SystemPromptContext {
+  page?: string;
+  voice?: boolean;
+  /** Current AI thread (excluded from the recent-context block). */
+  conversationId?: string;
+  /** Set when running as the inbox copilot. */
+  inboxConversationId?: string;
+  /** Set when running as the internal-chat copilot. */
+  chatChannelId?: string;
+}
+
 export async function buildSystemPrompt(
   actor: CurrentUser,
-  context?: { page?: string; voice?: boolean }
+  context?: SystemPromptContext
 ): Promise<string> {
   const settings = await getAiSettings();
   const tools = getAllTools();
@@ -69,6 +81,16 @@ export async function buildSystemPrompt(
     : 0;
   const personalization = preferences ? `\n\n${buildPreferencesPrompt(preferences)}` : '';
   const memoryBlock = memories.length > 0 || pendingMemories > 0 ? `\n\n${buildMemoryPrompt(memories, pendingMemories)}` : '';
+  // Shared context: what this user discussed with the assistant anywhere else (assistant, inbox, chat).
+  const recentContext = preferences?.memoryEnabled === false
+    ? ''
+    : await buildRecentContextPrompt(actor.id, context?.conversationId).catch(() => '');
+  const recentBlock = recentContext ? `\n\n${recentContext}` : '';
+  const surfaceBlock = context?.inboxConversationId || context?.chatChannelId
+    ? ''
+    : `\n\n## Superficies donde vives
+- Eres la MISMA IA en el Asistente IA, en el copiloto de la Bandeja externa y en el copiloto del Chat interno: mismo contexto, misma memoria, mismas tools y mismas reglas de aprobación.
+- Cuando el usuario mencione una conversación de bandeja o un canal del chat interno, puedes consultarlos con listInboxConversations/getConversationMessages y listChatChannels/getChatChannelMessages.`;
   const libraryBlock = `
 
 ## Biblioteca aprobada y fuentes empresariales
@@ -381,7 +403,7 @@ ${context?.voice ? `
 - Si necesitas un tool, úsalo en silencio y solo di el resultado
 ` : ''}`;
 
-  const personalized = `${base}${libraryBlock}${personalization}${memoryBlock}`;
+  const personalized = `${base}${libraryBlock}${surfaceBlock}${personalization}${memoryBlock}${recentBlock}`;
   if (settings.systemPromptOverride && settings.systemPromptOverride.trim().length > 0) {
     return `${personalized}\n\n## Instrucciones adicionales del administrador\n${settings.systemPromptOverride}`;
   }

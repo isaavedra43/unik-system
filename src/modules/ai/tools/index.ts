@@ -75,5 +75,14 @@ import './comms-tools';
 // Inbox copilot tools (acciones sugeridas, borradores, estado/notas de la conversación)
 import './inbox-copilot-tools';
 
+// Internal chat copilot tools (canales, mensajes, borradores, resumen, fijar)
+import './chat-copilot-tools';
+
+// Quotes (cotizaciones de Zoho Books: consultar, previsualizar, crear/editar con aprobación, PDF oficial)
+import './quotes-tools';
+
+// Skills (recetas del usuario ejecutables desde cualquier superficie)
+import './skills-tools';
+
 // Export the registry API for consumers
 export * from './registry';

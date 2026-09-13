@@ -87,6 +87,7 @@ export interface ZohoEstimateWriteInput {
   is_discount_before_tax?: boolean;
   discount_type?: 'entity_level' | 'item_level';
   is_inclusive_tax?: boolean;
+  salesperson_id?: string;
   salesperson_name?: string;
   notes?: string;
   terms?: string;
@@ -161,4 +162,9 @@ export async function getEstimatePdf(
 /** Lists PDF templates available for estimates (for the template picker). */
 export async function listEstimateTemplates(): Promise<unknown> {
   return zohoBooksGet('/estimates/templates');
+}
+
+/** Lists the salespersons configured in Zoho Books (shared with Inventory). */
+export async function listSalespersons(): Promise<unknown> {
+  return zohoBooksGet('/salespersons');
 }

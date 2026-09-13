@@ -48,11 +48,17 @@ async function assertMcpUrl(
   allowedHosts: string[],
   allowedPorts: number[]
 ): Promise<void> {
-  if (url.protocol !== 'https:') throw new McpError('El servidor MCP debe usar HTTPS', 'scheme');
+  // Development escape hatch: UNIK_MCP_ALLOW_INSECURE_LOCAL=true (never in production)
+  // lets admins test an MCP server on http://localhost / private addresses.
+  const allowInsecureLocal =
+    process.env.NODE_ENV !== 'production' && process.env.UNIK_MCP_ALLOW_INSECURE_LOCAL === 'true';
+  if (url.protocol !== 'https:' && !(allowInsecureLocal && url.protocol === 'http:'))
+    throw new McpError('El servidor MCP debe usar HTTPS', 'scheme');
   if (!isHostAllowed(url.hostname, allowedHosts))
     throw new McpError(`Dominio no aprobado: ${url.hostname}`, 'host');
-  const port = url.port ? Number(url.port) : 443;
+  const port = url.port ? Number(url.port) : url.protocol === 'http:' ? 80 : 443;
   if (!allowedPorts.includes(port)) throw new McpError(`Puerto no aprobado: ${port}`, 'port');
+  if (allowInsecureLocal) return;
   const addresses = net.isIP(url.hostname)
     ? [url.hostname]
     : (await dns.lookup(url.hostname, { all: true, verbatim: true })).map((r) => r.address);

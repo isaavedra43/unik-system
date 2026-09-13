@@ -22,6 +22,7 @@ import { processAttachment, resolveAttachmentsForMessage, type AttachmentResult 
 import { prisma } from '@/lib/prisma';
 import { buildReportSubtitle, buildSummaryCards } from './ai-report-helpers';
 import { ARTIFACT_TOOL_NAMES, collectRowArrays, findLastDataToolResult } from './ai-history-data';
+import { maybeSummarizeConversation } from './ai-conversation-summary';
 
 interface OrchestratorInput {
   conversationId: string;
@@ -32,6 +33,8 @@ interface OrchestratorInput {
     voice?: boolean;
     /** Set when the assistant runs as the inbox copilot of this conversation. */
     inboxConversationId?: string;
+    /** Set when the assistant runs as the internal-chat copilot of this channel. */
+    chatChannelId?: string;
   };
   /** Optional model override — user can pick a model in the chat UI. */
   model?: string;
@@ -51,12 +54,23 @@ interface OrchestratorEvent {
 const EXPORT_MAX_ROWS = 5000;
 const EXPORT_PAGE_SIZE = 200; // querySalesOrders' Zod max
 
+/** Tools that only make sense inside a copilot side panel (any surface). */
+const SURFACE_ONLY_TOOLS = new Set(['suggestNextActions']);
 /** Tools that only exist inside the inbox copilot (take `inboxConversationId`). */
 const INBOX_ONLY_TOOLS = new Set([
-  'suggestNextActions',
   'proposeInboxDraft',
   'updateInboxConversation',
   'addInboxNote',
+]);
+/** Tools that only exist inside the internal-chat copilot. */
+const CHAT_ONLY_TOOLS = new Set(['proposeChatDraft']);
+/** Chat tools whose `chatChannelId` defaults to the current channel. */
+const CHAT_CHANNEL_ID_TOOLS = new Set([
+  'getChatChannelMessages',
+  'summarizeChatChannel',
+  'proposeChatDraft',
+  'pinChatMessage',
+  'searchChatMessages',
 ]);
 /** Existing comms tools whose `conversationId` means the inbox conversation. */
 const INBOX_CONVERSATION_ID_TOOLS = new Set([
@@ -185,10 +199,14 @@ export async function* runAssistant(
 
   // 6. Build system prompt (+ the live inbox context when running as copilot)
   const inboxConversationId = input.context?.inboxConversationId;
-  let systemPrompt = await buildSystemPrompt(input.actor, input.context);
+  const chatChannelId = input.context?.chatChannelId;
+  let systemPrompt = await buildSystemPrompt(input.actor, { ...input.context, conversationId: input.conversationId });
   if (inboxConversationId) {
     const { buildInboxCopilotPrompt } = await import('@/modules/comms/inbox-copilot');
     systemPrompt += `\n\n${await buildInboxCopilotPrompt(input.actor, inboxConversationId)}`;
+  } else if (chatChannelId) {
+    const { buildChatCopilotPrompt } = await import('@/modules/chat/chat-copilot');
+    systemPrompt += `\n\n${await buildChatCopilotPrompt(input.actor, chatChannelId)}`;
   }
 
   // 7. Build messages
@@ -287,7 +305,10 @@ export async function* runAssistant(
     preferences?.mode === 'paused'
       ? loadedTools.filter((t) => !PAUSED_MODE_HIDDEN_EFFECTS.has(t.effect ?? 'read'))
       : loadedTools
-  ).filter((t) => inboxConversationId || !INBOX_ONLY_TOOLS.has(t.name));
+  )
+    .filter((t) => inboxConversationId || chatChannelId || !SURFACE_ONLY_TOOLS.has(t.name))
+    .filter((t) => inboxConversationId || !INBOX_ONLY_TOOLS.has(t.name))
+    .filter((t) => chatChannelId || !CHAT_ONLY_TOOLS.has(t.name));
   const toolSpecs: ToolSpec[] = toOpenAiTools(availableTools);
 
   // Resolve effective model: user override > default
@@ -588,6 +609,8 @@ export async function* runAssistant(
         totalCompletionTokens,
         0
       );
+      // Shared context: refresh this thread's rolling summary (never blocks the answer).
+      void maybeSummarizeConversation(input.conversationId, input.actor.id);
       yield {
         type: 'done',
         data: {
@@ -642,6 +665,15 @@ export async function* runAssistant(
           }
           if (INBOX_CONVERSATION_ID_TOOLS.has(tc.name) && !argsObj.conversationId) {
             argsObj.conversationId = inboxConversationId;
+          }
+        }
+        // Chat tools work on the current internal-chat channel by default.
+        if (chatChannelId) {
+          if (CHAT_CHANNEL_ID_TOOLS.has(tc.name) && !argsObj.chatChannelId) {
+            argsObj.chatChannelId = chatChannelId;
+          }
+          if (tc.name === 'sendInternalChatMessage' && !argsObj.channelId) {
+            argsObj.channelId = chatChannelId;
           }
         }
         if (!argsObj.conversationId) {

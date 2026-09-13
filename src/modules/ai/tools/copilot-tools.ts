@@ -14,7 +14,6 @@ registerTool({
     'Busca en la biblioteca APROBADA de UNIK (fichas, políticas, manuales). Devuelve fragmentos con fuente, versión y si son internos o publicables. Úsala antes de afirmar datos de productos, políticas o procesos. Si la respuesta va a un cliente, pide visibility="publishable".',
   category: 'knowledge',
   enabledByDefault: true,
-  requiredPermission: 'assistant.use',
   effect: 'read',
   parameters: z.object({
     query: z.string().min(2).max(300).describe('Términos de búsqueda'),
@@ -51,7 +50,6 @@ registerTool({
     'Propone guardar en la memoria personal del usuario un hecho o preferencia estable (o una corrección que te hizo). Queda PENDIENTE hasta que el usuario lo confirme en su panel de memoria.',
   category: 'knowledge',
   enabledByDefault: true,
-  requiredPermission: 'assistant.use',
   effect: 'internal_task',
   parameters: z.object({
     content: z
@@ -80,7 +78,6 @@ registerTool({
   description: 'Lista la memoria personal activa y pendiente del usuario actual.',
   category: 'knowledge',
   enabledByDefault: true,
-  requiredPermission: 'assistant.use',
   effect: 'read',
   parameters: z.object({}),
   execute: async (actor) => ({ memories: await listMemory(actor.id) }),
@@ -92,7 +89,6 @@ registerTool({
     'Elimina un recuerdo de la memoria personal del usuario (a petición explícita del usuario).',
   category: 'knowledge',
   enabledByDefault: true,
-  requiredPermission: 'assistant.use',
   effect: 'internal_task',
   parameters: z.object({ memoryId: z.string().min(1) }),
   execute: async (actor, rawArgs) => ({

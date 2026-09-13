@@ -3,6 +3,7 @@ import { requirePermission } from '@/modules/auth/authorization';
 import { QuoteForm } from '@/components/quotes/QuoteForm';
 import { isZohoBooksMockEnabled } from '@/modules/integrations/zoho/config';
 import { getCustomerForQuote } from '@/modules/quotes/quotes-service';
+import { getSalespersonsForQuote } from '@/modules/quotes/quotes-salespersons';
 import type { QuoteFormInput } from '@/modules/quotes/quotes-form-schema';
 import { createQuoteAction } from '../actions';
 
@@ -13,7 +14,10 @@ interface SearchParams { customer?: string }
 export default async function NewQuotePage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   await requirePermission('quotes.create');
   const params = await searchParams;
-  const preselected = params.customer ? await getCustomerForQuote(params.customer) : null;
+  const [preselected, salespersons] = await Promise.all([
+    params.customer ? getCustomerForQuote(params.customer) : Promise.resolve(null),
+    getSalespersonsForQuote(),
+  ]);
 
   const today = new Date().toISOString().slice(0, 10);
   const expiry = new Date(); expiry.setDate(expiry.getDate() + 15);
@@ -25,6 +29,7 @@ export default async function NewQuotePage({ searchParams }: { searchParams: Pro
     expiryDate: expiry.toISOString().slice(0, 10),
     referenceNumber: null,
     salespersonName: null,
+    salespersonId: null,
     notes: null,
     terms: null,
     discountMode: 'none',
@@ -45,6 +50,7 @@ export default async function NewQuotePage({ searchParams }: { searchParams: Pro
       basePath="/app/quotes"
       initialValues={initialValues}
       initialCustomer={preselected}
+      salespersons={salespersons}
       isMockMode={isZohoBooksMockEnabled()}
       submitAction={createQuoteAction}
     />

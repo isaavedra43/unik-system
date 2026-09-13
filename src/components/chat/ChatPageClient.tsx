@@ -13,6 +13,7 @@ import { ChatPersonalStats } from './ChatPersonalStats';
 import { ChatBroadcastDialog } from './ChatBroadcastDialog';
 import { ChatIncomingCallDialog } from './ChatIncomingCallDialog';
 import { ChatCallDialog } from './ChatCallDialog';
+import { ChatCopilotPanel } from './ChatCopilotPanel';
 import type { ChatInboxItem, ChatCallDTO } from '@/modules/chat/chat-events';
 
 export interface ChatPageClientProps {
@@ -30,6 +31,11 @@ export function ChatPageClient({ user }: ChatPageClientProps) {
   const [showCalendar, setShowCalendar] = useState(false);
   const [showStats, setShowStats] = useState(false);
   const [showBroadcast, setShowBroadcast] = useState(false);
+  // Copilot (same AI as the assistant and the inbox) beside the conversation.
+  const [aiOpen, setAiOpen] = useState(true);
+  const [mobileAi, setMobileAi] = useState(false);
+  const [insertRequest, setInsertRequest] = useState<{ text: string; nonce: number } | null>(null);
+  const [chatActivityAt, setChatActivityAt] = useState<string | null>(null);
 
   // Global incoming call state
   const [incomingCall, setIncomingCall] = useState<ChatCallDTO | null>(null);
@@ -154,6 +160,9 @@ export function ChatPageClient({ user }: ChatPageClientProps) {
   }, []);
 
   const handleSelectChannel = (id: string | null) => {
+    setChatActivityAt(null);
+    setInsertRequest(null);
+    setMobileAi(false);
     setActiveChannelId(id);
     if (id) {
       fetch(`/app/chat/api/channels/${id}/read`, { method: 'POST' }).catch(() => {});
@@ -240,7 +249,7 @@ export function ChatPageClient({ user }: ChatPageClientProps) {
         </div>
 
         {/* Main conversation area — always visible on desktop; on mobile, visible when conversation active */}
-        <div className={`chat-page-main ${activeChannelId ? 'chat-mobile-show' : 'chat-mobile-hidden'}`}>
+        <div className={`chat-page-main ${activeChannelId && !mobileAi ? 'chat-mobile-show' : 'chat-mobile-hidden'}`}>
           {activeChannelId ? (
             <ChatConversation
               channelId={activeChannelId}
@@ -248,11 +257,48 @@ export function ChatPageClient({ user }: ChatPageClientProps) {
               onRefresh={handleRefresh}
               onBack={handleBack}
               onIncomingCall={handleSseIncomingCall}
+              aiOpen={aiOpen}
+              onToggleAi={() => {
+                setAiOpen((v) => !v);
+                setMobileAi((v) => !v);
+              }}
+              insertRequest={insertRequest}
+              onForeignMessage={setChatActivityAt}
             />
           ) : (
             <ChatEmptyState />
           )}
         </div>
+
+        {/* Copilot aside — the same AI as the assistant, next to the channel */}
+        {activeChannelId && aiOpen && (
+          <aside
+            className={`chat-copilot-aside ${mobileAi ? 'chat-mobile-show' : 'chat-mobile-hidden'}`}
+            style={{
+              width: 'clamp(340px, 26vw, 400px)',
+              flexShrink: 0,
+              display: 'flex',
+              flexDirection: 'column',
+              minHeight: 0,
+              borderLeft: '1px solid var(--unik-border)',
+              background: 'var(--unik-surface)',
+              overflow: 'hidden',
+            }}
+          >
+            <ChatCopilotPanel
+              key={activeChannelId}
+              channelId={activeChannelId}
+              user={{ id: user.id, name: user.name }}
+              activityAt={chatActivityAt}
+              onInsertDraft={(text) => {
+                setInsertRequest({ text, nonce: Date.now() });
+                setMobileAi(false);
+              }}
+              onAfterTurn={handleRefresh}
+              onBack={() => setMobileAi(false)}
+            />
+          </aside>
+        )}
       </div>
 
       {/* Search dialog */}
