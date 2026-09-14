@@ -255,9 +255,21 @@ export async function zohoBooksGetBinary(
   path: string,
   query?: Record<string, string>
 ): Promise<{ bytes: Uint8Array; contentType: string }> {
+  return zohoGetBinary('books', path, query);
+}
+
+/**
+ * Downloads a binary document (PDF) from any Zoho product. Zoho returns the
+ * bytes directly when `accept=pdf` is passed; errors still arrive as JSON.
+ */
+export async function zohoGetBinary(
+  product: ZohoProduct,
+  path: string,
+  query?: Record<string, string>
+): Promise<{ bytes: Uint8Array; contentType: string }> {
   const accessToken = await getZohoAccessToken();
-  const url = buildUrl('books', path, { accept: 'pdf', ...(query ?? {}) });
-  const logPath = `[books]${path}`;
+  const url = buildUrl(product, path, { accept: 'pdf', ...(query ?? {}) });
+  const logPath = product === 'books' ? `[books]${path}` : path;
   const startedAt = Date.now();
 
   let response: Response;

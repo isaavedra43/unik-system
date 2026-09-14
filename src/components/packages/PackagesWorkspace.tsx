@@ -11,6 +11,7 @@ import { type PackagesListResult, type PackageListRow } from '@/modules/packages
 import {
   formatCurrency,
   formatDateOnly,
+  formatNumber,
   getPackageStatusConfig,
   getPackageStatusLabel,
   getPackageStatusOptions,
@@ -109,6 +110,13 @@ function renderCell(row: PackageListRow, column: EntityColumnDefinition): React.
   }
   if (column.formatter === 'date') {
     return formatDateOnly(value as string | Date | null);
+  }
+  if (column.id === 'quantity') {
+    return (
+      <span style={{ fontVariantNumeric: 'tabular-nums', textAlign: 'right', display: 'block' }}>
+        {value === null || value === undefined ? '—' : formatNumber(value as string)}
+      </span>
+    );
   }
   if (column.formatter === 'statusDot') {
     return (

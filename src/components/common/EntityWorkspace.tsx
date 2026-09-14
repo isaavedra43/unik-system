@@ -136,12 +136,8 @@ function normalizeTablePreference(
   columns: EntityColumnDefinition[],
   defaultColumnOrder: string[]
 ): TablePreferenceConfig {
-  const defaultVisibility = Object.fromEntries(
-    columns.map((c) => [c.id, c.defaultVisible])
-  );
-  const defaultWidths = Object.fromEntries(
-    columns.map((c) => [c.id, c.defaultWidth])
-  );
+  const defaultVisibility = Object.fromEntries(columns.map((c) => [c.id, c.defaultVisible]));
+  const defaultWidths = Object.fromEntries(columns.map((c) => [c.id, c.defaultWidth]));
   const savedOrder = p.columnOrder.length > 0 ? p.columnOrder : defaultColumnOrder;
   const missing = defaultColumnOrder.filter((id) => !savedOrder.includes(id));
   return {
@@ -490,24 +486,31 @@ export function EntityWorkspace<TRow extends { id: string }>({
     [router, basePath, extraUrlParams]
   );
 
-  const fetchData = useCallback(async (q: EntityQueryState) => {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await fetch(`${basePath}/api`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(q),
-      });
-      if (!res.ok) throw new Error(`No pudimos cargar los ${entityLabelPlural.toLowerCase()}.`);
-      const json = await res.json();
-      setData(json);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : `No pudimos cargar los ${entityLabelPlural.toLowerCase()}.`);
-    } finally {
-      setLoading(false);
-    }
-  }, [basePath, entityLabelPlural]);
+  const fetchData = useCallback(
+    async (q: EntityQueryState) => {
+      setLoading(true);
+      setError(null);
+      try {
+        const res = await fetch(`${basePath}/api`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(q),
+        });
+        if (!res.ok) throw new Error(`No pudimos cargar los ${entityLabelPlural.toLowerCase()}.`);
+        const json = await res.json();
+        setData(json);
+      } catch (err) {
+        setError(
+          err instanceof Error
+            ? err.message
+            : `No pudimos cargar los ${entityLabelPlural.toLowerCase()}.`
+        );
+      } finally {
+        setLoading(false);
+      }
+    },
+    [basePath, entityLabelPlural]
+  );
 
   const handleSearchChange = useCallback(
     (value: string) => {
@@ -522,15 +525,18 @@ export function EntityWorkspace<TRow extends { id: string }>({
     [fetchData, updateUrl]
   );
 
-  const savePreference = useCallback((newPref: TablePreferenceConfig) => {
-    setPref(newPref);
-    if (prefTimerRef.current) clearTimeout(prefTimerRef.current);
-    prefTimerRef.current = setTimeout(() => {
-      savePreferenceAction(newPref).catch(() => {
-        toast.error('No se pudo guardar la preferencia');
-      });
-    }, 800);
-  }, [savePreferenceAction]);
+  const savePreference = useCallback(
+    (newPref: TablePreferenceConfig) => {
+      setPref(newPref);
+      if (prefTimerRef.current) clearTimeout(prefTimerRef.current);
+      prefTimerRef.current = setTimeout(() => {
+        savePreferenceAction(newPref).catch(() => {
+          toast.error('No se pudo guardar la preferencia');
+        });
+      }, 800);
+    },
+    [savePreferenceAction]
+  );
 
   const handleSort = useCallback(
     (columnId: string, shiftKey: boolean) => {
@@ -562,8 +568,7 @@ export function EntityWorkspace<TRow extends { id: string }>({
   );
 
   const visibleColumns = useMemo(() => {
-    const order =
-      pref.columnOrder.length > 0 ? pref.columnOrder : columns.map((c) => c.id);
+    const order = pref.columnOrder.length > 0 ? pref.columnOrder : columns.map((c) => c.id);
     return order
       .filter((id) => pref.columnVisibility[id] !== false && columnMap[id])
       .map((id) => columnMap[id])
@@ -598,8 +603,7 @@ export function EntityWorkspace<TRow extends { id: string }>({
       const { active, over } = event;
       if (!over || active.id === over.id) return;
       setPref((prev) => {
-        const order =
-          prev.columnOrder.length > 0 ? prev.columnOrder : columns.map((c) => c.id);
+        const order = prev.columnOrder.length > 0 ? prev.columnOrder : columns.map((c) => c.id);
         const oldIndex = order.indexOf(active.id as string);
         const newIndex = order.indexOf(over.id as string);
         if (oldIndex === -1 || newIndex === -1) return prev;
@@ -667,8 +671,7 @@ export function EntityWorkspace<TRow extends { id: string }>({
   const handleMoveColumn = useCallback(
     (columnId: string, direction: 'left' | 'right') => {
       setPref((prev) => {
-        const order =
-          prev.columnOrder.length > 0 ? prev.columnOrder : columns.map((c) => c.id);
+        const order = prev.columnOrder.length > 0 ? prev.columnOrder : columns.map((c) => c.id);
         const idx = order.indexOf(columnId);
         if (idx === -1) return prev;
         const newIdx = direction === 'left' ? idx - 1 : idx + 1;
@@ -751,23 +754,23 @@ export function EntityWorkspace<TRow extends { id: string }>({
 
   const clearSelection = useCallback(() => setSelectedIds(new Set()), []);
 
-  const addFilter = useCallback((columnId?: string) => {
-    setFilterPanelOpen(true);
-    const column = columnId
-      ? columnMap[columnId]
-      : columns.find((c) => c.filterable && c.type === 'text');
-    if (!column || !column.filterable) return;
-    const operators = FILTER_OPERATORS_BY_TYPE[column.type] ?? ['contains'];
-    const operator = operators[0] as string;
-    setQuery((prev) => {
-      const newRules = [
-        ...prev.filters.rules,
-        { field: column.field, operator, value: '' },
-      ];
-      const next = { ...prev, filters: { ...prev.filters, rules: newRules }, page: 1 };
-      return next;
-    });
-  }, [columnMap, columns]);
+  const addFilter = useCallback(
+    (columnId?: string) => {
+      setFilterPanelOpen(true);
+      const column = columnId
+        ? columnMap[columnId]
+        : columns.find((c) => c.filterable && c.type === 'text');
+      if (!column || !column.filterable) return;
+      const operators = FILTER_OPERATORS_BY_TYPE[column.type] ?? ['contains'];
+      const operator = operators[0] as string;
+      setQuery((prev) => {
+        const newRules = [...prev.filters.rules, { field: column.field, operator, value: '' }];
+        const next = { ...prev, filters: { ...prev.filters, rules: newRules }, page: 1 };
+        return next;
+      });
+    },
+    [columnMap, columns]
+  );
 
   const removeFilter = useCallback(
     (index: number) => {
@@ -828,10 +831,7 @@ export function EntityWorkspace<TRow extends { id: string }>({
       if (!canWatch) return;
       const formData = new FormData();
       formData.set('entityId', entityId);
-      const result = await watchAction(
-        { error: null, success: false, isWatched: false },
-        formData
-      );
+      const result = await watchAction({ error: null, success: false, isWatched: false }, formData);
       if (result.success) {
         setWatchedIds((prev) => new Set(prev).add(entityId));
         toast.success(`${entityLabel} seguido`);
@@ -1063,11 +1063,21 @@ export function EntityWorkspace<TRow extends { id: string }>({
       } else if (res.status === 409) {
         toast.info('Ya hay una sincronización en curso');
       } else {
-        toast.error('No pudimos iniciar la sincronización');
+        const detail = typeof json?.error === 'string' ? json.error : null;
+        toast.error(
+          detail ? `No pudimos sincronizar: ${detail}` : 'No pudimos iniciar la sincronización',
+          {
+            description:
+              typeof json?.error_code === 'string' ? `Código ${json.error_code}` : undefined,
+            duration: 8000,
+          }
+        );
       }
       await fetchSyncStatus();
     } catch {
-      toast.error('No pudimos iniciar la sincronización');
+      toast.error('No pudimos iniciar la sincronización', {
+        description: 'El servidor no respondió. Revisa tu conexión e inténtalo de nuevo.',
+      });
     } finally {
       setSyncTriggering(false);
     }
@@ -1096,7 +1106,8 @@ export function EntityWorkspace<TRow extends { id: string }>({
   const hasFilters = query.filters.rules.length > 0;
   const activeFilterCount = query.filters.rules.length;
 
-  const defaultSearchPlaceholder = searchPlaceholder ?? `Buscar ${entityLabelPlural.toLowerCase()}...`;
+  const defaultSearchPlaceholder =
+    searchPlaceholder ?? `Buscar ${entityLabelPlural.toLowerCase()}...`;
 
   return (
     <div className={`so-workspace ${fullscreen ? 'so-workspace-fullscreen' : ''} ${densityClass}`}>
@@ -1211,16 +1222,18 @@ export function EntityWorkspace<TRow extends { id: string }>({
               {columnManagerOpen ? (
                 <div className="so-view-dropdown" style={{ right: 0, left: 'auto', minWidth: 260 }}>
                   <div className="so-column-manager">
-                    {columns.sort((a, b) => a.priority - b.priority).map((col) => (
-                      <label key={col.id} className="so-column-manager-item">
-                        <input
-                          type="checkbox"
-                          checked={pref.columnVisibility[col.id] !== false}
-                          onChange={() => handleToggleColumn(col.id)}
-                        />
-                        <span>{col.label}</span>
-                      </label>
-                    ))}
+                    {columns
+                      .sort((a, b) => a.priority - b.priority)
+                      .map((col) => (
+                        <label key={col.id} className="so-column-manager-item">
+                          <input
+                            type="checkbox"
+                            checked={pref.columnVisibility[col.id] !== false}
+                            onChange={() => handleToggleColumn(col.id)}
+                          />
+                          <span>{col.label}</span>
+                        </label>
+                      ))}
                   </div>
                   <div style={{ borderTop: '1px solid var(--unik-border)', margin: '4px 0' }} />
                   <button className="so-view-dropdown-item" onClick={handleResetColumns}>
@@ -1328,7 +1341,8 @@ export function EntityWorkspace<TRow extends { id: string }>({
               const col = columns.find((c) => c.field === rule.field);
               if (!col) return null;
               const displayValue = (() => {
-                if (!('value' in rule) || rule.value === undefined || rule.value === null) return '';
+                if (!('value' in rule) || rule.value === undefined || rule.value === null)
+                  return '';
                 if (col.type === 'boolean') return rule.value === true ? 'Sí' : 'No';
                 if (col.type === 'status' && getStatusLabel) {
                   return getStatusLabel(String(rule.value));
@@ -1375,11 +1389,13 @@ export function EntityWorkspace<TRow extends { id: string }>({
                       });
                     }}
                   >
-                    {columns.filter((c) => c.filterable).map((c) => (
-                      <option key={c.id} value={c.field}>
-                        {c.label}
-                      </option>
-                    ))}
+                    {columns
+                      .filter((c) => c.filterable)
+                      .map((c) => (
+                        <option key={c.id} value={c.field}>
+                          {c.label}
+                        </option>
+                      ))}
                   </select>
                   <select
                     value={rule.operator}
@@ -1407,9 +1423,7 @@ export function EntityWorkspace<TRow extends { id: string }>({
                         </select>
                       ) : col?.type === 'boolean' ? (
                         <select
-                          value={
-                            rule.value === true ? 'true' : rule.value === false ? 'false' : ''
-                          }
+                          value={rule.value === true ? 'true' : rule.value === false ? 'false' : ''}
                           onChange={(e) => {
                             const boolValue =
                               e.target.value === 'true'
@@ -1439,12 +1453,12 @@ export function EntityWorkspace<TRow extends { id: string }>({
                         />
                       )}
                       {rule.operator === 'between' &&
-                      (col?.type === 'number' || col?.type === 'currency' || col?.type === 'date') ? (
+                      (col?.type === 'number' ||
+                        col?.type === 'currency' ||
+                        col?.type === 'date') ? (
                         <input
                           type={
-                            col?.type === 'number' || col?.type === 'currency'
-                              ? 'number'
-                              : 'date'
+                            col?.type === 'number' || col?.type === 'currency' ? 'number' : 'date'
                           }
                           value={'valueTo' in rule ? String(rule.valueTo ?? '') : ''}
                           onChange={(e) => updateFilter(i, { valueTo: e.target.value })}
@@ -1704,7 +1718,11 @@ export function EntityWorkspace<TRow extends { id: string }>({
                               onClick={() =>
                                 isWatched ? handleUnwatch(item.id) : handleWatch(item.id)
                               }
-                              aria-label={isWatched ? 'Dejar de seguir' : `Seguir ${entityLabel.toLowerCase()}`}
+                              aria-label={
+                                isWatched
+                                  ? 'Dejar de seguir'
+                                  : `Seguir ${entityLabel.toLowerCase()}`
+                              }
                             >
                               {isWatched ? (
                                 <BellRing size={14} className="so-watch-indicator" />

@@ -1,7 +1,16 @@
 'use client';
 
 import Link from 'next/link';
-import { ArrowLeft, Bell, BellRing, User, ShoppingCart, FileText, MapPin, Package } from 'lucide-react';
+import {
+  ArrowLeft,
+  Bell,
+  BellRing,
+  FileText,
+  MapPin,
+  ShoppingCart,
+  Truck,
+  User,
+} from 'lucide-react';
 import { toast } from 'sonner';
 import { useState } from 'react';
 import type { PackageDetail } from '@/modules/packages/packages-contract';
@@ -10,9 +19,18 @@ import {
   formatDateOnly,
   formatDateTime,
   formatNumber,
-  getPackageStatusConfig,
 } from '@/modules/packages/packages-helpers';
+import { getSalesOrderStatusConfig } from '@/modules/sales/sales-orders-helpers';
 import type { RelatedContactSummary } from '@/modules/cross-module/relationships-service';
+import {
+  PackageAddress,
+  PackageItemsTable,
+  PackagePdfActions,
+  PackageShipmentFacts,
+  PackageStatusBadge,
+  PackageSteps,
+  RelatedLink,
+} from './package-view';
 
 interface RelatedSalesOrderSummary {
   id: string;
@@ -29,6 +47,11 @@ interface RelatedInvoiceSummary {
   date: string | null;
 }
 
+type WatchAction = (
+  prevState: { error: string | null; success: boolean; isWatched: boolean },
+  formData: FormData
+) => Promise<{ error: string | null; success: boolean; isWatched: boolean }>;
+
 interface PackageDetailPageProps {
   pkg: PackageDetail;
   entityLabel: string;
@@ -36,14 +59,8 @@ interface PackageDetailPageProps {
   basePath: string;
   isWatched: boolean;
   canWatch: boolean;
-  watchAction: (
-    prevState: { error: string | null; success: boolean; isWatched: boolean },
-    formData: FormData
-  ) => Promise<{ error: string | null; success: boolean; isWatched: boolean }>;
-  unwatchAction: (
-    prevState: { error: string | null; success: boolean; isWatched: boolean },
-    formData: FormData
-  ) => Promise<{ error: string | null; success: boolean; isWatched: boolean }>;
+  watchAction: WatchAction;
+  unwatchAction: WatchAction;
   relatedContact?: RelatedContactSummary | null;
   relatedSalesOrder?: RelatedSalesOrderSummary | null;
   relatedInvoices?: RelatedInvoiceSummary[];
@@ -63,223 +80,213 @@ export function PackageDetailPage({
   relatedInvoices,
 }: PackageDetailPageProps) {
   const [watched, setWatched] = useState(initialWatched);
+  const [watchBusy, setWatchBusy] = useState(false);
 
   const handleWatch = async () => {
-    if (!canWatch) return;
+    if (!canWatch || watchBusy) return;
+    setWatchBusy(true);
     const formData = new FormData();
     formData.set('entityId', pkg.id);
     const result = watched
       ? await unwatchAction({ error: null, success: false, isWatched: true }, formData)
       : await watchAction({ error: null, success: false, isWatched: false }, formData);
+    setWatchBusy(false);
     if (result.success) {
       setWatched(!watched);
-      toast.success(watched ? `Dejaste de seguir el ${entityLabel.toLowerCase()}` : `${entityLabel} seguido`);
+      toast.success(
+        watched ? `Dejaste de seguir el ${entityLabel.toLowerCase()}` : `${entityLabel} seguido`
+      );
     } else {
       toast.error(result.error ?? 'Error');
     }
   };
 
-  const statusConfig = getPackageStatusConfig(pkg.status);
-  const hasShippingAddress = Boolean(
-    pkg.shippingAddress || pkg.shippingCity || pkg.shippingState || pkg.shippingCountry || pkg.shippingAttention
-  );
+  const salesOrderNumber = relatedSalesOrder?.salesOrderNumber ?? pkg.salesorderNumber;
+  const totalQty =
+    pkg.quantity ??
+    (pkg.items.length ? String(pkg.items.reduce((s, i) => s + Number(i.quantity ?? 0), 0)) : null);
+  const customerHref = relatedContact?.id ? `/app/contacts/customers/${relatedContact.id}` : null;
 
   return (
-    <div className="app-content">
-      <div className="mx-auto max-w-4xl space-y-6 p-4 sm:p-6 lg:p-8">
-        <div className="flex items-center justify-between gap-4">
-          <Link href={basePath} className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors">
-            <ArrowLeft className="h-4 w-4" />
-            Volver a {entityLabelPlural.toLowerCase()}
-          </Link>
-          {canWatch && (
-            <button onClick={handleWatch} className="inline-flex items-center gap-2 rounded-md border border-input bg-background px-3 py-1.5 text-sm font-medium hover:bg-accent transition-colors">
-              {watched ? <><BellRing className="h-4 w-4 text-primary" />Siguiendo</> : <><Bell className="h-4 w-4" />Seguir</>}
+    <div className="app-content pkg-page">
+      <div className="pkg-topbar">
+        <Link href={basePath} className="pkg-back">
+          <ArrowLeft size={14} aria-hidden="true" />
+          Volver a {entityLabelPlural.toLowerCase()}
+        </Link>
+        <div className="pkg-topbar-actions">
+          {canWatch ? (
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={handleWatch}
+              aria-pressed={watched}
+              disabled={watchBusy}
+            >
+              {watched ? (
+                <BellRing size={14} aria-hidden="true" />
+              ) : (
+                <Bell size={14} aria-hidden="true" />
+              )}
+              {watched ? 'Siguiendo' : 'Seguir'}
             </button>
-          )}
-        </div>
-
-        {/* Header */}
-        <div className="rounded-lg border bg-card p-6 space-y-4">
-          <div className="flex items-start justify-between gap-4">
-            <div className="space-y-1">
-              <h1 className="text-2xl font-bold tracking-tight">{pkg.packageNumber ?? '—'}</h1>
-              {pkg.trackingNumber && <p className="text-sm text-muted-foreground">Guía: {pkg.trackingNumber}</p>}
-              {pkg.salesorderNumber && <p className="text-sm text-muted-foreground">Folio OV: {pkg.salesorderNumber}</p>}
-            </div>
-            <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium ${
-              statusConfig.tone === 'success' ? 'bg-success/10 text-success'
-              : statusConfig.tone === 'danger' ? 'bg-destructive/10 text-destructive'
-              : statusConfig.tone === 'warning' ? 'bg-warning/10 text-warning'
-              : statusConfig.tone === 'info' ? 'bg-info/10 text-info'
-              : 'bg-muted text-muted-foreground'
-            }`}>
-              <span className={`h-1.5 w-1.5 rounded-full ${
-                statusConfig.tone === 'success' ? 'bg-success'
-                : statusConfig.tone === 'danger' ? 'bg-destructive'
-                : statusConfig.tone === 'warning' ? 'bg-warning'
-                : statusConfig.tone === 'info' ? 'bg-info'
-                : 'bg-muted-foreground'
-              }`} />
-              {statusConfig.label}
-            </span>
-          </div>
-        </div>
-
-        {/* General info */}
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          <DetailCard label="Fecha" value={pkg.date ? formatDateOnly(pkg.date) : '—'} />
-          <DetailCard label="Cliente" value={pkg.customerName ?? '—'} />
-          <DetailCard label="Paquetería" value={pkg.carrier ?? '—'} />
-          <DetailCard label="Tipo de envío" value={pkg.shipmentType ?? '—'} />
-          <DetailCard label="Método de entrega" value={pkg.deliveryMethod ?? '—'} />
-          <DetailCard label="Costo de envío" value={formatCurrency(pkg.shippingCharge)} />
-          {pkg.shipmentDate && <DetailCard label="Fecha de envío" value={formatDateOnly(pkg.shipmentDate)} />}
-          {pkg.shipmentStatus && <DetailCard label="Estado de envío" value={pkg.shipmentStatus} />}
-          {pkg.salesChannel && <DetailCard label="Canal de venta" value={pkg.salesChannel} />}
-          {pkg.quantity && <DetailCard label="Cantidad total" value={pkg.quantity} />}
-        </div>
-
-        {/* Customer info */}
-        {relatedContact && (
-          <div className="rounded-lg border bg-card p-6 space-y-3">
-            <h2 className="text-lg font-semibold flex items-center gap-2"><User className="h-4 w-4" /> Cliente</h2>
-            <Link
-              href={relatedContact.contactType === 'vendor' ? `/app/contacts/vendors/${relatedContact.id}` : `/app/contacts/customers/${relatedContact.id}`}
-              className="inline-flex items-center justify-between w-full rounded-md border border-input bg-background px-4 py-2.5 text-sm hover:bg-accent transition-colors"
-            >
-              <span className="font-medium">{relatedContact.contactName ?? relatedContact.companyName ?? '—'}</span>
-              <span className="text-muted-foreground text-xs">{relatedContact.contactType ?? '—'}</span>
-            </Link>
-            {pkg.shippingPhone && (
-              <p className="text-sm text-muted-foreground">Teléfono: {pkg.shippingPhone}</p>
-            )}
-          </div>
-        )}
-
-        {/* Shipping address */}
-        {hasShippingAddress ? (
-          <div className="rounded-lg border bg-card p-6 space-y-3">
-            <h2 className="text-lg font-semibold flex items-center gap-2"><MapPin className="h-4 w-4" /> Dirección de envío</h2>
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {pkg.shippingAttention && <DetailCard label="Contacto para recepción" value={pkg.shippingAttention} />}
-              <DetailCard label="Calle" value={pkg.shippingAddress ?? '—'} />
-              <DetailCard label="Ciudad" value={pkg.shippingCity ?? '—'} />
-              <DetailCard label="Estado" value={pkg.shippingState ?? '—'} />
-              <DetailCard label="C.P." value={pkg.shippingZip ?? '—'} />
-              <DetailCard label="País" value={pkg.shippingCountry ?? '—'} />
-              {pkg.shippingPhone && <DetailCard label="Teléfono" value={pkg.shippingPhone} />}
-            </div>
-          </div>
-        ) : (
-          <div className="rounded-lg border bg-card p-6 space-y-3">
-            <h2 className="text-lg font-semibold flex items-center gap-2"><MapPin className="h-4 w-4" /> Dirección de envío</h2>
-            <p className="text-sm text-muted-foreground">
-              No hay dirección de envío disponible. Ejecuta la sincronización para obtener los detalles completos del paquete.
-            </p>
-          </div>
-        )}
-
-        {/* Package items / materials */}
-        {pkg.items.length > 0 ? (
-          <div className="rounded-lg border bg-card p-6 space-y-3">
-            <h2 className="text-lg font-semibold flex items-center gap-2"><Package className="h-4 w-4" /> Contenido del paquete ({pkg.items.length})</h2>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="border-b bg-muted/50">
-                  <tr>
-                    <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide">#</th>
-                    <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide">Artículo & Descripción</th>
-                    <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide">Código</th>
-                    <th className="px-3 py-2 text-right text-xs font-medium uppercase tracking-wide">Cantidad</th>
-                    <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide">Unidad</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {pkg.items.map((item, index) => (
-                    <tr key={item.id} className="border-b last:border-0">
-                      <td className="px-3 py-2 text-muted-foreground">{index + 1}</td>
-                      <td className="px-3 py-2">
-                        <div className="font-medium">{item.name ?? '—'}</div>
-                        {item.description && (
-                          <div className="text-xs text-muted-foreground mt-0.5">{item.description}</div>
-                        )}
-                      </td>
-                      <td className="px-3 py-2 text-muted-foreground">{item.sku ?? '—'}</td>
-                      <td className="px-3 py-2 text-right font-medium">{formatNumber(item.quantity)}</td>
-                      <td className="px-3 py-2 text-muted-foreground">{item.unit ?? '—'}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        ) : (
-          <div className="rounded-lg border bg-card p-6 space-y-3">
-            <h2 className="text-lg font-semibold flex items-center gap-2"><Package className="h-4 w-4" /> Contenido del paquete</h2>
-            <p className="text-sm text-muted-foreground">
-              No hay items disponibles. Ejecuta la sincronización para obtener los detalles completos del paquete desde Zoho.
-            </p>
-          </div>
-        )}
-
-        {/* Related sales order */}
-        {relatedSalesOrder && (
-          <div className="rounded-lg border bg-card p-6 space-y-3">
-            <h2 className="text-lg font-semibold flex items-center gap-2"><ShoppingCart className="h-4 w-4" /> Orden de venta relacionada</h2>
-            <Link
-              href={`/app/sales/orders/${relatedSalesOrder.id}`}
-              className="inline-flex items-center justify-between w-full rounded-md border border-input bg-background px-4 py-2.5 text-sm hover:bg-accent transition-colors"
-            >
-              <span className="font-medium">{relatedSalesOrder.salesOrderNumber ?? '—'}</span>
-              <span className="text-muted-foreground text-xs">
-                {relatedSalesOrder.status ?? '—'} · {relatedSalesOrder.total ? formatCurrency(relatedSalesOrder.total, null) : '—'}
-              </span>
-            </Link>
-          </div>
-        )}
-
-        {/* Related invoices */}
-        {relatedInvoices && relatedInvoices.length > 0 && (
-          <div className="rounded-lg border bg-card p-6 space-y-3">
-            <h2 className="text-lg font-semibold flex items-center gap-2"><FileText className="h-4 w-4" /> Facturas relacionadas ({relatedInvoices.length})</h2>
-            <div className="flex flex-col gap-2">
-              {relatedInvoices.map((inv) => (
-                <Link
-                  key={inv.id}
-                  href={`/app/invoices/${inv.id}`}
-                  className="inline-flex items-center justify-between w-full rounded-md border border-input bg-background px-4 py-2.5 text-sm hover:bg-accent transition-colors"
-                >
-                  <span className="font-medium">{inv.invoiceNumber ?? '—'}</span>
-                  <span className="text-muted-foreground text-xs">
-                    {inv.status ?? '—'} · {inv.total ? formatCurrency(inv.total, null) : '—'}
-                  </span>
-                </Link>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Sync info */}
-        <div className="rounded-lg border bg-card p-6 space-y-3">
-          <h2 className="text-lg font-semibold">Sincronización</h2>
-          <div className="grid gap-4 sm:grid-cols-2">
-            <DetailCard label="Última modificación remota" value={formatDateTime(pkg.sourceRemoteModifiedAt)} />
-            <DetailCard label="Última normalización" value={formatDateTime(pkg.normalizedAt)} />
-            <DetailCard label="ID Zoho" value={pkg.zohoPackageId} />
-            <DetailCard label="ID Snapshot" value={pkg.sourceSnapshotId} />
-          </div>
+          ) : null}
+          <PackagePdfActions pkgId={pkg.id} basePath={basePath} />
         </div>
       </div>
-    </div>
-  );
-}
 
-function DetailCard({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-lg border bg-card p-4 space-y-1">
-      <p className="text-xs text-muted-foreground uppercase tracking-wide">{label}</p>
-      <p className="text-sm font-medium truncate">{value}</p>
+      <header className="card pkg-hero">
+        <div className="pkg-hero-row">
+          <div className="pkg-hero-main">
+            <p className="pkg-kicker">
+              {entityLabel}
+              {salesOrderNumber ? (
+                <>
+                  {' · '}
+                  {relatedSalesOrder ? (
+                    <Link href={`/app/sales/orders/${relatedSalesOrder.id}`} className="pkg-link">
+                      {salesOrderNumber}
+                    </Link>
+                  ) : (
+                    salesOrderNumber
+                  )}
+                </>
+              ) : null}
+            </p>
+            <h1 className="pkg-title">{pkg.packageNumber ?? '—'}</h1>
+            <p className="pkg-hero-sub">
+              {customerHref ? (
+                <Link href={customerHref} className="pkg-link">
+                  {pkg.customerName ?? relatedContact?.contactName ?? 'Cliente'}
+                </Link>
+              ) : (
+                <span>{pkg.customerName ?? 'Cliente no especificado'}</span>
+              )}
+              <span aria-hidden="true">·</span>
+              <span>{formatDateOnly(pkg.date)}</span>
+              {totalQty ? (
+                <>
+                  <span aria-hidden="true">·</span>
+                  <span>
+                    {formatNumber(totalQty)} {pkg.items[0]?.unit ?? 'unidades'}
+                  </span>
+                </>
+              ) : null}
+            </p>
+          </div>
+          <PackageStatusBadge status={pkg.status} className="pkg-hero-badge" />
+        </div>
+        <PackageSteps pkg={pkg} />
+      </header>
+
+      <div className="pkg-grid">
+        <div className="pkg-main">
+          <section className="card pkg-card">
+            <div className="pkg-card-head">
+              <h2 className="pkg-card-title">Contenido del paquete</h2>
+              {pkg.items.length > 0 ? (
+                <span className="pkg-count">
+                  {pkg.items.length} {pkg.items.length === 1 ? 'artículo' : 'artículos'}
+                </span>
+              ) : null}
+            </div>
+            <PackageItemsTable pkg={pkg} />
+          </section>
+
+          {relatedInvoices && relatedInvoices.length > 0 ? (
+            <section className="card pkg-card">
+              <div className="pkg-card-head">
+                <h2 className="pkg-card-title">
+                  <FileText size={15} aria-hidden="true" /> Facturas relacionadas
+                </h2>
+                <span className="pkg-count">{relatedInvoices.length}</span>
+              </div>
+              <div className="pkg-related-list">
+                {relatedInvoices.map((inv) => (
+                  <RelatedLink
+                    key={inv.id}
+                    href={`/app/invoices/${inv.id}`}
+                    title={inv.invoiceNumber ?? '—'}
+                    meta={[
+                      inv.status,
+                      inv.total ? formatCurrency(inv.total, null) : null,
+                      inv.date ? formatDateOnly(inv.date) : null,
+                    ]
+                      .filter(Boolean)
+                      .join(' · ')}
+                  />
+                ))}
+              </div>
+            </section>
+          ) : null}
+        </div>
+
+        <aside className="pkg-side">
+          <section className="card pkg-card">
+            <div className="pkg-card-head">
+              <h2 className="pkg-card-title">
+                <Truck size={15} aria-hidden="true" /> Envío
+              </h2>
+            </div>
+            <PackageShipmentFacts pkg={pkg} />
+          </section>
+
+          <section className="card pkg-card">
+            <div className="pkg-card-head">
+              <h2 className="pkg-card-title">
+                <User size={15} aria-hidden="true" /> Cliente
+              </h2>
+              {relatedContact?.contactType ? (
+                <span className="badge badge-weak">{relatedContact.contactType}</span>
+              ) : null}
+            </div>
+            <div className="pkg-customer">
+              {customerHref ? (
+                <Link href={customerHref} className="pkg-link pkg-customer-name">
+                  {relatedContact?.contactName ?? pkg.customerName ?? '—'}
+                </Link>
+              ) : (
+                <strong className="pkg-customer-name">{pkg.customerName ?? '—'}</strong>
+              )}
+              {relatedContact?.companyName &&
+              relatedContact.companyName !== relatedContact.contactName ? (
+                <span className="text-muted">{relatedContact.companyName}</span>
+              ) : null}
+            </div>
+            <h3 className="pkg-subhead">
+              <MapPin size={13} aria-hidden="true" /> Dirección de envío
+            </h3>
+            <PackageAddress pkg={pkg} />
+          </section>
+
+          {relatedSalesOrder ? (
+            <section className="card pkg-card">
+              <div className="pkg-card-head">
+                <h2 className="pkg-card-title">
+                  <ShoppingCart size={15} aria-hidden="true" /> Orden de venta
+                </h2>
+              </div>
+              <RelatedLink
+                href={`/app/sales/orders/${relatedSalesOrder.id}`}
+                title={relatedSalesOrder.salesOrderNumber ?? '—'}
+                meta={[
+                  getSalesOrderStatusConfig(relatedSalesOrder.status, 'order').label,
+                  relatedSalesOrder.total ? formatCurrency(relatedSalesOrder.total, null) : null,
+                ]
+                  .filter(Boolean)
+                  .join(' · ')}
+              />
+            </section>
+          ) : null}
+        </aside>
+      </div>
+
+      <footer className="pkg-sync">
+        <span>Datos de Zoho Inventory</span>
+        <span>Última modificación en Zoho: {formatDateTime(pkg.sourceRemoteModifiedAt)}</span>
+        <span>Sincronizado: {formatDateTime(pkg.normalizedAt)}</span>
+        <span className="pkg-mono">ID Zoho {pkg.zohoPackageId}</span>
+      </footer>
     </div>
   );
 }

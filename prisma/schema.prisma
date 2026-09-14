@@ -463,6 +463,12 @@ model Package {
   salesChannel           String?
   salesorderNumber       String?
   quantity               Decimal?      @db.Decimal(18, 4)
+  // Shipment order (Zoho "orden de envío", e.g. NE-28815) — carrier lives here once shipped
+  zohoShipmentId         String?
+  shipmentNumber         String?
+  deliveryDate           DateTime?
+  trackingUrl            String?
+  notes                  String?
   // Detail fetch tracking
   lastDetailFetchedAt    DateTime?
   // Sync tracking

@@ -10,8 +10,24 @@ import {
 
 export const runtime = 'nodejs';
 
-const SYNC_ROUTE_TIMEOUT_MS = 120_000;
+/** Max time the HTTP request stays open; the sync itself continues in `after()`. */
+const SYNC_ROUTE_TIMEOUT_MS = 25_000;
 
+const ERROR_MESSAGES: Record<string, string> = {
+  ZOHO_API_ERROR: 'Zoho rechazó la consulta de paquetes. Revisa la conexión en Integraciones.',
+  INVALID_LIST_RESPONSE: 'Zoho devolvió una respuesta inesperada al listar paquetes.',
+  PAGE_LIMIT_EXCEEDED: 'Se alcanzó el límite de páginas configurado para la sincronización.',
+  RATE_LIMIT_EXCEEDED:
+    'Zoho limitó las llamadas por minuto. Espera un momento e inténtalo de nuevo.',
+  DAILY_LIMIT_EXCEEDED: 'Se agotó la cuota diaria de llamadas a Zoho.',
+  UNEXPECTED_ERROR: 'La sincronización falló por un error inesperado. Revisa Deploy Logs.',
+};
+
+/**
+ * User-facing "Actualizar": incremental sync of the most recently modified
+ * packages (sorted LIST pages + detail download), same strategy as sales
+ * orders. A full scan of every page runs from the scheduler, never from here.
+ */
 export async function POST() {
   const session = await getCurrentSession();
   if (!session) return NextResponse.json({ error: 'No autenticado' }, { status: 401 });
@@ -21,9 +37,12 @@ export async function POST() {
   try {
     const activeRun = await getActivePackagesSyncRun();
     if (activeRun)
-      return NextResponse.json({ already_running: true, run_id: activeRun.runId }, { status: 409 });
+      return NextResponse.json(
+        { already_running: true, run_id: activeRun.runId, status: formatRunStatus(activeRun) },
+        { status: 409 }
+      );
 
-    const syncPromise = syncPackages({ mode: 'sync' });
+    const syncPromise = syncPackages({ mode: 'quick', maxDetailFetches: 30 });
 
     after(async () => {
       try {
@@ -79,13 +98,26 @@ export async function POST() {
 
     if (error instanceof SyncFailedError) {
       return NextResponse.json(
-        { error: 'La sincronización falló', error_code: error.errorCode },
+        {
+          error: ERROR_MESSAGES[error.errorCode] ?? ERROR_MESSAGES.UNEXPECTED_ERROR,
+          error_code: error.errorCode,
+          run_id: error.runId,
+        },
         { status: 500 }
       );
     }
 
     console.error('packages sync trigger error', error);
-    return NextResponse.json({ error: 'No se pudo iniciar la sincronización' }, { status: 500 });
+    return NextResponse.json(
+      {
+        error:
+          error instanceof Error && error.message.startsWith('Invalid or missing Zoho')
+            ? 'Faltan credenciales de Zoho en el servidor.'
+            : 'No se pudo iniciar la sincronización.',
+        error_code: 'UNEXPECTED_ERROR',
+      },
+      { status: 500 }
+    );
   }
 }
 

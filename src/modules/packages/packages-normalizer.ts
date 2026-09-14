@@ -1,10 +1,13 @@
 import { Prisma, PrismaClient } from '@prisma/client';
-import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { SOURCE, PACKAGES_ENTITY_TYPE } from '@/modules/integrations/zoho/packages-sync';
 import { recordPackageChange, PACKAGE_CHANGE_SELECT } from './packages-change-events';
-
-const CURRENT_PACKAGE_NORMALIZER_VERSION = 3;
+import {
+  CURRENT_PACKAGE_NORMALIZER_VERSION,
+  extractZohoPackage,
+  mapZohoPackage,
+  type MappedPackage,
+} from './packages-payload';
 
 export const NORMALIZATION_ERROR_CODE = {
   SNAPSHOT_SHAPE_INVALID: 'SNAPSHOT_SHAPE_INVALID',
@@ -61,160 +64,36 @@ function log(payload: Record<string, unknown>) {
   console.info(JSON.stringify(payload));
 }
 
-const packagePayloadSchema = z
-  .object({
-    package_id: z.union([z.string(), z.number()]).transform(String),
-    package_number: z.string().nullish(),
-    status: z.string().nullish(),
-    date: z.string().nullish(),
-    shipment_type: z.string().nullish(),
-    carrier: z.string().nullish(),
-    tracking_number: z.string().nullish(),
-    delivery_method: z.string().nullish(),
-    shipping_charge: z.union([z.string(), z.number()]).nullish(),
-    salesorder_id: z.union([z.string(), z.number().transform(String)]).nullish(),
-    customer_id: z.union([z.string(), z.number().transform(String)]).nullish(),
-    customer_name: z.string().nullish(),
-    last_modified_time: z.string().nullish(),
-    // Additional fields
-    shipment_date: z.string().nullish(),
-    shipment_status: z.string().nullish(),
-    is_carrier_shipment: z.boolean().nullish(),
-    is_tracking_enabled: z.boolean().nullish(),
-    label_format: z.string().nullish(),
-    sales_channel: z.string().nullish(),
-    salesorder_number: z.string().nullish(),
-    quantity: z.union([z.string(), z.number()]).nullish(),
-    // Shipping address
-    shipping_attention: z.string().nullish(),
-    shipping_address: z.string().nullish(),
-    shipping_city: z.string().nullish(),
-    shipping_state: z.string().nullish(),
-    shipping_zip: z.string().nullish(),
-    shipping_country: z.string().nullish(),
-    shipping_phone: z.string().nullish(),
-    package_items: z
-      .array(
-        z.object({
-          item_id: z.string().nullish(),
-          name: z.string().nullish(),
-          sku: z.string().nullish(),
-          description: z.string().nullish(),
-          quantity: z.union([z.string(), z.number()]).nullish(),
-          unit: z.string().nullish(),
-        })
-      )
-      .nullish(),
-  })
-  .passthrough();
-
-function toDecimal(value: unknown): Prisma.Decimal | null {
-  if (value === null || value === undefined) return null;
-  if (value instanceof Prisma.Decimal) return value;
-  if (typeof value === 'number') return Number.isFinite(value) ? new Prisma.Decimal(value) : null;
-  if (typeof value !== 'string') return null;
-  const cleaned = value.trim().replace(/,/g, '');
-  if (cleaned.length === 0) return null;
+function toDecimal(value: string | null): Prisma.Decimal | null {
+  if (value === null) return null;
   try {
-    return new Prisma.Decimal(cleaned);
+    return new Prisma.Decimal(value);
   } catch {
     return null;
   }
 }
 
-function safeDate(value: string | null | undefined): Date | null {
-  if (!value) return null;
-  const d = new Date(value);
-  return Number.isNaN(d.getTime()) ? null : d;
-}
-
 function buildPackageData(
   snapshotId: string,
   remoteModifiedAt: Date,
-  payload: z.infer<typeof packagePayloadSchema>
-): { package: Prisma.PackageCreateInput; items: Omit<Prisma.PackageItemCreateManyInput, 'packageId'>[] } {
+  mapped: MappedPackage
+): {
+  package: Prisma.PackageCreateInput;
+  items: Omit<Prisma.PackageItemCreateManyInput, 'packageId'>[];
+} {
+  const { items, ...fields } = mapped;
   const packageData: Prisma.PackageCreateInput = {
-    zohoPackageId: payload.package_id,
-    packageNumber: payload.package_number ?? null,
-    status: payload.status ?? null,
-    date: payload.date ? new Date(payload.date) : null,
-    shipmentType: payload.shipment_type ?? null,
-    carrier: payload.carrier ?? null,
-    trackingNumber: payload.tracking_number ?? null,
-    deliveryMethod: payload.delivery_method ?? null,
-    shippingCharge: toDecimal(payload.shipping_charge),
-    zohoSalesOrderId: payload.salesorder_id ?? null,
-    zohoCustomerId: payload.customer_id ?? null,
-    customerName: payload.customer_name ?? null,
-    // Additional fields
-    shipmentDate: payload.shipment_date ? safeDate(payload.shipment_date) : null,
-    shipmentStatus: payload.shipment_status ?? null,
-    isCarrierShipment: payload.is_carrier_shipment ?? null,
-    isTrackingEnabled: payload.is_tracking_enabled ?? null,
-    labelFormat: payload.label_format ?? null,
-    salesChannel: payload.sales_channel ?? null,
-    salesorderNumber: payload.salesorder_number ?? null,
-    quantity: toDecimal(payload.quantity),
-    // Shipping address
-    shippingAttention: payload.shipping_attention ?? null,
-    shippingAddress: payload.shipping_address ?? null,
-    shippingCity: payload.shipping_city ?? null,
-    shippingState: payload.shipping_state ?? null,
-    shippingZip: payload.shipping_zip ?? null,
-    shippingCountry: payload.shipping_country ?? null,
-    shippingPhone: payload.shipping_phone ?? null,
+    ...fields,
+    shippingCharge: toDecimal(fields.shippingCharge),
+    quantity: toDecimal(fields.quantity),
     sourceRemoteModifiedAt: remoteModifiedAt,
     sourceSnapshotId: snapshotId,
     normalizedAt: new Date(),
   };
-
-  const items: Omit<Prisma.PackageItemCreateManyInput, 'packageId'>[] = (payload.package_items ?? []).map(
-    (item, index) => ({
-      zohoItemId: item.item_id ?? null,
-      name: item.name ?? null,
-      sku: item.sku ?? null,
-      description: item.description ?? null,
-      quantity: toDecimal(item.quantity),
-      unit: item.unit ?? null,
-      sortOrder: index,
-    })
-  );
-
-  return { package: packageData, items };
-}
-
-type ExtractPayloadResult =
-  | { data: z.infer<typeof packagePayloadSchema>; error: null }
-  | { data: null; error: string };
-
-function extractPackagePayload(raw: unknown): ExtractPayloadResult {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-    return { data: null, error: 'Snapshot payload is not an object' };
-  }
-
-  const obj = raw as Record<string, unknown>;
-
-  // Direct package shape
-  if (typeof obj.package_id === 'string' || typeof obj.package_id === 'number') {
-    const parse = packagePayloadSchema.safeParse(raw);
-    if (!parse.success) return { data: null, error: 'Invalid direct package shape' };
-    return { data: parse.data, error: null };
-  }
-
-  // Zoho API wrapper shape: { code, message, package: {...} }
-  if ('code' in obj) {
-    if (typeof obj.code !== 'number' || obj.code !== 0) {
-      return { data: null, error: `Zoho API error code: ${obj.code}` };
-    }
-    if (typeof obj.package !== 'object' || obj.package === null || Array.isArray(obj.package)) {
-      return { data: null, error: 'Missing or invalid package in Zoho wrapper' };
-    }
-    const parse = packagePayloadSchema.safeParse(obj.package);
-    if (!parse.success) return { data: null, error: 'Invalid wrapped package shape' };
-    return { data: parse.data, error: null };
-  }
-
-  return { data: null, error: 'Unrecognized snapshot payload shape' };
+  return {
+    package: packageData,
+    items: items.map((item) => ({ ...item, quantity: toDecimal(item.quantity) })),
+  };
 }
 
 async function markSnapshotProcessed(
@@ -275,7 +154,7 @@ export async function normalizePackageSnapshot(
     );
   }
 
-  const extraction = extractPackagePayload(snapshot.payload);
+  const extraction = extractZohoPackage(snapshot.payload);
   if (extraction.data === null) {
     await markSnapshotFailed(
       snapshot.id,
@@ -291,7 +170,11 @@ export async function normalizePackageSnapshot(
   }
 
   const payload = extraction.data;
-  const { package: packageData, items } = buildPackageData(snapshot.id, snapshot.remoteModifiedAt, payload);
+  const { package: packageData, items } = buildPackageData(
+    snapshot.id,
+    snapshot.remoteModifiedAt,
+    mapZohoPackage(payload)
+  );
 
   return prisma.$transaction(async (tx) => {
     const existing = await tx.package.findUnique({

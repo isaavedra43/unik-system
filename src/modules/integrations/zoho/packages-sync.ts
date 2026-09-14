@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { listPackages, getPackage } from './packages';
+import { CURRENT_PACKAGE_NORMALIZER_VERSION } from '@/modules/packages/packages-payload';
 import {
   type ZohoEntityAdapter,
   type EntitySummary,
@@ -84,13 +85,12 @@ export const packagesAdapter: ZohoEntityAdapter = {
   },
 
   async normalizePendingSnapshots({ limit }) {
-    const { normalizePendingPackageSnapshots } = await import(
-      '@/modules/packages/packages-normalizer'
-    );
+    const { normalizePendingPackageSnapshots } =
+      await import('@/modules/packages/packages-normalizer');
     await normalizePendingPackageSnapshots({ limit });
   },
 
-  currentNormalizerVersion: 3,
+  currentNormalizerVersion: CURRENT_PACKAGE_NORMALIZER_VERSION,
 };
 
 // ---------------------------------------------------------------------------

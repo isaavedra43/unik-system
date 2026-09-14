@@ -10,13 +10,14 @@ import { balanceGap } from '@/modules/contacts/vendor-profile-helpers';
 import type { VendorProfile, VendorTransactionType } from '@/modules/contacts/vendor-profile-service';
 import { DocumentTable } from './vendor-ui';
 import { VendorTransactionsTable } from './VendorTransactionsTable';
+import { VendorStatement } from './VendorStatement';
 
 type WatchAction = (
   prevState: { error: string | null; success: boolean; isWatched: boolean },
   formData: FormData
 ) => Promise<{ error: string | null; success: boolean; isWatched: boolean }>;
 
-type TabId = 'summary' | VendorTransactionType;
+type TabId = 'summary' | 'statement' | VendorTransactionType;
 
 interface VendorDetailViewProps {
   contact: ContactDetail;
@@ -105,6 +106,7 @@ export function VendorDetailView({ contact, profile, isWatched, canWatch, watchA
 
   const tabs: Array<{ id: TabId; label: string; count?: number }> = [
     { id: 'summary', label: 'Resumen' },
+    ...(bills && vc ? [{ id: 'statement' as const, label: 'Estado de cuenta' }] : []),
     ...(po ? [{ id: 'purchase_orders' as const, label: 'Órdenes de compra', count: po.count }] : []),
     ...(bills ? [{ id: 'bills' as const, label: 'Facturas', count: bills.count }] : []),
     ...(vc ? [{ id: 'vendor_credits' as const, label: 'Créditos', count: vc.count }] : []),
@@ -352,6 +354,8 @@ export function VendorDetailView({ contact, profile, isWatched, canWatch, watchA
             </section>
           </aside>
         </div>
+      ) : tab === 'statement' ? (
+        <VendorStatement contactId={contact.id} vendorName={name} currencyCode={currency} />
       ) : (
         <VendorTransactionsTable
           key={tab}

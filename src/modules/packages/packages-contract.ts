@@ -21,7 +21,12 @@ export interface PackageListRow {
   date: string | null;
   carrier: string | null;
   trackingNumber: string | null;
+  shipmentNumber: string | null;
+  shipmentDate: string | null;
+  deliveryDate: string | null;
   customerName: string | null;
+  salesorderNumber: string | null;
+  quantity: string | null;
   zohoSalesOrderId: string | null;
   salesOrderStatus: string | null;
   sourceRemoteModifiedAt: string | null;
@@ -50,6 +55,12 @@ export interface PackageDetail {
   salesChannel: string | null;
   salesorderNumber: string | null;
   quantity: string | null;
+  // Shipment order (Zoho "orden de envío")
+  zohoShipmentId: string | null;
+  shipmentNumber: string | null;
+  deliveryDate: string | null;
+  trackingUrl: string | null;
+  notes: string | null;
   // Shipping address
   shippingAttention: string | null;
   shippingAddress: string | null;
@@ -81,7 +92,12 @@ export function toPackageListRow(pkg: {
   date: Date | null;
   carrier: string | null;
   trackingNumber: string | null;
+  shipmentNumber: string | null;
+  shipmentDate: Date | null;
+  deliveryDate: Date | null;
   customerName: string | null;
+  salesorderNumber: string | null;
+  quantity: Prisma.Decimal | null;
   zohoSalesOrderId: string | null;
   sourceRemoteModifiedAt: Date;
   salesOrderStatus?: string | null;
@@ -93,7 +109,12 @@ export function toPackageListRow(pkg: {
     date: pkg.date?.toISOString() ?? null,
     carrier: pkg.carrier,
     trackingNumber: pkg.trackingNumber,
+    shipmentNumber: pkg.shipmentNumber,
+    shipmentDate: pkg.shipmentDate?.toISOString() ?? null,
+    deliveryDate: pkg.deliveryDate?.toISOString() ?? null,
     customerName: pkg.customerName,
+    salesorderNumber: pkg.salesorderNumber,
+    quantity: decimalToString(pkg.quantity),
     zohoSalesOrderId: pkg.zohoSalesOrderId,
     salesOrderStatus: pkg.salesOrderStatus ?? null,
     sourceRemoteModifiedAt: pkg.sourceRemoteModifiedAt.toISOString(),
@@ -122,6 +143,11 @@ export function toPackageDetail(pkg: {
   salesChannel: string | null;
   salesorderNumber: string | null;
   quantity: Prisma.Decimal | null;
+  zohoShipmentId: string | null;
+  shipmentNumber: string | null;
+  deliveryDate: Date | null;
+  trackingUrl: string | null;
+  notes: string | null;
   shippingAttention: string | null;
   shippingAddress: string | null;
   shippingCity: string | null;
@@ -134,7 +160,15 @@ export function toPackageDetail(pkg: {
   normalizedAt: Date;
   createdAt: Date;
   updatedAt: Date;
-  items?: { id: string; name: string | null; sku: string | null; description: string | null; quantity: Prisma.Decimal | null; unit: string | null; zohoItemId: string | null }[];
+  items?: {
+    id: string;
+    name: string | null;
+    sku: string | null;
+    description: string | null;
+    quantity: Prisma.Decimal | null;
+    unit: string | null;
+    zohoItemId: string | null;
+  }[];
 }): PackageDetail {
   return {
     id: pkg.id,
@@ -158,6 +192,11 @@ export function toPackageDetail(pkg: {
     salesChannel: pkg.salesChannel,
     salesorderNumber: pkg.salesorderNumber,
     quantity: decimalToString(pkg.quantity),
+    zohoShipmentId: pkg.zohoShipmentId,
+    shipmentNumber: pkg.shipmentNumber,
+    deliveryDate: pkg.deliveryDate?.toISOString() ?? null,
+    trackingUrl: pkg.trackingUrl,
+    notes: pkg.notes,
     shippingAttention: pkg.shippingAttention,
     shippingAddress: pkg.shippingAddress,
     shippingCity: pkg.shippingCity,

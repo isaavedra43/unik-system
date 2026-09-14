@@ -1,11 +1,7 @@
 import { z } from 'zod';
-import { zohoGet } from './client';
+import { zohoGet, zohoGetBinary } from './client';
 
-const packageIdSchema = z
-  .string()
-  .min(1)
-  .max(30)
-  .regex(/^\d+$/, 'packageId must be numeric');
+const packageIdSchema = z.string().min(1).max(30).regex(/^\d+$/, 'packageId must be numeric');
 
 interface ListPackagesOptions {
   page?: number;
@@ -56,4 +52,12 @@ export async function getPackage(packageId: string): Promise<unknown> {
   packageIdSchema.parse(packageId);
 
   return zohoGet(`/packages/${packageId}`);
+}
+
+/** Downloads the official Zoho Inventory PDF of the package (packing slip / "orden de salida"). */
+export async function getPackagePdf(
+  packageId: string
+): Promise<{ bytes: Uint8Array; contentType: string }> {
+  packageIdSchema.parse(packageId);
+  return zohoGetBinary('inventory', `/packages/${packageId}`);
 }

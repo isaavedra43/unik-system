@@ -98,11 +98,7 @@ export interface ZohoEntityAdapter {
    * The adapter MUST force `sort_column=last_modified_time&sort_order=D`
    * when `sorted` is true and the endpoint supports it.
    */
-  listPage(opts: {
-    page: number;
-    perPage: number;
-    sorted: boolean;
-  }): Promise<unknown>;
+  listPage(opts: { page: number; perPage: number; sorted: boolean }): Promise<unknown>;
 
   /**
    * Fetches the DETAIL of a single entity by external ID.
@@ -413,9 +409,7 @@ async function scanAllPages(
       throw new SyncPageLimitError();
     }
 
-    await waitForRateBudget(budgetConfig);
-    const rawPage = await adapter.listPage({ page, perPage: params.perPage, sorted: false });
-    recordApiCall(budgetConfig);
+    const rawPage = await fetchListPage(adapter, page, params.perPage, false, budgetConfig);
     apiCalls += 1;
 
     const { summaries, rawRecords } = extractSummariesWithRaw(adapter, rawPage);
@@ -454,9 +448,7 @@ async function scanRecentPages(
 
   const tryPage = async (page: number, sorted: boolean): Promise<boolean | null> => {
     try {
-      await waitForRateBudget(budgetConfig);
-      const rawPage = await adapter.listPage({ page, perPage: params.perPage, sorted });
-      recordApiCall(budgetConfig);
+      const rawPage = await fetchListPage(adapter, page, params.perPage, sorted, budgetConfig);
       apiCalls += 1;
       pagesScanned += 1;
 
@@ -476,8 +468,7 @@ async function scanRecentPages(
       }
 
       const hasMore = hasMorePages(rawPage);
-      const isRecentRecord =
-        newest !== null && now - newest.getTime() < params.recentThresholdMs;
+      const isRecentRecord = newest !== null && now - newest.getTime() < params.recentThresholdMs;
 
       return isRecentRecord ? true : hasMore ? false : null;
     } catch (error) {
@@ -543,8 +534,38 @@ async function scanRecentPages(
   return { pagesScanned, recordsSeen, apiCalls };
 }
 
-function extractSummaries(adapter: ZohoEntityAdapter, rawPage: unknown): EntitySummary[] {
-  return extractSummariesWithRaw(adapter, rawPage).summaries;
+const LIST_PAGE_RATE_LIMIT_RETRIES = 3;
+
+/**
+ * Lists one page, honouring the shared rate budget. Several entity syncs share
+ * that budget, so two of them can pass `waitForRateBudget` together and the
+ * slower one trips the per-minute check; a scan must back off and retry the
+ * page instead of failing the whole run.
+ */
+async function fetchListPage(
+  adapter: ZohoEntityAdapter,
+  page: number,
+  perPage: number,
+  sorted: boolean,
+  budgetConfig: RateBudgetConfig
+): Promise<unknown> {
+  for (let attempt = 0; ; attempt++) {
+    await waitForRateBudget(budgetConfig);
+    try {
+      recordApiCall(budgetConfig);
+    } catch (error) {
+      if (
+        error instanceof RateLimitError &&
+        error.limitType === 'per_minute' &&
+        attempt < LIST_PAGE_RATE_LIMIT_RETRIES
+      ) {
+        handleRateLimitError(error);
+        continue;
+      }
+      throw error;
+    }
+    return adapter.listPage({ page, perPage, sorted });
+  }
 }
 
 function extractSummariesWithRaw(
@@ -679,7 +700,8 @@ async function recordSummaryWithSnapshot(
     })
   );
 
-  const hasChanged = !existing || existing.remoteModifiedAt.getTime() !== remoteModifiedAt.getTime();
+  const hasChanged =
+    !existing || existing.remoteModifiedAt.getTime() !== remoteModifiedAt.getTime();
 
   // Same last_modified_time, different content: Zoho doesn't bump a contact's modified time when
   // its balances move (bills paid, credits applied). Refresh the snapshot in place and queue it for
@@ -1094,6 +1116,7 @@ export async function runSync(
       const MAX_NORMALIZATION_LOOPS = 200; // safety valve: 200 * 500 = 100k records
       let normalizationLoops = 0;
       let totalNormalized = 0;
+      let previousPending = Number.POSITIVE_INFINITY;
 
       while (normalizationLoops < MAX_NORMALIZATION_LOOPS) {
         normalizationLoops += 1;
@@ -1109,6 +1132,20 @@ export async function runSync(
         );
 
         if (pendingCount === 0) break;
+        // Snapshots that fail to normalize keep their old version, so a batch
+        // that made no progress would repeat forever; stop and leave them flagged.
+        if (pendingCount >= previousPending) {
+          console.warn(
+            JSON.stringify({
+              event: 'zoho.sync.normalization_stalled',
+              entityType: adapter.entityType,
+              runId: run.id,
+              pendingCount,
+            })
+          );
+          break;
+        }
+        previousPending = pendingCount;
 
         try {
           await withTimeout(

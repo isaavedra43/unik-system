@@ -26,7 +26,12 @@ const LIST_SELECT = {
   date: true,
   carrier: true,
   trackingNumber: true,
+  shipmentNumber: true,
+  shipmentDate: true,
+  deliveryDate: true,
   customerName: true,
+  salesorderNumber: true,
+  quantity: true,
   zohoSalesOrderId: true,
   sourceRemoteModifiedAt: true,
 } satisfies Prisma.PackageSelect;
@@ -38,15 +43,19 @@ function resolveDateShortcut(shortcut: string): { from: Date; to: Date } | null 
   endOfDay.setDate(endOfDay.getDate() + 1);
   endOfDay.setMilliseconds(-1);
   switch (shortcut) {
-    case 'today': return { from: startOfDay, to: endOfDay };
+    case 'today':
+      return { from: startOfDay, to: endOfDay };
     case 'yesterday': {
-      const from = new Date(startOfDay); from.setDate(from.getDate() - 1);
-      const to = new Date(endOfDay); to.setDate(to.getDate() - 1);
+      const from = new Date(startOfDay);
+      from.setDate(from.getDate() - 1);
+      const to = new Date(endOfDay);
+      to.setDate(to.getDate() - 1);
       return { from, to };
     }
     case 'this_week': {
       const day = startOfDay.getDay();
-      const from = new Date(startOfDay); from.setDate(from.getDate() - day);
+      const from = new Date(startOfDay);
+      from.setDate(from.getDate() - day);
       return { from, to: endOfDay };
     }
     case 'this_month': {
@@ -54,14 +63,17 @@ function resolveDateShortcut(shortcut: string): { from: Date; to: Date } | null 
       return { from, to: endOfDay };
     }
     case 'last_7_days': {
-      const from = new Date(startOfDay); from.setDate(from.getDate() - 6);
+      const from = new Date(startOfDay);
+      from.setDate(from.getDate() - 6);
       return { from, to: endOfDay };
     }
     case 'last_30_days': {
-      const from = new Date(startOfDay); from.setDate(from.getDate() - 29);
+      const from = new Date(startOfDay);
+      from.setDate(from.getDate() - 29);
       return { from, to: endOfDay };
     }
-    default: return null;
+    default:
+      return null;
   }
 }
 
@@ -86,11 +98,20 @@ function buildRuleWhere(
       if (op === 'is_empty') return { [field]: { equals: null } } as Prisma.PackageWhereInput;
       if (op === 'is_not_empty') return { [field]: { not: null } } as Prisma.PackageWhereInput;
       if (!val) return {};
-      if (op === 'contains') return { [field]: { contains: val, mode: 'insensitive' } } as Prisma.PackageWhereInput;
-      if (op === 'not_contains') return { [field]: { not: { contains: val, mode: 'insensitive' } } } as Prisma.PackageWhereInput;
-      if (op === 'equals') return { [field]: { equals: val, mode: 'insensitive' } } as Prisma.PackageWhereInput;
-      if (op === 'not_equals') return { [field]: { not: { equals: val, mode: 'insensitive' } } } as Prisma.PackageWhereInput;
-      if (op === 'starts_with') return { [field]: { startsWith: val, mode: 'insensitive' } } as Prisma.PackageWhereInput;
+      if (op === 'contains')
+        return { [field]: { contains: val, mode: 'insensitive' } } as Prisma.PackageWhereInput;
+      if (op === 'not_contains')
+        return {
+          [field]: { not: { contains: val, mode: 'insensitive' } },
+        } as Prisma.PackageWhereInput;
+      if (op === 'equals')
+        return { [field]: { equals: val, mode: 'insensitive' } } as Prisma.PackageWhereInput;
+      if (op === 'not_equals')
+        return {
+          [field]: { not: { equals: val, mode: 'insensitive' } },
+        } as Prisma.PackageWhereInput;
+      if (op === 'starts_with')
+        return { [field]: { startsWith: val, mode: 'insensitive' } } as Prisma.PackageWhereInput;
       return {};
     }
     case 'status': {
@@ -103,7 +124,9 @@ function buildRuleWhere(
       }
       if (op === 'not_equals') {
         if (typeof val !== 'string') return {};
-        return { [field]: { not: { equals: val, mode: 'insensitive' } } } as Prisma.PackageWhereInput;
+        return {
+          [field]: { not: { equals: val, mode: 'insensitive' } },
+        } as Prisma.PackageWhereInput;
       }
       if (op === 'in') {
         const arr = Array.isArray(val) ? val : typeof val === 'string' ? [val] : [];
@@ -124,12 +147,23 @@ function buildRuleWhere(
       const rawTo = 'valueTo' in rule ? rule.valueTo : undefined;
       const num = raw !== undefined && raw !== null && raw !== '' ? Number(raw) : null;
       const numTo = rawTo !== undefined && rawTo !== null && rawTo !== '' ? Number(rawTo) : null;
-      if (op === 'equals' && num !== null && !Number.isNaN(num)) return { [field]: { equals: num } } as Prisma.PackageWhereInput;
-      if (op === 'greater_than' && num !== null && !Number.isNaN(num)) return { [field]: { gt: num } } as Prisma.PackageWhereInput;
-      if (op === 'greater_or_equal' && num !== null && !Number.isNaN(num)) return { [field]: { gte: num } } as Prisma.PackageWhereInput;
-      if (op === 'less_than' && num !== null && !Number.isNaN(num)) return { [field]: { lt: num } } as Prisma.PackageWhereInput;
-      if (op === 'less_or_equal' && num !== null && !Number.isNaN(num)) return { [field]: { lte: num } } as Prisma.PackageWhereInput;
-      if (op === 'between' && num !== null && numTo !== null && !Number.isNaN(num) && !Number.isNaN(numTo))
+      if (op === 'equals' && num !== null && !Number.isNaN(num))
+        return { [field]: { equals: num } } as Prisma.PackageWhereInput;
+      if (op === 'greater_than' && num !== null && !Number.isNaN(num))
+        return { [field]: { gt: num } } as Prisma.PackageWhereInput;
+      if (op === 'greater_or_equal' && num !== null && !Number.isNaN(num))
+        return { [field]: { gte: num } } as Prisma.PackageWhereInput;
+      if (op === 'less_than' && num !== null && !Number.isNaN(num))
+        return { [field]: { lt: num } } as Prisma.PackageWhereInput;
+      if (op === 'less_or_equal' && num !== null && !Number.isNaN(num))
+        return { [field]: { lte: num } } as Prisma.PackageWhereInput;
+      if (
+        op === 'between' &&
+        num !== null &&
+        numTo !== null &&
+        !Number.isNaN(num) &&
+        !Number.isNaN(numTo)
+      )
         return { [field]: { gte: num, lte: numTo } } as Prisma.PackageWhereInput;
       return {};
     }
@@ -140,17 +174,20 @@ function buildRuleWhere(
       const rawValTo = 'valueTo' in rule ? rule.valueTo : undefined;
       if (shortcut && DATE_SHORTCUTS.includes(shortcut as (typeof DATE_SHORTCUTS)[number])) {
         const range = resolveDateShortcut(shortcut);
-        if (range) return { [field]: { gte: range.from, lte: range.to } } as Prisma.PackageWhereInput;
+        if (range)
+          return { [field]: { gte: range.from, lte: range.to } } as Prisma.PackageWhereInput;
       }
       const val = rawVal ? parseDate(rawVal as string | Date) : null;
       const valTo = rawValTo ? parseDate(rawValTo as string | Date) : null;
       if (op === 'equals' && val) return { [field]: { equals: val } } as Prisma.PackageWhereInput;
       if (op === 'before' && val) return { [field]: { lt: val } } as Prisma.PackageWhereInput;
       if (op === 'after' && val) return { [field]: { gt: val } } as Prisma.PackageWhereInput;
-      if (op === 'between' && val && valTo) return { [field]: { gte: val, lte: valTo } } as Prisma.PackageWhereInput;
+      if (op === 'between' && val && valTo)
+        return { [field]: { gte: val, lte: valTo } } as Prisma.PackageWhereInput;
       return {};
     }
-    default: return {};
+    default:
+      return {};
   }
 }
 
@@ -175,7 +212,8 @@ function buildSearchWhere(search: string | undefined): Prisma.PackageWhereInput 
 }
 
 function buildSortOrderBy(sort: PackageSort): Prisma.PackageOrderByWithRelationInput[] {
-  if (!sort || sort.length === 0) return [{ packageNumber: 'asc' }, { createdAt: 'desc' }, { id: 'desc' }];
+  if (!sort || sort.length === 0)
+    return [{ packageNumber: 'asc' }, { createdAt: 'desc' }, { id: 'desc' }];
   return sort.map((s) => ({ [s.field]: s.direction }) as Prisma.PackageOrderByWithRelationInput);
 }
 
@@ -203,7 +241,9 @@ export async function getPackagesWorkspace(rawQuery: unknown): Promise<PackagesL
   ]);
 
   // Batch lookup related sales order statuses
-  const salesOrderIds = [...new Set(packages.map((p) => p.zohoSalesOrderId).filter(Boolean))] as string[];
+  const salesOrderIds = [
+    ...new Set(packages.map((p) => p.zohoSalesOrderId).filter(Boolean)),
+  ] as string[];
   const salesOrderStatusMap = new Map<string, string | null>();
   if (salesOrderIds.length > 0) {
     const salesOrders = await prisma.salesOrder.findMany({
@@ -218,7 +258,9 @@ export async function getPackagesWorkspace(rawQuery: unknown): Promise<PackagesL
   const rows = packages.map((p) =>
     toPackageListRow({
       ...p,
-      salesOrderStatus: p.zohoSalesOrderId ? (salesOrderStatusMap.get(p.zohoSalesOrderId) ?? null) : null,
+      salesOrderStatus: p.zohoSalesOrderId
+        ? (salesOrderStatusMap.get(p.zohoSalesOrderId) ?? null)
+        : null,
     })
   );
 
@@ -252,7 +294,6 @@ export interface ExportOptions {
   pageSize?: number;
 }
 
-
 function getExportColumns(includeAll: boolean): typeof PACKAGE_COLUMNS {
   if (includeAll) return PACKAGE_COLUMNS;
   return PACKAGE_COLUMNS.filter((c) => c.defaultVisible);
@@ -280,7 +321,8 @@ export async function getPackagesForExport(
   if (options.scope === 'selected' && options.selectedIds && options.selectedIds.length > 0) {
     const selectedWhere = { ...where, id: { in: options.selectedIds } };
     const packages = await prisma.package.findMany({
-      where: selectedWhere, orderBy,
+      where: selectedWhere,
+      orderBy,
       take: Math.min(options.selectedIds.length, MAX_EXPORT_ROWS),
       select: LIST_SELECT,
     });
@@ -288,12 +330,19 @@ export async function getPackagesForExport(
   } else if (options.scope === 'current_page') {
     const skip = ((options.page ?? query.page) - MIN_PAGE) * (options.pageSize ?? query.page_size);
     const packages = await prisma.package.findMany({
-      where, orderBy, take: options.pageSize ?? query.page_size, skip, select: LIST_SELECT,
+      where,
+      orderBy,
+      take: options.pageSize ?? query.page_size,
+      skip,
+      select: LIST_SELECT,
     });
     rows = packages.map(toPackageListRow);
   } else {
     const packages = await prisma.package.findMany({
-      where, orderBy, take: MAX_EXPORT_ROWS, select: LIST_SELECT,
+      where,
+      orderBy,
+      take: MAX_EXPORT_ROWS,
+      select: LIST_SELECT,
     });
     rows = packages.map(toPackageListRow);
   }
@@ -305,10 +354,12 @@ export async function getPackagesForExport(
 export function buildCsv(rows: PackageListRow[], columns: typeof PACKAGE_COLUMNS): string {
   const header = columns.map((c) => `"${c.label.replace(/"/g, '""')}"`).join(',');
   const lines = rows.map((row) =>
-    columns.map((c) => {
-      const val = formatExportValue(row, c.id);
-      return `"${val.replace(/"/g, '""')}"`;
-    }).join(',')
+    columns
+      .map((c) => {
+        const val = formatExportValue(row, c.id);
+        return `"${val.replace(/"/g, '""')}"`;
+      })
+      .join(',')
   );
   return [header, ...lines].join('\r\n');
 }
