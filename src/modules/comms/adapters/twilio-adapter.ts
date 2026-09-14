@@ -170,14 +170,18 @@ async function mediaUrlsFor(objectIds: string[]): Promise<{ urls: string[]; erro
     const object = await getStorageObject(id);
     if (!object || object.status !== 'ready') return { urls, error: 'Adjunto no disponible' };
     const auth = await authorizeDownload(object, { disposition: 'inline' });
-    if (auth.mode !== 'signed') {
-      return {
-        urls,
-        error:
-          'El almacenamiento no puede emitir URLs firmadas para que Twilio descargue el adjunto',
-      };
+    if (auth.mode === 'signed') {
+      urls.push(auth.url);
+      continue;
     }
-    urls.push(auth.url);
+    // Disk driver or a protected object (reports/quotes sent to customers are protected):
+    // serve it from UNIK through a short-lived signed public link Twilio can fetch.
+    const base = (process.env.APP_URL ?? '').trim().replace(/\/+$/, '');
+    if (!base || !/^https:\/\//.test(base)) {
+      return { urls, error: 'Falta APP_URL (https) para que Twilio pueda descargar el adjunto desde UNIK' };
+    }
+    const { mediaSharePath } = await import('@/modules/storage/media-share');
+    urls.push(`${base}${mediaSharePath(object.id)}`);
   }
   return { urls };
 }

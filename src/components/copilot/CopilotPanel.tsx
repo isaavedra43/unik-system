@@ -33,7 +33,7 @@ import {
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { AssistantMarkdown } from '@/components/assistant/AssistantMarkdown';
-import { ArtifactRenderer, type ArtifactData } from '@/components/assistant/ArtifactRenderer';
+import { ArtifactRenderer, toAttachable, type ArtifactData, type AttachableArtifact } from '@/components/assistant/ArtifactRenderer';
 import { ProposalCard } from './ProposalCard';
 import { PlanCard } from './PlanCard';
 import { ConfidenceBadge } from './ConfidenceBadge';
@@ -79,6 +79,8 @@ export interface CopilotSurfaceConfig {
   };
   activityAt: string | null;
   draftTool: string;
+  /** Put every proposed draft into the host composer automatically (inbox: the user just presses send). */
+  autoInsertDrafts?: boolean;
   starters: string[];
   copy: {
     eventOpen: string;
@@ -93,6 +95,8 @@ export interface CopilotPanelProps {
   surface: CopilotSurfaceConfig;
   user: { id: string; name: string };
   onInsertDraft?: (text: string) => void;
+  /** Puts an already-stored file (report, official quote PDF) into the host's composer. */
+  onInsertAttachment?: (attachment: AttachableArtifact) => void;
   /** Sends the (possibly edited) draft straight from the card — the click is the approval. */
   onSendDraft?: (text: string) => Promise<void>;
   onAfterTurn?: () => void;
@@ -346,7 +350,7 @@ function parseSystemEvent(text: string): { kind: 'approved' | 'rejected' | 'othe
 /* Panel                                                               */
 /* ------------------------------------------------------------------ */
 
-export function CopilotPanel({ surface, user, onInsertDraft, onSendDraft, onAfterTurn, onBack }: CopilotPanelProps) {
+export function CopilotPanel({ surface, user, onInsertDraft, onInsertAttachment, onSendDraft, onAfterTurn, onBack }: CopilotPanelProps) {
   const [mode, setMode] = useState<CopilotMode>('active');
   const [loading, setLoading] = useState(true);
   const [messages, setMessages] = useState<CopilotMessage[]>([]);
@@ -443,7 +447,11 @@ export function CopilotPanel({ surface, user, onInsertDraft, onSendDraft, onAfte
                 if (parsed) setLiveActions(parsed);
               } else if (name === draftTool) {
                 const parsed = parseDraft(d.args);
-                if (parsed) setLiveDraft(parsed);
+                if (parsed) {
+                  setLiveDraft(parsed);
+                  // The suggested text lands in the composer too; the user edits and sends.
+                  if (surface.autoInsertDrafts && onInsertDraft) onInsertDraft(parsed.draft);
+                }
               }
               if (name !== 'suggestNextActions') setLiveSteps((prev) => [...prev, { id, name, status: 'running' }]);
             } else if (event.type === 'tool_call_end') {
@@ -460,6 +468,14 @@ export function CopilotPanel({ surface, user, onInsertDraft, onSendDraft, onAfte
             } else if (event.type === 'artifact') {
               const a = d as unknown as ArtifactData;
               if (a.artifactId) setLiveArtifacts((prev) => [...prev.filter((x) => x.artifactId !== a.artifactId), a]);
+              // An official quote PDF goes straight to the composer: the user only reviews and sends.
+              if (a.quoteId && onInsertAttachment) {
+                const att = toAttachable(a);
+                if (att) {
+                  onInsertAttachment(att);
+                  toast.success('PDF de la cotización adjuntado al redactor');
+                }
+              }
             } else if (event.type === 'proposal') {
               const p = d as unknown as CopilotProposal;
               setProposals((prev) => [...prev.filter((x) => x.id !== p.id), p]);
@@ -488,7 +504,7 @@ export function CopilotPanel({ surface, user, onInsertDraft, onSendDraft, onAfte
         if (queued && modeRef.current === 'active') void runTurn({ trigger: queued });
       }
     },
-    [threadUrl, draftTool, loadThread]
+    [threadUrl, draftTool, loadThread, onInsertDraft, onInsertAttachment, surface.autoInsertDrafts]
   );
 
   const runTurnRef = useRef(runTurn);
@@ -565,6 +581,29 @@ export function CopilotPanel({ surface, user, onInsertDraft, onSendDraft, onAfte
       return data.execution;
     },
     [surface.endpoints, loadThread]
+  );
+
+  /** "Al redactor": the proposed message and its files go to the composer; the user sends. */
+  const handoffProposal = useCallback(
+    (proposal: CopilotProposal) => {
+      const args = (proposal.args && typeof proposal.args === 'object' ? proposal.args : {}) as Record<string, unknown>;
+      const text = typeof args.message === 'string' ? args.message : typeof args.body === 'string' ? args.body : '';
+      const wanted = new Set<string>(((args.attachments as { artifactIds?: string[] } | undefined)?.artifactIds) ?? []);
+      const quoteId = typeof args.quoteId === 'string' ? args.quoteId : null;
+      const all = messages.flatMap((m) => m.artifacts ?? []);
+      const picked = all.filter((a) => wanted.has(a.artifactId) || (quoteId && a.quoteId === quoteId));
+      if (text && onInsertDraft) onInsertDraft(text.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '$1'));
+      let attached = 0;
+      for (const a of picked) {
+        const att = toAttachable(a as ArtifactData);
+        if (att && onInsertAttachment) {
+          onInsertAttachment(att);
+          attached += 1;
+        }
+      }
+      toast.success(attached > 0 ? `Mensaje y ${attached} archivo(s) en el redactor: revisa y envía` : 'Mensaje en el redactor: revisa y envía');
+    },
+    [messages, onInsertDraft, onInsertAttachment]
   );
 
   const [modeBusy, setModeBusy] = useState(false);
@@ -832,7 +871,7 @@ export function CopilotPanel({ surface, user, onInsertDraft, onSendDraft, onAfte
                 {it.artifacts.length > 0 && (
                   <div className="copilot-artifacts">
                     {it.artifacts.map((a) => (
-                      <ArtifactRenderer key={a.artifactId} artifact={a as ArtifactData} compact />
+                      <ArtifactRenderer key={a.artifactId} artifact={a as ArtifactData} compact onAttach={onInsertAttachment ? (att) => { onInsertAttachment(att); toast.success('Archivo adjuntado al redactor'); } : undefined} />
                     ))}
                   </div>
                 )}
@@ -866,7 +905,7 @@ export function CopilotPanel({ surface, user, onInsertDraft, onSendDraft, onAfte
             {liveArtifacts.length > 0 && (
               <div className="copilot-artifacts">
                 {liveArtifacts.map((a) => (
-                  <ArtifactRenderer key={a.artifactId} artifact={a} compact />
+                  <ArtifactRenderer key={a.artifactId} artifact={a} compact onAttach={onInsertAttachment ? (att) => { onInsertAttachment(att); toast.success('Archivo adjuntado al redactor'); } : undefined} />
                 ))}
               </div>
             )}
@@ -876,7 +915,7 @@ export function CopilotPanel({ surface, user, onInsertDraft, onSendDraft, onAfte
         )}
 
         {pendingProposals.map((p) => (
-          <ProposalCard key={p.id} proposal={p} decide={(decision) => decideProposal(p, decision)} />
+          <ProposalCard key={p.id} proposal={p} decide={(decision) => decideProposal(p, decision)} onHandoff={onInsertAttachment || onInsertDraft ? () => handoffProposal(p) : undefined} />
         ))}
 
         {error && (

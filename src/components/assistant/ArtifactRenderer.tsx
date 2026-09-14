@@ -13,6 +13,7 @@ import {
   Image as ImageIcon,
   Link2,
   Loader2,
+  Paperclip,
   Table,
   X,
 } from 'lucide-react';
@@ -30,7 +31,20 @@ export interface ArtifactData {
   pageCount?: number;
   chartType?: string;
   shared?: boolean;
+  /** Storage object behind the file (lets a composer attach it without re-uploading). */
+  storageObjectId?: string;
+  mimeType?: string;
+  /** Zoho quote this PDF belongs to (official estimate PDF). */
+  quoteId?: string;
   createdAt?: string;
+}
+
+export interface AttachableArtifact {
+  objectId: string;
+  name: string;
+  mimeType: string;
+  sizeBytes: number;
+  artifactId: string;
 }
 
 interface InlineTableData {
@@ -139,7 +153,19 @@ function PreviewModal({ artifact, onClose }: { artifact: ArtifactData; onClose: 
   );
 }
 
-export function ArtifactRenderer({ artifact, compact = false }: { artifact: ArtifactData; compact?: boolean }) {
+export function toAttachable(artifact: ArtifactData): AttachableArtifact | null {
+  if (!artifact.storageObjectId) return null;
+  const ext = artifact.type === 'xlsx' ? 'xlsx' : artifact.type === 'docx' ? 'docx' : artifact.type === 'csv' ? 'csv' : 'pdf';
+  return {
+    objectId: artifact.storageObjectId,
+    name: artifact.filename ?? `${artifact.title}.${ext}`,
+    mimeType: artifact.mimeType ?? (artifact.type === 'pdf' ? 'application/pdf' : 'application/octet-stream'),
+    sizeBytes: artifact.sizeBytes ?? 0,
+    artifactId: artifact.artifactId,
+  };
+}
+
+export function ArtifactRenderer({ artifact, compact = false, onAttach }: { artifact: ArtifactData; compact?: boolean; onAttach?: (attachment: AttachableArtifact) => void }) {
   const [inlineData, setInlineData] = useState<InlineTableData | InlineChartData | InlineImageData | null>(null);
   const [loading, setLoading] = useState(false);
   const [preview, setPreview] = useState(false);
@@ -251,6 +277,7 @@ export function ArtifactRenderer({ artifact, compact = false }: { artifact: Arti
   }
 
   const canPreview = artifact.type === 'pdf' && Boolean(artifact.downloadUrl);
+  const attachable = toAttachable(artifact);
 
   // File card (PDF, XLSX, DOCX, CSV)
   return (
@@ -275,10 +302,16 @@ export function ArtifactRenderer({ artifact, compact = false }: { artifact: Arti
               <Eye size={14} /> <span>Ver</span>
             </button>
           )}
-          {artifact.downloadUrl && (
-            <button type="button" className="artifact-btn artifact-btn-ghost" onClick={copyLink} title="Copiar enlace">
-              {copied ? <Check size={14} /> : <Copy size={14} />}
+          {onAttach && attachable ? (
+            <button type="button" className="artifact-btn artifact-btn-ghost" onClick={() => onAttach(attachable)} title="Adjuntar al redactor del mensaje">
+              <Paperclip size={14} /> <span>Adjuntar</span>
             </button>
+          ) : (
+            artifact.downloadUrl && (
+              <button type="button" className="artifact-btn artifact-btn-ghost" onClick={copyLink} title="Copiar enlace">
+                {copied ? <Check size={14} /> : <Copy size={14} />}
+              </button>
+            )
           )}
           {artifact.downloadUrl && (
             <a href={localUrl(artifact.downloadUrl)} className="artifact-btn artifact-btn-primary" download={artifact.filename}>

@@ -251,8 +251,10 @@ async function publishToTeams(
 ): Promise<void> {
   const base = { conversationId: conversation.id, accountId: conversation.accountId, ...payload };
   const tasks: Promise<unknown>[] = [];
-  for (const key of new Set(account.teamKeys))
-    tasks.push(publishRealtime(REALTIME_CHANNELS.inbox(key), type, base));
+  // An account without teams is visible to everyone who can use the inbox: publish globally,
+  // otherwise nobody learns about a new customer message until they reload.
+  const scopes = account.teamKeys.length > 0 ? new Set(account.teamKeys) : new Set(['all']);
+  for (const key of scopes) tasks.push(publishRealtime(REALTIME_CHANNELS.inbox(key), type, base));
   for (const userId of new Set([conversation.assignedToUserId, ...extraUserIds])) {
     if (userId) tasks.push(publishRealtime(REALTIME_CHANNELS.user(userId), type, base));
   }

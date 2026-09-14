@@ -45,6 +45,9 @@ export interface CopilotMessage {
     pageCount?: number;
     chartType?: string;
     shared?: boolean;
+    storageObjectId?: string;
+    mimeType?: string;
+    quoteId?: string;
     createdAt?: string;
   }>;
   createdAt: string;
@@ -306,23 +309,32 @@ function asObject(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' ? (value as Record<string, unknown>) : null;
 }
 
+const SENTIMENTS = new Set(['positivo', 'neutral', 'negativo', 'molesto']);
+const URGENCIES = new Set(['baja', 'media', 'alta']);
+
+/** Tolerant to the model's variants: {title,text}, {name,prompt}, plain strings… */
 export function parseSuggestedActions(args: unknown): SuggestedActionsData | null {
   const obj = asObject(args);
-  if (!obj || !Array.isArray(obj.actions)) return null;
-  const actions = obj.actions
-    .map((a) => asObject(a))
-    .filter((a): a is Record<string, unknown> => Boolean(a))
-    .map((a) => ({
-      label: String(a.label ?? '').trim(),
-      instruction: String(a.instruction ?? '').trim(),
-      kind: (typeof a.kind === 'string' ? a.kind : 'other') as ActionKind,
-    }))
-    .filter((a) => a.label && a.instruction);
+  if (!obj) return null;
+  const rawList = Array.isArray(obj.actions) ? obj.actions : Array.isArray(obj.suggestions) ? obj.suggestions : Array.isArray(obj.options) ? obj.options : null;
+  if (!rawList) return null;
+  const actions = rawList
+    .map((a) => {
+      if (typeof a === 'string') return { label: a.trim().slice(0, 60), instruction: a.trim(), kind: 'other' as ActionKind };
+      const o = asObject(a);
+      if (!o) return null;
+      const label = String(o.label ?? o.title ?? o.name ?? o.action ?? '').trim();
+      const instruction = String(o.instruction ?? o.prompt ?? o.command ?? o.text ?? o.description ?? o.detail ?? label).trim();
+      return { label: (label || instruction).slice(0, 60), instruction, kind: (typeof o.kind === 'string' ? o.kind : 'other') as ActionKind };
+    })
+    .filter((a): a is { label: string; instruction: string; kind: ActionKind } => Boolean(a && a.label && a.instruction));
   if (actions.length === 0) return null;
+  const sentiment = String(obj.sentiment ?? '').toLowerCase();
+  const urgency = String(obj.urgency ?? '').toLowerCase();
   return {
-    situation: String(obj.situation ?? ''),
-    sentiment: (obj.sentiment as SuggestedActionsData['sentiment']) ?? 'neutral',
-    urgency: (obj.urgency as SuggestedActionsData['urgency']) ?? 'media',
+    situation: String(obj.situation ?? obj.summary ?? obj.reading ?? ''),
+    sentiment: (SENTIMENTS.has(sentiment) ? sentiment : 'neutral') as SuggestedActionsData['sentiment'],
+    urgency: (URGENCIES.has(urgency) ? urgency : 'media') as SuggestedActionsData['urgency'],
     actions,
   };
 }

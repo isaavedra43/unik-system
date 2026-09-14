@@ -21,23 +21,28 @@ registerTool({
   effect: 'read',
   contextTags: ['all'],
   parameters: z.object({
-    situation: z.string().max(300).describe('Lectura en una línea: qué quiere el cliente y en qué punto está.'),
-    sentiment: z.enum(['positivo', 'neutral', 'negativo', 'molesto']),
-    urgency: z.enum(['baja', 'media', 'alta']),
+    situation: z.string().max(400).optional().describe('Lectura en una línea: qué quiere el cliente y en qué punto está.'),
+    sentiment: z.string().max(20).optional().describe('positivo | neutral | negativo | molesto'),
+    urgency: z.string().max(20).optional().describe('baja | media | alta'),
     actions: z
       .array(
         z.object({
-          label: z.string().min(2).max(60).describe('Texto corto del botón, ej. "Redactar respuesta"'),
-          instruction: z.string().min(3).max(300).describe('Orden completa que ejecutarás al hacer clic, ej. "Redacta una respuesta confirmando que mañana enviamos la cotización"'),
-          kind: z.enum(['reply', 'task', 'lookup', 'status', 'note', 'escalate', 'send', 'other']).default('other'),
+          label: z.string().max(80).optional().describe('Texto corto del botón, ej. "Redactar respuesta"'),
+          title: z.string().max(80).optional().describe('Alias de label'),
+          instruction: z.string().max(400).optional().describe('Orden completa que ejecutarás al hacer clic, ej. "Redacta una respuesta confirmando que mañana enviamos la cotización"'),
+          prompt: z.string().max(400).optional().describe('Alias de instruction'),
+          description: z.string().max(400).optional().describe('Alias de instruction'),
+          kind: z.string().max(20).optional().describe('reply | task | lookup | status | note | escalate | send | other'),
         })
       )
       .min(1)
-      .max(5),
+      .max(6),
   }),
   execute: async (_actor, rawArgs) => {
-    const args = rawArgs as { actions: unknown[] };
-    return { shown: args.actions.length, note: 'Acciones mostradas al operador como botones. No las repitas en texto.' };
+    const args = rawArgs as { actions: Array<{ label?: string; title?: string; instruction?: string; prompt?: string; description?: string }> };
+    const usable = args.actions.filter((a) => (a.label ?? a.title ?? '').trim() || (a.instruction ?? a.prompt ?? a.description ?? '').trim());
+    if (usable.length === 0) return { error: 'Cada acción necesita label (texto del botón) e instruction (la orden que ejecutarás).' };
+    return { shown: usable.length, note: 'Acciones mostradas al operador como botones. No las repitas en texto; añade solo tu lectura en 2-3 líneas.' };
   },
 });
 

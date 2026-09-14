@@ -521,7 +521,7 @@ export async function ensureQuotePdfArtifact(actor: { id: string }, quoteId: str
     const sizeBytes = Number(object.sizeBytes);
     const title = `Cotización ${quote.estimateNumber ?? filename.replace(/\.pdf$/i, '')}`.trim();
     const artifact = await createArtifact({ conversationId: aiConversationId, type: 'pdf', storageObjectId: object.id, meta: { title, filename, mimeType: 'application/pdf', sizeBytes, source: 'zoho', protected: true, quoteId: quote.id } });
-    return { artifactId: artifact.id, type: 'pdf' as const, title, filename, sizeBytes, downloadUrl: `/app/assistant/api/artifacts/${artifact.id}/download` };
+    return { artifactId: artifact.id, type: 'pdf' as const, title, filename, sizeBytes, mimeType: 'application/pdf', storageObjectId: object.id, quoteId: quote.id, downloadUrl: `/app/assistant/api/artifacts/${artifact.id}/download` };
   } finally {
     await fs.rm(dir, { recursive: true, force: true }).catch(() => undefined);
   }

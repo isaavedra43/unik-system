@@ -8,6 +8,7 @@ interface Props {
   conversation: CommConversationDTO;
   user: InboxUserInfo;
   onInsertDraft: (text: string) => void;
+  onInsertAttachment?: (attachment: { objectId: string; name: string; mimeType?: string; sizeBytes?: number }) => void;
   onRefreshConversation: () => void;
   onBack?: () => void;
 }
@@ -20,7 +21,7 @@ const STARTERS = [
 ];
 
 /** Inbox (Bandeja externa) surface of the shared copilot. */
-export function CopilotPanel({ conversation, user, onInsertDraft, onRefreshConversation, onBack }: Props) {
+export function CopilotPanel({ conversation, user, onInsertDraft, onInsertAttachment, onRefreshConversation, onBack }: Props) {
   const surface = useMemo<CopilotSurfaceConfig>(
     () => ({
       surfaceId: conversation.id,
@@ -31,6 +32,7 @@ export function CopilotPanel({ conversation, user, onInsertDraft, onRefreshConve
       },
       activityAt: conversation.lastInboundAt,
       draftTool: 'proposeInboxDraft',
+      autoInsertDrafts: true,
       starters: STARTERS,
       copy: {
         eventOpen: 'Analicé la conversación al abrirla',
@@ -48,6 +50,7 @@ export function CopilotPanel({ conversation, user, onInsertDraft, onRefreshConve
       surface={surface}
       user={{ id: user.id, name: user.name }}
       onInsertDraft={onInsertDraft}
+      onInsertAttachment={onInsertAttachment}
       onSendDraft={async (text) => {
         const res = await fetch(`/app/inbox/api/conversations/${conversation.id}/messages`, {
           method: 'POST',

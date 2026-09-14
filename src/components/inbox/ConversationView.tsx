@@ -17,7 +17,7 @@ import {
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { useCallDock } from '@/components/calls/CallDockProvider';
-import { MessageComposer } from './MessageComposer';
+import { MessageComposer, type ComposerAttachment } from './MessageComposer';
 import {
   apiJson,
   formatDateTime,
@@ -43,6 +43,8 @@ interface Props {
   onBack?: () => void;
   onToggleAi: () => void;
   aiOpen: boolean;
+  insertAttachment?: ComposerAttachment | null;
+  onInsertAttachmentConsumed?: () => void;
 }
 
 function StatusIcon({ message }: { message: CommMessageDTO }) {
@@ -146,8 +148,7 @@ export function ConversationView({
   onConversationChanged,
   onBack,
   onToggleAi,
-  aiOpen,
-}: Props) {
+  aiOpen, insertAttachment, onInsertAttachmentConsumed }: Props) {
   const [messages, setMessages] = useState<CommMessageDTO[]>([]);
   const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -531,6 +532,8 @@ export function ConversationView({
         onSend={send}
         disabledReason={sendError}
         showTemplatePicker={conversation.account.provider === 'twilio_whatsapp'}
+        insertAttachment={insertAttachment}
+        onInsertAttachmentConsumed={onInsertAttachmentConsumed}
       />
     </div>
   );

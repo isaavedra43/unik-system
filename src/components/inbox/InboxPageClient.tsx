@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import { ConversationList } from './ConversationList';
 import { ConversationView } from './ConversationView';
 import { CopilotPanel } from './copilot/CopilotPanel';
+import type { ComposerAttachment } from './MessageComposer';
 import { NewConversationDialog } from './NewConversationDialog';
 import { useInboxRealtime } from './useInboxRealtime';
 import { useIsMobile } from './useIsMobile';
@@ -47,6 +48,7 @@ export function InboxPageClient({ user }: { user: InboxUserInfo }) {
   const [mobileView, setMobileView] = useState<MobileView>('list');
   const [aiOpen, setAiOpen] = useState(true);
   const [draft, setDraft] = useState('');
+  const [attachSeed, setAttachSeed] = useState<ComposerAttachment | null>(null);
   const [threadVersion, setThreadVersion] = useState(0);
   const [newOpen, setNewOpen] = useState(false);
   const filtersRef = useRef(filters);
@@ -134,7 +136,7 @@ export function InboxPageClient({ user }: { user: InboxUserInfo }) {
   );
 
   const channels = useMemo(() => {
-    const keys = new Set<string>([`user:${user.id}`]);
+    const keys = new Set<string>([`user:${user.id}`, 'inbox:all']);
     for (const key of user.roleKeys) keys.add(`inbox:${key}`);
     for (const account of accounts) for (const key of account.teamKeys) keys.add(`inbox:${key}`);
     return [...keys];
@@ -161,6 +163,16 @@ export function InboxPageClient({ user }: { user: InboxUserInfo }) {
   });
 
   const selected = conversations.find((c) => c.id === selectedId) ?? null;
+
+  // Safety net for missed realtime events: keep the open conversation fresh so a new
+  // customer message always reaches the thread and wakes the copilot.
+  useEffect(() => {
+    if (!selectedId) return;
+    const interval = window.setInterval(() => {
+      if (document.visibilityState === 'visible') void refreshConversation(selectedId);
+    }, 15_000);
+    return () => window.clearInterval(interval);
+  }, [selectedId, refreshConversation]);
 
   const selectConversation = (id: string) => {
     setSelectedId(id);
@@ -216,6 +228,8 @@ export function InboxPageClient({ user }: { user: InboxUserInfo }) {
                 onBack={isMobile ? () => setMobileView('list') : undefined}
                 onToggleAi={() => (isMobile ? setMobileView('ai') : setAiOpen((v) => !v))}
                 aiOpen={Boolean(showAi)}
+                insertAttachment={attachSeed}
+                onInsertAttachmentConsumed={() => setAttachSeed(null)}
               />
             ) : (
               <div
@@ -250,6 +264,10 @@ export function InboxPageClient({ user }: { user: InboxUserInfo }) {
               user={user}
               onInsertDraft={(text) => {
                 setDraft(text);
+                if (isMobile) setMobileView('conversation');
+              }}
+              onInsertAttachment={(att) => {
+                setAttachSeed({ ...att, key: `${att.objectId}-${Date.now()}` });
                 if (isMobile) setMobileView('conversation');
               }}
               onRefreshConversation={() => refreshConversation(selected.id)}

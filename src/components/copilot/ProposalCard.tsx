@@ -7,6 +7,7 @@ import {
   ChevronDown,
   ChevronRight,
   FileText,
+  Import,
   Loader2,
   MessageCircle,
   Phone,
@@ -35,6 +36,8 @@ export interface ProposalCardProps {
   proposal: CopilotProposal;
   decide: (decision: 'approve' | 'reject') => Promise<ProposalDecisionResult | void>;
   onDecided?: (decision: 'approve' | 'reject', result: ProposalDecisionResult | void) => void;
+  /** Hand the message (and its files) to the host's composer so the user sends it manually. */
+  onHandoff?: () => void;
 }
 
 const EFFECT_META: Record<string, { label: string; tone: string; icon: React.ReactNode }> = {
@@ -85,7 +88,7 @@ function extractPreview(args: unknown): { body: string | null; recipients: strin
   return { body, recipients, attachments };
 }
 
-export function ProposalCard({ proposal, decide, onDecided }: ProposalCardProps) {
+export function ProposalCard({ proposal, decide, onDecided, onHandoff }: ProposalCardProps) {
   const [busy, setBusy] = useState<'approve' | 'reject' | null>(null);
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -172,6 +175,11 @@ export function ProposalCard({ proposal, decide, onDecided }: ProposalCardProps)
       )}
 
       <div className="proposal-actions">
+        {onHandoff && (
+          <button type="button" className="proposal-btn proposal-btn-ghost" disabled={busy !== null} onClick={onHandoff} title="Pasar el mensaje y los archivos al redactor para enviarlo tú">
+            <Import size={14} /> Al redactor
+          </button>
+        )}
         <button type="button" className="proposal-btn proposal-btn-ghost" disabled={busy !== null} onClick={() => run('reject')}>
           {busy === 'reject' ? <Loader2 size={14} className="copilot-spin" /> : <X size={14} />} Rechazar
         </button>

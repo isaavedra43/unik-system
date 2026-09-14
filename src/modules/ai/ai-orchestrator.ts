@@ -973,6 +973,9 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
             sizeBytes: a.sizeBytes,
             pageCount: a.pageCount,
             chartType: a.chartType,
+            storageObjectId: typeof a.storageObjectId === 'string' ? a.storageObjectId : undefined,
+            mimeType: typeof a.mimeType === 'string' ? a.mimeType : undefined,
+            quoteId: typeof a.quoteId === 'string' ? a.quoteId : undefined,
           },
         };
       }

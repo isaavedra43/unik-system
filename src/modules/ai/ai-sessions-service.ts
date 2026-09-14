@@ -138,6 +138,9 @@ function formatMsgWithToolCalls(
         pageCount: typeof meta.pageCount === 'number' ? meta.pageCount : undefined,
         chartType: typeof meta.chartType === 'string' ? meta.chartType : undefined,
         shared: meta.protected === true,
+        storageObjectId: a.storageObjectId ?? undefined,
+        mimeType: typeof meta.mimeType === 'string' ? meta.mimeType : undefined,
+        quoteId: typeof meta.quoteId === 'string' ? meta.quoteId : undefined,
         createdAt: a.createdAt.toISOString(),
       };
     }),
