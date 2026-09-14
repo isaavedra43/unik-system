@@ -1,5 +1,5 @@
 import { prisma } from '@/lib/prisma';
-import { buildVendorStatement, type StatementDocument, type VendorStatement } from './vendor-statement';
+import { buildVendorStatement, type StatementDocument, type StatementShow, type VendorStatement } from './vendor-statement';
 
 /** Every bill and vendor credit of a vendor (linked by Zoho vendor id), oldest first. */
 export async function loadVendorStatementDocuments(zohoVendorId: string): Promise<StatementDocument[]> {
@@ -43,6 +43,6 @@ export async function loadVendorStatementDocuments(zohoVendorId: string): Promis
   ];
 }
 
-export async function getVendorStatement(zohoVendorId: string, range: { from?: string | null; to?: string | null }): Promise<VendorStatement> {
+export async function getVendorStatement(zohoVendorId: string, range: { from?: string | null; to?: string | null; show?: StatementShow }): Promise<VendorStatement> {
   return buildVendorStatement(await loadVendorStatementDocuments(zohoVendorId), range);
 }

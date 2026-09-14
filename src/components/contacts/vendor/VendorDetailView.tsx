@@ -355,7 +355,7 @@ export function VendorDetailView({ contact, profile, isWatched, canWatch, watchA
           </aside>
         </div>
       ) : tab === 'statement' ? (
-        <VendorStatement contactId={contact.id} vendorName={name} currencyCode={currency} />
+        <VendorStatement contactId={contact.id} vendorName={name} vendorRfc={contact.taxRegNo} currencyCode={currency} />
       ) : (
         <VendorTransactionsTable
           key={tab}

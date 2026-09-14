@@ -63,7 +63,17 @@ describe('vendor statement', () => {
     expect(r).toEqual({ from: '2026-09-01', to: '2026-09-30' });
     expect(presetRange('last_month', new Date('2026-01-10T12:00:00Z'))).toEqual({ from: '2025-12-01', to: '2025-12-31' });
     expect(presetRange('all')).toEqual({ from: null, to: null });
-    expect(isIsoDay('2026-09-31')).toBe(false === false);
+    expect(isIsoDay('2026-09-14')).toBe(true);
     expect(isIsoDay('hoy')).toBe(false);
+  });
+});
+
+describe('vendor statement "Mostrar" filter', () => {
+  it('lists only credits but keeps the real opening/closing balances', () => {
+    const s = buildVendorStatement(history, { from: '2026-09-01', to: '2026-09-30', show: 'credits' });
+    expect(s.rows.map((r) => r.number)).toEqual(['UNKNC-01715', 'UNKNC-01723', 'UNKNC-01734']);
+    expect(s.openingBalance).toBe(530915);
+    expect(s.closingBalance).toBe(466420);
+    expect(s.billsCount).toBe(1);
   });
 });

@@ -38,6 +38,7 @@ export interface VendorStatement {
   creditsTotal: number;
   creditsCount: number;
   closingBalance: number;
+  show: StatementShow;
   rows: StatementRow[];
   /** Documents left out because they don't count (draft / cancelled / void). */
   excluded: number;
@@ -61,12 +62,23 @@ function dateKey(doc: StatementDocument): string {
 }
 
 /** `from`/`to` are 'YYYY-MM-DD' (inclusive) or null for open ends. */
+export type StatementShow = 'all' | 'bills' | 'credits';
+
+export function parseStatementShow(value: string | null | undefined): StatementShow {
+  return value === 'bills' || value === 'credits' ? value : 'all';
+}
+
+/**
+ * `show` limits the ROWS listed (only bills / only credits, like Zoho's "Filtrar por"); the
+ * opening and closing balances always count both, so the balance stays real.
+ */
 export function buildVendorStatement(
   documents: StatementDocument[],
-  range: { from?: string | null; to?: string | null } = {}
+  range: { from?: string | null; to?: string | null; show?: StatementShow } = {}
 ): VendorStatement {
   const from = range.from?.trim() || null;
   const to = range.to?.trim() || null;
+  const show = range.show ?? 'all';
 
   const countable = documents.filter(counts);
   const excluded = documents.length - countable.length;
@@ -107,7 +119,7 @@ export function buildVendorStatement(
     }
     running = round2(running + amount);
     return { ...doc, amount: round2(amount), runningBalance: running };
-  });
+  }).filter((row) => show === 'all' || (show === 'bills' ? row.kind === 'bill' : row.kind === 'credit'));
 
   return {
     from,
@@ -118,6 +130,7 @@ export function buildVendorStatement(
     creditsTotal: round2(creditsTotal),
     creditsCount,
     closingBalance: running,
+    show,
     rows,
     excluded,
     firstDocumentDate: sorted[0]?.date ?? null,
