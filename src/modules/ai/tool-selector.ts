@@ -62,6 +62,8 @@ export const CORE_TOOL_NAMES: readonly string[] = [
   'sendInternalChatMessage',
   'getRecentActivity',
   'listConversationAttachments',
+  'readAttachment',
+  'composeDocument',
 ];
 
 export function normalizeText(text: string): string {
@@ -282,7 +284,7 @@ const DOMAIN_RULES: DomainRule[] = [
   { domain: 'customers', test: /client|contact|expedient|telefon|correo|inactiv|reactiv|salud|riesgo/, categories: ['contacts'], tools: ['queryContacts', 'getContactDetail', 'getContactFile', 'getTopCustomers', 'getCustomerDetails', 'getCustomerSegments', 'getCustomerRetention', 'getCustomerHealth', 'findReactivationOpportunities', 'findDuplicateContacts', 'getCustomerPriceHistory'] },
   { domain: 'packages', test: /paquet|env[ií]o|guia|paqueter|transport|rastre/, categories: ['packages'], tools: ['queryPackages', 'getPackageDetail', 'notifyDelayedDeliveries'] },
   { domain: 'analytics', test: /tendenc|pronost|proyecc|compar|versus|\bvs\b|ranking|\btop\b|mejores|kpi|indicador|metric|desempe|rendimient|anomal|analiz|analisis|retenc|segment|patron|horari|ritmo|crec|cay|baj[oó]|subi/, categories: ['sales', 'finance'], tools: ['getTopProducts', 'getSalesTrend', 'getSalesRanking', 'getHourlySalesPattern', 'getWeekdaySalesPattern', 'comparePeriods', 'getSalesKPIs', 'getDashboardSummary', 'getCrossTabAnalysis', 'compareEntities', 'getTeamPerformance', 'getSalesForecast', 'getSalesAlerts', 'getSalesVelocity', 'getProductBundles', 'getRevenueAnalysis', 'getDailyRevenue', 'getSalespersonScorecard', 'getCustomerRetention'] },
-  { domain: 'documents', test: /reporte|informe|\bpdf\b|excel|xlsx|word|docx|\bcsv\b|grafic|tabla|imagen|foto|export|descarg|archivo|documento/, categories: ['export'], tools: ['generatePdfReport', 'generateExcelReport', 'generateWordReport', 'generateCsvExport', 'generateChart', 'generateReportImage', 'generateTable', 'listArtifacts', 'cleanupArtifacts', 'getArtifactSpec', 'shareArtifact', 'listAttachableDocuments', 'findShareableDocument'] },
+  { domain: 'documents', test: /reporte|informe|\bpdf\b|excel|xlsx|word|docx|\bcsv\b|grafic|tabla|imagen|foto|export|descarg|archivo|documento/, categories: ['export'], tools: ['composeDocument', 'generatePdfReport', 'generateExcelReport', 'generateWordReport', 'generateCsvExport', 'generateChart', 'generateReportImage', 'generateTable', 'listArtifacts', 'cleanupArtifacts', 'getArtifactSpec', 'shareArtifact', 'listAttachableDocuments', 'findShareableDocument'] },
   { domain: 'messaging', test: /mensaje|whatsapp|\bsms\b|manda|envia|escribe|avisa|dile|contesta|respond|recordatorio|masivo|campa/, categories: ['communication'], tools: ['sendMessageToContact', 'sendBulkMessages', 'sendInboxMessage', 'draftReply', 'listInboxConversations', 'getConversationMessages', 'listCommitments', 'createCommitment', 'scheduleFollowUp', 'getPickupLocation', 'listAttachableDocuments', 'findShareableDocument', 'shareArtifact', 'listCampaigns', 'getCampaignStats', 'draftCampaignContent', 'createCampaignDraft', 'approveCampaign', 'draftSatisfactionSurvey', 'draftCollectionReminders', 'notifyDelayedDeliveries'] },
   { domain: 'chat', test: /chat|canal|equipo|compa[ñn]er|interno|fija|pinea|reunion|evento|agenda|junta/, categories: [], tools: ['listChatChannels', 'getChatChannelMessages', 'searchChatMessages', 'summarizeChatChannel', 'proposeChatDraft', 'pinChatMessage', 'sendInternalChatMessage', 'createChatEvent', 'startInternalCall', 'suggestAssignee'] },
   { domain: 'calls', test: /llam|marc[aá]|telefon|habl[ae]|\bvoz\b|grabaci|transcrip/, categories: [], tools: ['callContact', 'startInternalCall', 'startOutboundCall', 'listCalls', 'getCallTranscript', 'pauseCallAi'] },
@@ -291,7 +293,7 @@ const DOMAIN_RULES: DomainRule[] = [
   { domain: 'memory', test: /recuerd|memoria|olvid|preferenc|anota|apunta/, categories: [], tools: ['rememberForUser', 'listUserMemory', 'forgetMemory'] },
   { domain: 'skills', test: /skill|receta|rutina|automatiz/, categories: ['skill'], tools: ['listSkills', 'runSkill', 'getSkillRunStatus'] },
   { domain: 'digest', test: /como voy|mi dia|jornada|que hice|digest|ponme al dia|resumen del dia|pendientes de hoy/, categories: [], tools: ['getWorkDigest', 'getRecentActivity', 'getNotifications', 'getDealBlockers'] },
-  { domain: 'attachments', test: /adjunt|subi|archivo|factura|recibo|extrae|\bocr\b|lee el|leer el|documento/, categories: [], tools: ['listConversationAttachments', 'extractDocumentData', 'draftBillFromDocument'] },
+  { domain: 'attachments', test: /adjunt|subi|archivo|factura|recibo|extrae|\bocr\b|lee el|leer el|documento/, categories: [], tools: ['listConversationAttachments', 'readAttachment', 'composeDocument', 'extractDocumentData', 'draftBillFromDocument'] },
   { domain: 'system', test: /integraci|zoho|sincroniz|notificaci|modulo|sistema|quien soy|permiso/, categories: ['system'], tools: ['getIntegrationStatus', 'getNotifications', 'getModuleList', 'getCurrentUserContext'] },
   { domain: 'planning', test: /\bplan\b|planea|paso a paso|primero.*luego|trimestral|anual|completo|integral/, categories: [], tools: ['proposePlan'] },
 ];

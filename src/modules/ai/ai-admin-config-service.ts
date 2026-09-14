@@ -296,6 +296,8 @@ export const DEFAULT_AI_SETTINGS: AiSettings = {
     'loadMoreTools',
     'proposePlan',
     'listConversationAttachments',
+    'readAttachment',
+    'composeDocument',
     'extractDocumentData',
     'draftBillFromDocument',
     'getZohoBooksStatus',

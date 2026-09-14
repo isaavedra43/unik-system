@@ -67,7 +67,12 @@ export function classifyTask(input: ClassifyInput): TaskClassification {
   if (kinds.includes('document') || kinds.includes('audio') || kinds.includes('video')) {
     return { tier: 'complex', reason: 'adjunto que requiere lectura/extracción', needsVision };
   }
-  if (kinds.includes('image')) return { tier: 'standard', reason: 'imagen adjunta', needsVision: true };
+  if (kinds.includes('image')) {
+    // A photo with a real task (transcribe, cross-check, report, table) deserves the strongest
+    // model: reading handwriting and reconciling it with system data is the hard case.
+    const substantive = words >= 8 || COMPLEX_PATTERNS.some((re) => re.test(norm)) || /report|tabla|cruz|compar|lista|transcrib|anota|nota/.test(norm);
+    return { tier: substantive ? 'complex' : 'standard', reason: substantive ? 'imagen adjunta con análisis' : 'imagen adjunta', needsVision: true };
+  }
 
   if (input.autoTrigger) return { tier: 'standard', reason: 'turno automático de copiloto', needsVision };
 

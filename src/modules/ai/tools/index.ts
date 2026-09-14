@@ -57,6 +57,9 @@ import './contacts-tools';
 // Audit tools (pending deliveries with reasons, cash close reconciliation, customer/vendor product relations)
 import './audit-tools';
 
+// Composed documents (PDF/Word narrativos) + lectura de adjuntos
+import './compose-document-tools';
+
 // Artifact tools (PDF, Excel, CSV, tablas, gráficas)
 import './artifact-tools';
 

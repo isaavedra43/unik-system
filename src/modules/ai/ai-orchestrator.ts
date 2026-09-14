@@ -37,6 +37,7 @@ import type { Prisma } from '@prisma/client';
 import type { ToolDefinition, ToolExecutionResult } from './tools/registry';
 import { CORE_TOOL_NAMES, PROVIDER_MAX_TOOLS, findToolsByTopic, selectToolsForTurn } from './tool-selector';
 import { classifyTask, resolveTurnModel } from './model-router';
+import { getModelById } from './model-catalog';
 import { inferConfidence, parseConfidence } from './confidence';
 import { mergeMessageMeta } from './ai-sessions-service';
 import { attachmentKind } from './ai-attachments-service';
@@ -449,6 +450,18 @@ export async function* runAssistant(
   const routing = resolveTurnModel(settings, input.model, classification);
   const effectiveModel = routing.model;
   const fallbackModel = settings.fallbackDeployment;
+
+  // Output budget: a complex turn (analysis, cross-check of attachments, a composed
+  // document with every row written by the model) needs far more than a chat answer.
+  // The admin's maxTokens is the floor; the model's own output cap is the ceiling.
+  const resolveTurnMaxTokens = (model: string): number => {
+    const cap = getModelById(model)?.maxOutput;
+    const wanted =
+      classification.tier === 'complex' || resolvedAttachments.length > 0
+        ? Math.max(settings.maxTokens, 12_000)
+        : settings.maxTokens;
+    return cap && cap > 0 ? Math.min(wanted, cap) : wanted;
+  };
 
   // 8.7. Live data requested explicitly → bypass the short-TTL read cache this turn.
   const wantsFreshData = /\b(actualiza\w*|en tiempo real|refresca\w*|sin cach[eé]|datos de ahora|ahorita mismo|al momento)\b/i.test(input.message);
@@ -1142,7 +1155,7 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
         tools: toolSpecs.length > 0 ? toolSpecs : undefined,
         toolChoice: forceActions ? { type: 'function', function: { name: 'suggestNextActions' } } : undefined,
         temperature: settings.temperature,
-        maxTokens: settings.maxTokens,
+        maxTokens: resolveTurnMaxTokens(modelToUse),
         userId: input.actor.id,
         conversationId: input.conversationId,
         model: modelToUse,

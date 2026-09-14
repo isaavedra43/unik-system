@@ -39,6 +39,7 @@ export const ARTIFACT_TOOL_NAMES = new Set([
   'generateChart',
   'generateReportImage',
   'generateTable',
+  'composeDocument',
   'listArtifacts',
   'cleanupArtifacts',
 ]);

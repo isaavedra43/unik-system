@@ -92,7 +92,7 @@ const customizationSchema = z
  * uploaded to the object storage (R2 in production) and the temporary directory
  * is removed. Nothing permanent is ever written to the local disk.
  */
-async function withTempArtifactFile<T>(
+export async function withTempArtifactFile<T>(
   ext: string,
   work: (filePath: string) => Promise<T>
 ): Promise<T> {
@@ -105,7 +105,7 @@ async function withTempArtifactFile<T>(
   }
 }
 
-async function storeArtifactFile(
+export async function storeArtifactFile(
   actorId: string,
   filePath: string,
   fileName: string,

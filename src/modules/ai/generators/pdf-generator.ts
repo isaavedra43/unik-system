@@ -109,7 +109,7 @@ function pageBottom(doc: PDFKit.PDFDocument): number {
  * and under-count lines, which is what caused rows to overflow their
  * computed height and trigger pdfkit's own emergency page breaks mid-row.
  */
-function measureLines(
+export function measureLines(
   doc: PDFKit.PDFDocument,
   text: string,
   maxWidth: number,
@@ -159,7 +159,7 @@ function measureLines(
   return Math.max(1, total);
 }
 
-interface ResolvedColumns {
+export interface ResolvedColumns {
   tableColumns: PdfTableColumn[];
   detailColumns: PdfTableColumn[];
   widths: number[];
@@ -177,7 +177,7 @@ interface ResolvedColumns {
  * font size is shrunk (down to a floor) before anything is allowed to
  * overflow.
  */
-function resolveColumns(
+export function resolveColumns(
   doc: PDFKit.PDFDocument,
   cols: PdfTableColumn[],
   requestedFontSize: number,
@@ -244,7 +244,7 @@ function resolveColumns(
   };
 }
 
-function cellText(col: PdfTableColumn, row: Record<string, unknown>): string {
+export function cellText(col: PdfTableColumn, row: Record<string, unknown>): string {
   const rawValue = row[col.key];
   if (col.format) return col.format(rawValue);
   if (rawValue === null || rawValue === undefined) return '';

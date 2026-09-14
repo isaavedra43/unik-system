@@ -19774,6 +19774,12 @@ button.calls-stat:focus-visible { outline: none; box-shadow: var(--unik-shadow-f
   justify-content: space-between;
   gap: var(--unik-space-4);
 }
+.vd-header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--unik-space-2);
+  flex-shrink: 0;
+}
 .vd-identity {
   display: flex;
   align-items: center;

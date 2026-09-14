@@ -1,8 +1,8 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { AlertTriangle, ArrowLeft, Bell, BellRing, CreditCard, Link2Off, Receipt, RefreshCw, ShoppingCart } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Bell, BellRing, CreditCard, FileText, Link2Off, Receipt, RefreshCw, ShoppingCart } from 'lucide-react';
 import { toast } from 'sonner';
 import type { ContactDetail } from '@/modules/contacts/contacts-contract';
 import { formatCurrency, formatDateOnly, formatDateTime, getContactStatusConfig } from '@/modules/contacts/contacts-helpers';
@@ -78,6 +78,14 @@ function Kpi({
 export function VendorDetailView({ contact, profile, isWatched, canWatch, watchAction, unwatchAction }: VendorDetailViewProps) {
   const [tab, setTab] = useState<TabId>('summary');
   const [watched, setWatched] = useState(isWatched);
+  const canStatement = Boolean(profile.bills && profile.vendorCredits);
+
+  // Deep link: /app/contacts/vendors/<id>?tab=statement opens that section directly.
+  useEffect(() => {
+    const wanted = new URLSearchParams(window.location.search).get('tab');
+    if (wanted === 'statement' && canStatement) setTab('statement');
+    else if (wanted === 'purchase_orders' || wanted === 'bills' || wanted === 'vendor_credits') setTab(wanted);
+  }, [canStatement]);
   const currency = contact.currencyCode;
   const status = getContactStatusConfig(contact.status);
   const name = contact.contactName ?? 'Proveedor';
@@ -106,7 +114,7 @@ export function VendorDetailView({ contact, profile, isWatched, canWatch, watchA
 
   const tabs: Array<{ id: TabId; label: string; count?: number }> = [
     { id: 'summary', label: 'Resumen' },
-    ...(bills && vc ? [{ id: 'statement' as const, label: 'Estado de cuenta' }] : []),
+    ...(canStatement ? [{ id: 'statement' as const, label: 'Estado de cuenta' }] : []),
     ...(po ? [{ id: 'purchase_orders' as const, label: 'Órdenes de compra', count: po.count }] : []),
     ...(bills ? [{ id: 'bills' as const, label: 'Facturas', count: bills.count }] : []),
     ...(vc ? [{ id: 'vendor_credits' as const, label: 'Créditos', count: vc.count }] : []),
@@ -136,12 +144,20 @@ export function VendorDetailView({ contact, profile, isWatched, canWatch, watchA
             </p>
           </div>
         </div>
-        {canWatch ? (
-          <button className="btn btn-secondary btn-sm" onClick={handleWatch} aria-pressed={watched}>
-            {watched ? <BellRing size={14} /> : <Bell size={14} />}
-            {watched ? 'Siguiendo' : 'Seguir'}
-          </button>
-        ) : null}
+        <div className="vd-header-actions">
+          {canStatement ? (
+            <button type="button" className="btn btn-primary btn-sm" onClick={() => setTab('statement')} aria-pressed={tab === 'statement'}>
+              <FileText size={14} aria-hidden="true" />
+              Estado de cuenta
+            </button>
+          ) : null}
+          {canWatch ? (
+            <button className="btn btn-secondary btn-sm" onClick={handleWatch} aria-pressed={watched}>
+              {watched ? <BellRing size={14} /> : <Bell size={14} />}
+              {watched ? 'Siguiendo' : 'Seguir'}
+            </button>
+          ) : null}
+        </div>
       </header>
 
       <section className="vd-kpis" aria-label="Indicadores del proveedor">

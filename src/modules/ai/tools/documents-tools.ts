@@ -129,7 +129,7 @@ async function extractFromAttachment(
   const res = await chatCompletion({
     model,
     temperature: 0,
-    maxTokens: 3500,
+    maxTokens: 8000,
     messages: [
       { role: 'system', content: EXTRACTION_SYSTEM_PROMPT },
       { role: 'user', content: parts },
@@ -137,7 +137,7 @@ async function extractFromAttachment(
   });
   const raw = parseJsonObject(res.content ?? '');
   const parsed = extractedDocumentSchema.safeParse(raw);
-  if (!parsed.success) throw new Error(`Extracción inválida: ${parsed.error.issues[0]?.message ?? 'formato'}`);
+  if (!parsed.success) throw new Error(`Extracción inválida: ${parsed.error.issues[0]?.message ?? 'formato'}. Si el archivo no es una factura/recibo (notas, listas, fotos de libreta), usa readAttachment o el contenido que ya tienes en el mensaje.`);
   return { attachment: { id: attachment.id, fileName: attachment.fileName, mimeType: attachment.mimeType }, document: parsed.data, source, model };
 }
 
@@ -168,7 +168,7 @@ registerTool({
 registerTool({
   name: 'extractDocumentData',
   description:
-    'Extrae datos estructurados de un documento adjunto (factura/CFDI, recibo, orden de compra, cotización, remisión): emisor y receptor con RFC, folio, UUID, fecha, conceptos con cantidades y precios, subtotal, impuestos y total. Funciona con PDF con texto, PDF escaneado e imágenes (OCR con visión). Si no pasas attachmentId usa el archivo más reciente de la conversación.',
+    'Extrae datos estructurados de un documento COMERCIAL adjunto (factura/CFDI, recibo, orden de compra, cotización, remisión): emisor y receptor con RFC, folio, UUID, fecha, conceptos con cantidades y precios, subtotal, impuestos y total. Funciona con PDF con texto, PDF escaneado e imágenes (OCR con visión). NO la uses para notas manuscritas, listas, reportes o fotos de libreta: para eso lee el adjunto directamente en tu contexto o usa readAttachment. Si no pasas attachmentId usa el archivo más reciente de la conversación.',
   category: 'system',
   enabledByDefault: true,
   effect: 'read',

@@ -169,7 +169,8 @@ export async function resolveAttachmentsForMessage(
   return rows.map(toResult).filter((r) => r.status === 'ready' || r.status === 'legacy');
 }
 
-async function readAttachmentBytes(attachment: AttachmentResult, maxBytes: number): Promise<Buffer> {
+/** Raw bytes of an attachment the caller already authorized (bounded read). */
+export async function readAttachmentBytes(attachment: AttachmentResult, maxBytes: number): Promise<Buffer> {
   if (attachment.storageObjectId) {
     const object = await getStorageObject(attachment.storageObjectId);
     if (!object) throw new Error('Archivo no encontrado');
@@ -196,7 +197,7 @@ export function attachmentKind(mimeType: string): AttachmentKind {
 
 const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
-const MAX_TEXT_CHARS = 12_000;
+const MAX_TEXT_CHARS = 24_000;
 const MAX_PDF_FILE_PART_BYTES = 20 * 1024 * 1024;
 
 export type ProcessedAttachment =
@@ -206,10 +207,10 @@ export type ProcessedAttachment =
   /** Scanned PDF: handed to the model as a file so it reads it with vision (OCR fallback). */
   | { type: 'file_part'; dataUrl: string; filename: string; note: string };
 
-function clip(text: string): { content: string; truncated: boolean } {
+function clip(text: string, limit: number = MAX_TEXT_CHARS): { content: string; truncated: boolean } {
   const clean = text.replace(/\r/g, '').replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
-  if (clean.length <= MAX_TEXT_CHARS) return { content: clean, truncated: false };
-  return { content: `${clean.slice(0, MAX_TEXT_CHARS)}\n[… contenido recortado: ${clean.length - MAX_TEXT_CHARS} caracteres más]`, truncated: true };
+  if (clean.length <= limit) return { content: clean, truncated: false };
+  return { content: `${clean.slice(0, limit)}\n[… contenido recortado: ${clean.length - limit} caracteres más. Usa readAttachment con maxChars mayor para leer el resto.]`, truncated: true };
 }
 
 async function extractPdfText(buffer: Buffer): Promise<string> {
@@ -293,10 +294,14 @@ async function transcribeAudio(buffer: Buffer, mimeType: string): Promise<string
  * - video → not transcribed yet (explicit note)
  * Reads are bounded in size.
  */
-export async function processAttachment(attachment: AttachmentResult): Promise<ProcessedAttachment> {
+export async function processAttachment(
+  attachment: AttachmentResult,
+  options: { maxTextChars?: number } = {}
+): Promise<ProcessedAttachment> {
   const settings = await getAiSettings();
   const maxBytes = Math.min(MAX_IN_MEMORY_BYTES, Math.max(1, settings.maxAttachmentSizeMb) * 1024 * 1024);
   const mime = attachment.mimeType;
+  const textLimit = Math.max(1000, Math.min(options.maxTextChars ?? MAX_TEXT_CHARS, 200_000));
 
   if (mime.startsWith('image/')) {
     const buffer = await readAttachmentBytes(attachment, maxBytes);
@@ -307,7 +312,7 @@ export async function processAttachment(attachment: AttachmentResult): Promise<P
     try {
       const buffer = await readAttachmentBytes(attachment, maxBytes);
       const text = await extractPdfText(buffer);
-      if (text.length > 0) return { type: 'text', ...clip(text) };
+      if (text.length > 0) return { type: 'text', ...clip(text, textLimit) };
       if (settings.ocrFallbackEnabled && buffer.length <= MAX_PDF_FILE_PART_BYTES) {
         return {
           type: 'file_part',
@@ -332,7 +337,7 @@ export async function processAttachment(attachment: AttachmentResult): Promise<P
       const buffer = await readAttachmentBytes(attachment, maxBytes);
       const text = await extractDocxText(buffer);
       if (text.trim().length === 0) return { type: 'text', content: `[El documento Word "${attachment.fileName}" no contiene texto.]` };
-      return { type: 'text', ...clip(text) };
+      return { type: 'text', ...clip(text, textLimit) };
     } catch (err) {
       return { type: 'text', content: `[Error al leer el Word: ${err instanceof Error ? err.message : 'desconocido'}]` };
     }
@@ -343,7 +348,7 @@ export async function processAttachment(attachment: AttachmentResult): Promise<P
       const buffer = await readAttachmentBytes(attachment, maxBytes);
       const text = await extractXlsxText(buffer);
       if (text.trim().length === 0) return { type: 'text', content: `[El Excel "${attachment.fileName}" está vacío.]` };
-      return { type: 'text', ...clip(text) };
+      return { type: 'text', ...clip(text, textLimit) };
     } catch (err) {
       return { type: 'text', content: `[Error al leer el Excel: ${err instanceof Error ? err.message : 'desconocido'}]` };
     }
@@ -354,7 +359,7 @@ export async function processAttachment(attachment: AttachmentResult): Promise<P
       const buffer = await readAttachmentBytes(attachment, Math.min(maxBytes, 25 * 1024 * 1024));
       const transcript = await transcribeAudio(buffer, mime);
       if (transcript.trim().length === 0) return { type: 'text', content: `[El audio "${attachment.fileName}" no contiene voz reconocible.]` };
-      return { type: 'text', ...clip(`[Transcripción del audio "${attachment.fileName}"]\n${transcript}`) };
+      return { type: 'text', ...clip(`[Transcripción del audio "${attachment.fileName}"]\n${transcript}`, textLimit) };
     } catch (err) {
       return { type: 'text', content: `[No se pudo transcribir el audio "${attachment.fileName}": ${err instanceof Error ? err.message : 'desconocido'}]` };
     }
@@ -369,7 +374,7 @@ export async function processAttachment(attachment: AttachmentResult): Promise<P
 
   if (mime.startsWith('text/') || mime === 'application/json') {
     const buffer = await readAttachmentBytes(attachment, Math.min(maxBytes, 4 * 1024 * 1024));
-    return { type: 'text', ...clip(buffer.toString('utf-8')) };
+    return { type: 'text', ...clip(buffer.toString('utf-8'), textLimit) };
   }
 
   return { type: 'file', content: `[Archivo: ${attachment.fileName}]` };
