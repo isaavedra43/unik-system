@@ -23,6 +23,8 @@ export interface HistoryMessageLike {
 export interface LastDataToolResult {
   result: Record<string, unknown>;
   rows: Record<string, unknown>[];
+  /** Field of `result` that `rows` came from (so every export page reads the same field). */
+  rowKey: string;
   /** Every array-of-objects field in the result, keyed by field name (for multi-section PDFs). */
   arrays: Record<string, Record<string, unknown>[]>;
   toolName: string | null;
@@ -63,6 +65,101 @@ export function collectRowArrays(result: Record<string, unknown>): Record<string
     }
   }
   return arrays;
+}
+
+/** Array fields that DESCRIBE a result (breakdowns, examples) instead of being its records. */
+const SUMMARY_ARRAY_KEY = /(breakdown|distribution|summary|reconciliation|examples?|samples?)$/i;
+/** Names data tools use for their main list of records, most common first. */
+const PRIMARY_ROW_KEYS = [
+  'orders', 'rows', 'records', 'results', 'invoices', 'bills', 'payments', 'packages',
+  'purchaseOrders', 'vendorCredits', 'quotes', 'contacts', 'customers', 'vendors', 'products', 'groups',
+];
+
+/**
+ * The array that holds the RECORDS of a data result — what a report must list.
+ *
+ * Never "the first array": querySalesOrders returns `ticketStatusBreakdown` (1-3 summary rows)
+ * BEFORE `orders`, so the first-array rule exported the breakdown, and the orchestrator then kept
+ * the 9 rows the model had hand-typed because they were "more" — a PDF with 9 of 65 orders under
+ * KPI cards that said 65 (bug reported 2026-09-14).
+ */
+export function pickPrimaryRowArray(result: Record<string, unknown>): { key: string; rows: Record<string, unknown>[] } | null {
+  const arrays = collectRowArrays(result);
+  const keys = Object.keys(arrays);
+  if (keys.length === 0) return null;
+  const records = keys.filter((k) => !SUMMARY_ARRAY_KEY.test(k));
+  const pool = records.length > 0 ? records : keys;
+  const showing = typeof result.showing === 'number' ? result.showing : NaN;
+  const sameSizeAsShowing = pool.filter((k) => arrays[k].length === showing);
+  const key =
+    (sameSizeAsShowing.length === 1 ? sameSizeAsShowing[0] : undefined) ??
+    PRIMARY_ROW_KEYS.find((k) => pool.includes(k)) ??
+    pool[0];
+  return { key, rows: arrays[key] };
+}
+
+/**
+ * How many records a paginated list result says match in total, or null when the result does
+ * not declare it (grouped results, summaries, or a `total` that is money rather than a count).
+ */
+export function declaredRowTotal(result: Record<string, unknown>): number | null {
+  if (result.mode === 'grouped') return null;
+  const paged = result.mode === 'list' || typeof result.showing === 'number' || typeof result.totalPages === 'number';
+  if (!paged || typeof result.total !== 'number') return null;
+  return Number.isInteger(result.total) && result.total >= 0 ? result.total : null;
+}
+
+export interface ReportRowsDecision {
+  rows: Record<string, unknown>[];
+  source: 'system' | 'model';
+  expectedRows: number | null;
+  includedRows: number;
+  complete: boolean;
+  /** Set when the report must NOT be generated because it would silently miss rows. */
+  blockReason?: string;
+}
+
+/**
+ * Decides which rows go into a report (PDF/Excel/CSV/image/table) and whether it may be delivered.
+ * A report is never allowed to hold fewer rows than the query declared unless that is explicit:
+ * the user picked a subset (subsetOnly) or the export cap was hit — both are labeled, never silent.
+ */
+export function resolveReportRows(input: {
+  modelRows: Record<string, unknown>[] | null;
+  systemRows: Record<string, unknown>[];
+  expectedRows: number | null;
+  subsetOnly: boolean;
+  exportCap: number;
+}): ReportRowsDecision {
+  const { modelRows, systemRows, expectedRows: expected, subsetOnly, exportCap } = input;
+
+  if (subsetOnly && modelRows && modelRows.length > 0) {
+    const n = modelRows.length;
+    return { rows: modelRows, source: 'model', expectedRows: expected, includedRows: n, complete: expected === null || n >= expected };
+  }
+
+  const systemComplete = expected === null || systemRows.length >= expected;
+  if (systemComplete && modelRows && modelRows.length > systemRows.length) {
+    // The model merged several results: more rows than the last query holds.
+    return { rows: modelRows, source: 'model', expectedRows: expected, includedRows: modelRows.length, complete: true };
+  }
+  if (systemComplete) {
+    return { rows: systemRows, source: 'system', expectedRows: expected, includedRows: systemRows.length, complete: true };
+  }
+  if (expected !== null && expected > exportCap && systemRows.length >= exportCap) {
+    // Too many rows for one file: deliver the cap, labeled as partial.
+    return { rows: systemRows, source: 'system', expectedRows: expected, includedRows: systemRows.length, complete: false };
+  }
+  return {
+    rows: systemRows,
+    source: 'system',
+    expectedRows: expected,
+    includedRows: systemRows.length,
+    complete: false,
+    blockReason:
+      `El reporte NO se generó: solo se obtuvieron ${systemRows.length} de ${expected} filas de la consulta y entregar un archivo incompleto está prohibido. ` +
+      'Vuelve a llamar la tool de datos con los mismos filtros y en cuanto responda genera el reporte de nuevo. Si vuelve a fallar, dile al usuario exactamente eso; no entregues ni describas un reporte parcial.',
+  };
 }
 
 /**
@@ -107,14 +204,14 @@ export function findLastDataToolResult(history: HistoryMessageLike[]): LastDataT
     if (call && ARTIFACT_TOOL_NAMES.has(call.name)) continue;
     if (isArtifactResult(result)) continue;
 
-    const arrays = collectRowArrays(result);
-    const firstKey = Object.keys(arrays)[0];
-    if (!firstKey) continue;
+    const primary = pickPrimaryRowArray(result);
+    if (!primary) continue;
 
     return {
       result,
-      rows: arrays[firstKey],
-      arrays,
+      rows: primary.rows,
+      rowKey: primary.key,
+      arrays: collectRowArrays(result),
       toolName: call?.name ?? null,
       toolArgs: call?.args ?? null,
     };

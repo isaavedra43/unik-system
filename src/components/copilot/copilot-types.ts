@@ -208,6 +208,7 @@ const TOOL_LABELS: Record<string, { running: string; done: string }> = {
   queryProducts: { running: 'Buscando productos', done: 'Productos revisados' },
   getProductSearch: { running: 'Buscando productos', done: 'Productos revisados' },
   searchKnowledgeLibrary: { running: 'Buscando en la biblioteca', done: 'Biblioteca consultada' },
+  findShareableDocument: { running: 'Buscando el archivo autorizado', done: 'Archivo autorizado revisado' },
   universalSearch: { running: 'Buscando en todo UNIK', done: 'Búsqueda completa' },
   getDatabaseOverview: { running: 'Revisando datos disponibles', done: 'Datos revisados' },
   sendInternalChatMessage: { running: 'Preparando aviso al equipo', done: 'Aviso propuesto' },

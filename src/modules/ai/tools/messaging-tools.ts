@@ -10,6 +10,7 @@ import { channelLabel, pickConversationForContact, resolveContact, type Preferre
 import { sendOutboundMessage, startConversation } from '@/modules/comms/comms-service';
 import { CommsError } from '@/modules/comms/comms-errors';
 import { extractArtifactIdsFromLinks, formatForCustomerChannel, stripArtifactLinks } from '../customer-message-format';
+import { findShareableDocuments, listShareableDocuments, resolveApprovedDocumentFile } from '@/modules/copilot/knowledge-service';
 
 /**
  * Messaging tools: WhatsApp / SMS to any contact (by name or phone), bulk
@@ -23,7 +24,7 @@ const WHATSAPP_WINDOW_MS = 24 * 60 * 60 * 1000;
 const attachmentsSchema = z
   .object({
     artifactIds: z.array(z.string()).max(5).optional().describe('Reportes/PDFs generados en este chat (artifactId)'),
-    knowledgeSourceIds: z.array(z.string()).max(5).optional().describe('Documentos aprobados de la biblioteca (de listAttachableDocuments)'),
+    knowledgeSourceIds: z.array(z.string()).max(5).optional().describe('Documentos aprobados de la biblioteca (knowledgeSourceId de findShareableDocument o listAttachableDocuments)'),
   })
   .optional();
 
@@ -105,16 +106,14 @@ export async function resolveMediaObjectIds(actor: CurrentUser, attachments: Att
     labels.push(String((artifact.meta as Record<string, unknown> | null)?.title ?? 'Reporte'));
   }
   for (const sourceId of attachments?.knowledgeSourceIds ?? []) {
-    const source = await prisma.knowledgeSource.findUnique({
-      where: { id: sourceId },
-      select: { id: true, title: true, visibility: true, status: true, currentVersionId: true, versions: { where: { status: 'ready' }, orderBy: { version: 'desc' }, take: 1, select: { id: true, storageObjectId: true } } },
-    });
-    if (!source || source.status !== 'approved') throw new CommsError(`El documento ${sourceId} no está aprobado en la biblioteca`, 404);
-    if (external && source.visibility !== 'publishable') throw new CommsError(`"${source.title}" es interno: no puede enviarse a clientes`, 403);
-    const version = source.versions[0];
-    if (!version?.storageObjectId) throw new CommsError(`"${source.title}" no tiene archivo adjuntable (es texto o URL)`, 400);
-    ids.push(version.storageObjectId);
-    labels.push(source.title);
+    // Always the APPROVED current version: a newer upload still under review is never sent.
+    const doc = await resolveApprovedDocumentFile(sourceId);
+    if (!doc || doc.status !== 'approved') throw new CommsError(`El documento ${sourceId} no está aprobado en la biblioteca`, 404);
+    if (doc.expired) throw new CommsError(`"${doc.title}" está vencido: actualízalo en la biblioteca antes de enviarlo`, 409);
+    if (external && doc.visibility !== 'publishable') throw new CommsError(`"${doc.title}" es interno: no puede enviarse a clientes`, 403);
+    if (!doc.storageObjectId) throw new CommsError(`"${doc.title}" no tiene archivo adjuntable (es texto o URL)`, 400);
+    ids.push(doc.storageObjectId);
+    labels.push(doc.title);
   }
   return { ids, labels };
 }
@@ -255,44 +254,42 @@ registerTool({
 registerTool({
   name: 'listAttachableDocuments',
   description:
-    'Lista documentos aprobados de la biblioteca que se pueden adjuntar a mensajes (catálogos, fichas, listas de precios). Devuelve id, título, etiquetas y si es publicable (enviable a clientes).',
+    'Lista documentos aprobados y vigentes de la biblioteca que se pueden adjuntar a mensajes (catálogos, promociones, fichas, listas de precios). Devuelve knowledgeSourceId, título, categoría, etiquetas, "cuándo usarlo" y si es publicable (enviable a clientes). Si el usuario pide un archivo concreto ("mándale el PDF de promociones") usa findShareableDocument.',
   category: 'knowledge',
   enabledByDefault: true,
   effect: 'read',
   parameters: z.object({
-    search: z.string().max(100).optional().describe('Título o etiqueta, ej. "catálogo"'),
+    search: z.string().max(100).optional().describe('Título, etiqueta o tema, ej. "catálogo"'),
     publishableOnly: z.boolean().default(true),
   }),
   execute: async (_actor, rawArgs) => {
     const a = rawArgs as { search?: string; publishableOnly: boolean };
-    const term = a.search?.trim().toLowerCase();
-    const sources = await prisma.knowledgeSource.findMany({
-      where: { status: 'approved', ...(a.publishableOnly ? { visibility: 'publishable' } : {}) },
-      orderBy: { updatedAt: 'desc' },
-      select: { id: true, title: true, description: true, kind: true, visibility: true, tags: true, versions: { where: { status: 'ready' }, orderBy: { version: 'desc' }, take: 1, select: { storageObjectId: true } } },
-    });
-    const objectIds = sources.map((s) => s.versions[0]?.storageObjectId).filter((id): id is string => Boolean(id));
-    const objects = objectIds.length > 0
-      ? await prisma.storageObject.findMany({ where: { id: { in: objectIds }, status: 'ready' }, select: { id: true, originalName: true, declaredMimeType: true, sizeBytes: true } })
-      : [];
-    const objectById = new Map(objects.map((o) => [o.id, o]));
-    const docs = sources
-      .filter((s) => s.versions[0]?.storageObjectId && objectById.has(s.versions[0].storageObjectId))
-      .filter((s) => !term || s.title.toLowerCase().includes(term) || s.tags.some((t) => t.toLowerCase().includes(term)) || (s.description ?? '').toLowerCase().includes(term))
-      .map((s) => {
-        const object = objectById.get(s.versions[0]!.storageObjectId!)!;
-        return {
-          knowledgeSourceId: s.id,
-          title: s.title,
-          description: s.description,
-          tags: s.tags,
-          visibility: s.visibility,
-          fileName: object.originalName,
-          mimeType: object.declaredMimeType,
-          sizeBytes: Number(object.sizeBytes),
-        };
-      });
-    return { count: docs.length, documents: docs, note: docs.length === 0 ? 'No hay documentos adjuntables. Un administrador puede subirlos en Biblioteca aprobada (marcados como publicables).' : undefined };
+    const docs = await listShareableDocuments({ includeInternal: !a.publishableOnly, search: a.search });
+    return {
+      count: docs.length,
+      documents: docs,
+      note:
+        docs.length === 0
+          ? 'No hay documentos adjuntables que coincidan. Un administrador puede subirlos en Biblioteca aprobada (publicables y aprobados).'
+          : undefined,
+    };
+  },
+});
+
+registerTool({
+  name: 'findShareableDocument',
+  description:
+    'Elige EL archivo autorizado para enviar cuando el usuario lo pide por nombre o tema ("mándale el PDF de promociones al cliente", "pásale el catálogo"). Solo considera documentos de la biblioteca aprobados, publicables y vigentes, siempre en su versión aprobada. Devuelve decision (single | ambiguous | none), los candidatos con knowledgeSourceId y la instrucción a seguir. Úsala ANTES de preparar el envío.',
+  category: 'knowledge',
+  enabledByDefault: true,
+  effect: 'read',
+  parameters: z.object({
+    request: z.string().min(2).max(200).describe('Qué archivo pidió el usuario, con sus palabras. Ej: "pdf de promociones"'),
+    limit: z.number().int().min(1).max(5).default(3),
+  }),
+  execute: async (_actor, rawArgs) => {
+    const a = rawArgs as { request: string; limit: number };
+    return findShareableDocuments(a.request, a.limit);
   },
 });
 

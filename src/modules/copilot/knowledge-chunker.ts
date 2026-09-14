@@ -94,8 +94,12 @@ export function chunkText(text: string, options: ChunkOptions = {}): TextChunk[]
   return chunks;
 }
 
-/** Turns a user query into a safe tsquery string (AND of alphanumeric terms). Pure. */
-export function buildTsQuery(query: string): string {
+/**
+ * Turns a user query into a safe, accent-folded prefix tsquery: every term (`and`, default) or any
+ * term (`or`, the fallback when no fragment has them all). Pure. The indexed text is folded the
+ * same way (see FOLDED_TSVECTOR in knowledge-service.ts).
+ */
+export function buildTsQuery(query: string, mode: 'and' | 'or' = 'and'): string {
   const terms = query
     .normalize('NFD')
     .replace(/[̀-ͯ]/g, '')
@@ -104,5 +108,5 @@ export function buildTsQuery(query: string): string {
     .filter((t) => t.length >= 2)
     .slice(0, 12);
   if (terms.length === 0) return '';
-  return terms.map((t) => `${t}:*`).join(' & ');
+  return terms.map((t) => `${t}:*`).join(mode === 'or' ? ' | ' : ' & ');
 }

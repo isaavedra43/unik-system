@@ -358,10 +358,13 @@ export async function receiveDiskPart(
   claims: UploadPartClaims,
   body: Readable
 ): Promise<{ etag: string }> {
-  const driver = getObjectStorageDriver();
-  if (!(driver instanceof DiskObjectStorageDriver)) {
+  const shared = getObjectStorageDriver();
+  // Check the provider, not `instanceof`: the driver is cached on globalThis and may have been
+  // created by another bundle (instrumentation/job worker) with its own copy of the class.
+  if (shared.provider !== 'disk') {
     throw new StorageError('Subida directa no disponible con este proveedor', 'state', 400);
   }
+  const driver = shared as DiskObjectStorageDriver;
   const repo = getStorageRepository();
   const session = await repo.getSession(claims.uploadId);
   if (!session) throw new StorageError('Carga no encontrada', 'not_found', 404);

@@ -252,6 +252,7 @@ export const DEFAULT_AI_SETTINGS: AiSettings = {
     'sendMessageToContact',
     'sendBulkMessages',
     'listAttachableDocuments',
+    'findShareableDocument',
     'shareArtifact',
     'getPickupLocation',
     'scheduleFollowUp',

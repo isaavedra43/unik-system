@@ -97,7 +97,11 @@ export interface VoiceCallDTO {
   toIdentity: string | null;
   externalNumber: string | null;
   accountId: string | null;
+  /** Label of the phone line (CommAccount) the call went through. */
+  accountLabel: string | null;
   contactId: string | null;
+  /** Display name of the linked CommContact, when the number is known. */
+  contactName: string | null;
   initiatedByUserId: string | null;
   aiState: AiState;
   aiMode: AiMode;
@@ -203,10 +207,19 @@ async function userNames(userIds: string[]): Promise<Map<string, string>> {
 }
 
 export async function toCallDTO(call: CallWithRelations): Promise<VoiceCallDTO> {
-  const names = await userNames(
-    call.participants.map((p) => p.userId).filter((v): v is string => Boolean(v))
-  );
-  const segmentCount = await prisma.voiceTranscriptSegment.count({ where: { callId: call.id } });
+  const [names, segmentCount, contact, account] = await Promise.all([
+    userNames(call.participants.map((p) => p.userId).filter((v): v is string => Boolean(v))),
+    prisma.voiceTranscriptSegment.count({ where: { callId: call.id } }),
+    call.contactId
+      ? prisma.commContact.findUnique({
+          where: { id: call.contactId },
+          select: { displayName: true },
+        })
+      : null,
+    call.accountId
+      ? prisma.commAccount.findUnique({ where: { id: call.accountId }, select: { label: true } })
+      : null,
+  ]);
   return {
     id: call.id,
     type: call.type as CallType,
@@ -216,7 +229,9 @@ export async function toCallDTO(call: CallWithRelations): Promise<VoiceCallDTO> 
     toIdentity: call.toIdentity,
     externalNumber: call.externalNumber,
     accountId: call.accountId,
+    accountLabel: account?.label ?? null,
     contactId: call.contactId,
+    contactName: contact?.displayName ?? null,
     initiatedByUserId: call.initiatedByUserId,
     aiState: call.aiState as AiState,
     aiMode: aiModeOf(call),

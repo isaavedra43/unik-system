@@ -46,6 +46,11 @@ describe('knowledge chunker', () => {
     expect(buildTsQuery("'; DROP TABLE x; --")).toBe('drop:* & table:*');
     expect(buildTsQuery('a')).toBe('');
   });
+
+  it('builds the any-term fallback with folded accents ("años" → anos)', () => {
+    expect(buildTsQuery('Precio 10 años', 'or')).toBe('precio:* | 10:* | anos:*');
+    expect(buildTsQuery('x', 'or')).toBe('');
+  });
 });
 
 describe('preferences prompt', () => {

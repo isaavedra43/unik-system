@@ -1,151 +1,367 @@
 'use client';
 
 import React from 'react';
-import { Bot, Circle, Mic, PhoneIncoming, PhoneOutgoing, Users } from 'lucide-react';
+import {
+  AudioLines,
+  MessageSquareText,
+  PhoneCall,
+  PhoneOutgoing,
+  RefreshCw,
+  SearchX,
+} from 'lucide-react';
 import type { VoiceCallDTO } from '@/modules/voice/voice-service';
+import { Button, IconButton, Select } from '@/components/ui/primitives';
+import { cn } from '@/lib/utils';
+import { CallDirectionIcon } from './CallBadges';
+import {
+  aiHandled,
+  callSubtitle,
+  callTitle,
+  dayKey,
+  dayLabel,
+  externalNumberOf,
+  formatDuration,
+  handlerLabel,
+  summarySnippet,
+  timeLabel,
+  type HistoryFilter,
+} from './calls-format';
 
-export const STATUS_LABEL: Record<VoiceCallDTO['status'], { label: string; badge: string }> = {
-  ringing: { label: 'Timbrando', badge: 'badge-warning' },
-  active: { label: 'En curso', badge: 'badge-success' },
-  ended: { label: 'Finalizada', badge: 'badge-weak' },
-  failed: { label: 'Fallida', badge: 'badge-danger' },
-  missed: { label: 'Perdida', badge: 'badge-danger' },
-};
+export type TypeFilter = 'all' | VoiceCallDTO['type'];
 
-export const TYPE_LABEL: Record<VoiceCallDTO['type'], string> = {
-  internal: 'Interna',
-  inbound: 'Entrante',
-  outbound: 'Saliente',
-};
+const FILTERS: Array<{ key: HistoryFilter; label: string }> = [
+  { key: 'all', label: 'Todas' },
+  { key: 'missed', label: 'Perdidas' },
+  { key: 'ai', label: 'IA atendió' },
+  { key: 'recorded', label: 'Con grabación' },
+];
 
-export function formatDuration(sec: number | null): string {
-  if (sec === null || !Number.isFinite(sec)) return '—';
-  const m = Math.floor(sec / 60);
-  const s = sec % 60;
-  return `${m}:${String(s).padStart(2, '0')}`;
+export interface CallsListProps {
+  calls: VoiceCallDTO[];
+  total: number;
+  counts: Record<HistoryFilter, number>;
+  filter: HistoryFilter;
+  onFilterChange: (filter: HistoryFilter) => void;
+  type: TypeFilter;
+  onTypeChange: (type: TypeFilter) => void;
+  agent: string;
+  onAgentChange: (agent: string) => void;
+  agents: Array<{ id: string; name: string }>;
+  showAgentFilter: boolean;
+  hasActiveFilters: boolean;
+  onClearFilters: () => void;
+  selectedId: string | null;
+  onSelect: (id: string) => void;
+  userId: string;
+  loading: boolean;
+  error: string | null;
+  onRetry: () => void;
+  onCallback?: (call: VoiceCallDTO) => void;
+  canCall: boolean;
+  onNewCall: () => void;
 }
 
-export function AiBadge({ call }: { call: VoiceCallDTO }) {
-  if (call.aiState === 'off') return <span className="badge badge-weak">IA apagada</span>;
-  if (call.aiState === 'paused') return <span className="badge badge-warning">IA en pausa</span>;
+export function CallsList(props: CallsListProps) {
+  const {
+    calls,
+    total,
+    counts,
+    filter,
+    onFilterChange,
+    type,
+    onTypeChange,
+    agent,
+    onAgentChange,
+    agents,
+    showAgentFilter,
+    hasActiveFilters,
+    onClearFilters,
+    loading,
+    error,
+    onRetry,
+    canCall,
+    onNewCall,
+  } = props;
+
   return (
-    <span className="badge badge-info">
-      <Bot size={12} aria-hidden="true" /> {call.aiMode === 'answer' ? 'IA atiende' : 'Copiloto'}
-    </span>
+    <section className="calls-panel" aria-label="Historial de llamadas">
+      <div className="calls-toolbar">
+        <div className="calls-seg" role="group" aria-label="Filtrar historial">
+          {FILTERS.map((f) => (
+            <button
+              key={f.key}
+              type="button"
+              aria-pressed={filter === f.key}
+              onClick={() => onFilterChange(f.key)}
+            >
+              {f.label}
+              <span className="calls-seg-count">{counts[f.key]}</span>
+            </button>
+          ))}
+        </div>
+        <div className="calls-toolbar-selects">
+          <Select
+            value={type}
+            onChange={(e) => onTypeChange(e.target.value as TypeFilter)}
+            aria-label="Tipo de llamada"
+          >
+            <option value="all">Todos los tipos</option>
+            <option value="inbound">Entrantes</option>
+            <option value="outbound">Salientes</option>
+            <option value="internal">Internas</option>
+          </Select>
+          {showAgentFilter ? (
+            <Select
+              value={agent}
+              onChange={(e) => onAgentChange(e.target.value)}
+              aria-label="Agente"
+            >
+              <option value="all">Todo el equipo</option>
+              {agents.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.name}
+                </option>
+              ))}
+            </Select>
+          ) : null}
+        </div>
+      </div>
+
+      {loading && total === 0 ? (
+        <div className="calls-skeleton" aria-busy="true" aria-label="Cargando llamadas">
+          {[72, 58, 66, 50, 62].map((w, i) => (
+            <div key={i} className="calls-skeleton-row">
+              <span className="calls-skel is-circle" />
+              <span className="calls-skel-lines">
+                <span className="calls-skel" style={{ width: `${w}%` }} />
+                <span className="calls-skel is-thin" style={{ width: `${w - 22}%` }} />
+              </span>
+              <span className="calls-skel" />
+            </div>
+          ))}
+        </div>
+      ) : error && total === 0 ? (
+        <div className="calls-empty">
+          <span className="calls-empty-icon" aria-hidden="true">
+            <RefreshCw size={18} />
+          </span>
+          <h3>No se pudieron cargar las llamadas</h3>
+          <p>{error}</p>
+          <Button variant="secondary" size="sm" onClick={onRetry} icon={<RefreshCw size={14} />}>
+            Reintentar
+          </Button>
+        </div>
+      ) : total === 0 ? (
+        <div className="calls-empty">
+          <span className="calls-empty-icon" aria-hidden="true">
+            <PhoneCall size={18} />
+          </span>
+          <h3>Aún no hay llamadas</h3>
+          <p>
+            Cuando alguien llame a tus líneas o hagas una llamada, aquí verás quién llamó, quién
+            atendió, el resumen y la grabación.
+          </p>
+          {canCall ? (
+            <Button size="sm" onClick={onNewCall} icon={<PhoneOutgoing size={14} />}>
+              Hacer una llamada
+            </Button>
+          ) : null}
+        </div>
+      ) : calls.length === 0 ? (
+        <div className="calls-empty">
+          <span className="calls-empty-icon" aria-hidden="true">
+            <SearchX size={18} />
+          </span>
+          <h3>Ninguna llamada coincide</h3>
+          <p>Prueba con otro nombre o número, o quita los filtros.</p>
+          <Button variant="secondary" size="sm" onClick={onClearFilters}>
+            Quitar filtros
+          </Button>
+        </div>
+      ) : (
+        <CallGroups {...props} />
+      )}
+
+      {total > 0 ? (
+        <footer className="calls-list-foot">
+          <span className="calls-foot-count">
+            {hasActiveFilters
+              ? `${calls.length} de ${total} llamadas`
+              : `${total} ${total === 1 ? 'llamada reciente' : 'llamadas recientes'}`}
+            {error ? ' · sin actualizar' : ''}
+          </span>
+          <span className="calls-foot-keys">
+            <kbd className="calls-kbd">J</kbd>
+            <kbd className="calls-kbd">K</kbd> moverse
+          </span>
+          <span className="calls-foot-keys">
+            <kbd className="calls-kbd">/</kbd> buscar
+          </span>
+          {canCall ? (
+            <span className="calls-foot-keys">
+              <kbd className="calls-kbd">N</kbd> nueva llamada
+            </span>
+          ) : null}
+        </footer>
+      ) : null}
+    </section>
   );
 }
 
-export function RecordingBadge({ call }: { call: VoiceCallDTO }) {
-  if (call.recordingState === 'recording') {
+function CallGroups({ calls, selectedId, onSelect, userId, onCallback }: CallsListProps) {
+  const groups: Array<{ key: string; label: string; calls: VoiceCallDTO[] }> = [];
+  for (const call of calls) {
+    const key = dayKey(call.createdAt);
+    let group = groups[groups.length - 1];
+    if (!group || group.key !== key) {
+      group = { key, label: dayLabel(call.createdAt), calls: [] };
+      groups.push(group);
+    }
+    group.calls.push(call);
+  }
+
+  return (
+    <div>
+      <div className="calls-cols" aria-hidden="true">
+        <span />
+        <span>Llamada</span>
+        <span>Atendió</span>
+        <span />
+        <span className="is-right">Hora</span>
+        <span className="is-right">Dur.</span>
+      </div>
+      {groups.map((group) => (
+        <div key={group.key} role="group" aria-label={group.label}>
+          <div className="calls-day">
+            {group.label}
+            <span>
+              {group.calls.length} {group.calls.length === 1 ? 'llamada' : 'llamadas'}
+            </span>
+          </div>
+          <ul className="calls-rows">
+            {group.calls.map((call) => (
+              <CallRow
+                key={call.id}
+                call={call}
+                selected={selectedId === call.id}
+                onSelect={onSelect}
+                userId={userId}
+                onCallback={onCallback}
+              />
+            ))}
+          </ul>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function CallRow({
+  call,
+  selected,
+  onSelect,
+  userId,
+  onCallback,
+}: {
+  call: VoiceCallDTO;
+  selected: boolean;
+  onSelect: (id: string) => void;
+  userId: string;
+  onCallback?: (call: VoiceCallDTO) => void;
+}) {
+  const title = callTitle(call, userId);
+  const snippet =
+    call.status === 'missed'
+      ? 'Sin respuesta'
+      : call.status === 'failed'
+        ? 'No se pudo conectar'
+        : summarySnippet(call.summary);
+  const canCallBack = Boolean(onCallback && externalNumberOf(call));
+
+  return (
+    <li className={cn('calls-row', selected && 'is-selected', canCallBack && 'has-actions')}>
+      <button
+        type="button"
+        className="calls-row-main"
+        data-call-id={call.id}
+        onClick={() => onSelect(call.id)}
+        aria-current={selected || undefined}
+      >
+        <CallDirectionIcon call={call} />
+        <span className="calls-who">
+          <strong title={title}>{title}</strong>
+          <small>
+            <span className={call.contactName ? 'calls-mono' : undefined}>
+              {callSubtitle(call)}
+            </span>
+            {snippet ? (
+              <span
+                className={
+                  call.status === 'missed' || call.status === 'failed'
+                    ? 'calls-text-danger'
+                    : undefined
+                }
+              >
+                {' · '}
+                {snippet}
+              </span>
+            ) : null}
+          </small>
+        </span>
+        <span className="calls-handler">{handlerLabel(call, userId)}</span>
+        <RowMarks call={call} />
+        <span className="calls-time">{timeLabel(call.createdAt)}</span>
+        <span className="calls-dur">{formatDuration(call.durationSec)}</span>
+      </button>
+      {canCallBack ? (
+        <span className="calls-row-actions">
+          <IconButton
+            onClick={() => onCallback?.(call)}
+            aria-label={`Devolver llamada a ${title}`}
+            title="Devolver llamada"
+          >
+            <PhoneOutgoing size={15} />
+          </IconButton>
+        </span>
+      ) : null}
+    </li>
+  );
+}
+
+function RowMarks({ call }: { call: VoiceCallDTO }) {
+  if (call.status === 'missed') {
     return (
-      <span className="badge badge-danger">
-        <Circle size={10} fill="currentColor" aria-hidden="true" /> Grabando
+      <span className="calls-marks">
+        <span className="badge badge-danger">Perdida</span>
       </span>
     );
   }
-  if (call.recordingObjectId) return <span className="badge badge-success">Grabación</span>;
-  return <span className="badge badge-weak">Sin grabar</span>;
-}
-
-function TypeIcon({ type }: { type: VoiceCallDTO['type'] }) {
-  if (type === 'inbound') return <PhoneIncoming size={16} aria-hidden="true" />;
-  if (type === 'outbound') return <PhoneOutgoing size={16} aria-hidden="true" />;
-  return <Users size={16} aria-hidden="true" />;
-}
-
-export function CallsList({
-  calls,
-  selectedId,
-  onSelect,
-  loading,
-  error,
-}: {
-  calls: VoiceCallDTO[];
-  selectedId: string | null;
-  onSelect: (id: string) => void;
-  loading: boolean;
-  error: string | null;
-}) {
-  if (loading && calls.length === 0)
-    return <div className="assistant-admin-loading">Cargando llamadas…</div>;
-  if (error && calls.length === 0)
+  if (call.status === 'failed') {
     return (
-      <div className="alert alert-error" role="alert">
-        {error}
-      </div>
-    );
-  if (calls.length === 0) {
-    return (
-      <div className="empty-state">
-        <div className="empty-state-icon">
-          <Mic size={40} aria-hidden="true" />
-        </div>
-        <h3 className="empty-state-title">Sin llamadas</h3>
-        <p>Aquí aparecerán tus llamadas internas, entrantes y salientes.</p>
-      </div>
+      <span className="calls-marks">
+        <span className="badge badge-danger">Falló</span>
+      </span>
     );
   }
   return (
-    <div className="table-wrap">
-      <table className="table" style={{ width: '100%' }}>
-        <thead>
-          <tr>
-            <th scope="col">Tipo</th>
-            <th scope="col">Con</th>
-            <th scope="col">Estado</th>
-            <th scope="col">Duración</th>
-            <th scope="col">IA</th>
-            <th scope="col">Grabación</th>
-          </tr>
-        </thead>
-        <tbody>
-          {calls.map((call) => {
-            const others = call.participants
-              .filter((p) => p.role !== 'supervisor' && p.role !== 'ai')
-              .map(
-                (p) =>
-                  p.userName ??
-                  (p.identity.startsWith('sip-') ? (call.externalNumber ?? 'Teléfono') : p.identity)
-              );
-            const status = STATUS_LABEL[call.status];
-            return (
-              <tr
-                key={call.id}
-                onClick={() => onSelect(call.id)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    onSelect(call.id);
-                  }
-                }}
-                tabIndex={0}
-                aria-selected={selectedId === call.id}
-                style={{
-                  cursor: 'pointer',
-                  background: selectedId === call.id ? 'var(--unik-surface-hover)' : undefined,
-                }}
-              >
-                <td>
-                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}>
-                    <TypeIcon type={call.type} /> {TYPE_LABEL[call.type]}
-                  </span>
-                </td>
-                <td>{others.length ? others.join(', ') : (call.externalNumber ?? '—')}</td>
-                <td>
-                  <span className={`badge ${status.badge}`}>{status.label}</span>
-                </td>
-                <td>{formatDuration(call.durationSec)}</td>
-                <td>
-                  <AiBadge call={call} />
-                </td>
-                <td>
-                  <RecordingBadge call={call} />
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
+    <span className="calls-marks">
+      {aiHandled(call) ? (
+        <span className="badge badge-info">IA atendió</span>
+      ) : call.aiState === 'paused' ? (
+        <span className="badge badge-warning">IA en pausa</span>
+      ) : null}
+      {call.segmentCount > 0 ? (
+        <span className="calls-mark" title={`${call.segmentCount} frases transcritas`}>
+          <MessageSquareText size={15} aria-hidden="true" />
+          <span className="sr-only">Con transcripción</span>
+        </span>
+      ) : null}
+      {call.recordingObjectId ? (
+        <span className="calls-mark" title="Con grabación">
+          <AudioLines size={15} aria-hidden="true" />
+          <span className="sr-only">Con grabación</span>
+        </span>
+      ) : null}
+    </span>
   );
 }

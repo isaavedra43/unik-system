@@ -2036,7 +2036,7 @@ model KnowledgeSource {
   id               String                   @id @default(cuid())
   title            String
   description      String?
-  /// document | url | text
+  /// document | url | website | text
   kind             String
   /// internal | publishable
   visibility       String                   @default("internal")
@@ -2044,6 +2044,12 @@ model KnowledgeSource {
   status           String                   @default("draft")
   currentVersionId String?
   tags             String[]                 @default([])
+  /// promociones | catalogos | precios | fichas_tecnicas | politicas | manuales | procesos | capacitacion | otro
+  category         String?
+  /// Hint the assistant uses to pick this document ("cuando un distribuidor pide precios").
+  useWhen          String?
+  /// After this moment the source is neither cited nor sent.
+  expiresAt        DateTime?
   createdBy        String
   approvedBy       String?
   approvedAt       DateTime?
@@ -2052,6 +2058,7 @@ model KnowledgeSource {
   versions         KnowledgeSourceVersion[]
 
   @@index([status, visibility])
+  @@index([category])
 }
 
 model KnowledgeSourceVersion {
@@ -2065,6 +2072,13 @@ model KnowledgeSourceVersion {
   sha256          String?
   chunkCount      Int              @default(0)
   error           String?
+  fileName        String?
+  mimeType        String?
+  sizeBytes       Int?
+  /// Pages read for url/website versions.
+  pageCount       Int              @default(0)
+  /// Becomes the current approved version as soon as processing succeeds.
+  autoApprove     Boolean          @default(false)
   createdBy       String
   createdAt       DateTime         @default(now())
   source          KnowledgeSource  @relation(fields: [sourceId], references: [id], onDelete: Cascade)

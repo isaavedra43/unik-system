@@ -23,6 +23,7 @@ import { listEstimates } from '@/modules/integrations/zoho/estimates';
 import { QUOTE_SEGMENTS } from '@/modules/quotes/quotes-filters';
 import { getQuoteStatusLabel } from '@/modules/quotes/quotes-helpers';
 import { prisma } from '@/lib/prisma';
+import { getCustomerForQuote } from '@/modules/quotes/quotes-service';
 import { absoluteUrl } from '@/lib/app-url';
 import { previewText } from '@/modules/comms/normalize';
 import { isZohoBooksMockEnabled } from '@/modules/integrations/zoho/config';
@@ -615,6 +616,22 @@ export async function findCatalogProducts(query: string, limit = 6) {
   return [];
 }
 
+/** Active customer by Zoho id or by name; exact names win, active wins over inactive, otherwise the candidates are returned. */
+async function resolveQuoteCustomer(reference: string): Promise<{ customer: { zohoContactId: string; contactName: string | null } | null; candidates: Array<{ customerId: string; name: string | null; status: string | null }> }> {
+  const ref = reference.trim();
+  const byId = /^\d{6,}$/.test(ref) ? await getCustomerForQuote(ref) : null;
+  if (byId) return { customer: { zohoContactId: byId.zohoContactId, contactName: byId.contactName }, candidates: [] };
+  const found = await aiSearchCustomers(ref, 10);
+  const isActive = (c: { status: string | null }) => (c.status ?? 'active').toLowerCase() === 'active';
+  const norm = normalizeName(ref);
+  const exact = found.filter((c) => normalizeName(c.contactName ?? '') === norm || normalizeName(c.companyName ?? '') === norm);
+  const pool = exact.length > 0 ? exact : found;
+  const active = pool.filter(isActive);
+  const pick = active.length === 1 ? active[0] : pool.length === 1 && isActive(pool[0]) ? pool[0] : exact.length > 0 && active.length > 1 ? active[0] : null;
+  if (pick) return { customer: { zohoContactId: pick.zohoContactId, contactName: pick.contactName }, candidates: [] };
+  return { customer: null, candidates: found.map((c) => ({ customerId: c.zohoContactId, name: c.contactName ?? c.companyName, status: c.status })) };
+}
+
 async function resolveRequestedLine(line: { query: string; quantity: number; unit?: string; rate?: number; notes?: string }): Promise<ResolvedProductLine> {
   const candidates = await findCatalogProducts(line.query, 6);
   const q = line.query.trim().toLowerCase();
@@ -645,7 +662,7 @@ registerTool({
   effect: 'draft',
   parameters: z.object({
     inboxConversationId: z.string().optional().describe('Conversación de bandeja (se inyecta en el copiloto)'),
-    customer: z.string().optional().describe('Nombre o zohoContactId si no hay conversación'),
+    customer: z.string().optional().describe('Nombre o zohoContactId (customerId) del cliente cuando no hay conversación de bandeja. Si el sistema devuelve candidatos, vuelve a llamar con el customerId elegido.'),
     items: z.array(z.object({
       query: z.string().min(2).describe('Producto tal como lo pidió el cliente, ej. "piel de elefante 5xll"'),
       quantity: z.number().gt(0),
@@ -674,19 +691,20 @@ registerTool({
       customerLabel = conv.contact.displayName;
       if (conv.contact.zohoContactId) customerId = conv.contact.zohoContactId;
       else {
-        const found = await aiSearchCustomers(conv.contact.displayName, 5);
-        const exact = found.find((c) => (c.contactName ?? '').toLowerCase() === conv.contact.displayName.toLowerCase());
-        if (exact) customerId = exact.zohoContactId;
-        else if (found.length === 1) customerId = found[0].zohoContactId;
-        else return { error: `El contacto "${conv.contact.displayName}" no está vinculado a un cliente de Zoho. Pide al usuario que indique el cliente (searchQuoteCustomers) o que lo vincule en la bandeja.`, candidates: found.map((c) => ({ customerId: c.zohoContactId, name: c.contactName })) };
+        const resolved = await resolveQuoteCustomer(conv.contact.displayName);
+        if (resolved.customer) customerId = resolved.customer.zohoContactId;
+        else return { error: `El contacto "${conv.contact.displayName}" no está vinculado a un cliente de Zoho. Pide al usuario que indique el cliente (searchQuoteCustomers) o que lo vincule en la bandeja.`, candidates: resolved.candidates };
       }
     } else if (a.customer) {
-      const found = await aiSearchCustomers(a.customer, 5);
-      const exact = found.find((c) => c.zohoContactId === a.customer || (c.contactName ?? '').toLowerCase() === a.customer!.toLowerCase());
-      const pick = exact ?? (found.length === 1 ? found[0] : null);
-      if (!pick) return { error: `Cliente "${a.customer}" no encontrado o ambiguo`, candidates: found.map((c) => ({ customerId: c.zohoContactId, name: c.contactName })) };
-      customerId = pick.zohoContactId;
-      customerLabel = pick.contactName ?? a.customer;
+      const resolved = await resolveQuoteCustomer(a.customer);
+      if (!resolved.customer) {
+        return {
+          error: resolved.candidates.length === 0 ? `Cliente "${a.customer}" no existe en los clientes sincronizados de Zoho.` : `Cliente "${a.customer}" ambiguo: pregunta al usuario cuál de los candidatos es y vuelve a llamar con su customerId.`,
+          candidates: resolved.candidates,
+        };
+      }
+      customerId = resolved.customer.zohoContactId;
+      customerLabel = resolved.customer.contactName ?? a.customer;
     } else {
       return { error: 'Indica el cliente (inboxConversationId o customer).' };
     }

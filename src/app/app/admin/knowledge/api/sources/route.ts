@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireKnowledgeAdmin, knowledgeError } from '../_auth';
-import { createSource, createSourceSchema, listSources } from '@/modules/copilot/knowledge-service';
+import {
+  createSourceWithContent,
+  createSourceWithContentSchema,
+  listSources,
+} from '@/modules/copilot/knowledge-service';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -17,13 +21,14 @@ export async function GET(request: NextRequest) {
   });
 }
 
+/** POST — creates a source; with storageObjectId (target knowledge_library), url or text it also creates and processes its first version. */
 export async function POST(request: NextRequest) {
   const auth = await requireKnowledgeAdmin();
   if ('response' in auth) return auth.response;
   try {
-    const body = createSourceSchema.parse(await request.json());
-    const source = await createSource(auth.user, body);
-    return NextResponse.json({ id: source.id }, { status: 201 });
+    const body = createSourceWithContentSchema.parse(await request.json());
+    const { source, version } = await createSourceWithContent(auth.user, body);
+    return NextResponse.json({ id: source.id, versionId: version?.id ?? null }, { status: 201 });
   } catch (err) {
     return knowledgeError(err);
   }

@@ -1,6 +1,6 @@
 import { requirePermission } from '@/modules/auth/authorization';
 import { PageHeader } from '@/components/ui/composite';
-import { KnowledgeAdminPanel } from '@/components/copilot/KnowledgeAdminPanel';
+import { KnowledgeLibrary } from '@/components/knowledge/KnowledgeLibrary';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -11,9 +11,9 @@ export default async function KnowledgeAdminPage() {
     <div className="assistant-admin-page">
       <PageHeader
         title="Biblioteca aprobada"
-        description="Fuentes empresariales con versiones que el asistente puede citar. Nada entra por sí solo: cada versión se procesa y se aprueba aquí. Separa lo interno de lo publicable."
+        description="Todo lo que la IA sabe y puede compartir: documentos, hojas de cálculo, páginas web y conexiones. Solo usa lo aprobado y solo envía a clientes lo publicable."
       />
-      <KnowledgeAdminPanel />
+      <KnowledgeLibrary />
     </div>
   );
 }

@@ -77,7 +77,7 @@ export function Drawer({
   subtitle?: string;
   children: ReactNode;
   footer?: ReactNode;
-  size?: 'md' | 'lg';
+  size?: 'md' | 'lg' | 'xl';
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
 
@@ -113,7 +113,13 @@ export function Drawer({
         role="dialog"
         aria-modal="true"
         aria-labelledby="drawer-title"
-        style={size === 'lg' ? { width: 'min(100vw, 640px)' } : undefined}
+        style={
+          size === 'lg'
+            ? { width: 'min(100vw, 640px)' }
+            : size === 'xl'
+              ? { width: 'min(100vw, 980px)' }
+              : undefined
+        }
       >
         <div className="drawer-header">
           <div>

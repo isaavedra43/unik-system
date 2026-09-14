@@ -21,7 +21,15 @@ import { validateInput, validateOutput } from './ai-guardrails';
 import { processAttachment, resolveAttachmentsForMessage, type AttachmentResult } from './ai-attachments-service';
 import { prisma } from '@/lib/prisma';
 import { buildReportSubtitle, buildSummaryCards } from './ai-report-helpers';
-import { ARTIFACT_TOOL_NAMES, collectRowArrays, findLastDataToolResult } from './ai-history-data';
+import {
+  ARTIFACT_TOOL_NAMES,
+  collectRowArrays,
+  declaredRowTotal,
+  findLastDataToolResult,
+  pickPrimaryRowArray,
+  resolveReportRows,
+  type ReportRowsDecision,
+} from './ai-history-data';
 import { maybeSummarizeConversation } from './ai-conversation-summary';
 import { absoluteUrl } from '@/lib/app-url';
 import type { Prisma } from '@prisma/client';
@@ -147,11 +155,12 @@ async function linkArtifactToMessage(artifactId: string, messageId: string, spec
   }
 }
 
-function firstRowArray(result: Record<string, unknown> | null | undefined): Record<string, unknown>[] | null {
+/** The records array of a result, read from the SAME field as the original result when known. */
+function recordRowsOf(result: Record<string, unknown> | null | undefined, rowKey: string | null): Record<string, unknown>[] | null {
   if (!result) return null;
-  const arrays = collectRowArrays(result);
-  const firstKey = Object.keys(arrays)[0];
-  return firstKey ? arrays[firstKey] : null;
+  // A page past the end has `orders: []` — never fall back to another array (a breakdown) then.
+  if (rowKey && Array.isArray(result[rowKey])) return result[rowKey] as Record<string, unknown>[];
+  return pickPrimaryRowArray(result)?.rows ?? null;
 }
 
 /**
@@ -163,11 +172,12 @@ async function fetchAllRowsForExport(
   toolName: string | null,
   toolArgs: Record<string, unknown> | null,
   lastResult: Record<string, unknown> | null,
+  rowKey: string | null,
   fallbackRows: Record<string, unknown>[],
   actor: CurrentUser
 ): Promise<Record<string, unknown>[]> {
   if (!toolName || !toolArgs || !lastResult) return fallbackRows;
-  const total = Number(lastResult.total ?? lastResult.totalOrders ?? NaN);
+  const total = declaredRowTotal(lastResult) ?? NaN;
   const showing = Number(lastResult.showing ?? fallbackRows.length);
   const totalPages = Number(lastResult.totalPages ?? 1);
   const paginated = Number.isFinite(total) && (total > showing || totalPages > 1);
@@ -180,7 +190,7 @@ async function fetchAllRowsForExport(
   for (let page = 1; page <= pages; page++) {
     const res = await executeTool(toolName, actor, { ...toolArgs, page, pageSize: EXPORT_PAGE_SIZE });
     if (!res.success || !res.result || typeof res.result !== 'object') break;
-    const rows = firstRowArray(res.result as Record<string, unknown>);
+    const rows = recordRowsOf(res.result as Record<string, unknown>, rowKey);
     if (!rows || rows.length === 0) break;
     all.push(...rows);
     if (rows.length < EXPORT_PAGE_SIZE) break;
@@ -456,6 +466,9 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
   // artifact results and resolving the originating call by toolCallId — see ai-history-data.ts.
   const seed = findLastDataToolResult(history);
   let lastToolRows: Record<string, unknown>[] | null = seed?.rows ?? null;
+  let lastToolRowKey: string | null = seed?.rowKey ?? null;
+  /** Row decision per artifact tool call id: blocks incomplete reports and tells the model what the file holds. */
+  const reportRowChecks = new Map<string, ReportRowsDecision>();
   let lastToolName: string | null = seed?.toolName ?? null;
   let lastToolArgs: Record<string, unknown> | null = seed?.toolArgs ?? null;
   let lastToolResult: Record<string, unknown> | null = seed?.result ?? null;
@@ -677,7 +690,7 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
   }
 
   /** Parses the model's JSON args and injects surface ids, report rows/titles and chart params. */
-  async function prepareArgs(tc: { name: string; arguments: string }): Promise<unknown> {
+  async function prepareArgs(tc: { id: string; name: string; arguments: string }): Promise<unknown> {
     let parsedArgs: unknown;
     try {
       parsedArgs = JSON.parse(tc.arguments);
@@ -712,29 +725,55 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
     if (ARTIFACT_TOOLS.has(tc.name)) {
       const modelRows = Array.isArray(argsObj.rows) ? (argsObj.rows as Record<string, unknown>[]) : null;
       const subsetOnly = argsObj.subsetOnly === true;
-      if (!argsObj.sections && !subsetOnly && lastToolRows && lastToolRows.length > 0) {
+      let decision: ReportRowsDecision | null = null;
+      if (!argsObj.sections && lastToolRows && lastToolRows.length > 0) {
         // The rows of a report ALWAYS come from the data tool, never from what the model
         // re-typed: hand-typed rows are (a) a partial page ("solo algunos renglones"), and
         // (b) already-formatted strings ("$1,797.00") that break totals ("$NaN").
         // Chat results are paginated (pageSize ≤ 200) so the model's context stays small,
         // but a report must contain EVERY matching row — re-run the data tool page by page
         // (never through the model) when the last result was only a partial page.
-        const exportRows = await fetchAllRowsForExport(lastToolName, lastToolArgs, lastToolResult, lastToolRows, input.actor);
-        if (modelRows && modelRows.length > exportRows.length) {
-          // The model has more rows than we can reproduce (e.g. it merged several results):
-          // keep its rows rather than silently dropping data.
-          console.log(`[ai-orchestrator] Keeping ${modelRows.length} model rows for ${tc.name} (system has ${exportRows.length})`);
-        } else {
-          if (modelRows) {
-            console.log(`[ai-orchestrator] Replacing ${modelRows.length} model-typed rows with ${exportRows.length} rows from ${lastToolName} for ${tc.name}`);
-          } else {
-            console.log(`[ai-orchestrator] Auto-injecting ${exportRows.length} rows from ${lastToolName} into ${tc.name}`);
-          }
-          argsObj.rows = exportRows;
+        const systemRows =
+          subsetOnly && modelRows && modelRows.length > 0
+            ? lastToolRows
+            : await fetchAllRowsForExport(lastToolName, lastToolArgs, lastToolResult, lastToolRowKey, lastToolRows, input.actor);
+        decision = resolveReportRows({
+          modelRows,
+          systemRows,
+          expectedRows: lastToolResult ? declaredRowTotal(lastToolResult) : null,
+          subsetOnly,
+          exportCap: EXPORT_MAX_ROWS,
+        });
+        argsObj.rows = decision.rows;
+        reportRowChecks.set(tc.id, decision);
+        console.log(JSON.stringify({
+          event: 'ai.report.rows',
+          tool: tc.name,
+          sourceTool: lastToolName,
+          rowKey: lastToolRowKey,
+          modelRows: modelRows?.length ?? null,
+          included: decision.includedRows,
+          expected: decision.expectedRows,
+          source: decision.source,
+          complete: decision.complete,
+          blocked: Boolean(decision.blockReason),
+        }));
+        // The cover numbers must describe the table below them: computed from the data, never typed.
+        if (decision.source === 'system' && decision.complete && lastToolResult) {
+          const cards = buildSummaryCards(lastToolResult);
+          if (cards.length > 0) argsObj.summaryCards = cards;
         }
       }
       if (!argsObj.subtitle && lastToolName === 'querySalesOrders') {
         argsObj.subtitle = buildReportSubtitle(lastToolArgs, lastToolResult);
+      }
+      if (decision && !decision.complete && !decision.blockReason) {
+        // A report with fewer rows than the query is only allowed when it says so on its face.
+        const label =
+          decision.source === 'model'
+            ? `SUBCONJUNTO: ${decision.includedRows} de ${decision.expectedRows} registros`
+            : `REPORTE PARCIAL: ${decision.includedRows} de ${decision.expectedRows} registros (límite de exportación)`;
+        argsObj.subtitle = [label, typeof argsObj.subtitle === 'string' ? argsObj.subtitle : ''].filter(Boolean).join('  ·  ');
       }
       // Auto-inject sections for PDF when the tool result has multiple arrays
       if (tc.name === 'generatePdfReport' && !argsObj.sections && !argsObj.rows && lastToolResult) {
@@ -869,8 +908,12 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
     skipCache: wantsFreshData,
   });
 
-  async function runTool(tc: { name: string; arguments: string }, parsedArgs: unknown, assistantMessageId: string): Promise<ToolExecutionResult> {
+  async function runTool(tc: { id: string; name: string; arguments: string }, parsedArgs: unknown, assistantMessageId: string): Promise<ToolExecutionResult> {
     if (tc.name === 'loadMoreTools') return loadMoreTools(parsedArgs);
+    const blockReason = reportRowChecks.get(tc.id)?.blockReason;
+    if (blockReason) {
+      return { success: false, error: blockReason, errorCode: 'incomplete_report_rows', durationMs: 0 };
+    }
     try {
       return await executeTool(tc.name, input.actor, parsedArgs, execCtx(assistantMessageId));
     } catch (err) {
@@ -918,13 +961,13 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
       !(result.result as Record<string, unknown>).error
     ) {
       const toolResult = result.result as Record<string, unknown>;
-      // Use the first array as the default rows (for simple mode); preserve the COMPLETE
-      // result for multi-section PDF injection and KPI cards.
-      const allArrays = collectRowArrays(toolResult);
-      const firstKey = Object.keys(allArrays)[0];
-      if (firstKey) {
+      // Use the RECORDS array as the default rows (never a breakdown that happens to come first);
+      // preserve the COMPLETE result for multi-section PDF injection and KPI cards.
+      const primary = pickPrimaryRowArray(toolResult);
+      if (primary) {
         lastToolResult = toolResult;
-        lastToolRows = allArrays[firstKey];
+        lastToolRows = primary.rows;
+        lastToolRowKey = primary.key;
         lastToolName = tc.name;
         lastToolArgs = (parsedArgs as Record<string, unknown>) ?? null;
       }
@@ -1017,6 +1060,20 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
               'NO afirmes que la acción se realizó. Explica al usuario qué se hará exactamente y pídele que apruebe la propuesta en la tarjeta mostrada.',
           }
         : { error: result.error, ...(result.uncertain ? { uncertain: true } : {}) };
+    const rowCheck = reportRowChecks.get(tc.id);
+    if (rowCheck && result.success && toolPayload && typeof toolPayload === 'object' && !Array.isArray(toolPayload)) {
+      const { includedRows: n, expectedRows: expected } = rowCheck;
+      (toolPayload as Record<string, unknown>).dataCompleteness = {
+        includedRows: n,
+        expectedRows: expected,
+        complete: rowCheck.complete,
+        note: rowCheck.complete
+          ? `El archivo contiene ${n} filas${expected !== null ? `, todas las de la consulta (${expected})` : ''}. Di ese número al entregarlo.`
+          : rowCheck.source === 'model'
+            ? `El archivo contiene SOLO ${n} de ${expected} filas porque usaste subsetOnly. Díselo al usuario con esos números; nunca lo presentes como el reporte completo.`
+            : `El archivo contiene SOLO ${n} de ${expected} filas (límite de exportación). Díselo al usuario con esos números y ofrece dividir por periodo o filtro.`,
+      };
+    }
     messages.push({
       role: 'tool',
       content: JSON.stringify(toolPayload),
