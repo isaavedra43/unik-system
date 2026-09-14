@@ -52,6 +52,14 @@ interface PdfReportOptions {
   author?: string;
   brandColor?: string; // hex like '#2563eb'
   accentColor?: string; // secondary accent
+  /** Header-row text color (default white on the brand fill). */
+  headerTextColor?: string;
+  /** Fill of the alternating rows (default a very light slate). */
+  rowStripeColor?: string;
+  /** Body text color of the cells. */
+  textColor?: string;
+  /** false = no alternating row fill at all. */
+  zebra?: boolean;
   logoText?: string; // text-based logo
   columns: PdfTableColumn[];
   rows: Record<string, unknown>[];
@@ -270,6 +278,11 @@ export function generatePdfReport(
     // SVG-based generators (see sanitizeSvgColor).
     const brand = sanitizeSvgColor(options.brandColor, DEFAULT_BRAND);
     const accent = sanitizeSvgColor(options.accentColor, DEFAULT_ACCENT);
+    // Caller-overridable table colors (same sanitizing rule as brand/accent).
+    const headerTextColor = sanitizeSvgColor(options.headerTextColor, '#ffffff');
+    const rowStripeColor = sanitizeSvgColor(options.rowStripeColor, ROW_ALT_FILL);
+    const bodyTextColor = sanitizeSvgColor(options.textColor, TEXT_BODY);
+    const zebra = options.zebra !== false;
     const requestedFontSize = options.fontSize ?? MAX_CONTENT_FONT_SIZE;
     const orientation = options.orientation ?? 'landscape';
 
@@ -458,7 +471,7 @@ export function generatePdfReport(
           const col = tableColumns[i];
           const align = col.align ?? 'left';
           doc.fontSize(HEADER_FONT_SIZE)
-            .fillColor('#ffffff')
+            .fillColor(headerTextColor)
             .font('Helvetica-Bold')
             .text(col.header.toUpperCase(), x + CELL_PAD_X, y + 7, {
               width: innerWidths[i],
@@ -496,7 +509,7 @@ export function generatePdfReport(
             return;
           }
         }
-        doc.fillColor(tone ? TONE_HEX[tone] : TEXT_BODY)
+        doc.fillColor(tone ? TONE_HEX[tone] : bodyTextColor)
           .font(tone ? 'Helvetica-Bold' : 'Helvetica')
           .text(value, x, y + CELL_PAD_Y, {
             width: innerWidth,
@@ -549,10 +562,10 @@ export function generatePdfReport(
           tableY = drawTableHeader(tableY);
         }
 
-        const isAlt = rowIdx % 2 === 1;
+        const isAlt = zebra && rowIdx % 2 === 1;
         if (isAlt) {
           doc.rect(PAGE_MARGIN, tableY, cw, cappedRowHeight)
-            .fillColor(ROW_ALT_FILL)
+            .fillColor(rowStripeColor)
             .fill();
         }
 
@@ -583,7 +596,7 @@ export function generatePdfReport(
               .font('Helvetica-Bold')
               .text(`${col.header}:`, PAGE_MARGIN + CELL_PAD_X, detailY, { width: DETAIL_LABEL_WIDTH });
             doc.fontSize(DETAIL_FONT_SIZE)
-              .fillColor('#334155')
+              .fillColor(bodyTextColor)
               .font('Helvetica')
               .text(value, PAGE_MARGIN + CELL_PAD_X + DETAIL_LABEL_WIDTH, detailY, {
                 width: detailWidth,

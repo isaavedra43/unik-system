@@ -17,6 +17,17 @@ import { generateTableData } from '../generators/table-generator';
 import { getAiSettings } from '../ai-admin-config-service';
 import { absoluteUrl } from '@/lib/app-url';
 import { parseNumeric, sumColumn } from '../ai-report-helpers';
+import {
+  applyColumnCustomization,
+  mergeReportCustomization,
+  applyRowCustomization,
+  applySummaryCardCustomization,
+  formatItemsList,
+  looksLikeItemList,
+  normalizeCustomization,
+  wantsTotalsRow,
+  type ReportCustomization,
+} from '../report-customization';
 
 /**
  * Shared parameter for every row-consuming artifact tool. The orchestrator ALWAYS replaces the
@@ -28,6 +39,49 @@ const subsetOnlySchema = z.boolean().optional().describe(
   'Pon true SOLO si el usuario pidió explícitamente un subconjunto pequeño que tú eliges a mano (ej. "solo estas 3 órdenes") — ' +
   'para subconjuntos por filtro (cerradas, pagadas, de un cliente...) NO uses esto: vuelve a llamar la tool de datos con el filtro y luego genera el reporte.'
 );
+
+/**
+ * Layout knobs every report tool accepts. The orchestrator pre-fills it from the user's own
+ * words ("sin totales", "quita la columna vendedor", "ordénalo por cliente", "en rojo"); the
+ * model only needs to pass it when the request is more specific than that.
+ */
+const customizationSchema = z
+  .object({
+    showTotals: z.boolean().optional().describe('true SOLO si el usuario pidió ver montos/totales/saldos. Si es false (default) el reporte no lleva columnas Total/Saldo, ni fila de TOTALES, ni KPIs de dinero.'),
+    showSummaryCards: z.boolean().optional().describe('false = sin tarjetas KPI arriba de la tabla.'),
+    showTotalsRow: z.boolean().optional().describe('false = sin la fila de TOTALES al final.'),
+    columns: z.array(z.string()).optional().describe('Columnas exactas y en ESE orden (claves o nombres en español: "orden, fecha, cliente, productos").'),
+    addColumns: z.array(z.string()).optional().describe('Columnas a agregar al set por defecto.'),
+    hideColumns: z.array(z.string()).optional().describe('Columnas a quitar (ej: ["vendedor", "método"]).'),
+    columnLabels: z.record(z.string()).optional().describe('Renombra encabezados: {"balance": "Por cobrar"}.'),
+    columnAlign: z.record(z.enum(['left', 'right', 'center'])).optional().describe('Alineación por columna.'),
+    columnWidths: z.record(z.number()).optional().describe('Pesos relativos de ancho por columna.'),
+    asDetail: z.array(z.string()).optional().describe('Campos que van como línea completa debajo de la fila (ej: ["productos", "dirección"]).'),
+    asColumn: z.array(z.string()).optional().describe('Campos que deben ir como columna normal de la tabla.'),
+    sortBy: z.string().optional().describe('Columna por la que se ordenan las filas.'),
+    sortDirection: z.enum(['asc', 'desc']).optional(),
+    brandColor: z.string().optional().describe('Color hex del encabezado/acento (ej: #dc2626).'),
+    accentColor: z.string().optional().describe('Color hex de los textos secundarios.'),
+    headerTextColor: z.string().optional().describe('Color hex del texto del encabezado de la tabla.'),
+    rowStripeColor: z.string().optional().describe('Color hex del rayado de filas alternas.'),
+    textColor: z.string().optional().describe('Color hex del texto de las celdas.'),
+    zebra: z.boolean().optional().describe('false = sin rayado de filas alternas.'),
+    orientation: z.enum(['portrait', 'landscape']).optional().describe('PDF: vertical u horizontal.'),
+    fontSize: z.number().min(5).max(14).optional().describe('Tamaño de letra de la tabla.'),
+    rowsPerImage: z.number().int().min(1).max(60).optional().describe('generateReportImage: filas por imagen.'),
+    itemsStyle: z.enum(['list', 'compact', 'none']).optional().describe('Cómo se escriben los productos de cada orden: list (numerados, default), compact (uno por línea) o none (sin productos).'),
+    itemFields: z.array(z.string()).optional().describe('Qué campos de cada producto mostrar: name, sku, quantity, unit, rate, lineTotal, description.'),
+    itemPrices: z.boolean().optional().describe('false = los productos se listan sin precios ni importes.'),
+  })
+  .partial()
+  // The description must sit on the OBJECT, not on the optional wrapper: the JSON-schema
+  // converter unwraps ZodOptional and would drop a description attached after `.optional()`.
+  .describe(
+    'Ajustes de PRESENTACIÓN pedidos por el usuario (filas, columnas, colores, textos). ' +
+    'Pásalo cuando pida cambios concretos: "quita la columna vendedor", "ponlo en rojo", "ordénalo por cliente", ' +
+    '"con totales", "sin los productos", "en vertical". Lo que no pases se queda como está.'
+  )
+  .optional();
 
 /* ------------------------------------------------------------------ */
 /* Helpers                                                            */
@@ -220,11 +274,21 @@ function formatValue(value: unknown, format?: string): string {
  * Example: { customer: "Juan", items: [{name: "Silla", qty: 2}] }
  * becomes: { customer: "Juan", items: "name: Silla, qty: 2; name: ..." }
  */
-function flattenRow(row: Record<string, unknown>): Record<string, unknown> {
+function flattenRow(row: Record<string, unknown>, cust: ReportCustomization = {}): Record<string, unknown> {
   const result: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(row)) {
     if (value === null || value === undefined) {
       result[key] = value;
+    } else if (looksLikeItemList(value)) {
+      // Product lines get a readable layout ("1. Marmol… · SKU UPC-1110 / 120 m2 × $385.00 =
+      // $46,200.00") instead of the raw "name: …; sku: …; quantity: …" dump.
+      result[key] = formatItemsList(value, {
+        style: cust.itemsStyle,
+        fields: cust.itemFields,
+        // Product-line prices stay unless the user asked to drop prices: hiding the Total/Saldo
+        // COLUMNS is not a request to strip what each product costs.
+        showMoney: cust.itemPrices !== false,
+      });
     } else if (Array.isArray(value)) {
       // Arrays of objects: stringify each item and join
       result[key] = value.map((v) =>
@@ -296,6 +360,36 @@ function tableSummaryFromTotals(
   return summary;
 }
 
+/**
+ * Single entry point for every report tool: resolves the user's/model's customization against
+ * the real row keys, applies it to the rows (order, product lines) and to the columns (which
+ * ones, in what order, labelled how), and builds the TOTAL row only when amounts are wanted.
+ */
+function prepareReportData(
+  rawRows: Record<string, unknown>[],
+  explicitColumns: Array<{ header: string; key: string; format?: string }> | undefined,
+  rawCustomization: unknown
+): {
+  cust: ReportCustomization;
+  rows: Record<string, unknown>[];
+  columns: Array<{ header: string; key: string; format?: string }>;
+  totalsRow: Record<string, unknown> | null;
+} {
+  const keys = rawRows.length > 0 ? Object.keys(rawRows[0]) : [];
+  // Money is opt-in HERE, not only in the orchestrator: a report generated through any other
+  // path (voice agent, MCP, a direct tool call) must not print amounts nobody asked for either.
+  const cust = normalizeCustomization(
+    mergeReportCustomization({ showTotals: false }, rawCustomization as ReportCustomization | undefined),
+    keys
+  );
+  const flatRows = rawRows.map((r) => flattenRow(r, cust));
+  const rows = applyRowCustomization(flatRows, cust, parseNumeric);
+  const baseColumns = explicitColumns && explicitColumns.length > 0 ? explicitColumns : autoColumns(flatRows);
+  const columns = applyColumnCustomization(baseColumns, cust, keys);
+  const totalsRow = wantsTotalsRow(cust) ? buildTotalsRow(rows, columns) : null;
+  return { cust, rows, columns, totalsRow };
+}
+
 const NO_ROWS_ERROR =
   'No recibí filas para el reporte. Vuelve a llamar la tool de datos (ej. querySalesOrders con los mismos filtros de la conversación) ' +
   'y en cuanto tengas su resultado llama esta tool otra vez: el sistema tomará automáticamente TODAS las filas de esa consulta.';
@@ -353,6 +447,7 @@ registerTool({
       value: z.string(),
     })).optional().describe('KPIs de resumen (ej: [{label: "Total", value: "$73,987.77"}, {label: "Órdenes", value: "8"}])'),
     brandColor: z.string().optional().describe('Color hex (ej: #2563eb)'),
+    customization: customizationSchema,
     subsetOnly: subsetOnlySchema,
   }),
   execute: async (_actor, rawArgs) => {
@@ -365,6 +460,7 @@ registerTool({
       sections?: Array<{ title?: string; rows: Record<string, unknown>[]; columns?: Array<{ header: string; key: string; format?: string }> }>;
       summaryCards?: Array<{ label: string; value: string }>;
       brandColor?: string;
+      customization?: ReportCustomization;
     };
 
     // Build sections from either args.sections or args.rows
@@ -411,47 +507,54 @@ registerTool({
     // render them as a full-width wrapped line below the row instead.
     const DETAIL_KEYS = new Set(['items', 'shippingAddress', 'notes', 'description', 'address', 'direccion', 'dirección']);
 
-    function buildPdfColumns(cols: Array<{ header: string; key: string; format?: string }>): PdfTableColumn[] {
+    function buildPdfColumns(
+      cols: Array<{ header: string; key: string; format?: string }>,
+      cust: ReportCustomization
+    ): PdfTableColumn[] {
+      const forcedDetail = new Set(cust.asDetail ?? []);
+      const forcedInline = new Set(cust.asColumn ?? []);
       return cols.map((c) => ({
         header: c.header,
         key: c.key,
-        width: widthMap[c.key] ?? 85,
-        detail: DETAIL_KEYS.has(c.key),
+        width: cust.columnWidths?.[c.key] ?? widthMap[c.key] ?? 85,
+        detail: forcedDetail.has(c.key) || (DETAIL_KEYS.has(c.key) && !forcedInline.has(c.key)),
         nowrap: NOWRAP_KEYS.has(c.key) || c.format === 'currency' || c.format === 'number' || c.format === 'date',
-        align: c.format === 'currency' || c.format === 'number'
-          ? 'right'
-          : c.format === 'date' || c.key === 'status'
-          ? 'center'
-          : 'left',
+        align: cust.columnAlign?.[c.key]
+          ?? (c.format === 'currency' || c.format === 'number'
+            ? 'right'
+            : c.format === 'date' || c.key === 'status'
+            ? 'center'
+            : 'left'),
         format: (v: unknown) => formatValue(v, c.format),
       }));
     }
 
     let pdfSections: PdfSection[] = [];
     let totalRowCount = 0;
+    let customization: ReportCustomization = {};
 
     if (hasSections) {
       // Multi-section mode
       pdfSections = args.sections!.map((sec) => {
-        const flatRows = sec.rows.map((r) => flattenRow(r));
-        totalRowCount += flatRows.length;
-        const cols = sec.columns ?? autoColumns(flatRows);
+        const prepared = prepareReportData(sec.rows, sec.columns, args.customization);
+        customization = prepared.cust;
+        totalRowCount += prepared.rows.length;
         return {
           title: sec.title,
-          columns: buildPdfColumns(cols),
-          rows: flatRows,
-          totalsRow: buildTotalsRow(flatRows, cols) ?? undefined,
+          columns: buildPdfColumns(prepared.columns, prepared.cust),
+          rows: prepared.rows,
+          totalsRow: prepared.totalsRow ?? undefined,
         };
       });
     } else {
       // Simple mode
-      const flatRows = (args.rows ?? []).map((r) => flattenRow(r));
-      totalRowCount = flatRows.length;
-      const cols = args.columns ?? autoColumns(flatRows);
+      const prepared = prepareReportData(args.rows ?? [], args.columns, args.customization);
+      customization = prepared.cust;
+      totalRowCount = prepared.rows.length;
       pdfSections = [{
-        columns: buildPdfColumns(cols),
-        rows: flatRows,
-        totalsRow: buildTotalsRow(flatRows, cols) ?? undefined,
+        columns: buildPdfColumns(prepared.columns, prepared.cust),
+        rows: prepared.rows,
+        totalsRow: prepared.totalsRow ?? undefined,
       }];
     }
 
@@ -460,13 +563,19 @@ registerTool({
       const generated = await generatePdfReport(filePath, {
         title: args.title,
         subtitle: args.subtitle,
-        brandColor: args.brandColor,
+        brandColor: customization.brandColor ?? args.brandColor,
+        accentColor: customization.accentColor,
+        headerTextColor: customization.headerTextColor,
+        rowStripeColor: customization.rowStripeColor,
+        textColor: customization.textColor,
+        zebra: customization.zebra,
+        fontSize: customization.fontSize,
         logoText: 'UNIK',
         columns: pdfSections[0]?.columns ?? [],
         rows: pdfSections[0]?.rows ?? [],
         sections: pdfSections,
-        summaryCards: args.summaryCards,
-        orientation: 'landscape',
+        summaryCards: applySummaryCardCustomization(args.summaryCards, customization),
+        orientation: customization.orientation ?? 'landscape',
       });
       const stored = await storeArtifactFile(_actor.id, filePath, pdfFileName, 'application/pdf', {
         title: args.title,
@@ -525,6 +634,7 @@ registerTool({
     summaryCards: z.array(z.object({ label: z.string(), value: z.string() })).optional(),
     notes: z.string().max(4000).optional().describe('Texto libre al final (conclusiones, recomendaciones)'),
     brandColor: z.string().optional(),
+    customization: customizationSchema,
   }),
   execute: async (_actor, rawArgs) => {
     const args = rawArgs as {
@@ -532,21 +642,27 @@ registerTool({
       columns?: Array<{ header: string; key: string; format?: string }>;
       sections?: Array<{ title?: string; rows: Record<string, unknown>[]; columns?: Array<{ header: string; key: string; format?: string }> }>;
       summaryCards?: Array<{ label: string; value: string }>; notes?: string; brandColor?: string;
+      customization?: ReportCustomization;
     };
+    let wordCustomization: ReportCustomization = {};
     const sections = (args.sections && args.sections.length > 0
       ? args.sections
       : [{ title: undefined, rows: args.rows ?? [], columns: args.columns }]
-    ).map((s) => ({
-      title: s.title,
-      rows: s.rows,
-      columns: (s.columns && s.columns.length > 0 ? s.columns : autoColumns(s.rows)).map((c) => ({ header: c.header, key: c.key, format: c.format as 'currency' | 'number' | 'percentage' | 'date' | 'text' | undefined })),
-    }));
+    ).map((s) => {
+      const prepared = prepareReportData(s.rows, s.columns, args.customization);
+      wordCustomization = prepared.cust;
+      return {
+        title: s.title,
+        rows: prepared.rows,
+        columns: prepared.columns.map((c) => ({ header: c.header, key: c.key, format: c.format as 'currency' | 'number' | 'percentage' | 'date' | 'text' | undefined })),
+      };
+    });
     const totalRows = sections.reduce((n, s) => n + s.rows.length, 0);
     if (totalRows === 0) return { error: 'No hay filas para el reporte. Primero consulta los datos (querySalesOrders, queryInvoices…) y vuelve a generar.' };
     const filename = `${args.title.replace(/[^a-zA-Z0-9]/g, '_')}.docx`;
     const mimeType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
     const { sizeBytes, rowCount, storageObjectId } = await withTempArtifactFile('docx', async (filePath) => {
-      const generated = await generateDocxReport({ title: args.title, subtitle: args.subtitle, summaryCards: args.summaryCards, sections, notes: args.notes, brandColor: args.brandColor, author: 'UNIK' }, filePath);
+      const generated = await generateDocxReport({ title: args.title, subtitle: args.subtitle, summaryCards: applySummaryCardCustomization(args.summaryCards, wordCustomization), sections, notes: args.notes, brandColor: wordCustomization.brandColor ?? args.brandColor, author: 'UNIK' }, filePath);
       const stored = await storeArtifactFile(_actor.id, filePath, filename, mimeType, { title: args.title, rowCount: generated.rowCount });
       return { ...generated, storageObjectId: stored.storageObjectId };
     });
@@ -581,6 +697,7 @@ registerTool({
     })).optional().describe('OPCIONAL. Se generan automáticamente si no se pasan.'),
     summaryCards: z.array(z.object({ label: z.string(), value: z.string() })).optional(),
     brandColor: z.string().optional(),
+    customization: customizationSchema,
     subsetOnly: subsetOnlySchema,
   }),
   execute: async (_actor, rawArgs) => {
@@ -592,15 +709,14 @@ registerTool({
       columns?: Array<{ header: string; key: string; format?: string }>;
       summaryCards?: Array<{ label: string; value: string }>;
       brandColor?: string;
+      customization?: ReportCustomization;
     };
 
-    const rows = (args.rows ?? []).map((r) => flattenRow(r));
-    if (rows.length === 0) {
+    if ((args.rows ?? []).length === 0) {
       return { error: NO_ROWS_ERROR };
     }
 
-
-    const cols = args.columns ?? autoColumns(rows);
+    const { cust, rows, columns: cols } = prepareReportData(args.rows ?? [], args.columns, args.customization);
 
     const excelColumns: ExcelColumn[] = cols.map((c) => ({
       header: c.header,
@@ -614,10 +730,10 @@ registerTool({
       const generated = await generateExcelReport(filePath, {
         title: args.title,
         subtitle: args.subtitle,
-        brandColor: args.brandColor ? hexToArgb(args.brandColor) : undefined,
+        brandColor: (cust.brandColor ?? args.brandColor) ? hexToArgb((cust.brandColor ?? args.brandColor)!) : undefined,
         columns: excelColumns,
         rows,
-        summaryCards: args.summaryCards,
+        summaryCards: applySummaryCardCustomization(args.summaryCards, cust),
       });
       const stored = await storeArtifactFile(_actor.id, filePath, xlsxFileName, xlsxMime, { title: args.title });
       return { ...generated, storageObjectId: stored.storageObjectId };
@@ -667,6 +783,7 @@ registerTool({
       key: z.string(),
       format: z.enum(['currency', 'number', 'percentage', 'date', 'text']).optional(),
     })).optional().describe('OPCIONAL. Se generan automáticamente si no se pasan.'),
+    customization: customizationSchema,
     subsetOnly: subsetOnlySchema,
   }),
   execute: async (_actor, rawArgs) => {
@@ -675,15 +792,14 @@ registerTool({
       title: string;
       rows?: Record<string, unknown>[];
       columns?: Array<{ header: string; key: string; format?: string }>;
+      customization?: ReportCustomization;
     };
 
-    const rows = (args.rows ?? []).map((r) => flattenRow(r));
-    if (rows.length === 0) {
+    if ((args.rows ?? []).length === 0) {
       return { error: NO_ROWS_ERROR };
     }
 
-
-    const cols = args.columns ?? autoColumns(rows);
+    const { rows, columns: cols } = prepareReportData(args.rows ?? [], args.columns, args.customization);
 
     const csvFileName = `${args.title.replace(/[^a-zA-Z0-9]/g, '_')}.csv`;
     const { sizeBytes, storageObjectId } = await withTempArtifactFile('csv', async (filePath) => {
@@ -814,7 +930,7 @@ registerTool({
     'Genera IMÁGENES (PNG/SVG) con el reporte: título, KPIs y una tabla — NO es una gráfica de barras/línea/pie (para eso usa generateChart). ' +
     'Úsalo cuando el usuario pida explícitamente "una imagen del reporte", "una foto con los datos", o algo para compartir directo por WhatsApp/redes sin abrir un PDF. ' +
     'Cada imagen muestra hasta ~25 filas (ajustable con maxRows); si hay más filas de las que caben en una imagen, el sistema genera AUTOMÁTICAMENTE varias imágenes ("Parte 1 de 3", "Parte 2 de 3"...) hasta cubrir TODAS las filas (límite de 40 imágenes ≈ 1000 filas — si el usuario pidió aún más, ofrece PDF/Excel para el resto). ' +
-    'SOLO necesitas pasar title (las filas las toma el sistema de la última consulta de datos, TODAS, sin que las escribas); columnas y KPIs se auto-generan igual que en generatePdfReport. Los estados (Cerrado, Pendiente, etc.) se colorean automáticamente y la última imagen incluye la fila de TOTALES.',
+    'SOLO necesitas pasar title (las filas las toma el sistema de la última consulta de datos, TODAS, sin que las escribas); columnas y KPIs se auto-generan igual que en generatePdfReport. Los estados (Cerrado, Pendiente, etc.) se colorean automáticamente; la fila de TOTALES y las columnas de dinero solo salen si el usuario pidió montos (customization.showTotals).',
   category: 'export',
   requiredPermission: 'sales_orders.view',
   enabledByDefault: true,
@@ -831,6 +947,7 @@ registerTool({
     summaryCards: z.array(z.object({ label: z.string(), value: z.string() })).optional().describe('KPIs de resumen del TOTAL (ej: [{label: "Total", value: "$500,000.00"}]) — se muestran solo en la primera imagen.'),
     brandColor: z.string().optional().describe('Color hex (ej: #2563eb).'),
     maxRows: z.number().int().min(1).max(60).default(25).describe('Filas por imagen (default 25). No limita el total: si hay más filas que esto, se generan más imágenes.'),
+    customization: customizationSchema,
     subsetOnly: subsetOnlySchema,
   }),
   execute: async (_actor, rawArgs) => {
@@ -843,46 +960,60 @@ registerTool({
       summaryCards?: Array<{ label: string; value: string }>;
       brandColor?: string;
       maxRows: number;
+      customization?: ReportCustomization;
     };
 
-    const flatRows = (args.rows ?? []).map((r) => flattenRow(r));
-    if (flatRows.length === 0) {
+    if ((args.rows ?? []).length === 0) {
       return { error: NO_ROWS_ERROR };
     }
 
-    // Long free-text fields never fit in a compact image row — keep the snapshot glanceable.
+    const { cust, rows: flatRows, columns: preparedColumns, totalsRow: preparedTotals } =
+      prepareReportData(args.rows ?? [], args.columns, args.customization);
+
+    // Long free-text fields never fit in a compact image row — keep the snapshot glanceable,
+    // unless the user asked for one of them explicitly (customization.asColumn / columns).
     const IMAGE_EXCLUDE_KEYS = new Set(['items', 'shippingAddress', 'notes', 'description', 'address', 'direccion', 'dirección']);
-    const cols = (args.columns ?? autoColumns(flatRows)).filter((c) => !IMAGE_EXCLUDE_KEYS.has(c.key));
+    const keptLongFields = new Set([...(cust.asColumn ?? []), ...(cust.columns ?? []), ...(cust.addColumns ?? [])]);
+    const cols = preparedColumns.filter((c) => !IMAGE_EXCLUDE_KEYS.has(c.key) || keptLongFields.has(c.key));
     const imageColumns = cols.map((c) => ({
       header: c.header,
       key: c.key,
-      align: c.format === 'currency' || c.format === 'number' ? 'right' as const : (c.key === 'status' || c.key === 'ticketStatus') ? 'center' as const : 'left' as const,
+      align: cust.columnAlign?.[c.key]
+        ?? (c.format === 'currency' || c.format === 'number' ? 'right' as const : (c.key === 'status' || c.key === 'ticketStatus') ? 'center' as const : 'left' as const),
       format: (v: unknown) => formatValue(v, c.format),
     }));
+    const rowsPerImage = cust.rowsPerImage ?? args.maxRows;
 
     // If everything doesn't fit in one image, generate as many as needed to cover ALL rows —
     // never silently truncate to a "preview" and push the user to a file instead.
     const MAX_IMAGE_PARTS = 40;
-    const totalParts = Math.min(MAX_IMAGE_PARTS, Math.ceil(flatRows.length / args.maxRows));
-    const rowsCovered = Math.min(flatRows.length, totalParts * args.maxRows);
+    const totalParts = Math.min(MAX_IMAGE_PARTS, Math.ceil(flatRows.length / rowsPerImage));
+    const rowsCovered = Math.min(flatRows.length, totalParts * rowsPerImage);
     const rowsNotCovered = flatRows.length - rowsCovered;
     // Totals over the WHOLE set, shown once on the last image (KPIs go on the first).
-    const totalsRow = rowsNotCovered === 0 ? buildTotalsRow(flatRows, cols) : null;
+    const totalsRow = rowsNotCovered === 0 ? preparedTotals : null;
+    const imageCards = applySummaryCardCustomization(args.summaryCards, cust);
 
     const artifacts: Array<Record<string, unknown>> = [];
     for (let part = 0; part < totalParts; part++) {
-      const chunk = flatRows.slice(part * args.maxRows, (part + 1) * args.maxRows);
+      const chunk = flatRows.slice(part * rowsPerImage, (part + 1) * rowsPerImage);
       const partTitle = totalParts > 1 ? `${args.title} — Parte ${part + 1} de ${totalParts}` : args.title;
       const isLast = part === totalParts - 1;
       const { svg, width, height } = generateReportImageSvg({
         title: partTitle,
-        subtitle: part === 0 ? args.subtitle : `Continuación · filas ${part * args.maxRows + 1}–${part * args.maxRows + chunk.length} de ${flatRows.length}`,
+        subtitle: part === 0 ? args.subtitle : `Continuación · filas ${part * rowsPerImage + 1}–${part * rowsPerImage + chunk.length} de ${flatRows.length}`,
         logoText: 'UNIK',
-        brandColor: args.brandColor,
+        brandColor: cust.brandColor ?? args.brandColor,
+        accentColor: cust.accentColor,
+        headerTextColor: cust.headerTextColor,
+        rowStripeColor: cust.rowStripeColor,
+        textColor: cust.textColor,
+        zebra: cust.zebra,
+        fontSize: cust.fontSize,
         maxRows: chunk.length, // this chunk is never itself truncated
         columns: imageColumns,
         rows: chunk,
-        summaryCards: part === 0 ? args.summaryCards : undefined, // KPIs describe the WHOLE set — show once, not per part
+        summaryCards: part === 0 ? imageCards : undefined, // KPIs describe the WHOLE set — show once, not per part
         totalsRow: isLast && totalsRow ? totalsRow : undefined,
       });
 
@@ -890,7 +1021,7 @@ registerTool({
         conversationId: args.conversationId,
         type: 'image',
         inlineData: { svg, width, height },
-        meta: { title: partTitle, rowCount: chunk.length, part: part + 1, totalParts, brandColor: args.brandColor },
+        meta: { title: partTitle, rowCount: chunk.length, part: part + 1, totalParts, brandColor: cust.brandColor ?? args.brandColor },
       });
 
       artifacts.push({ artifactId: artifact.id, type: 'image', title: partTitle, inlineRender: true, rowCount: chunk.length });
@@ -930,6 +1061,7 @@ registerTool({
     })).optional().describe('OPCIONAL. Se generan automáticamente si no se pasan.'),
     summary: z.array(z.object({ label: z.string(), value: z.string() })).optional(),
     brandColor: z.string().optional(),
+    customization: customizationSchema,
     subsetOnly: subsetOnlySchema,
   }),
   execute: async (_actor, rawArgs) => {
@@ -941,14 +1073,14 @@ registerTool({
       columns?: Array<{ header: string; key: string; format?: string }>;
       summary?: Array<{ label: string; value: string }>;
       brandColor?: string;
+      customization?: ReportCustomization;
     };
 
-    const rows = (args.rows ?? []).map((r) => flattenRow(r));
-    if (rows.length === 0) {
+    if ((args.rows ?? []).length === 0) {
       return { error: NO_ROWS_ERROR };
     }
 
-    const cols = args.columns ?? autoColumns(rows);
+    const { cust, rows, columns: cols } = prepareReportData(args.rows ?? [], args.columns, args.customization);
 
     const tableData = generateTableData({
       title: args.title,
@@ -959,8 +1091,8 @@ registerTool({
         format: c.format as 'currency' | 'number' | 'percentage' | 'date' | 'text' | undefined,
       })),
       rows,
-      summary: args.summary ?? tableSummaryFromTotals(rows, cols),
-      brandColor: args.brandColor,
+      summary: applySummaryCardCustomization(args.summary ?? tableSummaryFromTotals(rows, cols), cust),
+      brandColor: cust.brandColor ?? args.brandColor,
     });
 
     const artifact = await createArtifact({
@@ -971,7 +1103,7 @@ registerTool({
         title: args.title,
         rowCount: rows.length,
         columns: cols.map((c) => c.header),
-        brandColor: args.brandColor,
+        brandColor: cust.brandColor ?? args.brandColor,
       },
     });
 

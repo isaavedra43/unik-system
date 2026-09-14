@@ -27,6 +27,14 @@ export interface ReportImageOptions {
   logoText?: string;
   brandColor?: string;
   accentColor?: string;
+  /** Header-row text color (default white on the brand fill). */
+  headerTextColor?: string;
+  /** Fill of the alternating rows. */
+  rowStripeColor?: string;
+  /** Body text color of the cells. */
+  textColor?: string;
+  /** false = no alternating row fill. */
+  zebra?: boolean;
   columns: ReportImageColumn[];
   rows: Record<string, unknown>[];
   summaryCards?: Array<{ label: string; value: string; color?: string }>;
@@ -109,6 +117,10 @@ export function generateReportImageSvg(options: ReportImageOptions): ReportImage
   // attributes below; sanitize here so the rest of this function is safe by construction.
   const brand = sanitizeSvgColor(options.brandColor, DEFAULT_BRAND);
   const accent = sanitizeSvgColor(options.accentColor, DEFAULT_ACCENT);
+  const headerTextColor = sanitizeSvgColor(options.headerTextColor, '#ffffff');
+  const rowStripeColor = sanitizeSvgColor(options.rowStripeColor, '#f1f5f9');
+  const bodyTextColor = sanitizeSvgColor(options.textColor, '#334155');
+  const zebra = options.zebra !== false;
   const fontSize = options.fontSize ?? DEFAULT_FONT_SIZE;
   const maxRows = options.maxRows ?? 20;
   const cols = options.columns;
@@ -202,15 +214,15 @@ export function generateReportImageSvg(options: ReportImageOptions): ReportImage
       const tx = align === 'right' ? x + colWidths[i] - CELL_PAD_X : align === 'center' ? x + colWidths[i] / 2 : x + CELL_PAD_X;
       const anchor = align === 'right' ? 'end' : align === 'center' ? 'middle' : 'start';
       const label = truncateToWidth(col.header, colWidths[i] - CELL_PAD_X * 2, 9, true);
-      svg += `<text x="${tx}" y="${tableTop + HEADER_ROW_HEIGHT / 2 + 3}" text-anchor="${anchor}" font-size="9" font-weight="bold" fill="#ffffff">${escapeXml(label)}</text>`;
+      svg += `<text x="${tx}" y="${tableTop + HEADER_ROW_HEIGHT / 2 + 3}" text-anchor="${anchor}" font-size="9" font-weight="bold" fill="${headerTextColor}">${escapeXml(label)}</text>`;
       x += colWidths[i];
     });
   }
 
   let rowY = tableTop + HEADER_ROW_HEIGHT;
   cellsByRow.forEach((cells, rowIdx) => {
-    if (rowIdx % 2 === 1) {
-      svg += `<rect x="${MARGIN}" y="${rowY}" width="${contentWidth}" height="${rowHeight}" fill="#f1f5f9"/>`;
+    if (zebra && rowIdx % 2 === 1) {
+      svg += `<rect x="${MARGIN}" y="${rowY}" width="${contentWidth}" height="${rowHeight}" fill="${rowStripeColor}"/>`;
     }
     let x = MARGIN;
     cols.forEach((col, i) => {
@@ -222,7 +234,7 @@ export function generateReportImageSvg(options: ReportImageOptions): ReportImage
       const anchor = align === 'right' ? 'end' : align === 'center' ? 'middle' : 'start';
       svg +=
         `<text x="${tx}" y="${rowY + rowHeight / 2 + fontSize * 0.32}" text-anchor="${anchor}" font-size="${fontSize}" ` +
-        `${statusColor ? 'font-weight="bold" ' : ''}fill="${statusColor ?? '#334155'}">${escapeXml(value)}</text>`;
+        `${statusColor ? 'font-weight="bold" ' : ''}fill="${statusColor ?? bodyTextColor}">${escapeXml(value)}</text>`;
       x += colWidths[i];
     });
     rowY += rowHeight;

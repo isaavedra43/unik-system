@@ -21,6 +21,7 @@ import { validateInput, validateOutput } from './ai-guardrails';
 import { processAttachment, resolveAttachmentsForMessage, type AttachmentResult } from './ai-attachments-service';
 import { prisma } from '@/lib/prisma';
 import { buildReportSubtitle, buildSummaryCards } from './ai-report-helpers';
+import { resolveReportCustomization, type ReportCustomization } from './report-customization';
 import {
   ARTIFACT_TOOL_NAMES,
   collectRowArrays,
@@ -728,6 +729,13 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
 
     // Auto-inject rows and title for artifact tools
     if (ARTIFACT_TOOLS.has(tc.name)) {
+      // How the report should LOOK comes from the user's own words ("sin totales", "quita la
+      // columna vendedor", "ordénalo por cliente", "en rojo"), with whatever the model passed
+      // on top — except the amounts, which only the user can turn on.
+      argsObj.customization = resolveReportCustomization(
+        input.message,
+        argsObj.customization as ReportCustomization | undefined
+      );
       const modelRows = Array.isArray(argsObj.rows) ? (argsObj.rows as Record<string, unknown>[]) : null;
       const subsetOnly = argsObj.subsetOnly === true;
       let decision: ReportRowsDecision | null = null;
