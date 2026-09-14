@@ -190,10 +190,11 @@ registerTool({
       mode: a.mode,
       mock,
       joinUrl: absoluteUrl(`/app/calls?call=${call.id}`),
+      dock: 'auto',
       note:
         a.mode === 'ai'
-          ? 'La asistente de voz está marcando. El usuario puede escuchar o intervenir desde joinUrl; al terminar usa getCallTranscript para el resumen.'
-          : 'La llamada está sonando: pide al usuario que abra joinUrl para contestar desde el navegador.',
+          ? 'La asistente de voz ya está marcando; la llamada aparece en la barra flotante de UNIK (el usuario puede escuchar, intervenir, pausar la IA o colgar). Al terminar usa getCallTranscript para el resumen. No pidas abrir enlaces.'
+          : 'La llamada ya está sonando y se abrió automáticamente en la barra flotante de UNIK: el usuario contesta ahí con su micrófono, aunque cambie de módulo. No le pidas abrir enlaces; solo confirma que está marcando.',
     };
   },
 });
@@ -224,7 +225,8 @@ registerTool({
       user: target.name,
       chatChannelId: channel.id,
       openUrl: absoluteUrl(`/app/chat?channel=${channel.id}&call=${a.type}`),
-      note: 'Pide al usuario que abra openUrl: la llamada se inicia al instante desde su navegador.',
+      action: 'internal_call',
+      note: 'UNIK abre el chat con esa persona y la llamada empieza sola en el navegador del usuario. Solo confirma en una línea que estás llamando.',
     };
   },
 });

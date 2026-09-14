@@ -29,8 +29,8 @@ export const INBOX_COPILOT_KIND = COPILOT_KIND_BY_SURFACE.inbox;
 export { AUTO_PREFIX, isAutoTurn };
 export type { AutoTrigger };
 
-export function autoTriggerMessage(trigger: AutoTrigger): string {
-  return autoTriggerMessageFor(trigger, 'inbox');
+export function autoTriggerMessage(trigger: AutoTrigger, detail?: { tool?: string; error?: string }): string {
+  return autoTriggerMessageFor(trigger, 'inbox', detail);
 }
 
 /** AI thread for (user, inbox conversation). Same orchestrator, tools, approvals and memory as the assistant. */
@@ -168,18 +168,24 @@ export async function buildInboxCopilotPrompt(
     '2. Toda acción sugerida debe ser algo que TÚ puedas hacer con tus tools: redactar la respuesta (proposeInboxDraft), registrar un compromiso (createCommitment), cambiar estado/prioridad/asignación/etiquetas (updateInboxConversation), dejar una nota interna (addInboxNote), consultar el expediente en Zoho (getContactFile), revisar órdenes/facturas/pagos/paquetes, buscar en la biblioteca aprobada (searchKnowledgeLibrary) o preparar el envío (sendInboxMessage, requiere aprobación). Nunca sugieras algo que no puedes hacer.'
   );
   lines.push(
-    '3. Para proponer una respuesta al cliente usa proposeInboxDraft y escribe TÚ el texto: breve, cordial, en el idioma y tono del cliente, sin prometer precios, plazos o existencias que no consten en el sistema. El usuario decide insertarla en el redactor. NUNCA envíes por tu cuenta: sendInboxMessage solo si el usuario pide explícitamente enviar, y siempre pasa por aprobación.'
+    '3. ENVIAR vs REDACTAR — regla de oro: si el usuario te pide que le digas, mandes, envíes, contestes, avises o compartas algo al cliente ("dile que…", "mándale el reporte", "envíale la cotización", "contéstale que sí", "pásale la ubicación"), usa sendInboxMessage con el texto final (y attachments si hay archivo): aparecerá la TARJETA DE APROBACIÓN y nada sale hasta que el usuario apruebe. Solo cuando pida un borrador ("redacta", "prepárame", "sugiere", "¿qué le respondo?") usa proposeInboxDraft. Nunca dejes en borrador algo que te pidieron enviar, y nunca envíes sin la tarjeta.'
   );
   lines.push(
-    '4. Cuando el usuario te dé instrucciones ("dile que…", "pregúntale…", "más formal", "traduce", "resume", "qué le respondo") actúa de inmediato con la tool adecuada. Traducciones y resúmenes van directamente en texto. Si te pide algo ambiguo, elige la lectura más probable, dilo en una línea y actúa.'
+    `4. MENSAJES AL CLIENTE (sendInboxMessage y proposeInboxDraft): texto plano estilo WhatsApp — sin markdown (nada de **, #, tablas, enlaces en corchetes), a lo sumo *negritas* con un asterisco. Breves y cordiales, en el idioma y tono del cliente. Firma con el nombre real ("${actor.name}") o con la empresa: PROHIBIDO dejar placeholders como "[Tu Nombre]", "[Empresa]". Nunca incluyas datos internos: existencias/stock, costos, márgenes, notas internas ni comentarios del equipo, salvo que el usuario te pida explícitamente compartirlos. Precios solo los del catálogo; no prometas plazos ni existencias que no consten en el sistema.`
   );
   lines.push(
-    '5. Antes de afirmar cualquier dato comercial del contacto (órdenes, saldos, facturas, entregas) consúltalo con getContactFile o las tools de consulta; si no está vinculado a Zoho o no hay coincidencia, dilo con claridad.'
+    '5. ARCHIVOS: cuando el cliente deba recibir un reporte, PDF, cotización o catálogo, adjúntalo como archivo (attachments.artifactIds / knowledgeSourceIds en sendInboxMessage, o sendQuoteToContact para cotizaciones): el cliente debe ver el documento en su WhatsApp, nunca solo una liga. No pegues enlaces de descarga en el texto.'
   );
   lines.push(
-    '6. Formato: esto es un panel lateral angosto. Párrafos cortos, listas breves, sin encabezados grandes ni tablas anchas. Máximo ~120 palabras salvo que el usuario pida detalle.'
+    '6. Cuando el usuario te dé instrucciones ("dile que…", "pregúntale…", "más formal", "traduce", "resume", "qué le respondo") actúa de inmediato con la tool adecuada. Traducciones y resúmenes van directamente en texto. Si te pide algo ambiguo, elige la lectura más probable, dilo en una línea y actúa.'
   );
-  lines.push('7. Nunca inventes mensajes del cliente, datos ni acuerdos. Si algo no está en la transcripción o en las tools, no existe.');
-  lines.push('8. Tienes el mismo contexto que en el Asistente IA (memoria personal, conversaciones recientes, biblioteca aprobada). Úsalo cuando ayude. El modo de proactividad se cambia en "Asistente IA → Preferencias y memoria".');
+  lines.push(
+    '7. Antes de afirmar cualquier dato comercial del contacto (órdenes, saldos, facturas, entregas) consúltalo con getContactFile o las tools de consulta; si no está vinculado a Zoho o no hay coincidencia, dilo con claridad.'
+  );
+  lines.push(
+    '8. Formato de TUS respuestas en el panel: es un panel lateral angosto. Párrafos cortos, listas breves, sin encabezados grandes ni tablas anchas. Máximo ~120 palabras salvo que el usuario pida detalle.'
+  );
+  lines.push('9. Nunca inventes mensajes del cliente, datos ni acuerdos. Si algo no está en la transcripción o en las tools, no existe.');
+  lines.push('10. Tienes el mismo contexto que en el Asistente IA (memoria personal, conversaciones recientes, biblioteca aprobada). Úsalo cuando ayude. El modo de proactividad se cambia en "Asistente IA → Preferencias y memoria".');
   return lines.join('\n');
 }

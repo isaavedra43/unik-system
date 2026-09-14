@@ -30,7 +30,9 @@ export function buildShareToken(artifactId: string, ttlDays = DEFAULT_TTL_DAYS):
   return `${artifactId}.${expires}.${sign(artifactId, expires)}`;
 }
 
-export function verifyShareToken(token: string): { artifactId: string } | null {
+export function verifyShareToken(rawToken: string): { artifactId: string } | null {
+  // Messaging clients sometimes glue the sentence's period/paren to the link.
+  const token = decodeURIComponent(rawToken).replace(/[.,;:!?)\]]+$/, '');
   const parts = token.split('.');
   if (parts.length !== 3) return null;
   const [artifactId, expiresRaw, mac] = parts;
@@ -95,5 +97,6 @@ export async function rewriteArtifactLinksForSharing(text: string, userId: strin
 
 /** Markdown links `[label](url)` → `label: url` for channels that render plain text (WhatsApp, SMS, chat). */
 export function markdownLinksToPlain(text: string): string {
-  return text.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, (_m, label: string, url: string) => `${label.trim()}: ${url}`);
+  // A period right after the URL breaks the link on some clients: keep a space before it.
+  return text.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)([.,;:!?])?/g, (_m, label: string, url: string, p?: string) => `${label.trim()}: ${url}${p ? ` ${p}` : ''}`);
 }

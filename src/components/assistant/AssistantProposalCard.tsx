@@ -20,7 +20,14 @@ export interface ProposalData {
   error?: string | null;
 }
 
-export function AssistantProposalCard({ proposal, onDecided }: { proposal: ProposalData; onDecided: (updated: ProposalData) => void }) {
+export interface ProposalExecution {
+  success?: boolean;
+  error?: string;
+  uncertain?: boolean;
+  result?: unknown;
+}
+
+export function AssistantProposalCard({ proposal, onDecided }: { proposal: ProposalData; onDecided: (updated: ProposalData, execution?: ProposalExecution) => void }) {
   return (
     <ProposalCard
       proposal={proposal}
@@ -30,12 +37,12 @@ export function AssistantProposalCard({ proposal, onDecided }: { proposal: Propo
           headers: { 'Content-Type': 'application/json' },
           body: action === 'reject' ? JSON.stringify({}) : undefined,
         });
-        const data = (await res.json().catch(() => ({}))) as { error?: string; proposal?: ProposalData; execution?: { success?: boolean; error?: string; uncertain?: boolean } };
+        const data = (await res.json().catch(() => ({}))) as { error?: string; proposal?: ProposalData; execution?: ProposalExecution };
         if (!res.ok) {
           if (res.status === 409 || res.status === 410) onDecided({ ...proposal, status: 'invalidated' });
           throw new Error(data.error ?? 'No se pudo procesar');
         }
-        onDecided({ ...(data.proposal ?? proposal), status: data.proposal?.status ?? (action === 'approve' ? 'executed' : 'rejected') });
+        onDecided({ ...(data.proposal ?? proposal), status: data.proposal?.status ?? (action === 'approve' ? 'executed' : 'rejected') }, action === 'approve' ? data.execution : undefined);
         return data.execution;
       }}
     />

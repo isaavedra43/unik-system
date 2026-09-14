@@ -14,7 +14,15 @@ import { CallRoomPlaceholder } from './CallRoomPlaceholder';
 
 type RoomState = 'idle' | 'connecting' | 'connected' | 'error' | 'disconnected';
 
-export function CallRoom({ token }: { token: IssuedToken | null }) {
+export interface CallRoomProps {
+  token: IssuedToken | null;
+  /** Minimal control row (used by the floating call dock). */
+  compact?: boolean;
+  /** Publish the microphone right after connecting (default true). */
+  autoMic?: boolean;
+}
+
+export function CallRoom({ token, compact = false, autoMic = true }: CallRoomProps) {
   const [state, setState] = useState<RoomState>('idle');
   const [error, setError] = useState<string | null>(null);
   const [micOn, setMicOn] = useState(false);
@@ -65,7 +73,7 @@ export function CallRoom({ token }: { token: IssuedToken | null }) {
         }
         setRemoteCount(room.remoteParticipants.size);
         // Only roles that may publish (participants, whisper/barge supervisors) open the mic.
-        if (token.grants.canPublish) {
+        if (token.grants.canPublish && autoMic) {
           try {
             await room.localParticipant.setMicrophoneEnabled(true);
             setMicOn(true);
@@ -89,10 +97,14 @@ export function CallRoom({ token }: { token: IssuedToken | null }) {
       roomRef.current = null;
       if (current) void current.disconnect();
     };
-  }, [token]);
+  }, [token, autoMic]);
 
   if (!token || token.mock || !token.url) {
-    return <CallRoomPlaceholder token={token} />;
+    return compact ? (
+      <span className="call-dock-muted">{token?.mock ? 'Llamada simulada (sin audio)' : 'Sin audio disponible'}</span>
+    ) : (
+      <CallRoomPlaceholder token={token} />
+    );
   }
 
   async function toggleMic() {
@@ -122,6 +134,32 @@ export function CallRoom({ token }: { token: IssuedToken | null }) {
     error: 'Error',
     disconnected: 'Desconectado',
   };
+
+  if (compact) {
+    return (
+      <div className="call-room-compact" aria-live="polite">
+        <span className={`badge ${state === 'connected' ? 'badge-success' : state === 'error' ? 'badge-danger' : 'badge-info'}`}>{stateLabel[state]}</span>
+        {token.grants.canPublish && (
+          <button
+            type="button"
+            className={`btn btn-sm ${micOn ? 'btn-secondary' : 'btn-primary'}`}
+            onClick={toggleMic}
+            disabled={state !== 'connected'}
+            aria-label={micOn ? 'Silenciar micrófono' : 'Activar micrófono'}
+          >
+            {micOn ? <MicOff size={14} /> : <Mic size={14} />} {micOn ? 'Silenciar' : 'Micrófono'}
+          </button>
+        )}
+        <span className="call-dock-muted">{remoteCount} en línea</span>
+        {error && (
+          <span className="call-dock-error" role="alert">
+            {error}
+          </span>
+        )}
+        <div ref={audioContainerRef} aria-hidden="true" />
+      </div>
+    );
+  }
 
   return (
     <div className="card card-compact" aria-live="polite">

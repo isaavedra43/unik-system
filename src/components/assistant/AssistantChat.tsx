@@ -8,7 +8,7 @@ import { AssistantMessage, type AssistantMessageData } from './AssistantMessage'
 import { AssistantInput, type AttachmentDraft } from './AssistantInput';
 import { ModelSelector } from './ModelSelector';
 import { ArtifactRenderer, type ArtifactData } from './ArtifactRenderer';
-import { toolLabel } from '@/components/copilot/copilot-types';
+import { actionFailedMessage, performUiAction, toolLabel, uiActionFromResult, type UiAction } from '@/components/copilot/copilot-types';
 import {
   AssistantSuggestions,
   getSuggestionsForPage,
@@ -231,6 +231,8 @@ export function AssistantChat({
               setArtifacts((prev) => [...prev, event.data as ArtifactData]);
             } else if (event.type === 'proposal') {
               setProposals((prev) => [...prev.filter((p) => p.id !== event.data.id), event.data as ProposalData]);
+            } else if (event.type === 'action') {
+              performUiAction(event.data as UiAction);
             } else if (event.type === 'done') {
               setStreamingContent('');
               setActiveToolCalls([]);
@@ -329,9 +331,17 @@ export function AssistantChat({
                 <AssistantProposalCard
                   key={p.id}
                   proposal={p}
-                  onDecided={(updated) => {
+                  onDecided={(updated, execution) => {
                     setProposals((prev) => prev.map((x) => (x.id === updated.id ? updated : x)));
                     if (conversationId) loadConversation(conversationId);
+                    if (!execution) return;
+                    if (execution.success) {
+                      const action = uiActionFromResult(updated.toolName, execution.result);
+                      if (action) performUiAction(action);
+                    } else if (!execution.uncertain) {
+                      // Let the assistant read the error and fix it by itself.
+                      void handleSend(actionFailedMessage(updated.toolName, execution.error ?? 'La acción falló'));
+                    }
                   }}
                 />
               ))}

@@ -35,9 +35,22 @@ export const SURFACE_TITLES: Record<CopilotSurfaceKind, string> = {
 };
 
 export const AUTO_PREFIX = '⟦auto:';
-export type AutoTrigger = 'open' | 'inbound';
+export type AutoTrigger = 'open' | 'inbound' | 'action_failed';
 
-export function autoTriggerMessage(trigger: AutoTrigger, surface: CopilotSurfaceKind = 'inbox'): string {
+export interface AutoTriggerDetail {
+  tool?: string;
+  error?: string;
+}
+
+export function autoTriggerMessage(trigger: AutoTrigger, surface: CopilotSurfaceKind | 'assistant' = 'inbox', detail?: AutoTriggerDetail): string {
+  if (trigger === 'action_failed') {
+    const tool = detail?.tool ?? 'la acción';
+    const error = (detail?.error ?? 'error desconocido').replace(/\s+/g, ' ').slice(0, 600);
+    return `${AUTO_PREFIX}action_failed⟧ La acción que el usuario APROBÓ (${tool}) FALLÓ con este error: "${error}". Explica en una línea qué pasó y CORRÍGELO TÚ AHORA: si es un producto/cliente que no coincide, búscalo con las tools y vuelve a proponer la acción corregida; si es un dato inválido (precio 0, unidad, fecha), corrígelo y vuelve a proponer; si es configuración (Zoho, credenciales, permisos), dilo claramente e indica qué debe hacer el administrador. No pidas al usuario que lo haga a mano si tú puedes hacerlo.`;
+  }
+  if (surface === 'assistant') {
+    return trigger === 'open' ? `${AUTO_PREFIX}open⟧ El usuario abrió el asistente.` : `${AUTO_PREFIX}inbound⟧ Hay novedades.`;
+  }
   if (surface === 'chat') {
     return trigger === 'open'
       ? `${AUTO_PREFIX}open⟧ ${'El usuario acaba de abrir este canal del chat interno. Revisa lo reciente y sugiere acciones útiles.'}`

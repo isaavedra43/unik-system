@@ -287,6 +287,7 @@ export const DEFAULT_AI_SETTINGS: AiSettings = {
     'listConversationAttachments',
     'extractDocumentData',
     'draftBillFromDocument',
+    'getZohoBooksStatus',
   ],
   maxAttachmentSizeMb: 25,
   allowedMimeTypes: [

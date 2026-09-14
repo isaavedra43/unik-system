@@ -15,7 +15,11 @@ import {
   aiUpdateQuote,
   aiGetQuotePdf,
 } from '@/modules/quotes/quotes-ai-adapter';
-import { quoteLineInputSchema, DISCOUNT_MODES } from '@/modules/quotes/quotes-form-schema';
+import { DISCOUNT_MODES, type QuoteLineInput } from '@/modules/quotes/quotes-form-schema';
+import { QuoteWriteError } from '@/modules/quotes/quotes-write-service';
+import { ZodError } from 'zod';
+import { getZohoConfig } from '@/modules/integrations/zoho/config';
+import { listEstimates } from '@/modules/integrations/zoho/estimates';
 import { QUOTE_SEGMENTS } from '@/modules/quotes/quotes-filters';
 import { getQuoteStatusLabel } from '@/modules/quotes/quotes-helpers';
 import { prisma } from '@/lib/prisma';
@@ -31,6 +35,120 @@ import { deliverToContact } from './messaging-tools';
  * and — being business_write — through the approval card first.
  */
 
+/**
+ * Lenient line schema for the model: aliases (productId/price/qty…) are accepted
+ * and every line is normalized + enriched from the catalog before Zoho sees it
+ * (missing itemId → search by name; rate 0/missing → list price).
+ */
+const rawQuoteItemSchema = z.object({
+  lineItemId: z.string().optional().nullable().describe('Solo al editar: id de la línea existente en Zoho'),
+  itemId: z.string().optional().nullable().describe('zohoItemId del producto (de searchQuoteProducts). Si lo omites se busca por name.'),
+  productId: z.string().optional().describe('Alias de itemId'),
+  zohoItemId: z.string().optional().describe('Alias de itemId'),
+  name: z.string().optional().describe('Nombre del producto o concepto (obligatorio si no hay itemId)'),
+  product: z.string().optional().describe('Alias de name'),
+  description: z.string().optional().nullable(),
+  quantity: z.number().optional().describe('Cantidad (> 0)'),
+  qty: z.number().optional().describe('Alias de quantity'),
+  rate: z.number().optional().describe('Precio unitario. Si lo omites o es 0 se usa el precio de lista del catálogo'),
+  price: z.number().optional().describe('Alias de rate'),
+  unitPrice: z.number().optional().describe('Alias de rate'),
+  unit: z.string().optional().nullable(),
+  discountPercent: z.number().optional().nullable(),
+  taxId: z.string().optional().nullable(),
+});
+type RawQuoteItem = z.infer<typeof rawQuoteItemSchema>;
+
+/** Pure alias mapping: what the model typed → the strict form line. */
+export function normalizeQuoteItems(items: RawQuoteItem[]): QuoteLineInput[] {
+  return items.map((raw) => {
+    const itemId = raw.itemId ?? raw.productId ?? raw.zohoItemId ?? null;
+    const name = (raw.name ?? raw.product ?? '').trim();
+    const quantity = raw.quantity ?? raw.qty ?? 1;
+    const rate = raw.rate ?? raw.price ?? raw.unitPrice ?? 0;
+    return {
+      lineItemId: raw.lineItemId ?? null,
+      itemId: itemId ? String(itemId).trim() : null,
+      name: name || 'Concepto',
+      description: raw.description ?? null,
+      quantity: Number.isFinite(quantity) && quantity > 0 ? quantity : 1,
+      rate: Number.isFinite(rate) && rate >= 0 ? rate : 0,
+      unit: raw.unit ?? null,
+      discountPercent: raw.discountPercent ?? null,
+      taxId: raw.taxId ?? null,
+    };
+  });
+}
+
+/** Fills itemId / name / list price / unit from the synced catalog. */
+async function enrichQuoteItems(items: QuoteLineInput[]): Promise<{ items: QuoteLineInput[]; notes: string[] }> {
+  const notes: string[] = [];
+  const out: QuoteLineInput[] = [];
+  for (const item of items) {
+    let itemId = item.itemId ?? null;
+    let name = item.name === 'Concepto' ? '' : item.name;
+    let rate = item.rate;
+    let unit = item.unit ?? null;
+    let product: { zohoItemId: string; name: string | null; rate: string | null; unit: string | null } | null = null;
+    if (itemId) {
+      const row = await prisma.product.findUnique({ where: { zohoItemId: itemId }, select: { zohoItemId: true, name: true, rate: true, unit: true } });
+      if (row) product = { ...row, rate: row.rate ? String(row.rate) : null };
+      else notes.push(`itemId ${itemId} no existe en el catálogo sincronizado; se busca por nombre`);
+    }
+    if (!product && name) {
+      const found = await aiSearchProducts(name, 5);
+      const q = name.toLowerCase();
+      const exact = found.find((p) => (p.name ?? '').toLowerCase() === q || (p.sku ?? '').toLowerCase() === q);
+      const best = exact ?? found[0] ?? null;
+      if (best) {
+        product = { zohoItemId: best.zohoItemId, name: best.name, rate: best.rate, unit: best.unit };
+        if (!exact) notes.push(`"${name}" se interpretó como "${best.name}"`);
+      }
+    }
+    if (product) {
+      itemId = product.zohoItemId;
+      if (!name) name = product.name ?? name;
+      if (!rate || rate <= 0) {
+        const listPrice = Number(product.rate ?? 0);
+        if (listPrice > 0) {
+          rate = listPrice;
+          notes.push(`${product.name ?? name}: precio de lista ${listPrice}`);
+        }
+      }
+      if (!unit && product.unit) unit = product.unit;
+    } else if (itemId) {
+      itemId = null;
+    }
+    if (!name) name = 'Concepto';
+    if (!rate || rate <= 0) notes.push(`"${name}" quedó con precio 0: indica el precio o busca el producto con searchQuoteProducts`);
+    out.push({ ...item, itemId, name, rate: rate ?? 0, unit });
+  }
+  return { items: out, notes };
+}
+
+const QUOTE_HINTS: Record<string, string> = {
+  ZOHO_NOT_CONFIGURED: 'Faltan las variables ZOHO_* en el servidor (o activa ZOHO_BOOKS_MOCK=true para pruebas). Avisa al administrador; usa getZohoBooksStatus para el diagnóstico.',
+  ZOHO_AUTH: 'El refresh token de Zoho no tiene permiso para cotizaciones (scope ZohoBooks.estimates.ALL o ZohoBooks.fullaccess.all). El administrador debe regenerarlo.',
+  PRODUCT_NOT_FOUND: 'Busca el producto con searchQuoteProducts y usa su itemId, o envíalo como concepto libre sin itemId.',
+  CUSTOMER_NOT_FOUND: 'Busca el cliente con searchQuoteCustomers y usa su zohoContactId.',
+  ZOHO_RATE_LIMIT: 'Zoho limitó las llamadas: reintenta en un minuto.',
+  ZOHO_TIMEOUT: 'Verifica en Zoho si la cotización se creó antes de reintentar (evita duplicados).',
+  CONFLICT: 'La cotización cambió en Zoho: vuelve a leerla (getQuoteDetail) y reintenta con los datos actuales.',
+  MOCK_NO_PDF: 'Zoho está en modo simulación: no hay PDF oficial hasta configurar credenciales.',
+};
+
+/** One clear message for the model AND the approval card (never a raw stack). */
+function friendlyQuoteError(err: unknown): Error {
+  if (err instanceof QuoteWriteError) {
+    const hint = QUOTE_HINTS[err.code] ?? (err.code.startsWith('ZOHO_') ? 'Zoho rechazó la operación: revisa el mensaje y corrige los datos (producto, precio, unidad, impuestos).' : '');
+    return new Error(hint ? `${err.message} ${hint}` : err.message);
+  }
+  if (err instanceof ZodError) {
+    return new Error(`Datos de la cotización inválidos: ${err.issues.map((i) => `${i.path.join('.') || 'campo'}: ${i.message}`).join('; ')}`);
+  }
+  return err instanceof Error ? err : new Error('Error desconocido al cotizar');
+}
+
 const quoteDraftShape = {
   customerId: z.string().min(1).describe('zohoContactId del cliente (usa searchQuoteCustomers)'),
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe('yyyy-mm-dd; por defecto hoy'),
@@ -43,7 +161,7 @@ const quoteDraftShape = {
   discountValue: z.number().min(0).optional().nullable(),
   discountIsPercent: z.boolean().default(true),
   shippingCharge: z.number().min(0).optional().nullable(),
-  items: z.array(quoteLineInputSchema).min(1).max(200).describe('Conceptos; usa itemId (zohoItemId) de searchQuoteProducts para productos del catálogo'),
+  items: z.array(rawQuoteItemSchema).min(1).max(200).describe('Conceptos. Lo ideal: itemId (zohoItemId de searchQuoteProducts) + quantity; si solo das name, el sistema busca el producto y aplica el precio de lista'),
 };
 
 function summarizeQuoteRow(q: {
@@ -183,15 +301,30 @@ registerTool({
   execute: async (_actor, rawArgs) => {
     const args = rawArgs as z.infer<z.ZodObject<typeof quoteDraftShape>>;
     const today = new Date().toISOString().slice(0, 10);
-    const { values, totals } = aiPreviewQuote({ ...args, date: args.date ?? today });
-    return { valid: true, customerId: values.customerId, date: values.date, expiryDate: values.expiryDate ?? null, lines: values.items.length, totals, note: 'Totales preliminares; Zoho recalcula impuestos y asigna el folio al crear.' };
+    try {
+      const { items, notes } = await enrichQuoteItems(normalizeQuoteItems(args.items));
+      const { values, totals } = aiPreviewQuote({ ...args, items, date: args.date ?? today });
+      return {
+        valid: true,
+        customerId: values.customerId,
+        date: values.date,
+        expiryDate: values.expiryDate ?? null,
+        lines: values.items.map((i) => ({ itemId: i.itemId ?? null, name: i.name, quantity: i.quantity, rate: i.rate, unit: i.unit ?? null })),
+        totals,
+        adjustments: notes,
+        note: 'Totales preliminares; Zoho recalcula impuestos y asigna el folio al crear. Usa EXACTAMENTE estas líneas (itemId, rate) en createQuote.',
+      };
+    } catch (err) {
+      throw friendlyQuoteError(err);
+    }
   },
 });
 
 function draftSummary(args: unknown, verb: string): string {
-  const a = args as { customerId?: string; items?: { name?: string; quantity?: number; rate?: number }[] };
-  const items = (a.items ?? []).slice(0, 3).map((i) => `${i.quantity ?? 1}× ${i.name ?? 'concepto'} @ ${i.rate ?? 0}`).join(', ');
-  const more = (a.items?.length ?? 0) > 3 ? ` (+${(a.items?.length ?? 0) - 3} más)` : '';
+  const a = args as { customerId?: string; items?: RawQuoteItem[] };
+  const lines = normalizeQuoteItems(a.items ?? []);
+  const items = lines.slice(0, 3).map((i) => `${i.quantity}× ${i.name} @ ${i.rate > 0 ? i.rate : 'precio de lista'}`).join(', ');
+  const more = lines.length > 3 ? ` (+${lines.length - 3} más)` : '';
   return `${verb} cotización en Zoho Books para el cliente ${a.customerId ?? '?'}: ${items}${more}`;
 }
 
@@ -208,8 +341,13 @@ registerTool({
   execute: async (actor, rawArgs) => {
     const args = rawArgs as z.infer<z.ZodObject<typeof quoteDraftShape>>;
     const today = new Date().toISOString().slice(0, 10);
-    const quote = await aiCreateQuote(actor, { ...args, date: args.date ?? today });
-    return { created: true, ...summarizeQuoteRow(quote), pdfUrl: `/app/quotes/${quote.id}/pdf`, note: 'La cotización ya existe en Zoho Books. Comparte el enlace y ofrece el PDF oficial (getQuotePdf).' };
+    try {
+      const { items, notes } = await enrichQuoteItems(normalizeQuoteItems(args.items));
+      const quote = await aiCreateQuote(actor, { ...args, items, date: args.date ?? today });
+      return { created: true, ...summarizeQuoteRow(quote), adjustments: notes, pdfUrl: `/app/quotes/${quote.id}/pdf`, url: absoluteUrl(`/app/quotes/${quote.id}`), note: 'La cotización ya existe en Zoho Books. Comparte el enlace y ofrece el PDF oficial (getQuotePdf) o envíala con sendQuoteToContact.' };
+    } catch (err) {
+      throw friendlyQuoteError(err);
+    }
   },
 });
 
@@ -227,13 +365,19 @@ registerTool({
     const { quoteId, ...args } = rawArgs as { quoteId: string } & z.infer<z.ZodObject<typeof quoteDraftShape>>;
     const current = await aiGetQuote(quoteId);
     if (!current) return { error: 'Cotización no encontrada' };
-    const quote = await aiUpdateQuote(actor, quoteId, {
-      ...args,
-      requestKey: `ai-update-${quoteId}-${Date.now()}`,
-      date: args.date ?? current.date?.slice(0, 10) ?? new Date().toISOString().slice(0, 10),
-      expectedRemoteModifiedAt: current.zohoLastModifiedTime,
-    });
-    return { updated: true, ...summarizeQuoteRow(quote), pdfUrl: `/app/quotes/${quote.id}/pdf` };
+    try {
+      const { items, notes } = await enrichQuoteItems(normalizeQuoteItems(args.items));
+      const quote = await aiUpdateQuote(actor, quoteId, {
+        ...args,
+        items,
+        requestKey: `ai-update-${quoteId}-${Date.now()}`,
+        date: args.date ?? current.date?.slice(0, 10) ?? new Date().toISOString().slice(0, 10),
+        expectedRemoteModifiedAt: current.zohoLastModifiedTime,
+      });
+      return { updated: true, ...summarizeQuoteRow(quote), adjustments: notes, pdfUrl: `/app/quotes/${quote.id}/pdf` };
+    } catch (err) {
+      throw friendlyQuoteError(err);
+    }
   },
 });
 
@@ -398,13 +542,17 @@ registerTool({
     const requestKey = `${prefix}${Date.now()}`;
     let quote;
     let action: 'created' | 'updated';
-    if (existing && existing.status === 'draft') {
-      const currentLines = new Map(existing.items.map((i) => [i.zohoItemId ?? i.name ?? '', i.zohoLineItemId]));
-      quote = await aiUpdateQuote(actor, existing.id, { ...form, requestKey, items: form.items.map((i) => ({ ...i, lineItemId: currentLines.get(i.itemId ?? i.name) ?? null })), expectedRemoteModifiedAt: existing.zohoLastModifiedTime });
-      action = 'updated';
-    } else {
-      quote = await aiCreateQuote(actor, { ...form, requestKey });
-      action = 'created';
+    try {
+      if (existing && existing.status === 'draft') {
+        const currentLines = new Map(existing.items.map((i) => [i.zohoItemId ?? i.name ?? '', i.zohoLineItemId]));
+        quote = await aiUpdateQuote(actor, existing.id, { ...form, requestKey, items: form.items.map((i) => ({ ...i, lineItemId: currentLines.get(i.itemId ?? i.name) ?? null })), expectedRemoteModifiedAt: existing.zohoLastModifiedTime });
+        action = 'updated';
+      } else {
+        quote = await aiCreateQuote(actor, { ...form, requestKey });
+        action = 'created';
+      }
+    } catch (err) {
+      throw friendlyQuoteError(err);
     }
 
     return {
@@ -540,5 +688,50 @@ registerTool({
       return { requested: it.query, product: line.matched ? line.name : null, sku: line.sku, quantity: it.quantity, available, ok: line.matched && available !== null && available >= it.quantity, shortage: line.matched && available !== null && available < it.quantity ? Math.round((it.quantity - available) * 100) / 100 : 0, unknownStock: line.matched && available === null };
     }));
     return { allAvailable: rows.every((r) => r.ok), rows };
+  },
+});
+
+registerTool({
+  name: 'getZohoBooksStatus',
+  description:
+    'Diagnóstico de la conexión con Zoho Books para cotizaciones: modo simulación, credenciales, organización, última cotización sincronizada y una lectura de prueba. Úsalo cuando crear/editar/enviar una cotización falle, para explicar la causa real y qué debe hacer el administrador.',
+  category: 'system',
+  requiredPermission: 'quotes.view',
+  enabledByDefault: true,
+  effect: 'read',
+  parameters: z.object({}),
+  execute: async () => {
+    const mock = isZohoBooksMockEnabled();
+    let configured = false;
+    let organizationId: string | null = null;
+    let configError: string | null = null;
+    try {
+      const cfg = getZohoConfig();
+      configured = Boolean(cfg.clientId && cfg.clientSecret && cfg.refreshToken);
+      organizationId = cfg.booksOrganizationId ?? cfg.organizationId ?? null;
+    } catch (err) {
+      configError = err instanceof Error ? err.message : 'Configuración de Zoho inválida';
+    }
+    let probe: { ok: boolean; error?: string } | null = null;
+    if (!mock && configured) {
+      try {
+        await listEstimates({ perPage: 1 });
+        probe = { ok: true };
+      } catch (err) {
+        probe = { ok: false, error: err instanceof Error ? err.message : 'error' };
+      }
+    }
+    const [count, last] = await Promise.all([
+      prisma.quote.count(),
+      prisma.quote.findFirst({ orderBy: { createdAt: 'desc' }, select: { estimateNumber: true, createdAt: true, createdInUnik: true } }),
+    ]);
+    const diagnosis = mock
+      ? 'Zoho Books está en MODO SIMULACIÓN (ZOHO_BOOKS_MOCK=true): las cotizaciones se crean localmente, sin folio real ni PDF oficial.'
+      : !configured
+        ? `Zoho no está configurado: ${configError ?? 'faltan variables ZOHO_*'}. El administrador debe capturar ZOHO_CLIENT_ID, ZOHO_CLIENT_SECRET, ZOHO_REFRESH_TOKEN y ZOHO_ORGANIZATION_ID.`
+        : probe && !probe.ok
+          ? `Zoho rechaza las lecturas de cotizaciones: ${probe.error}. Casi siempre es el scope del refresh token (ZohoBooks.estimates.ALL / fullaccess) o el ID de organización de Books.`
+          : 'Conexión con Zoho Books correcta: lectura de cotizaciones OK. Si crear falla, el error viene de los datos (producto/cliente/precio) y el mensaje de Zoho lo indica.';
+    return { mock, configured, organizationId, probe, quotesSynced: count, lastQuote: last ? { folio: last.estimateNumber, at: last.createdAt.toISOString(), origin: last.createdInUnik ? 'UNIK' : 'Zoho' } : null, diagnosis };
   },
 });

@@ -45,7 +45,9 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
 const postSchema = z
   .object({
     message: z.string().min(1).max(8000).optional(),
-    trigger: z.enum(['open', 'inbound']).optional(),
+    trigger: z.enum(['open', 'inbound', 'action_failed']).optional(),
+    /** For action_failed: which tool and what error, so the copilot fixes it on its own. */
+    detail: z.object({ tool: z.string().max(80).optional(), error: z.string().max(800).optional() }).optional(),
     model: z.string().optional(),
   })
   .refine((v) => Boolean(v.message) !== Boolean(v.trigger), { message: 'Envía "message" o "trigger", no ambos' });
@@ -67,7 +69,10 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       return NextResponse.json({ error: 'El copiloto del chat está apagado', code: 'paused' }, { status: 409 });
     }
     aiConversationId = (await getOrCreateSurfaceConversation(auth.user, { kind: 'chat', id })).id;
-    if (input.trigger) {
+    if (input.trigger === 'action_failed') {
+      // A failed approved action: the copilot diagnoses and retries regardless of proactivity.
+      text = autoTriggerMessage('action_failed', 'chat', input.detail);
+    } else if (input.trigger) {
       if (mode !== 'active') return NextResponse.json({ skipped: true, reason: 'mode' });
       const anchor = await chatAutoAnchor(id, auth.user.id);
       if (!(await shouldRunAutoTurn(aiConversationId, anchor))) {

@@ -44,6 +44,11 @@ import {
   type ActionKind,
   type CopilotMessage,
   parsePlan,
+  AUTO_EVENT_LABELS,
+  extractFailureReason,
+  performUiAction,
+  uiActionFromResult,
+  type UiAction,
   type CopilotMode,
   type CopilotProposal,
   type DraftData,
@@ -59,6 +64,8 @@ import {
  */
 export interface CopilotSurfaceConfig {
   surfaceId: string;
+  /** Unified preference that stores this surface's proactivity (one config for every surface). */
+  preferenceKey: 'inboxCopilotMode' | 'chatCopilotMode';
   endpoints: {
     thread: string;
     proposal: (proposalId: string) => string;
@@ -83,7 +90,7 @@ export interface CopilotPanelProps {
   onBack?: () => void;
 }
 
-type TurnPayload = { message: string } | { trigger: 'open' | 'inbound' };
+type TurnPayload = { message: string } | { trigger: 'open' | 'inbound' } | { trigger: 'action_failed'; detail: { tool: string; error: string } };
 
 async function apiJson<T>(input: string, init?: RequestInit): Promise<T> {
   const res = await fetch(input, {
@@ -120,12 +127,60 @@ function Orb({ state }: { state: 'idle' | 'thinking' | 'paused' }) {
   );
 }
 
-function ModeBadge({ mode }: { mode: CopilotMode }) {
+/**
+ * Mode badge with an in-place menu. It writes the SAME unified preference the
+ * "Asistente IA → Preferencias y memoria" screen edits, so there is still one
+ * configuration — this is only a shortcut for this surface.
+ */
+function ModeBadge({ mode, onChange, busy }: { mode: CopilotMode; onChange: (mode: CopilotMode) => void; busy: boolean }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [open]);
   return (
-    <Link href={AI_SETTINGS_HREF} className={cn('copilot-mode-badge', `is-${mode}`)} title={`${MODE_META[mode].label} — ${MODE_META[mode].hint} Clic para configurar.`} aria-label="Configurar el copiloto en Asistente IA">
-      {mode === 'paused' ? <Pause size={12} /> : <Settings2 size={12} />}
-      <span>{MODE_META[mode].label}</span>
-    </Link>
+    <div className="copilot-mode-menu" ref={ref}>
+      <button
+        type="button"
+        className={cn('copilot-mode-badge', `is-${mode}`)}
+        title={`${MODE_META[mode].label} — ${MODE_META[mode].hint} Clic para cambiar.`}
+        aria-label="Cambiar el modo del copiloto"
+        aria-expanded={open}
+        disabled={busy}
+        onClick={() => setOpen((v) => !v)}
+      >
+        {mode === 'paused' ? <Pause size={12} /> : <Settings2 size={12} />}
+        <span>{MODE_META[mode].label}</span>
+      </button>
+      {open && (
+        <div className="copilot-mode-pop" role="menu" aria-label="Modo del copiloto en esta superficie">
+          {(Object.keys(MODE_META) as CopilotMode[]).map((m) => (
+            <button
+              key={m}
+              type="button"
+              role="menuitemradio"
+              aria-checked={m === mode}
+              className={cn('copilot-mode-option', m === mode && 'is-current')}
+              onClick={() => {
+                setOpen(false);
+                if (m !== mode) onChange(m);
+              }}
+            >
+              <span className="copilot-mode-option-label">{MODE_META[m].label}</span>
+              <span className="copilot-mode-option-hint">{MODE_META[m].hint}</span>
+            </button>
+          ))}
+          <Link href={AI_SETTINGS_HREF} className="copilot-mode-more">
+            <Settings2 size={12} /> Todas las preferencias de la IA
+          </Link>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -222,7 +277,8 @@ function parseSystemEvent(text: string): { kind: 'approved' | 'rejected' | 'othe
   const rejected = /RECHAZÓ/.test(clean);
   const failed = /fall[oó]:/i.test(clean);
   const action = /Acción:\s*([^]*?)(?:\s+Resultado:|$)/.exec(clean)?.[1]?.trim() ?? null;
-  if (approved) return { kind: 'approved', title: failed ? 'Aprobaste la acción, pero falló' : /incierto/.test(clean) ? 'Aprobaste la acción · resultado por confirmar' : 'Aprobaste la acción · ejecutada', detail: action, failed };
+  const reason = failed ? extractFailureReason(clean) : null;
+  if (approved) return { kind: 'approved', title: failed ? 'Aprobaste la acción, pero falló' : /incierto/.test(clean) ? 'Aprobaste la acción · resultado por confirmar' : 'Aprobaste la acción · ejecutada', detail: failed && reason ? `${reason}${action ? ` — ${action}` : ''}` : action, failed };
   if (rejected) return { kind: 'rejected', title: 'Rechazaste la acción', detail: /RECHAZÓ la propuesta [^\s]+ \([^)]+\)(?::\s*(.*))?/.exec(clean)?.[1] ?? null, failed: false };
   return { kind: 'other', title: clean, detail: null, failed: false };
 }
@@ -267,7 +323,7 @@ export function CopilotPanel({ surface, user, onInsertDraft, onAfterTurn, onBack
   const runTurn = useCallback(
     async (payload: TurnPayload) => {
       if (streamingRef.current) {
-        if ('trigger' in payload) pendingTrigger.current = payload.trigger;
+        if ('trigger' in payload && payload.trigger !== 'action_failed') pendingTrigger.current = payload.trigger;
         return;
       }
       setError(null);
@@ -345,6 +401,8 @@ export function CopilotPanel({ surface, user, onInsertDraft, onAfterTurn, onBack
             } else if (event.type === 'proposal') {
               const p = d as unknown as CopilotProposal;
               setProposals((prev) => [...prev.filter((x) => x.id !== p.id), p]);
+            } else if (event.type === 'action') {
+              performUiAction(d as unknown as UiAction);
             } else if (event.type === 'error') {
               setError(typeof d.message === 'string' ? d.message : 'Error desconocido');
             }
@@ -421,21 +479,61 @@ export function CopilotPanel({ surface, user, onInsertDraft, onAfterTurn, onBack
 
   const decideProposal = useCallback(
     async (proposal: CopilotProposal, decision: 'approve' | 'reject') => {
-      const data = await apiJson<{ proposal: CopilotProposal; execution?: { success: boolean; error?: string; uncertain?: boolean } }>(surface.endpoints.proposal(proposal.id), { method: 'POST', body: JSON.stringify({ decision }) });
+      const data = await apiJson<{ proposal: CopilotProposal; execution?: { success: boolean; error?: string; uncertain?: boolean; result?: unknown } }>(surface.endpoints.proposal(proposal.id), { method: 'POST', body: JSON.stringify({ decision }) });
+      let failedError: string | null = null;
       if (decision === 'approve') {
-        if (data.execution?.success) toast.success('Acción ejecutada');
-        else if (data.execution?.uncertain) toast.warning('Sin confirmación del proveedor; se actualizará solo');
-        else toast.error(data.execution?.error ?? 'La acción falló');
+        if (data.execution?.success) {
+          toast.success('Acción ejecutada');
+          const action = uiActionFromResult(proposal.toolName, data.execution.result);
+          if (action) performUiAction(action);
+        } else if (data.execution?.uncertain) toast.warning('Sin confirmación del proveedor; se actualizará solo');
+        else {
+          failedError = data.execution?.error ?? 'La acción falló';
+          toast.error(failedError);
+        }
       } else {
         toast.message('Propuesta rechazada');
       }
       setProposals((prev) => prev.filter((p) => p.id !== proposal.id));
       await loadThread().catch(() => undefined);
       onAfterTurnRef.current?.();
+      // The copilot reads the error and fixes it on its own (search the right product, adjust data, re-propose).
+      if (failedError) void runTurnRef.current({ trigger: 'action_failed', detail: { tool: proposal.toolName, error: failedError } });
       return data.execution;
     },
     [surface.endpoints, loadThread]
   );
+
+  const [modeBusy, setModeBusy] = useState(false);
+  const changeMode = useCallback(
+    async (next: CopilotMode) => {
+      setModeBusy(true);
+      try {
+        await apiJson('/app/assistant/api/preferences', { method: 'PATCH', body: JSON.stringify({ [surface.preferenceKey]: next }) });
+        setMode(next);
+        toast.success(`Copiloto: ${MODE_META[next].label}`);
+        if (next === 'active') void runTurnRef.current({ trigger: 'open' });
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : 'No se pudo cambiar el modo');
+      } finally {
+        setModeBusy(false);
+      }
+    },
+    [surface.preferenceKey]
+  );
+
+  // Preferences can change in another tab/screen: refresh the mode when the user comes back.
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === 'visible' && !streamingRef.current) void loadThreadRef.current().catch(() => undefined);
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('focus', onVisible);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('focus', onVisible);
+    };
+  }, []);
 
   const items = useMemo(() => {
     let lastActionsIdx = -1;
@@ -516,7 +614,7 @@ export function CopilotPanel({ surface, user, onInsertDraft, onAfterTurn, onBack
             </motion.span>
           </AnimatePresence>
         </div>
-        <ModeBadge mode={mode} />
+        <ModeBadge mode={mode} onChange={(m) => void changeMode(m)} busy={modeBusy} />
       </header>
 
       <div ref={scrollRef} className="copilot-thread" role="log" aria-live="polite">
@@ -544,7 +642,7 @@ export function CopilotPanel({ surface, user, onInsertDraft, onAfterTurn, onBack
               return (
                 <motion.div key={it.id} className="copilot-event" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.2 }}>
                   <span />
-                  {it.auto === 'open' ? surface.copy.eventOpen : surface.copy.eventInbound}
+                  {it.auto === 'open' ? surface.copy.eventOpen : it.auto === 'inbound' ? surface.copy.eventInbound : AUTO_EVENT_LABELS[it.auto]}
                   <span />
                 </motion.div>
               );

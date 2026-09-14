@@ -17834,3 +17834,55 @@ textarea.input {
 .assistant-plan-toggle:hover { background: var(--unik-surface-hover); color: var(--unik-text); }
 .assistant-plan-toggle.is-on { background: var(--unik-brand-subtle); color: var(--unik-brand-text); border-color: color-mix(in srgb, var(--unik-brand) 40%, transparent); }
 .model-selector-item-auto .model-selector-item-name { gap: 6px; }
+
+/* =====================================================================
+   CALL DOCK — floating phone call that survives navigation
+   ===================================================================== */
+.call-dock {
+  position: fixed; right: 20px; bottom: 96px; z-index: 1200; width: 340px; max-width: calc(100vw - 32px);
+  border-radius: 18px; border: 1px solid color-mix(in srgb, var(--unik-success) 35%, var(--unik-border));
+  background: var(--unik-surface); box-shadow: 0 18px 48px color-mix(in srgb, #000 22%, transparent), var(--unik-shadow-lg);
+  padding: 12px 14px 12px; display: flex; flex-direction: column; gap: 10px; color: var(--unik-text);
+}
+.call-dock.is-ai { border-color: color-mix(in srgb, var(--unik-brand) 40%, var(--unik-border)); }
+.call-dock.is-ended { border-color: var(--unik-border); opacity: 0.96; }
+.call-dock.is-min { width: 260px; padding: 8px 12px; }
+.call-dock-head { display: flex; align-items: center; gap: 10px; }
+.call-dock-icon {
+  width: 36px; height: 36px; border-radius: 12px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
+  background: var(--unik-surface-hover); color: var(--unik-text-secondary);
+}
+.call-dock-icon.is-live { background: var(--unik-success-bg); color: var(--unik-success); animation: call-dock-pulse 1.6s ease-in-out infinite; }
+.call-dock.is-ai .call-dock-icon.is-live { background: var(--unik-brand-subtle); color: var(--unik-brand-text); }
+@keyframes call-dock-pulse { 0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--unik-success) 35%, transparent); } 50% { box-shadow: 0 0 0 8px transparent; } }
+.call-dock-title { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.call-dock-title strong { font-size: var(--unik-text-sm); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.call-dock-title span { font-size: 11.5px; color: var(--unik-text-muted); font-variant-numeric: tabular-nums; }
+.call-dock-iconbtn { width: 28px; height: 28px; border-radius: 8px; border: 0; background: transparent; color: var(--unik-text-muted); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
+.call-dock-iconbtn:hover { background: var(--unik-surface-hover); color: var(--unik-text); }
+.call-dock-room { display: flex; align-items: center; }
+.call-room-compact { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; width: 100%; }
+.call-dock-muted { font-size: 12px; color: var(--unik-text-muted); }
+.call-dock-error { font-size: 12px; color: var(--unik-danger); background: var(--unik-danger-bg); padding: 6px 10px; border-radius: 8px; }
+.call-dock-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.call-dock-transfer { display: flex; gap: 6px; align-items: center; }
+.call-dock-transfer .select { flex: 1; min-width: 0; }
+.call-dock-link { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--unik-text-muted); text-decoration: none; }
+.call-dock-link:hover { color: var(--unik-brand-text); }
+@media (max-width: 640px) { .call-dock { right: 12px; left: 12px; width: auto; bottom: 84px; } }
+
+/* ---- Copilot mode menu (in-place shortcut to the unified preference) ---- */
+.copilot-mode-menu { position: relative; }
+.copilot-mode-badge[disabled] { opacity: 0.6; cursor: default; }
+.copilot-mode-pop {
+  position: absolute; right: 0; top: calc(100% + 6px); z-index: 60; width: 260px; padding: 6px;
+  border-radius: 12px; border: 1px solid var(--unik-border); background: var(--unik-surface); box-shadow: var(--unik-shadow-lg);
+  display: flex; flex-direction: column; gap: 2px;
+}
+.copilot-mode-option { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%; padding: 8px 10px; border-radius: 8px; border: 0; background: transparent; text-align: left; cursor: pointer; color: var(--unik-text); }
+.copilot-mode-option:hover { background: var(--unik-surface-hover); }
+.copilot-mode-option.is-current { background: var(--unik-brand-subtle); }
+.copilot-mode-option-label { font-size: 13px; font-weight: 600; }
+.copilot-mode-option-hint { font-size: 11px; color: var(--unik-text-muted); line-height: 1.35; }
+.copilot-mode-more { display: inline-flex; align-items: center; gap: 5px; padding: 8px 10px; font-size: 11.5px; color: var(--unik-text-secondary); text-decoration: none; border-top: 1px solid var(--unik-border-subtle); margin-top: 4px; }
+.copilot-mode-more:hover { color: var(--unik-brand-text); }

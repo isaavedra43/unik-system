@@ -58,9 +58,12 @@ interface OrchestratorInput {
 }
 
 interface OrchestratorEvent {
-  type: 'token' | 'tool_call_start' | 'tool_call_end' | 'artifact' | 'proposal' | 'done' | 'error';
+  type: 'token' | 'tool_call_start' | 'tool_call_end' | 'artifact' | 'proposal' | 'action' | 'done' | 'error';
   data?: unknown;
 }
+
+/** Tools whose successful result must open something in the user's screen (call dock, internal call). */
+const UI_ACTION_TOOLS = new Set(['callContact', 'startOutboundCall', 'startInternalCall']);
 
 const EXPORT_MAX_ROWS = 5000;
 const EXPORT_PAGE_SIZE = 200; // querySalesOrders' Zod max
@@ -967,6 +970,16 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
             chartType: a.chartType,
           },
         };
+      }
+    }
+
+    // UI actions: a phone call joins the floating call dock; an internal call opens the chat.
+    if (result.success && UI_ACTION_TOOLS.has(tc.name) && result.result && typeof result.result === 'object') {
+      const r = result.result as Record<string, unknown>;
+      if (typeof r.callId === 'string' && !r.error) {
+        yield { type: 'action', data: { kind: 'join_call', callId: r.callId, label: (r.to as string | undefined) ?? (r.phone as string | undefined) ?? null, aiCall: r.mode === 'ai' } };
+      } else if (typeof r.openUrl === 'string' && !r.error) {
+        yield { type: 'action', data: { kind: 'open_url', url: r.openUrl, reason: 'internal_call' } };
       }
     }
 

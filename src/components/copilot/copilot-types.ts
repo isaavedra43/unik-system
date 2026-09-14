@@ -90,9 +90,64 @@ export interface LiveStep {
 
 export const AUTO_PREFIX = '⟦auto:';
 
-export function autoKind(content: string | null | undefined): 'open' | 'inbound' | null {
+export type AutoEventKind = 'open' | 'inbound' | 'action_failed';
+
+export function autoKind(content: string | null | undefined): AutoEventKind | null {
   if (!content || !content.startsWith(AUTO_PREFIX)) return null;
+  if (content.startsWith(`${AUTO_PREFIX}action_failed`)) return 'action_failed';
   return content.startsWith(`${AUTO_PREFIX}inbound`) ? 'inbound' : 'open';
+}
+
+/** Client-side twin of the server trigger: sent when an approved action failed so the AI fixes it. */
+export function actionFailedMessage(tool: string, error: string): string {
+  const clean = error.replace(/\s+/g, ' ').slice(0, 600);
+  return `${AUTO_PREFIX}action_failed⟧ La acción que el usuario APROBÓ (${tool}) FALLÓ con este error: "${clean}". Explica en una línea qué pasó y CORRÍGELO TÚ AHORA: si es un producto/cliente que no coincide, búscalo con las tools y vuelve a proponer la acción corregida; si es un dato inválido (precio 0, unidad, fecha), corrígelo y vuelve a proponer; si es configuración (Zoho, credenciales, permisos), dilo claramente e indica qué debe hacer el administrador. No pidas al usuario que lo haga a mano si tú puedes hacerlo.`;
+}
+
+export const AUTO_EVENT_LABELS: Record<AutoEventKind, string> = {
+  open: 'Analicé el contexto al abrir',
+  inbound: 'Llegó algo nuevo · reanalicé',
+  action_failed: 'Una acción aprobada falló · la IA la está corrigiendo',
+};
+
+/** Result of an executed tool that must open something in the UI (call dock, internal call). */
+export interface UiAction {
+  kind: 'join_call' | 'open_url';
+  callId?: string;
+  label?: string | null;
+  aiCall?: boolean;
+  url?: string;
+  reason?: string;
+}
+
+/** Derives the UI action from a tool's (approved) result. */
+export function uiActionFromResult(toolName: string, result: unknown): UiAction | null {
+  if (!result || typeof result !== 'object') return null;
+  const r = result as Record<string, unknown>;
+  if (r.error) return null;
+  if ((toolName === 'callContact' || toolName === 'startOutboundCall') && typeof r.callId === 'string') {
+    return { kind: 'join_call', callId: r.callId, label: (r.to as string | undefined) ?? (r.phone as string | undefined) ?? null, aiCall: r.mode === 'ai' };
+  }
+  if (toolName === 'startInternalCall' && typeof r.openUrl === 'string') return { kind: 'open_url', url: r.openUrl, reason: 'internal_call' };
+  return null;
+}
+
+/** Runs a UI action: joins the floating call dock or opens the internal call. Client only. */
+export function performUiAction(action: UiAction): void {
+  if (typeof window === 'undefined') return;
+  if (action.kind === 'join_call' && action.callId) {
+    window.dispatchEvent(new CustomEvent('unik:call:join', { detail: { callId: action.callId, label: action.label ?? null, aiCall: Boolean(action.aiCall) } }));
+  } else if (action.kind === 'open_url' && action.url) {
+    const url = action.url.replace(/^https?:\/\/[^/]+/, '') || action.url;
+    window.location.assign(url);
+  }
+}
+
+/** "falló: <motivo>. Acción: …" → the reason, for the red system card. */
+export function extractFailureReason(text: string): string | null {
+  const m = /fall[oó]:\s*([^]*?)(?:\.\s+Acción:|\s+Acción:|$)/.exec(text);
+  const reason = m?.[1]?.trim();
+  return reason && reason.length > 0 ? reason.slice(0, 400) : null;
 }
 
 export const MODE_META: Record<CopilotMode, { label: string; hint: string }> = {

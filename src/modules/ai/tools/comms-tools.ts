@@ -12,6 +12,7 @@ import { suggestReply } from '@/modules/comms/comms-ai';
 import { createCommitment, listCommitments } from '@/modules/comms/commitments-service';
 import { previewText } from '@/modules/comms/normalize';
 import { markdownLinksToPlain, rewriteArtifactLinksForSharing } from '../artifact-share';
+import { prepareCustomerMessage, resolveMediaObjectIds } from './messaging-tools';
 
 /**
  * Assistant tools for the omnichannel inbox and commitments. Reads run directly; `sendInboxMessage` is an
@@ -139,7 +140,7 @@ registerTool({
 registerTool({
   name: 'sendInboxMessage',
   description:
-    'Envía un mensaje a un contacto por la conversación indicada (WhatsApp/SMS/Telegram). Requiere aprobación explícita del usuario.',
+    'Envía un mensaje al cliente de la conversación de bandeja actual (WhatsApp/SMS/Telegram), con archivos adjuntos si aplica (reportes generados: attachments.artifactIds; documentos aprobados: attachments.knowledgeSourceIds). El cliente ve el documento en su chat, no una liga. Texto plano estilo WhatsApp, firmado con tu nombre real. Requiere aprobación explícita del usuario (tarjeta).',
   category: 'communication',
   requiredPermission: 'inbox.use',
   enabledByDefault: true,
@@ -147,27 +148,41 @@ registerTool({
   contextTags: ['all'],
   parameters: z.object({
     conversationId: z.string(),
-    body: z.string().min(1).max(4000),
+    body: z.string().min(1).max(4000).describe('Mensaje final para el cliente (sin markdown ni placeholders)'),
+    attachments: z
+      .object({
+        artifactIds: z.array(z.string()).max(5).optional().describe('Reportes/PDFs generados en este chat (artifactId)'),
+        knowledgeSourceIds: z.array(z.string()).max(5).optional().describe('Documentos aprobados de la biblioteca (listAttachableDocuments)'),
+      })
+      .optional(),
+    keepInternalData: z.boolean().optional().describe('true SOLO si el usuario pidió compartir existencias/datos internos'),
   }),
   summarize: (args) => {
-    const a = args as { conversationId: string; body: string };
-    return `Enviar por la bandeja (conversación ${a.conversationId}): "${previewText(a.body, 200)}"`;
+    const a = args as { conversationId: string; body: string; attachments?: { artifactIds?: string[]; knowledgeSourceIds?: string[] } };
+    const files = (a.attachments?.artifactIds?.length ?? 0) + (a.attachments?.knowledgeSourceIds?.length ?? 0);
+    return `Enviar por la bandeja (conversación ${a.conversationId})${files > 0 ? ` con ${files} archivo(s) adjunto(s)` : ''}: "${previewText(a.body, 200)}"`;
   },
-  execute: async (actor, args) => {
-    const a = args as { conversationId: string; body: string };
+  execute: async (actor, args, ctx) => {
+    const a = args as { conversationId: string; body: string; attachments?: { artifactIds?: string[]; knowledgeSourceIds?: string[] }; keepInternalData?: boolean };
     const conversation = await getConversation(actor, a.conversationId);
-    const { text: body } = await rewriteArtifactLinksForSharing(markdownLinksToPlain(a.body), actor.id);
+    const prepared = await prepareCustomerMessage(actor, a.body, a.attachments, { keepInternalData: a.keepInternalData });
+    const { text: body } = await rewriteArtifactLinksForSharing(markdownLinksToPlain(prepared.body), actor.id);
+    const media = await resolveMediaObjectIds(actor, prepared.attachments, true);
     const message = await sendOutboundMessage({
       accountId: conversation.accountId,
       conversationId: conversation.id,
       body,
+      mediaObjectIds: media.ids,
       sentByUserId: actor.id,
+      proposalId: ctx.approvedProposalId ?? null,
       actor,
     });
     return {
       messageId: message.id,
       status: message.status,
       to: conversation.contact.displayName,
+      attachments: media.labels,
+      autoAttached: prepared.autoAttached.length,
       uncertain: message.uncertain,
       error: message.error,
     };

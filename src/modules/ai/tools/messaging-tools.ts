@@ -9,6 +9,7 @@ import { previewText } from '@/modules/comms/normalize';
 import { channelLabel, pickConversationForContact, resolveContact, type PreferredChannel } from '@/modules/comms/contact-resolver';
 import { sendOutboundMessage, startConversation } from '@/modules/comms/comms-service';
 import { CommsError } from '@/modules/comms/comms-errors';
+import { extractArtifactIdsFromLinks, formatForCustomerChannel, stripArtifactLinks } from '../customer-message-format';
 
 /**
  * Messaging tools: WhatsApp / SMS to any contact (by name or phone), bulk
@@ -26,7 +27,7 @@ const attachmentsSchema = z
   })
   .optional();
 
-type Attachments = z.infer<typeof attachmentsSchema>;
+export type Attachments = z.infer<typeof attachmentsSchema>;
 
 interface DeliveryInput {
   contact: string;
@@ -34,9 +35,43 @@ interface DeliveryInput {
   body: string;
   attachments?: Attachments;
   templateKey?: string;
+  /** The user explicitly asked to share stock/internal figures. */
+  keepInternalData?: boolean;
 }
 
-async function resolveMediaObjectIds(actor: CurrentUser, attachments: Attachments, external: boolean): Promise<{ ids: string[]; labels: string[] }> {
+/**
+ * Customer-facing body: WhatsApp formatting, real signature, no internal data,
+ * and every report the model linked becomes a REAL attachment (the customer
+ * must see the document, never a bare link).
+ */
+export async function prepareCustomerMessage(
+  actor: CurrentUser,
+  body: string,
+  attachments: Attachments,
+  options: { keepInternalData?: boolean } = {}
+): Promise<{ body: string; attachments: Attachments; autoAttached: string[] }> {
+  const settings = await getAiSettings().catch(() => null);
+  const linked = extractArtifactIdsFromLinks(body);
+  const known = new Set(attachments?.artifactIds ?? []);
+  const autoAttached: string[] = [];
+  for (const id of linked) {
+    if (known.has(id)) continue;
+    const artifact = await prisma.aiArtifact.findFirst({ where: { id, conversation: { userId: actor.id } }, select: { id: true, storageObjectId: true } });
+    if (artifact?.storageObjectId) {
+      known.add(id);
+      autoAttached.push(id);
+    }
+  }
+  let text = autoAttached.length > 0 || (attachments?.artifactIds?.length ?? 0) > 0 ? stripArtifactLinks(body) : body;
+  const formatted = formatForCustomerChannel(text, { senderName: actor.name, companyName: settings?.companyName ?? null, keepInternalData: options.keepInternalData });
+  text = formatted.text;
+  const merged: Attachments = { ...(attachments ?? {}), artifactIds: known.size > 0 ? [...known] : attachments?.artifactIds };
+  if (!merged.artifactIds?.length) delete merged.artifactIds;
+  if (!merged.knowledgeSourceIds?.length) delete merged.knowledgeSourceIds;
+  return { body: text, attachments: Object.keys(merged).length > 0 ? merged : undefined, autoAttached };
+}
+
+export async function resolveMediaObjectIds(actor: CurrentUser, attachments: Attachments, external: boolean): Promise<{ ids: string[]; labels: string[] }> {
   const ids: string[] = [];
   const labels: string[] = [];
   for (const artifactId of attachments?.artifactIds ?? []) {
@@ -77,8 +112,9 @@ export async function deliverToContact(actor: CurrentUser, input: DeliveryInput,
     conversationId = started.conversation.id;
   }
 
-  const { text: sharedBody } = await rewriteArtifactLinksForSharing(markdownLinksToPlain(input.body), actor.id);
-  const media = await resolveMediaObjectIds(actor, input.attachments, true);
+  const prepared = await prepareCustomerMessage(actor, input.body, input.attachments, { keepInternalData: input.keepInternalData });
+  const { text: sharedBody } = await rewriteArtifactLinksForSharing(markdownLinksToPlain(prepared.body), actor.id);
+  const media = await resolveMediaObjectIds(actor, prepared.attachments, true);
 
   const message = await sendOutboundMessage({
     accountId: target.accountId,

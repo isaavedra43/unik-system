@@ -24,6 +24,7 @@ export function CopilotPanel({ conversation, user, onInsertDraft, onRefreshConve
   const surface = useMemo<CopilotSurfaceConfig>(
     () => ({
       surfaceId: conversation.id,
+      preferenceKey: 'inboxCopilotMode',
       endpoints: {
         thread: `/app/inbox/api/conversations/${conversation.id}/copilot`,
         proposal: (id) => `/app/inbox/api/copilot/proposals/${id}`,

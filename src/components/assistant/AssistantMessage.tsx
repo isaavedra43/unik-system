@@ -4,7 +4,7 @@ import React, { useState } from 'react';
 import { Bot, Check, ChevronDown, ChevronRight, Clock, Database, FileText, Image as ImageIcon, ShieldCheck, ShieldX, Sparkles, User as UserIcon, X } from 'lucide-react';
 import { AssistantMarkdown } from './AssistantMarkdown';
 import { ArtifactRenderer, type ArtifactData } from './ArtifactRenderer';
-import { parsePlan, toolLabel, type MessageFeedbackData, type TurnMeta } from '@/components/copilot/copilot-types';
+import { AUTO_EVENT_LABELS, autoKind, extractFailureReason, parsePlan, toolLabel, type MessageFeedbackData, type TurnMeta } from '@/components/copilot/copilot-types';
 import { ConfidenceBadge } from '@/components/copilot/ConfidenceBadge';
 import { MessageFeedback } from '@/components/copilot/MessageFeedback';
 import { PlanCard } from '@/components/copilot/PlanCard';
@@ -116,7 +116,8 @@ function parseSystemEvent(text: string): { kind: 'approved' | 'rejected' | 'othe
   const rejected = /RECHAZÓ/.test(clean);
   const failed = /fall[oó]:/i.test(clean);
   const action = /Acción:\s*([^]*?)(?:\s+Resultado:|$)/.exec(clean)?.[1]?.trim() ?? null;
-  if (approved) return { kind: 'approved', title: failed ? 'Aprobaste la acción, pero falló' : /incierto/.test(clean) ? 'Aprobaste la acción · resultado por confirmar' : 'Aprobaste la acción · ejecutada', detail: action, failed };
+  const reason = failed ? extractFailureReason(clean) : null;
+  if (approved) return { kind: 'approved', title: failed ? 'Aprobaste la acción, pero falló' : /incierto/.test(clean) ? 'Aprobaste la acción · resultado por confirmar' : 'Aprobaste la acción · ejecutada', detail: failed && reason ? `${reason}${action ? ` — ${action}` : ''}` : action, failed };
   if (rejected) return { kind: 'rejected', title: 'Rechazaste la acción', detail: /RECHAZÓ la propuesta [^\s]+ \([^)]+\)(?::\s*(.*))?/.exec(clean)?.[1] ?? null, failed: false };
   return { kind: 'other', title: clean, detail: null, failed: false };
 }
@@ -146,6 +147,17 @@ export function AssistantMessage({ message, onSendText, isLatest = false }: Assi
   }
 
   const isUser = message.role === 'user';
+  const auto = isUser ? autoKind(message.content) : null;
+  if (auto) {
+    return (
+      <div className={`assistant-sysevent is-other ${auto === 'action_failed' ? 'is-failed' : ''}`}>
+        <Sparkles size={14} />
+        <div>
+          <div className="assistant-sysevent-title">{AUTO_EVENT_LABELS[auto]}</div>
+        </div>
+      </div>
+    );
+  }
   const records = message.toolCallRecords ?? [];
   const artifacts = message.artifacts ?? [];
   const planRecord = !isUser ? records.find((r) => r.toolName === 'proposePlan' && r.success) : undefined;

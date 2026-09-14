@@ -9,12 +9,14 @@ import {
   FileText,
   Image as ImageIcon,
   MessageSquareText,
+  Phone,
   Sparkles,
   StickyNote,
   TriangleAlert,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
+import { useCallDock } from '@/components/calls/CallDockProvider';
 import { MessageComposer } from './MessageComposer';
 import {
   apiJson,
@@ -276,6 +278,7 @@ export function ConversationView({
   const canChangeStatus = user.canAssign || conversation.assignedToUserId === user.id;
   const canAssignOthers = user.canAssign;
   const contact = conversation.contact;
+  const callDock = useCallDock();
   const identifier =
     contact.phone ??
     (contact.telegramId ? `Telegram ${contact.telegramId}` : (contact.email ?? ''));
@@ -326,6 +329,18 @@ export function ConversationView({
             flexWrap: 'wrap',
           }}
         >
+          {callDock.enabled && contact.phone && (
+            <button
+              type="button"
+              className="btn btn-sm btn-secondary"
+              onClick={() => callDock.dial({ toNumber: contact.phone as string, contactId: contact.id, label: contact.displayName })}
+              disabled={callDock.active !== null && !callDock.active.ended}
+              title={callDock.active && !callDock.active.ended ? 'Ya hay una llamada en curso' : `Llamar a ${contact.displayName} desde UNIK`}
+              aria-label={`Llamar a ${contact.displayName}`}
+            >
+              <Phone size={14} /> Llamar
+            </button>
+          )}
           <select
             className="select"
             aria-label="Asignar a"

@@ -36,6 +36,7 @@ import {
   Radio,
 } from 'lucide-react';
 import { AssistantWidget } from '@/components/assistant/AssistantWidget';
+import { CallDockProvider } from '@/components/calls/CallDockProvider';
 import { ThemeToggle } from '@/components/layout/ThemeToggle';
 import { SeedDemoDataButton } from '@/components/dev/SeedDemoDataButton';
 
@@ -856,15 +857,17 @@ export default function AppShell({ user, children }: AppShellProps) {
   const showWidget = canUseAssistant && !isAssistantPage;
 
   return (
-    <div className={`app-shell ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
-      <Sidebar entries={sections} open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
-      <div className="app-main">
-        <Topbar user={user} onToggleSidebar={toggleSidebar} />
-        <main className={isFlush ? 'app-content app-content-flush' : 'app-content'}>
-          {children}
-        </main>
+    <CallDockProvider user={user}>
+      <div className={`app-shell ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
+        <Sidebar entries={sections} open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+        <div className="app-main">
+          <Topbar user={user} onToggleSidebar={toggleSidebar} />
+          <main className={isFlush ? 'app-content app-content-flush' : 'app-content'}>
+            {children}
+          </main>
+        </div>
+        {showWidget && <AssistantWidget user={user} context={{ page: pathname }} />}
       </div>
-      {showWidget && <AssistantWidget user={user} context={{ page: pathname }} />}
-    </div>
+    </CallDockProvider>
   );
 }

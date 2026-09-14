@@ -25,6 +25,7 @@ export function ChatCopilotPanel({ channelId, user, activityAt, onInsertDraft, o
   const surface = useMemo<CopilotSurfaceConfig>(
     () => ({
       surfaceId: channelId,
+      preferenceKey: 'chatCopilotMode',
       endpoints: {
         thread: `/app/chat/api/channels/${channelId}/copilot`,
         proposal: (id) => `/app/chat/api/copilot/proposals/${id}`,

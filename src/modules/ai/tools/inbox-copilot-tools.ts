@@ -59,7 +59,11 @@ registerTool({
   execute: async (actor, rawArgs) => {
     const args = rawArgs as { inboxConversationId: string; body: string; rationale?: string };
     await getConversation(actor, args.inboxConversationId);
-    const { text } = await rewriteArtifactLinksForSharing(markdownLinksToPlain(args.body), actor.id);
+    const { formatForCustomerChannel } = await import('../customer-message-format');
+    const { getAiSettings } = await import('../ai-admin-config-service');
+    const settings = await getAiSettings().catch(() => null);
+    const formatted = formatForCustomerChannel(args.body, { senderName: actor.name, companyName: settings?.companyName ?? null });
+    const { text } = await rewriteArtifactLinksForSharing(markdownLinksToPlain(formatted.text), actor.id);
     return {
       draft: text,
       rationale: args.rationale ?? null,
