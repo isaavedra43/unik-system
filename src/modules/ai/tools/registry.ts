@@ -81,6 +81,12 @@ export interface ToolDefinition {
   isAvailable?: () => Promise<boolean> | boolean;
   /** Human summary used in approval cards. */
   summarize?: (args: unknown) => string;
+  /**
+   * Runs after validation and BEFORE the approval card: may complete/normalize
+   * the arguments (what the user approves is what will run) or reject them with
+   * a message the model can act on, without wasting an approval.
+   */
+  prepareArgs?: (actor: CurrentUser, args: unknown) => Promise<{ args: unknown } | { error: string }>;
 }
 
 export interface ToolExecutionContext {
@@ -402,7 +408,7 @@ export async function executeTool(
   }
 
   // 4. Arguments
-  const parsed = tool.parameters.safeParse(rawArgs);
+  let parsed = tool.parameters.safeParse(rawArgs);
   if (!parsed.success) {
     return {
       success: false,
@@ -410,6 +416,20 @@ export async function executeTool(
       errorCode: 'invalid_args',
       durationMs: 0,
     };
+  }
+
+  // 4b. Tool-specific completion of the arguments (catalog lookups, list prices…) so the
+  // approval card shows exactly what will run and impossible requests fail before approval.
+  if (tool.prepareArgs && !ctx.approvedProposalId) {
+    try {
+      const prepared = await tool.prepareArgs(actor, parsed.data);
+      if ('error' in prepared) {
+        return { success: false, error: prepared.error, errorCode: 'invalid_args', durationMs: 0 };
+      }
+      parsed = { success: true, data: prepared.args } as typeof parsed;
+    } catch (e) {
+      return { success: false, error: e instanceof Error ? e.message : 'No se pudieron preparar los datos', errorCode: 'invalid_args', durationMs: 0 };
+    }
   }
 
   // 5. Approval for side effects

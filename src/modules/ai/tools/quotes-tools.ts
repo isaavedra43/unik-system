@@ -168,6 +168,26 @@ function friendlyQuoteError(err: unknown): Error {
   return err instanceof Error ? err : new Error('Error desconocido al cotizar');
 }
 
+/**
+ * Completes the lines from the catalog BEFORE the approval card (create/preview)
+ * and refuses lines Zoho would reject: no product and no name, or price 0.
+ */
+async function prepareQuoteArgs(rawArgs: unknown, options: { forUpdate?: boolean } = {}): Promise<{ args: unknown } | { error: string }> {
+  const args = rawArgs as { items: RawQuoteItem[]; customerId?: string };
+  const customer = args.customerId ? await prisma.contact.findUnique({ where: { zohoContactId: args.customerId }, select: { zohoContactId: true, contactName: true } }) : null;
+  if (args.customerId && !customer) {
+    return { error: `El customerId ${args.customerId} no es un cliente de Zoho sincronizado. Usa searchQuoteCustomers y pasa su zohoContactId.` };
+  }
+  const { items, notes } = await enrichQuoteItems(normalizeQuoteItems(args.items, options));
+  const problems: string[] = [];
+  items.forEach((line, i) => {
+    if (!line.itemId && (line.name === 'Concepto' || !line.name.trim())) problems.push(`línea ${i + 1}: sin producto. Pasa itemId (de searchQuoteProducts) o name.`);
+    else if (!line.rate || line.rate <= 0) problems.push(`línea ${i + 1} (${line.name}): precio 0 y sin precio de lista. Indica rate.`);
+  });
+  if (problems.length > 0) return { error: `Cotización incompleta — ${problems.join(' ')}` };
+  return { args: { ...args, items: items.map((l) => ({ ...l, lineItemId: options.forUpdate ? l.lineItemId : undefined })), _prepared: notes } };
+}
+
 const quoteDraftShape = {
   customerId: z.string().min(1).describe('zohoContactId del cliente (usa searchQuoteCustomers)'),
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe('yyyy-mm-dd; por defecto hoy'),
@@ -357,6 +377,7 @@ registerTool({
   effect: 'business_write',
   summarize: (args) => draftSummary(args, 'Crear'),
   parameters: z.object(quoteDraftShape),
+  prepareArgs: (_actor, args) => prepareQuoteArgs(args),
   execute: async (actor, rawArgs) => {
     const args = rawArgs as z.infer<z.ZodObject<typeof quoteDraftShape>>;
     const today = new Date().toISOString().slice(0, 10);
@@ -380,6 +401,7 @@ registerTool({
   effect: 'business_write',
   summarize: (args) => draftSummary(args, `Editar (${(args as { quoteId: string }).quoteId})`),
   parameters: z.object({ quoteId: z.string().min(1), ...quoteDraftShape }),
+  prepareArgs: (_actor, args) => prepareQuoteArgs(args, { forUpdate: true }),
   execute: async (actor, rawArgs) => {
     const { quoteId, ...args } = rawArgs as { quoteId: string } & z.infer<z.ZodObject<typeof quoteDraftShape>>;
     const current = await aiGetQuote(quoteId);
