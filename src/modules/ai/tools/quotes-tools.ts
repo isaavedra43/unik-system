@@ -28,6 +28,7 @@ import { previewText } from '@/modules/comms/normalize';
 import { isZohoBooksMockEnabled } from '@/modules/integrations/zoho/config';
 import { changeQuoteStatus } from '@/modules/quotes/quotes-write-service';
 import { deliverToContact } from './messaging-tools';
+import { resolveContact } from '@/modules/comms/contact-resolver';
 
 /**
  * Cotizaciones (Zoho Books estimates). Every write goes through
@@ -503,6 +504,29 @@ registerTool({
 });
 
 
+/**
+ * Fetches the official Zoho PDF of a quote and attaches it to an AI thread as an
+ * artifact card (preview / download / send). Returns null in mock mode.
+ */
+export async function ensureQuotePdfArtifact(actor: { id: string }, quoteId: string, aiConversationId: string | undefined) {
+  if (isZohoBooksMockEnabled() || !aiConversationId) return null;
+  const quote = await aiGetQuote(quoteId);
+  if (!quote) return null;
+  const { bytes, filename } = await aiGetQuotePdf(quote.id);
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'unik-quote-pdf-'));
+  const filePath = path.join(dir, filename);
+  try {
+    await fs.writeFile(filePath, Buffer.from(bytes));
+    const object = await saveGeneratedFile({ createdBy: actor.id, purpose: 'ai_artifact', fileName: filename, mimeType: 'application/pdf', source: { filePath }, metadata: { source: 'zoho_books_estimate', quoteId: quote.id } });
+    const sizeBytes = Number(object.sizeBytes);
+    const title = `Cotización ${quote.estimateNumber ?? filename.replace(/\.pdf$/i, '')}`.trim();
+    const artifact = await createArtifact({ conversationId: aiConversationId, type: 'pdf', storageObjectId: object.id, meta: { title, filename, mimeType: 'application/pdf', sizeBytes, source: 'zoho', protected: true, quoteId: quote.id } });
+    return { artifactId: artifact.id, type: 'pdf' as const, title, filename, sizeBytes, downloadUrl: `/app/assistant/api/artifacts/${artifact.id}/download` };
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true }).catch(() => undefined);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Auto-quoting from a customer request
 // ---------------------------------------------------------------------------
@@ -634,9 +658,10 @@ registerTool({
     referenceNumber: z.string().max(100).optional(),
     salesperson: z.string().max(120).optional().describe('Vendedor de Zoho; por defecto el usuario actual o el de la última venta del cliente'),
     expiryDays: z.number().int().min(1).max(90).default(15),
+    conversationId: z.string().optional().describe('Se inyecta automáticamente, no lo pongas.'),
   }),
-  execute: async (actor, rawArgs) => {
-    const a = rawArgs as { inboxConversationId?: string; customer?: string; items: Array<{ query: string; quantity: number; unit?: string; rate?: number; notes?: string }>; delivery?: { mode: 'pickup' | 'delivery'; address?: string }; notes?: string; referenceNumber?: string; salesperson?: string; expiryDays: number };
+  execute: async (actor, rawArgs, ctx) => {
+    const a = rawArgs as { inboxConversationId?: string; customer?: string; items: Array<{ query: string; quantity: number; unit?: string; rate?: number; notes?: string }>; delivery?: { mode: 'pickup' | 'delivery'; address?: string }; notes?: string; referenceNumber?: string; salesperson?: string; expiryDays: number; conversationId?: string };
 
     // 1. Customer
     let customerId: string | null = null;
@@ -717,10 +742,20 @@ registerTool({
       throw friendlyQuoteError(err);
     }
 
+    // The official PDF goes straight to the chat as a card (preview / download / send).
+    let pdf: Awaited<ReturnType<typeof ensureQuotePdfArtifact>> = null;
+    try {
+      pdf = await ensureQuotePdfArtifact(actor, quote.id, ctx.conversationId ?? a.conversationId);
+    } catch (err) {
+      console.warn(JSON.stringify({ event: 'ai.quote.pdf_failed', quoteId: quote.id, message: err instanceof Error ? err.message : 'unknown' }));
+    }
+
     return {
       action,
       quoteId: quote.id,
       folio: quote.estimateNumber,
+      pdfArtifactId: pdf?.artifactId ?? null,
+      artifacts: pdf ? [pdf] : [],
       status: quote.status,
       customer: quote.customerName ?? customerLabel,
       customerPhone: contactPhone,
@@ -736,7 +771,9 @@ registerTool({
       url: absoluteUrl(`/app/quotes/${quote.id}`),
       editUrl: absoluteUrl(`/app/quotes/${quote.id}/edit`),
       mock: isZohoBooksMockEnabled(),
-      next: 'Muestra el resumen al usuario (folio, líneas, total, entrega). Si hay unmatched o lowStock, dilo. Luego propón el mensaje para el cliente y usa sendQuoteToContact (requiere aprobación).',
+      next: pdf
+        ? 'El PDF oficial de Zoho ya aparece como tarjeta en el chat (vista previa y descarga). Muestra el resumen (folio, líneas, total, entrega); si hay unmatched o lowStock, dilo. Si el usuario pidió enviarla, llama sendQuoteToContact de inmediato (adjunta ese PDF; requiere una aprobación). No pongas enlaces internos (/app/quotes) en mensajes al cliente.'
+        : 'Muestra el resumen al usuario (folio, líneas, total, entrega). Si hay unmatched o lowStock, dilo. Si el usuario pidió enviarla, llama sendQuoteToContact (requiere aprobación).',
     };
   },
 });
@@ -759,19 +796,30 @@ registerTool({
     conversationId: z.string().optional().describe('Se inyecta automáticamente, no lo pongas.'),
   }),
   summarize: (args) => {
-    const a = args as { quoteId: string; contact?: string; inboxConversationId?: string; message: string };
-    return `Enviar cotización ${a.quoteId} con PDF de Zoho a ${a.contact ?? 'el cliente de la conversación'}: "${previewText(a.message, 160)}"`;
+    const a = args as { quoteId: string; contact?: string; inboxConversationId?: string; message: string; _contactName?: string };
+    return `Enviar cotización ${a.quoteId} con PDF de Zoho a ${a._contactName ?? a.contact ?? 'el cliente de la conversación'}: "${previewText(a.message, 160)}"`;
+  },
+  // Resolve WHO before the approval card: the inbox contact wins; an ambiguous name is refused so the model asks.
+  prepareArgs: async (actor, rawArgs) => {
+    const a = rawArgs as { quoteId: string; inboxConversationId?: string; contact?: string; message: string };
+    if (a.inboxConversationId) {
+      const { getConversation } = await import('@/modules/comms/comms-service');
+      const conv = await getConversation(actor, a.inboxConversationId);
+      return { args: { ...a, contact: conv.contact.id, _contactName: conv.contact.displayName } };
+    }
+    if (!a.contact) return { error: 'Indica el contacto o usa esta herramienta desde la conversación de bandeja del cliente.' };
+    try {
+      const contact = await resolveContact(a.contact);
+      return { args: { ...a, contact: contact.commContactId ?? a.contact, _contactName: contact.displayName } };
+    } catch (err) {
+      return { error: `${err instanceof Error ? err.message : 'Contacto no encontrado'} Pregunta al usuario a cuál se refiere antes de proponer el envío.` };
+    }
   },
   execute: async (actor, rawArgs, ctx) => {
     const a = rawArgs as { quoteId: string; inboxConversationId?: string; contact?: string; message: string; markAsSent: boolean; conversationId?: string };
     const quote = await aiGetQuote(a.quoteId);
     if (!quote) return { error: 'Cotización no encontrada' };
-    let contactRef = a.contact ?? '';
-    if (a.inboxConversationId) {
-      const { getConversation } = await import('@/modules/comms/comms-service');
-      const conv = await getConversation(actor, a.inboxConversationId);
-      contactRef = conv.contact.id;
-    }
+    const contactRef = a.contact ?? '';
     if (!contactRef) return { error: 'Indica el contacto o la conversación de bandeja.' };
 
     const artifactIds: string[] = [];
@@ -779,20 +827,8 @@ registerTool({
     if (isZohoBooksMockEnabled()) {
       pdfNote = 'Modo simulación de Zoho: no hay PDF oficial; se envía solo el mensaje.';
     } else {
-      const { bytes, filename } = await aiGetQuotePdf(quote.id);
-      const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'unik-quote-send-'));
-      const filePath = path.join(dir, filename);
-      try {
-        await fs.writeFile(filePath, Buffer.from(bytes));
-        const object = await saveGeneratedFile({ createdBy: actor.id, purpose: 'ai_artifact', fileName: filename, mimeType: 'application/pdf', source: { filePath }, metadata: { source: 'zoho_books_estimate', quoteId: quote.id } });
-        const aiConversationId = ctx.conversationId ?? a.conversationId;
-        if (aiConversationId) {
-          const artifact = await createArtifact({ conversationId: aiConversationId, type: 'pdf', storageObjectId: object.id, meta: { title: `Cotización ${quote.estimateNumber ?? ''}`.trim(), filename, mimeType: 'application/pdf', sizeBytes: Number(object.sizeBytes), source: 'zoho', protected: true } });
-          artifactIds.push(artifact.id);
-        }
-      } finally {
-        await fs.rm(dir, { recursive: true, force: true }).catch(() => undefined);
-      }
+      const pdf = await ensureQuotePdfArtifact(actor, quote.id, ctx.conversationId ?? a.conversationId);
+      if (pdf) artifactIds.push(pdf.artifactId);
     }
 
     const delivery = await deliverToContact(actor, { contact: contactRef, channel: 'any', body: a.message, attachments: artifactIds.length ? { artifactIds } : undefined }, ctx);

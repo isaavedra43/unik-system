@@ -44,16 +44,35 @@ interface DeliveryInput {
  * and every report the model linked becomes a REAL attachment (the customer
  * must see the document, never a bare link).
  */
+const QUOTE_LINK_RE = /https?:\/\/[^\s)]+?\/app\/quotes\/([a-z0-9]+)[^\s)]*|\/app\/quotes\/([a-z0-9]+)[^\s)]*/gi;
+
 export async function prepareCustomerMessage(
   actor: CurrentUser,
   body: string,
   attachments: Attachments,
-  options: { keepInternalData?: boolean } = {}
+  options: { keepInternalData?: boolean; aiConversationId?: string } = {}
 ): Promise<{ body: string; attachments: Attachments; autoAttached: string[] }> {
   const settings = await getAiSettings().catch(() => null);
-  const linked = extractArtifactIdsFromLinks(body);
   const known = new Set(attachments?.artifactIds ?? []);
   const autoAttached: string[] = [];
+  // Internal quote pages (/app/quotes/<id>) need a login: the customer gets the official Zoho PDF instead.
+  const quoteIds = [...new Set([...body.matchAll(QUOTE_LINK_RE)].map((m) => m[1] ?? m[2]).filter(Boolean))];
+  if (quoteIds.length > 0) {
+    const { ensureQuotePdfArtifact } = await import('./quotes-tools');
+    for (const quoteId of quoteIds) {
+      try {
+        const pdf = await ensureQuotePdfArtifact(actor, quoteId, options.aiConversationId);
+        if (pdf) {
+          known.add(pdf.artifactId);
+          autoAttached.push(pdf.artifactId);
+        }
+      } catch (err) {
+        console.warn(JSON.stringify({ event: 'ai.message.quote_pdf_failed', quoteId, message: err instanceof Error ? err.message : 'unknown' }));
+      }
+    }
+    body = body.replace(QUOTE_LINK_RE, '').replace(/(revisarla|verla|consultarla|descargarla)\s+en\s+el\s+siguiente\s+enlace\s*:?/gi, 'verla en el PDF adjunto').replace(/[ \t]{2,}/g, ' ');
+  }
+  const linked = extractArtifactIdsFromLinks(body);
   for (const id of linked) {
     if (known.has(id)) continue;
     const artifact = await prisma.aiArtifact.findFirst({ where: { id, conversation: { userId: actor.id } }, select: { id: true, storageObjectId: true } });
@@ -112,7 +131,7 @@ export async function deliverToContact(actor: CurrentUser, input: DeliveryInput,
     conversationId = started.conversation.id;
   }
 
-  const prepared = await prepareCustomerMessage(actor, input.body, input.attachments, { keepInternalData: input.keepInternalData });
+  const prepared = await prepareCustomerMessage(actor, input.body, input.attachments, { keepInternalData: input.keepInternalData, aiConversationId: ctx.conversationId });
   const { text: sharedBody } = await rewriteArtifactLinksForSharing(markdownLinksToPlain(prepared.body), actor.id);
   const media = await resolveMediaObjectIds(actor, prepared.attachments, true);
 
@@ -165,9 +184,19 @@ registerTool({
     templateKey: z.string().optional().describe('Plantilla aprobada de WhatsApp cuando el cliente no ha escrito en 24 h'),
   }),
   summarize: (args) => {
-    const a = args as { contact: string; channel: string; body: string; attachments?: Attachments };
+    const a = args as { _contactName?: string; contact: string; channel: string; body: string; attachments?: Attachments };
     const n = (a.attachments?.artifactIds?.length ?? 0) + (a.attachments?.knowledgeSourceIds?.length ?? 0);
-    return `Enviar ${a.channel === 'any' ? 'WhatsApp/SMS' : a.channel} a ${a.contact}${n ? ` con ${n} adjunto(s)` : ''}: "${previewText(a.body, 180)}"`;
+    return `Enviar ${a.channel === 'any' ? 'WhatsApp/SMS' : a.channel} a ${a._contactName ?? a.contact}${n ? ` con ${n} adjunto(s)` : ''}: "${previewText(a.body, 180)}"`;
+  },
+  // Who exactly? Resolved before the approval card; an ambiguous name is refused so the model asks the user.
+  prepareArgs: async (_actor, rawArgs) => {
+    const a = rawArgs as { contact: string };
+    try {
+      const contact = await resolveContact(a.contact);
+      return { args: { ...a, contact: contact.commContactId ?? a.contact, _contactName: contact.displayName } };
+    } catch (err) {
+      return { error: `${err instanceof Error ? err.message : 'Contacto no encontrado'} Pregunta al usuario a cuál se refiere antes de proponer la acción.` };
+    }
   },
   execute: async (actor, rawArgs, ctx) => {
     const a = rawArgs as z.infer<typeof messageArgs>;

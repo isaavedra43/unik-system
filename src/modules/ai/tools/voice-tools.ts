@@ -169,6 +169,16 @@ registerTool({
       ? `Que la asistente de voz llame a ${a.contact} y: ${(a.brief ?? '').slice(0, 160)}`
       : `Llamar a ${a.contact} (tú contestas desde UNIK)`;
   },
+  // Who exactly? Resolved before the approval card; an ambiguous name is refused so the model asks the user.
+  prepareArgs: async (_actor, rawArgs) => {
+    const a = rawArgs as { contact: string };
+    try {
+      const contact = await resolveContact(a.contact);
+      return { args: { ...a, contact: contact.commContactId ?? a.contact, _contactName: contact.displayName } };
+    } catch (err) {
+      return { error: `${err instanceof Error ? err.message : 'Contacto no encontrado'} Pregunta al usuario a cuál se refiere antes de proponer la acción.` };
+    }
+  },
   execute: async (actor, args) => {
     const a = args as { contact: string; mode: 'me' | 'ai'; brief?: string; accountId?: string };
     if (a.mode === 'ai' && !a.brief?.trim()) return { error: 'Para que la IA llame necesitas indicar qué debe decir (brief).' };

@@ -76,6 +76,8 @@ const INBOX_ONLY_TOOLS = new Set([
   'updateInboxConversation',
   'addInboxNote',
 ]);
+/** Tools that take the inbox conversation as context (customer = the contact of this conversation). */
+const INBOX_CONTEXT_TOOLS = new Set(['draftQuoteFromRequest', 'sendQuoteToContact']);
 /** Tools that only exist inside the internal-chat copilot. */
 const CHAT_ONLY_TOOLS = new Set(['proposeChatDraft']);
 /** In the inbox the quote path is draftQuoteFromRequest → sendQuoteToContact (one approval); the manual builders only confuse the model there. */
@@ -686,7 +688,7 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
     const argsObj = parsedArgs as Record<string, unknown>;
     // Inbox tools work on the INBOX conversation, never on this AI thread.
     if (inboxConversationId) {
-      if (INBOX_ONLY_TOOLS.has(tc.name) && !argsObj.inboxConversationId) {
+      if ((INBOX_ONLY_TOOLS.has(tc.name) || INBOX_CONTEXT_TOOLS.has(tc.name)) && !argsObj.inboxConversationId) {
         argsObj.inboxConversationId = inboxConversationId;
       }
       if (INBOX_CONVERSATION_ID_TOOLS.has(tc.name) && !argsObj.conversationId) {

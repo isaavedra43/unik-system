@@ -165,7 +165,7 @@ registerTool({
   execute: async (actor, args, ctx) => {
     const a = args as { conversationId: string; body: string; attachments?: { artifactIds?: string[]; knowledgeSourceIds?: string[] }; keepInternalData?: boolean };
     const conversation = await getConversation(actor, a.conversationId);
-    const prepared = await prepareCustomerMessage(actor, a.body, a.attachments, { keepInternalData: a.keepInternalData });
+    const prepared = await prepareCustomerMessage(actor, a.body, a.attachments, { keepInternalData: a.keepInternalData, aiConversationId: ctx.conversationId });
     const { text: body } = await rewriteArtifactLinksForSharing(markdownLinksToPlain(prepared.body), actor.id);
     const media = await resolveMediaObjectIds(actor, prepared.attachments, true);
     const message = await sendOutboundMessage({
