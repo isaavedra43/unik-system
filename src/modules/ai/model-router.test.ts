@@ -6,6 +6,7 @@ const settings = {
   fallbackDeployment: 'gpt-4o-mini',
   routingEnabled: true,
   routingSimpleModel: 'gpt-4o-mini',
+  routingStandardModel: '',
   routingComplexModel: '',
 };
 
@@ -63,5 +64,14 @@ describe('resolveTurnModel', () => {
   it('pickModelForTier falls back sensibly', () => {
     expect(pickModelForTier({ ...settings, routingSimpleModel: '' }, 'simple')).toBe('gpt-4o-mini');
     expect(pickModelForTier(settings, 'complex')).toBe('gpt-4o');
+  });
+});
+
+describe('routine tier', () => {
+  it('standard turns use the routine model when configured', () => {
+    const split = { ...settings, routingStandardModel: 'moonshotai/kimi-k2.6', routingComplexModel: 'gpt-4o' };
+    expect(pickModelForTier(split, 'standard')).toBe('moonshotai/kimi-k2.6');
+    expect(pickModelForTier(split, 'complex')).toBe('gpt-4o');
+    expect(resolveTurnModel(split, AUTO_MODEL_ID, classifyTask({ message: 'dime las ventas de hoy' })).model).toBe('moonshotai/kimi-k2.6');
   });
 });

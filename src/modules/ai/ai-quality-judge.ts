@@ -1,6 +1,7 @@
 import { chatCompletion } from './ai-client';
 import { getAiSettings } from './ai-admin-config-service';
 import { mergeMessageMeta } from './ai-sessions-service';
+import { modelForTask } from './model-policy';
 
 /**
  * Optional automatic quality evaluation ("LLM as judge"). Runs AFTER the answer
@@ -44,7 +45,7 @@ export async function judgeTurnQuality(input: JudgeInput): Promise<JudgeVerdict 
   const settings = await getAiSettings();
   if (!settings.qualityJudgeEnabled) return null;
   if (input.answer.trim().length < 40) return null;
-  const model = settings.qualityJudgeModel?.trim() || settings.fallbackDeployment || settings.deployment;
+  const model = modelForTask(settings, 'judge');
   const tools = input.toolsUsed.length > 0 ? input.toolsUsed.map((t) => `${t.name}${t.success ? '' : ' (falló)'}${t.cached ? ' (caché)' : ''}`).join(', ') : 'ninguna';
   const res = await chatCompletion({
     model,

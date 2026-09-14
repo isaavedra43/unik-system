@@ -14,6 +14,7 @@ import {
   PackageShipmentFacts,
   PackageStatusBadge,
   PackageSteps,
+  PackageZohoRefresh,
   RelatedLink,
 } from './package-view';
 
@@ -175,6 +176,7 @@ export function PackagePreviewDrawer({
             </div>
           ) : pkg ? (
             <>
+              <PackageZohoRefresh pkg={pkg} basePath={basePath} onRefreshed={setPkg} />
               <PackageSteps pkg={pkg} compact />
 
               <section className="pkg-drawer-section">

@@ -78,6 +78,10 @@ export interface AiSettings {
   routingSimpleModel: string;
   /** Modelo para tareas complejas (análisis multi-paso, documentos). Vacío = deployment. */
   routingComplexModel: string;
+  /** Modelo para la rutina diaria (consultas y acciones estándar). Vacío = deployment. */
+  routingStandardModel: string;
+  /** Modelo para procesos de fondo (resúmenes, digest, borradores, re-ranking). Vacío = routingSimpleModel. */
+  utilityModel: string;
   /** Máximo de tools ofrecidas al modelo por turno (OpenAI admite 128). */
   maxToolsPerTurn: number;
   toolCacheEnabled: boolean;
@@ -336,7 +340,9 @@ export const DEFAULT_AI_SETTINGS: AiSettings = {
   pickupInstructions: '',
   routingEnabled: true,
   routingSimpleModel: 'gpt-4o-mini',
+  routingStandardModel: '',
   routingComplexModel: '',
+  utilityModel: '',
   maxToolsPerTurn: 96,
   toolCacheEnabled: true,
   toolCacheTtlLiveSeconds: 30,

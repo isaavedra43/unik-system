@@ -1,10 +1,13 @@
 import { notFound } from 'next/navigation';
 import { getCurrentSession } from '@/modules/auth/authorization';
-import { getPackageById } from '@/modules/packages/packages-service';
+import { getPackageForDisplay } from '@/modules/packages/packages-refresh';
 import { isEntityWatched } from '@/modules/sales/entity-watch-service';
 import { PACKAGE_ENTITY_TYPE } from '@/modules/packages/permissions';
 import { PackageDetailPage } from '@/components/packages/PackageDetailPage';
-import { getContactByZohoId, getInvoicesBySalesOrderZohoId } from '@/modules/cross-module/relationships-service';
+import {
+  getContactByZohoId,
+  getInvoicesBySalesOrderZohoId,
+} from '@/modules/cross-module/relationships-service';
 import { watchAction, unwatchAction } from '../actions';
 
 export const runtime = 'nodejs';
@@ -13,10 +16,11 @@ export default async function PackageDetailRoute({ params }: { params: Promise<{
   const session = await getCurrentSession();
   if (!session) notFound();
   const { id } = await params;
-  const pkg = await getPackageById(id);
+  const pkg = await getPackageForDisplay(id);
   if (!pkg) notFound();
   const isWatched = await isEntityWatched(session!.user.id, PACKAGE_ENTITY_TYPE, id);
-  const canWatch = session!.user.isSuperAdmin || session!.user.permissionKeys.includes('packages.watch');
+  const canWatch =
+    session!.user.isSuperAdmin || session!.user.permissionKeys.includes('packages.watch');
 
   // Fetch related contact (customer)
   let relatedContact = null;
@@ -27,7 +31,12 @@ export default async function PackageDetailRoute({ params }: { params: Promise<{
   }
 
   // Fetch related sales order (by zohoSalesOrderId)
-  let relatedSalesOrder: { id: string; salesOrderNumber: string | null; status: string | null; total: string | null } | null = null;
+  let relatedSalesOrder: {
+    id: string;
+    salesOrderNumber: string | null;
+    status: string | null;
+    total: string | null;
+  } | null = null;
   if (pkg!.zohoSalesOrderId) {
     try {
       const { prisma } = await import('@/lib/prisma');
@@ -49,7 +58,13 @@ export default async function PackageDetailRoute({ params }: { params: Promise<{
   }
 
   // Fetch related invoices (invoices that have items with this sales order ID)
-  let relatedInvoices: { id: string; invoiceNumber: string | null; status: string | null; total: string | null; date: string | null }[] = [];
+  let relatedInvoices: {
+    id: string;
+    invoiceNumber: string | null;
+    status: string | null;
+    total: string | null;
+    date: string | null;
+  }[] = [];
   if (pkg!.zohoSalesOrderId) {
     try {
       const invoices = await getInvoicesBySalesOrderZohoId(pkg!.zohoSalesOrderId);
@@ -66,9 +81,18 @@ export default async function PackageDetailRoute({ params }: { params: Promise<{
   }
 
   return (
-    <PackageDetailPage pkg={pkg!} entityLabel="Paquete" entityLabelPlural="Paquetes"
-      basePath="/app/packages" isWatched={isWatched} canWatch={canWatch}
-      watchAction={watchAction} unwatchAction={unwatchAction} relatedContact={relatedContact}
-      relatedSalesOrder={relatedSalesOrder} relatedInvoices={relatedInvoices} />
+    <PackageDetailPage
+      pkg={pkg!}
+      entityLabel="Paquete"
+      entityLabelPlural="Paquetes"
+      basePath="/app/packages"
+      isWatched={isWatched}
+      canWatch={canWatch}
+      watchAction={watchAction}
+      unwatchAction={unwatchAction}
+      relatedContact={relatedContact}
+      relatedSalesOrder={relatedSalesOrder}
+      relatedInvoices={relatedInvoices}
+    />
   );
 }

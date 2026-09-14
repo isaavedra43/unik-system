@@ -325,6 +325,16 @@ export async function withZohoRateBudget<T>(call: () => Promise<T>): Promise<T> 
   return call();
 }
 
+/** Whether a Zoho call can be made right now without waiting for the budget. */
+export function canCallZohoNow(): boolean {
+  const budget = getRateBudget();
+  const now = Date.now();
+  if (budget.backingOffUntil > now) return false;
+  const settings = DEFAULT_SETTINGS[INTEGRATION_SOURCE_ZOHO];
+  const recent = budget.callTimestamps.filter((ts) => now - ts < 60_000).length;
+  return recent < settings.maxCallsPerMinute && budget.dailyCallCount < settings.maxDailyCalls;
+}
+
 export function isDailyLimitError(error: unknown): boolean {
   return error instanceof RateLimitError && error.limitType === 'daily';
 }
@@ -1234,7 +1244,10 @@ export async function runSync(
     // Loop in batches until ALL pending snapshots are processed.
     if (adapter.normalizePendingSnapshots) {
       const BATCH_SIZE = 500;
-      const MAX_NORMALIZATION_LOOPS = 200; // safety valve: 200 * 500 = 100k records
+      // A quick (user-triggered) run must stay short: a normalizer version bump
+      // leaves tens of thousands of snapshots pending, and they are drained a
+      // few batches per run instead of overrunning the run's timeout.
+      const MAX_NORMALIZATION_LOOPS = effectiveMode === 'quick' ? 4 : 200;
       let normalizationLoops = 0;
       let totalNormalized = 0;
       let previousPending = Number.POSITIVE_INFINITY;
@@ -1252,7 +1265,7 @@ export async function runSync(
           })
         );
 
-        if (pendingCount === 0) break;
+        if (pendingCount === 0 || timedOut) break;
         // Snapshots that fail to normalize keep their old version, so a batch
         // that made no progress would repeat forever; stop and leave them flagged.
         if (pendingCount >= previousPending) {

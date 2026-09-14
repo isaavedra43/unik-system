@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import {
   ArrowLeft,
   Bell,
@@ -29,6 +30,7 @@ import {
   PackageShipmentFacts,
   PackageStatusBadge,
   PackageSteps,
+  PackageZohoRefresh,
   RelatedLink,
 } from './package-view';
 
@@ -79,6 +81,7 @@ export function PackageDetailPage({
   relatedSalesOrder,
   relatedInvoices,
 }: PackageDetailPageProps) {
+  const router = useRouter();
   const [watched, setWatched] = useState(initialWatched);
   const [watchBusy, setWatchBusy] = useState(false);
 
@@ -134,6 +137,8 @@ export function PackageDetailPage({
           <PackagePdfActions pkgId={pkg.id} basePath={basePath} />
         </div>
       </div>
+
+      <PackageZohoRefresh pkg={pkg} basePath={basePath} onRefreshed={() => router.refresh()} />
 
       <header className="card pkg-hero">
         <div className="pkg-hero-row">

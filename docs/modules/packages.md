@@ -52,6 +52,18 @@ vuelve a pedir el detalle a Zoho y lo normaliza al momento, en este orden:
 Respeta el presupuesto compartido de llamadas a Zoho (`withZohoRateBudget`) y se detiene si se agota la
 cuota diaria. Un paquete borrado en Zoho (404) se marca como leído para no reintentarlo cada corrida.
 
+## Refresco al abrir (la vista siempre coincide con Zoho)
+
+Al abrir un paquete (cajón o detalle), `getPackageForDisplay` hace **una** lectura del detalle en Zoho
+antes de mostrarlo si la fila puede estar atrasada: nunca releída, no entregada, sin transportista o sin
+artículos, y con más de 15 minutos desde la última lectura. Si Zoho está ocupado o falla, se muestra lo
+guardado con un aviso ("Mostrando datos guardados: …"). El botón **Actualizar desde Zoho**
+(`POST /app/packages/{id}/refresh`) fuerza la lectura. La nota "Verificado con Zoho …" indica cuándo se leyó.
+
+La corrida manual (`quick`) procesa como máximo 4 lotes de re-normalización (2 000 snapshots) para no
+exceder su límite de 3 minutos; el resto se drena en corridas siguientes, y el barrido de envíos arranca en
+paralelo, sin esperar a esa re-normalización.
+
 ## Pendiente de validación manual (producción)
 
 - Aplicar la migración (`npx prisma migrate deploy` en el Pre-deploy de Railway).

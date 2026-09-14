@@ -37,6 +37,7 @@ import {
 import { embedQuery, embedVersionChunks } from '@/modules/ai/embeddings-service';
 import { cosineSimilarity, reciprocalRankFusion } from '@/modules/ai/rag-fusion';
 import { getAiSettings } from '@/modules/ai/ai-admin-config-service';
+import { modelForTask } from '@/modules/ai/model-policy';
 
 /**
  * Approved knowledge library.
@@ -1024,7 +1025,7 @@ async function rerankWithModel(query: string, candidates: ChunkRow[]): Promise<M
       .map((c, i) => `[${i}] (${c.title}${c.section ? ` › ${c.section}` : ''}) ${c.content.replace(/\s+/g, ' ').slice(0, 700)}`)
       .join('\n\n');
     const res = await chatCompletion({
-      model: settings.qualityJudgeModel?.trim() || settings.fallbackDeployment || settings.deployment,
+      model: modelForTask(settings, 'utility'),
       temperature: 0,
       maxTokens: 400,
       messages: [

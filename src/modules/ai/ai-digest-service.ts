@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
-import { getActiveProvider } from './providers';
+import { chatCompletion } from './ai-client';
+import { modelForTask } from './model-policy';
 import { getAiSettings } from './ai-admin-config-service';
 
 /**
@@ -125,9 +126,8 @@ async function narrate(name: string, date: string, m: DigestMetrics): Promise<st
   try {
     const settings = await getAiSettings();
     if (!settings.isEnabled) return fallbackNarrative(name, date, m);
-    const provider = await getActiveProvider();
-    const result = await provider.chatCompletion({
-      model: settings.fallbackDeployment || settings.deployment,
+    const result = await chatCompletion({
+      model: modelForTask(settings, 'utility'),
       temperature: 0.2,
       maxTokens: 220,
       messages: [

@@ -1,5 +1,6 @@
 import { prisma } from '@/lib/prisma';
-import { getActiveProvider } from './providers';
+import { chatCompletion } from './ai-client';
+import { modelForTask } from './model-policy';
 import { getAiSettings } from './ai-admin-config-service';
 import { COPILOT_KIND_BY_SURFACE, isAutoTurn } from './copilot-surfaces';
 
@@ -86,9 +87,8 @@ export async function maybeSummarizeConversation(conversationId: string, userId:
     if (!transcript.trim()) return;
 
     const settings = await getAiSettings();
-    const provider = await getActiveProvider();
-    const result = await provider.chatCompletion({
-      model: settings.fallbackDeployment || settings.deployment,
+    const result = await chatCompletion({
+      model: modelForTask(settings, 'utility'),
       temperature: 0.1,
       maxTokens: 300,
       userId,

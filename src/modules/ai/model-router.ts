@@ -1,5 +1,6 @@
 import type { AiSettings } from './ai-admin-config-service';
 import { getModelById } from './model-catalog';
+import { modelForTask } from './model-policy';
 import { detectDomains, normalizeText } from './tool-selector';
 
 /**
@@ -93,11 +94,17 @@ function modelSupportsVision(modelId: string): boolean {
   return info ? info.capabilities.includes('vision') : true;
 }
 
-export function pickModelForTier(settings: Pick<AiSettings, 'deployment' | 'fallbackDeployment' | 'routingSimpleModel' | 'routingComplexModel'>, tier: TaskTier): string {
-  const primary = settings.deployment?.trim() || 'gpt-4o';
-  if (tier === 'simple') return settings.routingSimpleModel?.trim() || settings.fallbackDeployment?.trim() || primary;
-  if (tier === 'complex') return settings.routingComplexModel?.trim() || primary;
-  return primary;
+export type RouterSettings = Pick<
+  AiSettings,
+  'deployment' | 'fallbackDeployment' | 'routingEnabled' | 'routingSimpleModel' | 'routingStandardModel' | 'routingComplexModel'
+>;
+
+/** Tier → model through the shared policy (simple / rutina / compleja). */
+export function pickModelForTier(settings: Omit<RouterSettings, 'routingEnabled'>, tier: TaskTier): string {
+  const policy = { ...settings, utilityModel: '', qualityJudgeModel: '' };
+  if (tier === 'simple') return modelForTask(policy, 'simple');
+  if (tier === 'complex') return modelForTask(policy, 'complex');
+  return modelForTask(policy, 'routine');
 }
 
 /**
@@ -105,7 +112,7 @@ export function pickModelForTier(settings: Pick<AiSettings, 'deployment' | 'fall
  * A routed model that cannot see images is replaced by the primary deployment.
  */
 export function resolveTurnModel(
-  settings: Pick<AiSettings, 'deployment' | 'fallbackDeployment' | 'routingEnabled' | 'routingSimpleModel' | 'routingComplexModel'>,
+  settings: RouterSettings,
   requestedModel: string | undefined,
   classification: TaskClassification
 ): RoutingDecision {

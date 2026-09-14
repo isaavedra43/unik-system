@@ -20618,3 +20618,69 @@ button.calls-stat:focus-visible { outline: none; box-shadow: var(--unik-shadow-f
     width: 100%;
   }
 }
+
+/* Reparto de modelos (admin del asistente) */
+.model-policy-presets {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--unik-space-2);
+  margin-bottom: var(--unik-space-4);
+}
+.model-policy-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--unik-text-sm);
+  color: var(--unik-text-secondary);
+  margin-left: auto;
+}
+.model-policy-table {
+  display: flex;
+  flex-direction: column;
+}
+.model-policy-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 1.2fr);
+  gap: var(--unik-space-4);
+  padding: var(--unik-space-3) 0;
+  border-top: 1px solid var(--unik-border-subtle);
+}
+.model-policy-row:first-child {
+  border-top: none;
+}
+.model-policy-row-text,
+.model-policy-row-input {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  font-size: var(--unik-text-sm);
+}
+.model-policy-row-input input {
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--unik-border);
+  border-radius: var(--unik-radius-md);
+  background: var(--unik-surface);
+  color: var(--unik-text);
+  font-size: var(--unik-text-sm);
+  font-family: var(--unik-font-mono);
+}
+.model-policy-row-input input:focus {
+  outline: none;
+  border-color: var(--unik-brand);
+}
+@media (max-width: 720px) {
+  .model-policy-row {
+    grid-template-columns: 1fr;
+  }
+  .model-policy-toggle {
+    margin-left: 0;
+  }
+}
+
+/* Packages: refresh from Zoho */
+.pkg-refresh { display: flex; flex-wrap: wrap; align-items: center; gap: var(--unik-space-2) var(--unik-space-3); }
+.pkg-refresh-note { display: inline-flex; align-items: center; gap: 5px; font-size: var(--unik-text-xs); color: var(--unik-text-muted); }
+.pkg-refresh-note.is-warning { color: var(--unik-warning); }
+.pkg-refresh .spinner { width: 12px; height: 12px; }

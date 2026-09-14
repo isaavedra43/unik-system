@@ -46,6 +46,9 @@ export async function POST() {
       );
 
     const syncPromise = syncPackages({ mode: 'quick', maxDetailFetches: 30 });
+    // Carrier / shipment refresh for packages Zoho did not report as modified.
+    // Runs alongside the sync (shared rate budget) so it never waits for it.
+    const sweepPromise = sweepPackageShipments({ limit: SWEEP_LIMIT }).catch(() => undefined);
 
     after(async () => {
       try {
@@ -53,8 +56,7 @@ export async function POST() {
       } catch {
         // Errors are already logged inside syncPackages.
       }
-      // Carrier / shipment refresh for packages Zoho did not report as modified.
-      await sweepPackageShipments({ limit: SWEEP_LIMIT }).catch(() => undefined);
+      await sweepPromise;
     });
 
     const result = await Promise.race([

@@ -4,6 +4,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { Save, AlertCircle, CheckCircle2, Key, Cloud, Cpu, Check, X } from 'lucide-react';
 import { updateAiConfigAction, toggleAiEnabledAction } from '@/app/app/admin/assistant/actions';
 import { CANOPY_PLAN_MODELS, CanopyWaveSetup } from './CanopyWaveSetup';
+import { ModelPolicyConfig } from './ModelPolicyConfig';
 
 interface AiConfigData {
   id: string;
@@ -38,8 +39,6 @@ const PROVIDER_OPTIONS = [
 ];
 
 const SETTING_FIELDS: Array<{ key: string; label: string; type: 'number' | 'string' | 'boolean' | 'list' | 'textarea' | 'password'; hint?: string }> = [
-  { key: 'deployment', label: 'Modelo principal (default)', type: 'string', hint: 'Ej: gpt-4o, gpt-4o-mini, gpt-4.1' },
-  { key: 'fallbackDeployment', label: 'Modelo fallback', type: 'string', hint: 'Ej: gpt-4o-mini' },
   { key: 'temperature', label: 'Temperature', type: 'number', hint: '0.0 - 2.0' },
   { key: 'maxTokens', label: 'Max tokens por respuesta', type: 'number' },
   { key: 'maxMessagesPerMinute', label: 'Mensajes por minuto', type: 'number' },
@@ -67,9 +66,6 @@ const SETTING_FIELDS: Array<{ key: string; label: string; type: 'number' | 'stri
   { key: 'warehouseHours', label: 'Horario de recogida', type: 'string', hint: 'Ej. Lun-Vie 9:00-18:00, Sáb 9:00-14:00' },
   { key: 'pickupInstructions', label: 'Instrucciones para recoger', type: 'textarea', hint: 'Ej. Presentar folio y nombre; entrada por la puerta 2' },
   // Inteligencia: routing, herramientas por turno, caché, RAG, OCR y calidad
-  { key: 'routingEnabled', label: 'Routing automático de modelo', type: 'boolean', hint: 'Con "Automático" en el chat, elige el modelo según la tarea (simple → barato, complejo → principal)' },
-  { key: 'routingSimpleModel', label: 'Modelo para tareas simples', type: 'string', hint: 'Ej. gpt-4o-mini (saludos, aclaraciones, formato)' },
-  { key: 'routingComplexModel', label: 'Modelo para tareas complejas', type: 'string', hint: 'Vacío = modelo principal' },
   { key: 'maxToolsPerTurn', label: 'Tools ofrecidas por turno', type: 'number', hint: 'Máximo 128 (límite de OpenAI). Las demás se cargan bajo demanda con loadMoreTools' },
   { key: 'toolCacheEnabled', label: 'Caché de consultas de lectura', type: 'boolean', hint: 'Dos usuarios que preguntan lo mismo en segundos comparten el resultado' },
   { key: 'toolCacheTtlLiveSeconds', label: 'Caché datos vivos (segundos)', type: 'number', hint: 'Hoy, esta semana, sin periodo' },
@@ -79,7 +75,6 @@ const SETTING_FIELDS: Array<{ key: string; label: string; type: 'number' | 'stri
   { key: 'ragRerankEnabled', label: 'Re-ranking con modelo', type: 'boolean', hint: 'Más preciso; una llamada extra por búsqueda' },
   { key: 'ocrFallbackEnabled', label: 'OCR de PDF escaneados (visión)', type: 'boolean', hint: 'Si el PDF no tiene texto, el modelo lo lee como imagen' },
   { key: 'qualityJudgeEnabled', label: 'Juez de calidad automático', type: 'boolean', hint: 'Califica cada respuesta (1-5) con un modelo barato después de entregarla' },
-  { key: 'qualityJudgeModel', label: 'Modelo juez', type: 'string', hint: 'Ej. gpt-4o-mini' },
 ];
 
 export function AssistantAdminConfig({ canManage }: { canManage: boolean }) {
@@ -151,7 +146,9 @@ export function AssistantAdminConfig({ canManage }: { canManage: boolean }) {
         deployment: main.id,
         fallbackDeployment: secondary.id,
         routingSimpleModel: secondary.id,
+        routingStandardModel: main.id,
         routingComplexModel: main.id,
+        utilityModel: secondary.id,
         qualityJudgeModel: secondary.id,
         providerConfigs: { ...configs, canopywave: { ...entry, enabled: true } },
       };
@@ -315,6 +312,15 @@ export function AssistantAdminConfig({ canManage }: { canManage: boolean }) {
           })}
         </div>
       </div>
+
+      {/* ===== Sección: Reparto de modelos ===== */}
+      <ModelPolicyConfig
+        settings={settings}
+        canManage={canManage}
+        canopyConfigured={Boolean(providerConfigs.canopywave?.hasApiKey || providerConfigs.canopywave?.apiKey)}
+        openaiConfigured={Boolean(providerConfigs.openai?.hasApiKey || providerConfigs.openai?.apiKey || settings.hasApiKey)}
+        onChange={(patch) => setSettings((prev) => ({ ...prev, ...patch }))}
+      />
 
       {/* ===== Sección: Modelo y comportamiento ===== */}
       <div className="assistant-admin-config-section">

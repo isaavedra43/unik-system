@@ -12,7 +12,9 @@
  */
 
 import { prisma } from '@/lib/prisma';
-import { getActiveProvider } from '@/modules/ai/providers';
+import { chatCompletion } from '@/modules/ai/ai-client';
+import { getAiSettings } from '@/modules/ai/ai-admin-config-service';
+import { modelForTask } from '@/modules/ai/model-policy';
 import type { ChatMessage } from '@/modules/ai/providers/types';
 
 export class ChatAiError extends Error {
@@ -23,14 +25,15 @@ export class ChatAiError extends Error {
 }
 
 async function callAi(messages: ChatMessage[]): Promise<string> {
-  let provider;
+  let model: string;
   try {
-    provider = await getActiveProvider();
+    model = modelForTask(await getAiSettings(), 'utility');
   } catch {
     throw new ChatAiError('No hay un proveedor de IA configurado');
   }
 
-  const result = await provider.chatCompletion({
+  const result = await chatCompletion({
+    model,
     messages,
     temperature: 0.3,
     maxTokens: 1000,

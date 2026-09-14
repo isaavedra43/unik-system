@@ -1,7 +1,8 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { getPackage } from './packages';
-import { isDailyLimitError, withZohoRateBudget, SOURCE } from './zoho-sync-engine';
+import { ZohoApiError } from './client';
+import { canCallZohoNow, isDailyLimitError, withZohoRateBudget, SOURCE } from './zoho-sync-engine';
 import { PACKAGES_ENTITY_TYPE } from './packages-sync';
 
 /**
@@ -59,13 +60,138 @@ function remoteModifiedAtOf(detail: unknown, fallback: Date): Date {
   return Number.isNaN(d.getTime()) ? fallback : d;
 }
 
+interface RefreshCandidate {
+  id: string;
+  zohoPackageId: string;
+  sourceRemoteModifiedAt: Date;
+}
+
+/** Downloads the package detail from Zoho, stores the snapshot and normalizes it now. */
+async function refreshCandidate(candidate: RefreshCandidate): Promise<void> {
+  const { normalizePackageSnapshot } = await import('@/modules/packages/packages-normalizer');
+  const detail = await withZohoRateBudget(() => getPackage(candidate.zohoPackageId));
+  const fetchedAt = new Date();
+  // Never older than what we already stored, so the normalizer does not skip it.
+  const remoteModifiedAt = new Date(
+    Math.max(
+      remoteModifiedAtOf(detail, fetchedAt).getTime(),
+      candidate.sourceRemoteModifiedAt.getTime()
+    )
+  );
+  const snapshot = await prisma.integrationSnapshot.upsert({
+    where: {
+      source_entityType_externalId_remoteModifiedAt: {
+        source: SOURCE,
+        entityType: PACKAGES_ENTITY_TYPE,
+        externalId: candidate.zohoPackageId,
+        remoteModifiedAt,
+      },
+    },
+    create: {
+      source: SOURCE,
+      entityType: PACKAGES_ENTITY_TYPE,
+      externalId: candidate.zohoPackageId,
+      remoteModifiedAt,
+      payload: detail as Prisma.InputJsonValue,
+      fetchedAt,
+      normalizationVersion: 0,
+    },
+    update: { payload: detail as Prisma.InputJsonValue, fetchedAt, normalizationVersion: 0 },
+  });
+  await normalizePackageSnapshot(snapshot);
+  await prisma.package.update({
+    where: { id: candidate.id },
+    data: { lastDetailFetchedAt: fetchedAt },
+  });
+  await prisma.integrationEntityState.updateMany({
+    where: {
+      source: SOURCE,
+      entityType: PACKAGES_ENTITY_TYPE,
+      externalId: candidate.zohoPackageId,
+    },
+    data: { lastDetailFetchedAt: fetchedAt, needsSync: false },
+  });
+}
+
+export const ON_DEMAND_REFRESH_MAX_AGE_MS = 15 * 60 * 1000;
+
+/** True when the stored row may be behind Zoho: never re-read, still changeable, or missing data. */
+export function packageNeedsRefresh(
+  pkg: {
+    status: string | null;
+    carrier: string | null;
+    lastDetailFetchedAt: Date | null;
+    itemCount: number;
+  },
+  now: Date = new Date()
+): boolean {
+  if (!pkg.lastDetailFetchedAt) return true;
+  const age = now.getTime() - pkg.lastDetailFetchedAt.getTime();
+  if (age < ON_DEMAND_REFRESH_MAX_AGE_MS) return false;
+  const final = pkg.status ? FINAL_STATUSES.includes(pkg.status.toLowerCase()) : false;
+  return !final || !pkg.carrier || pkg.itemCount === 0;
+}
+
+export type OnDemandRefreshResult =
+  | { status: 'refreshed'; at: Date }
+  | { status: 'fresh' }
+  | { status: 'busy' }
+  | { status: 'failed'; error: string };
+
+/**
+ * Refresh used when someone opens a package: one Zoho call, done before the
+ * page renders, so the carrier, status, items and address are the ones Zoho
+ * has right now. Never blocks on the rate budget (returns `busy` instead) and
+ * never throws — the stored row is shown when Zoho is unavailable.
+ */
+export async function refreshPackageOnDemand(
+  packageId: string,
+  options: { force?: boolean } = {}
+): Promise<OnDemandRefreshResult> {
+  const pkg = await prisma.package.findUnique({
+    where: { id: packageId },
+    select: {
+      id: true,
+      zohoPackageId: true,
+      sourceRemoteModifiedAt: true,
+      status: true,
+      carrier: true,
+      lastDetailFetchedAt: true,
+      _count: { select: { items: true } },
+    },
+  });
+  if (!pkg) return { status: 'failed', error: 'Paquete no encontrado' };
+  if (!options.force && !packageNeedsRefresh({ ...pkg, itemCount: pkg._count.items })) {
+    return { status: 'fresh' };
+  }
+  if (!canCallZohoNow()) return { status: 'busy' };
+  try {
+    await refreshCandidate(pkg);
+    return { status: 'refreshed', at: new Date() };
+  } catch (error) {
+    const message =
+      error instanceof ZohoApiError
+        ? (error.zohoMessage ?? `Zoho respondió ${error.httpStatus ?? 'con error'}`)
+        : error instanceof Error && error.message.startsWith('Invalid or missing Zoho')
+          ? 'Faltan credenciales de Zoho en el servidor'
+          : 'No se pudo consultar Zoho';
+    console.warn(
+      JSON.stringify({
+        event: 'zoho.packages.on_demand_refresh.failed',
+        zohoPackageId: pkg.zohoPackageId,
+        error: error instanceof Error ? error.message : 'unknown',
+      })
+    );
+    return { status: 'failed', error: message };
+  }
+}
+
 export async function sweepPackageShipments(options: {
   limit: number;
   now?: Date;
 }): Promise<ShipmentSweepResult> {
   const now = options.now ?? new Date();
   const limit = Math.max(1, Math.min(options.limit, 200));
-  const { normalizePackageSnapshot } = await import('@/modules/packages/packages-normalizer');
 
   const candidates = await prisma.package.findMany({
     where: buildSweepWhere(now),
@@ -80,48 +206,7 @@ export async function sweepPackageShipments(options: {
 
   for (const candidate of candidates) {
     try {
-      const detail = await withZohoRateBudget(() => getPackage(candidate.zohoPackageId));
-      const fetchedAt = new Date();
-      // Never older than what we already stored, so the normalizer does not skip it.
-      const remoteModifiedAt = new Date(
-        Math.max(
-          remoteModifiedAtOf(detail, fetchedAt).getTime(),
-          candidate.sourceRemoteModifiedAt.getTime()
-        )
-      );
-      const snapshot = await prisma.integrationSnapshot.upsert({
-        where: {
-          source_entityType_externalId_remoteModifiedAt: {
-            source: SOURCE,
-            entityType: PACKAGES_ENTITY_TYPE,
-            externalId: candidate.zohoPackageId,
-            remoteModifiedAt,
-          },
-        },
-        create: {
-          source: SOURCE,
-          entityType: PACKAGES_ENTITY_TYPE,
-          externalId: candidate.zohoPackageId,
-          remoteModifiedAt,
-          payload: detail as Prisma.InputJsonValue,
-          fetchedAt,
-          normalizationVersion: 0,
-        },
-        update: { payload: detail as Prisma.InputJsonValue, fetchedAt, normalizationVersion: 0 },
-      });
-      await normalizePackageSnapshot(snapshot);
-      await prisma.package.update({
-        where: { id: candidate.id },
-        data: { lastDetailFetchedAt: fetchedAt },
-      });
-      await prisma.integrationEntityState.updateMany({
-        where: {
-          source: SOURCE,
-          entityType: PACKAGES_ENTITY_TYPE,
-          externalId: candidate.zohoPackageId,
-        },
-        data: { lastDetailFetchedAt: fetchedAt, needsSync: false },
-      });
+      await refreshCandidate(candidate);
       refreshed += 1;
     } catch (error) {
       failed += 1;

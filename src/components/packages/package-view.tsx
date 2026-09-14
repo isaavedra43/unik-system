@@ -1,11 +1,21 @@
 'use client';
 
-import React from 'react';
+import React, { useState } from 'react';
 import Link from 'next/link';
-import { Check, Download, FileText, MapPin, Package as PackageIcon, Truck } from 'lucide-react';
+import {
+  AlertTriangle,
+  Check,
+  Download,
+  FileText,
+  MapPin,
+  Package as PackageIcon,
+  RefreshCw,
+  Truck,
+} from 'lucide-react';
 import type { PackageDetail } from '@/modules/packages/packages-contract';
 import {
   formatDateOnly,
+  formatDateTime,
   formatNumber,
   getPackageStatusConfig,
 } from '@/modules/packages/packages-helpers';
@@ -283,5 +293,86 @@ export function RelatedLink({
       <span className="pkg-related-title">{title}</span>
       {meta ? <span className="pkg-related-meta">{meta}</span> : null}
     </Link>
+  );
+}
+
+/**
+ * "Actualizar desde Zoho" plus the outcome of the automatic refresh done when
+ * the package was opened, so the user always knows how current the data is.
+ */
+export function PackageZohoRefresh({
+  pkg,
+  basePath,
+  onRefreshed,
+  size = 'sm',
+}: {
+  pkg: PackageDetail;
+  basePath: string;
+  onRefreshed: (pkg: PackageDetail) => void;
+  size?: 'sm' | 'md';
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function refresh() {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(`${basePath}/${pkg.id}/refresh`, { method: 'POST' });
+      const json = (await res.json().catch(() => null)) as
+        (PackageDetail & { error?: string }) | null;
+      if (!res.ok || !json) {
+        setError(json?.error ?? 'No se pudo consultar Zoho');
+        return;
+      }
+      if (json.zohoRefresh?.status === 'failed')
+        setError(json.zohoRefresh.error ?? 'Zoho no respondió');
+      onRefreshed(json);
+    } catch {
+      setError('Error de red');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const outcome = pkg.zohoRefresh;
+  const note =
+    error ??
+    (outcome?.status === 'failed'
+      ? `Mostrando datos guardados: ${outcome.error ?? 'Zoho no respondió'}`
+      : outcome?.status === 'busy'
+        ? 'Zoho está ocupado; mostrando datos guardados.'
+        : null);
+  const checkedAt =
+    outcome?.status === 'refreshed'
+      ? 'Verificado con Zoho hace un momento'
+      : pkg.lastDetailFetchedAt
+        ? `Verificado con Zoho ${formatDateTime(pkg.lastDetailFetchedAt)}`
+        : 'Aún no verificado con Zoho';
+
+  return (
+    <div className="pkg-refresh">
+      <button
+        type="button"
+        className={`btn btn-secondary btn-${size}`}
+        onClick={refresh}
+        disabled={busy}
+        title="Vuelve a leer este paquete en Zoho"
+      >
+        {busy ? (
+          <span className="spinner" aria-hidden="true" />
+        ) : (
+          <RefreshCw size={14} aria-hidden="true" />
+        )}
+        Actualizar desde Zoho
+      </button>
+      <span
+        className={cn('pkg-refresh-note', note && 'is-warning')}
+        role={note ? 'status' : undefined}
+      >
+        {note ? <AlertTriangle size={12} aria-hidden="true" /> : null}
+        {note ?? checkedAt}
+      </span>
+    </div>
   );
 }

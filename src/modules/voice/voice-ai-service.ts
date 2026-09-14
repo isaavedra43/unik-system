@@ -15,6 +15,7 @@ import {
   VoiceError,
 } from './voice-service';
 import { getVoiceSettings } from './voice-settings';
+import { modelForTask } from '@/modules/ai/model-policy';
 
 /**
  * AI on calls.
@@ -229,6 +230,7 @@ export async function runAnswerTurn(
 
   for (let iteration = 0; iteration < 4; iteration++) {
     const result = await chatCompletion({
+      model: modelForTask(aiSettings, 'utility'),
       messages,
       tools: toolSpecs.length > 0 ? toolSpecs : undefined,
       temperature: 0.3,
@@ -359,6 +361,7 @@ export async function runCopilot(
   if (segments.length === 0) return { skipped: 'no_segments' };
 
   const result = await chatCompletion({
+    model: modelForTask(aiSettings, 'utility'),
     messages: [
       { role: 'system', content: COPILOT_PROMPT },
       { role: 'user', content: segmentsAsText(segments) },
@@ -414,6 +417,7 @@ export async function summarizeCall(
   if (segments.length === 0) return { skipped: 'no_segments' };
 
   const result = await chatCompletion({
+    model: modelForTask(aiSettings, 'utility'),
     messages: [
       { role: 'system', content: SUMMARY_PROMPT },
       { role: 'user', content: segmentsAsText(segments).slice(0, 60_000) },

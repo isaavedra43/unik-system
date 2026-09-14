@@ -69,6 +69,8 @@ export interface PackageDetail {
   shippingZip: string | null;
   shippingCountry: string | null;
   shippingPhone: string | null;
+  /** Last time the DETAIL was read from Zoho (sweep or on-demand refresh). */
+  lastDetailFetchedAt: string | null;
   sourceRemoteModifiedAt: string;
   sourceSnapshotId: string;
   normalizedAt: string;
@@ -78,6 +80,8 @@ export interface PackageDetail {
   /** Cross-module relations added by the API route. */
   relatedSalesOrder?: RelatedSalesOrderSummary | null;
   relatedContact?: RelatedContactSummary | null;
+  /** Outcome of the refresh attempted when the package was opened. */
+  zohoRefresh?: { status: 'refreshed' | 'fresh' | 'busy' | 'failed'; at?: string; error?: string };
 }
 
 function decimalToString(value: Prisma.Decimal | null | undefined): string | null {
@@ -155,6 +159,7 @@ export function toPackageDetail(pkg: {
   shippingZip: string | null;
   shippingCountry: string | null;
   shippingPhone: string | null;
+  lastDetailFetchedAt: Date | null;
   sourceRemoteModifiedAt: Date;
   sourceSnapshotId: string;
   normalizedAt: Date;
@@ -204,6 +209,7 @@ export function toPackageDetail(pkg: {
     shippingZip: pkg.shippingZip,
     shippingCountry: pkg.shippingCountry,
     shippingPhone: pkg.shippingPhone,
+    lastDetailFetchedAt: pkg.lastDetailFetchedAt?.toISOString() ?? null,
     sourceRemoteModifiedAt: pkg.sourceRemoteModifiedAt.toISOString(),
     sourceSnapshotId: pkg.sourceSnapshotId,
     normalizedAt: pkg.normalizedAt.toISOString(),

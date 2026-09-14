@@ -1,5 +1,7 @@
 import { chatCompletion } from '@/modules/ai/ai-client';
 import { previewText } from './normalize';
+import { getAiSettings } from '@/modules/ai/ai-admin-config-service';
+import { modelForTask } from '@/modules/ai/model-policy';
 
 /**
  * Assistive AI helpers for the inbox. Everything here produces TEXT for a
@@ -42,6 +44,7 @@ async function complete(
   options: { userId?: string; maxTokens?: number } = {}
 ): Promise<string> {
   const result = await chatCompletion({
+    model: modelForTask(await getAiSettings(), 'utility'),
     messages: [
       { role: 'system', content: system },
       { role: 'user', content: user },

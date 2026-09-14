@@ -4,6 +4,7 @@ import { registerTool } from './registry';
 import { chatCompletion, type ContentPart } from '../ai-client';
 import { getAiSettings } from '../ai-admin-config-service';
 import { attachmentKind, getAttachmentForActor, processAttachment } from '../ai-attachments-service';
+import { modelForTask } from '../model-policy';
 
 /**
  * Document intelligence: list the files of the conversation, extract
@@ -124,7 +125,7 @@ async function extractFromAttachment(
     throw new Error(`Formato no soportado para extracción: ${attachment.mimeType}`);
   }
   const settings = await getAiSettings();
-  const model = settings.deployment?.trim() || 'gpt-4o';
+  const model = modelForTask(settings, 'vision');
   const res = await chatCompletion({
     model,
     temperature: 0,
