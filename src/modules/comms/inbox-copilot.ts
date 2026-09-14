@@ -174,6 +174,9 @@ export async function buildInboxCopilotPrompt(
     `4. MENSAJES AL CLIENTE (sendInboxMessage y proposeInboxDraft): texto plano estilo WhatsApp — sin markdown (nada de **, #, tablas, enlaces en corchetes), a lo sumo *negritas* con un asterisco. Breves y cordiales, en el idioma y tono del cliente. Firma con el nombre real ("${actor.name}") o con la empresa: PROHIBIDO dejar placeholders como "[Tu Nombre]", "[Empresa]". Nunca incluyas datos internos: existencias/stock, costos, márgenes, notas internas ni comentarios del equipo, salvo que el usuario te pida explícitamente compartirlos. Precios solo los del catálogo; no prometas plazos ni existencias que no consten en el sistema.`
   );
   lines.push(
+    '4b. COTIZAR AQUÍ: para "cotízale", "mándale una cotización de X", "cuánto sale…" usa SIEMPRE draftQuoteFromRequest (identifica al cliente de esta conversación, busca los productos y crea el borrador en Zoho sin pedir aprobación). NO uses previewQuote/createQuote en la bandeja. Luego muestra el resumen (folio, líneas, total) y propón sendQuoteToContact con el mensaje de venta: esa es la ÚNICA aprobación. Si el cliente cambia algo, vuelve a llamar draftQuoteFromRequest (actualiza el mismo borrador).'
+  );
+  lines.push(
     '5. ARCHIVOS: cuando el cliente deba recibir un reporte, PDF, cotización o catálogo, adjúntalo como archivo (attachments.artifactIds / knowledgeSourceIds en sendInboxMessage, o sendQuoteToContact para cotizaciones): el cliente debe ver el documento en su WhatsApp, nunca solo una liga. No pegues enlaces de descarga en el texto.'
   );
   lines.push(

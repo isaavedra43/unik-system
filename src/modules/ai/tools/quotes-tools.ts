@@ -41,36 +41,50 @@ import { deliverToContact } from './messaging-tools';
  * (missing itemId → search by name; rate 0/missing → list price).
  */
 const rawQuoteItemSchema = z.object({
-  lineItemId: z.string().optional().nullable().describe('Solo al editar: id de la línea existente en Zoho'),
+  lineItemId: z.string().optional().nullable().describe('SOLO al editar (updateQuote): id de la línea existente en Zoho. Al crear NO lo uses.'),
+  line_item_id: z.string().optional().nullable().describe('Alias de lineItemId'),
   itemId: z.string().optional().nullable().describe('zohoItemId del producto (de searchQuoteProducts). Si lo omites se busca por name.'),
+  item_id: z.string().optional().nullable().describe('Alias de itemId'),
   productId: z.string().optional().describe('Alias de itemId'),
   zohoItemId: z.string().optional().describe('Alias de itemId'),
+  sku: z.string().optional().describe('SKU del producto (se busca en el catálogo)'),
   name: z.string().optional().describe('Nombre del producto o concepto (obligatorio si no hay itemId)'),
   product: z.string().optional().describe('Alias de name'),
+  productName: z.string().optional().describe('Alias de name'),
   description: z.string().optional().nullable(),
   quantity: z.number().optional().describe('Cantidad (> 0)'),
   qty: z.number().optional().describe('Alias de quantity'),
+  cantidad: z.number().optional().describe('Alias de quantity'),
   rate: z.number().optional().describe('Precio unitario. Si lo omites o es 0 se usa el precio de lista del catálogo'),
   price: z.number().optional().describe('Alias de rate'),
   unitPrice: z.number().optional().describe('Alias de rate'),
+  precio: z.number().optional().describe('Alias de rate'),
   unit: z.string().optional().nullable(),
   discountPercent: z.number().optional().nullable(),
   taxId: z.string().optional().nullable(),
 });
 type RawQuoteItem = z.infer<typeof rawQuoteItemSchema>;
 
-/** Pure alias mapping: what the model typed → the strict form line. */
-export function normalizeQuoteItems(items: RawQuoteItem[]): QuoteLineInput[] {
+/**
+ * Pure alias mapping: what the model typed → the strict form line.
+ * On create, a `lineItemId` can only be a confusion with the product id
+ * (Zoho rejects "line_item_id no válido"): it is dropped and reused as itemId
+ * candidate when no other id was given.
+ */
+export function normalizeQuoteItems(items: RawQuoteItem[], options: { forUpdate?: boolean } = {}): QuoteLineInput[] {
   return items.map((raw) => {
-    const itemId = raw.itemId ?? raw.productId ?? raw.zohoItemId ?? null;
-    const name = (raw.name ?? raw.product ?? '').trim();
-    const quantity = raw.quantity ?? raw.qty ?? 1;
-    const rate = raw.rate ?? raw.price ?? raw.unitPrice ?? 0;
+    const lineRef = raw.lineItemId ?? raw.line_item_id ?? null;
+    let itemId = raw.itemId ?? raw.item_id ?? raw.productId ?? raw.zohoItemId ?? null;
+    if (!itemId && !options.forUpdate && lineRef) itemId = lineRef;
+    const name = (raw.name ?? raw.product ?? raw.productName ?? '').trim();
+    const description = raw.description?.trim() ?? null;
+    const quantity = raw.quantity ?? raw.qty ?? raw.cantidad ?? 1;
+    const rate = raw.rate ?? raw.price ?? raw.unitPrice ?? raw.precio ?? 0;
     return {
-      lineItemId: raw.lineItemId ?? null,
+      lineItemId: options.forUpdate ? (lineRef ?? null) : null,
       itemId: itemId ? String(itemId).trim() : null,
-      name: name || 'Concepto',
-      description: raw.description ?? null,
+      name: name || (raw.sku ? raw.sku.trim() : '') || (description && description.length <= 120 ? description : '') || 'Concepto',
+      description,
       quantity: Number.isFinite(quantity) && quantity > 0 ? quantity : 1,
       rate: Number.isFinite(rate) && rate >= 0 ? rate : 0,
       unit: raw.unit ?? null,
@@ -93,7 +107,12 @@ async function enrichQuoteItems(items: QuoteLineInput[]): Promise<{ items: Quote
     if (itemId) {
       const row = await prisma.product.findUnique({ where: { zohoItemId: itemId }, select: { zohoItemId: true, name: true, rate: true, unit: true } });
       if (row) product = { ...row, rate: row.rate ? String(row.rate) : null };
-      else notes.push(`itemId ${itemId} no existe en el catálogo sincronizado; se busca por nombre`);
+      else {
+        // Not a Zoho item id: maybe a line id or a SKU typed in the wrong field.
+        const bySku = await prisma.product.findFirst({ where: { sku: { equals: itemId, mode: 'insensitive' } }, select: { zohoItemId: true, name: true, rate: true, unit: true } });
+        if (bySku) product = { ...bySku, rate: bySku.rate ? String(bySku.rate) : null };
+        else notes.push(`itemId ${itemId} no existe en el catálogo sincronizado; se busca por nombre`);
+      }
     }
     if (!product && name) {
       const found = await aiSearchProducts(name, 5);
@@ -366,7 +385,7 @@ registerTool({
     const current = await aiGetQuote(quoteId);
     if (!current) return { error: 'Cotización no encontrada' };
     try {
-      const { items, notes } = await enrichQuoteItems(normalizeQuoteItems(args.items));
+      const { items, notes } = await enrichQuoteItems(normalizeQuoteItems(args.items, { forUpdate: true }));
       const quote = await aiUpdateQuote(actor, quoteId, {
         ...args,
         items,

@@ -143,6 +143,18 @@ export function performUiAction(action: UiAction): void {
   }
 }
 
+/** Call / link inside the "Resultado: {…}" JSON of an approved system note (so the card can open it). */
+export function extractResultAction(text: string): UiAction | null {
+  const callId = /"callId"\s*:\s*"([^"]+)"/.exec(text)?.[1];
+  if (callId) {
+    const to = /"to"\s*:\s*"([^"]+)"/.exec(text)?.[1] ?? /"phone"\s*:\s*"([^"]+)"/.exec(text)?.[1] ?? null;
+    return { kind: 'join_call', callId, label: to, aiCall: /"mode"\s*:\s*"ai"/.test(text) };
+  }
+  const openUrl = /"openUrl"\s*:\s*"([^"]+)"/.exec(text)?.[1];
+  if (openUrl) return { kind: 'open_url', url: openUrl, reason: 'internal_call' };
+  return null;
+}
+
 /** "falló: <motivo>. Acción: …" → the reason, for the red system card. */
 export function extractFailureReason(text: string): string | null {
   const m = /fall[oó]:\s*([^]*?)(?:\.\s+Acción:|\s+Acción:|$)/.exec(text);

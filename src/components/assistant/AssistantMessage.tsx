@@ -4,7 +4,8 @@ import React, { useState } from 'react';
 import { Bot, Check, ChevronDown, ChevronRight, Clock, Database, FileText, Image as ImageIcon, ShieldCheck, ShieldX, Sparkles, User as UserIcon, X } from 'lucide-react';
 import { AssistantMarkdown } from './AssistantMarkdown';
 import { ArtifactRenderer, type ArtifactData } from './ArtifactRenderer';
-import { AUTO_EVENT_LABELS, autoKind, extractFailureReason, parsePlan, toolLabel, type MessageFeedbackData, type TurnMeta } from '@/components/copilot/copilot-types';
+import { AUTO_EVENT_LABELS, autoKind, extractFailureReason, extractResultAction, parsePlan, performUiAction, toolLabel, type MessageFeedbackData, type TurnMeta } from '@/components/copilot/copilot-types';
+import { ExternalLink, Phone } from 'lucide-react';
 import { ConfidenceBadge } from '@/components/copilot/ConfidenceBadge';
 import { MessageFeedback } from '@/components/copilot/MessageFeedback';
 import { PlanCard } from '@/components/copilot/PlanCard';
@@ -135,12 +136,18 @@ export function AssistantMessage({ message, onSendText, isLatest = false }: Assi
 
   if (message.role === 'system') {
     const ev = parseSystemEvent(message.content ?? '');
+    const action = ev.kind === 'approved' && !ev.failed ? extractResultAction(message.content ?? '') : null;
     return (
       <div className={`assistant-sysevent is-${ev.kind} ${ev.failed ? 'is-failed' : ''}`}>
         {ev.kind === 'approved' ? (ev.failed ? <ShieldX size={14} /> : <ShieldCheck size={14} />) : ev.kind === 'rejected' ? <ShieldX size={14} /> : <Sparkles size={14} />}
         <div>
           <div className="assistant-sysevent-title">{ev.title}</div>
           {ev.detail && <div className="assistant-sysevent-detail">{ev.detail}</div>}
+          {action && (
+            <button type="button" className="proposal-btn proposal-btn-primary copilot-sysevent-btn" onClick={() => performUiAction(action)}>
+              {action.kind === 'join_call' ? <><Phone size={13} /> Abrir la llamada</> : <><ExternalLink size={13} /> Abrir</>}
+            </button>
+          )}
         </div>
       </div>
     );

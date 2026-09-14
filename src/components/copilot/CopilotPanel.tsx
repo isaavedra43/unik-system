@@ -24,6 +24,9 @@ import {
   Square,
   StickyNote,
   X,
+  Pencil,
+  Phone,
+  ExternalLink,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
@@ -34,6 +37,7 @@ import { PlanCard } from './PlanCard';
 import { ConfidenceBadge } from './ConfidenceBadge';
 import { MessageFeedback } from './MessageFeedback';
 import { parseConfidence } from '@/modules/ai/confidence';
+import { VoiceDictationButton } from '@/components/voice/VoiceDictationButton';
 import {
   AI_SETTINGS_HREF,
   autoKind,
@@ -46,6 +50,7 @@ import {
   parsePlan,
   AUTO_EVENT_LABELS,
   extractFailureReason,
+  extractResultAction,
   performUiAction,
   uiActionFromResult,
   type UiAction,
@@ -86,6 +91,8 @@ export interface CopilotPanelProps {
   surface: CopilotSurfaceConfig;
   user: { id: string; name: string };
   onInsertDraft?: (text: string) => void;
+  /** Sends the (possibly edited) draft straight from the card — the click is the approval. */
+  onSendDraft?: (text: string) => Promise<void>;
   onAfterTurn?: () => void;
   onBack?: () => void;
 }
@@ -218,40 +225,71 @@ function ActionChips({ data, onPick, disabled, muted }: { data: SuggestedActions
   );
 }
 
-function DraftCard({ draft, onInsert }: { draft: DraftData; onInsert?: (text: string) => void }) {
+function DraftCard({ draft, onInsert, onSend }: { draft: DraftData; onInsert?: (text: string) => void; onSend?: (text: string) => Promise<void> }) {
+  const [text, setText] = useState(draft.draft);
+  const [editing, setEditing] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [sent, setSent] = useState(false);
   const copy = async () => {
     try {
-      await navigator.clipboard.writeText(draft.draft);
+      await navigator.clipboard.writeText(text);
       toast.success('Borrador copiado');
     } catch {
       toast.error('No se pudo copiar');
     }
   };
+  const send = async () => {
+    if (!onSend || !text.trim()) return;
+    setSending(true);
+    try {
+      await onSend(text.trim());
+      setSent(true);
+      toast.success('Mensaje enviado');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'No se pudo enviar');
+    } finally {
+      setSending(false);
+    }
+  };
   return (
-    <motion.div className="copilot-draft" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={spring}>
+    <motion.div className={cn('copilot-draft', sent && 'is-sent')} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={spring}>
       <div className="copilot-draft-head">
         <MessageSquareReply size={13} />
-        <span>Respuesta propuesta</span>
-        {draft.rationale && <span className="copilot-draft-rationale">· {draft.rationale}</span>}
+        <span>{sent ? 'Enviado al cliente' : 'Respuesta propuesta'}</span>
+        {draft.rationale && !sent && <span className="copilot-draft-rationale">· {draft.rationale}</span>}
       </div>
-      <div className="copilot-draft-body">{draft.draft}</div>
-      <div className="copilot-draft-actions">
-        <button type="button" className="copilot-btn copilot-btn-ghost" onClick={copy}>
-          <Copy size={13} /> Copiar
-        </button>
-        {onInsert && (
-          <button
-            type="button"
-            className="copilot-btn copilot-btn-primary"
-            onClick={() => {
-              onInsert(draft.draft);
-              toast.success('Insertado en el redactor');
-            }}
-          >
-            <Import size={13} /> Insertar en el redactor
+      {editing && !sent ? (
+        <textarea className="copilot-draft-edit" value={text} rows={Math.min(12, Math.max(3, text.split('\n').length + 1))} onChange={(e) => setText(e.target.value)} aria-label="Editar borrador" />
+      ) : (
+        <div className="copilot-draft-body">{text}</div>
+      )}
+      {!sent && (
+        <div className="copilot-draft-actions">
+          <button type="button" className="copilot-btn copilot-btn-ghost" onClick={copy}>
+            <Copy size={13} /> Copiar
           </button>
-        )}
-      </div>
+          <button type="button" className="copilot-btn copilot-btn-ghost" onClick={() => setEditing((v) => !v)}>
+            <Pencil size={13} /> {editing ? 'Listo' : 'Editar'}
+          </button>
+          {onInsert && (
+            <button
+              type="button"
+              className="copilot-btn copilot-btn-ghost"
+              onClick={() => {
+                onInsert(text);
+                toast.success('Insertado en el redactor');
+              }}
+            >
+              <Import size={13} /> Al redactor
+            </button>
+          )}
+          {onSend && (
+            <button type="button" className="copilot-btn copilot-btn-primary" disabled={sending || !text.trim()} onClick={() => void send()}>
+              {sending ? <Loader2 size={13} className="copilot-spin" /> : <SendHorizontal size={13} />} Enviar
+            </button>
+          )}
+        </div>
+      )}
     </motion.div>
   );
 }
@@ -287,7 +325,7 @@ function parseSystemEvent(text: string): { kind: 'approved' | 'rejected' | 'othe
 /* Panel                                                               */
 /* ------------------------------------------------------------------ */
 
-export function CopilotPanel({ surface, user, onInsertDraft, onAfterTurn, onBack }: CopilotPanelProps) {
+export function CopilotPanel({ surface, user, onInsertDraft, onSendDraft, onAfterTurn, onBack }: CopilotPanelProps) {
   const [mode, setMode] = useState<CopilotMode>('active');
   const [loading, setLoading] = useState(true);
   const [messages, setMessages] = useState<CopilotMessage[]>([]);
@@ -543,7 +581,7 @@ export function CopilotPanel({ surface, user, onInsertDraft, onAfterTurn, onBack
     return messages
       .map((m, i) => {
         if (m.role === 'tool') return null;
-        if (m.role === 'system') return { kind: 'system' as const, id: m.id, event: parseSystemEvent(m.content ?? '') };
+        if (m.role === 'system') return { kind: 'system' as const, id: m.id, event: parseSystemEvent(m.content ?? ''), action: extractResultAction(m.content ?? '') };
         if (m.role === 'user') {
           const auto = autoKind(m.content);
           if (auto) return { kind: 'event' as const, id: m.id, auto };
@@ -655,6 +693,11 @@ export function CopilotPanel({ surface, user, onInsertDraft, onAfterTurn, onBack
                   <div>
                     <div className="copilot-sysevent-title">{ev.title}</div>
                     {ev.detail && <div className="copilot-sysevent-detail">{ev.detail}</div>}
+                    {ev.kind === 'approved' && !ev.failed && it.action && (
+                      <button type="button" className="copilot-btn copilot-btn-primary copilot-sysevent-btn" onClick={() => performUiAction(it.action as UiAction)}>
+                        {it.action.kind === 'join_call' ? <><Phone size={13} /> Abrir la llamada</> : <><ExternalLink size={13} /> Abrir</>}
+                      </button>
+                    )}
                   </div>
                 </motion.div>
               );
@@ -693,7 +736,7 @@ export function CopilotPanel({ surface, user, onInsertDraft, onAfterTurn, onBack
                   </div>
                 )}
                 {it.drafts.map((d, i) => (
-                  <DraftCard key={`${it.id}-draft-${i}`} draft={d} onInsert={onInsertDraft} />
+                  <DraftCard key={`${it.id}-draft-${i}`} draft={d} onInsert={onInsertDraft} onSend={onSendDraft} />
                 ))}
                 {it.actions && <ActionChips data={it.actions} onPick={send} disabled={streaming || mode === 'paused'} muted={!it.actionsCurrent} />}
                 {it.text && (
@@ -726,7 +769,7 @@ export function CopilotPanel({ surface, user, onInsertDraft, onAfterTurn, onBack
                 ))}
               </div>
             )}
-            {liveDraft && <DraftCard draft={liveDraft} onInsert={onInsertDraft} />}
+            {liveDraft && <DraftCard draft={liveDraft} onInsert={onInsertDraft} onSend={onSendDraft} />}
             {liveActions && <ActionChips data={liveActions} onPick={send} disabled />}
           </motion.div>
         )}
@@ -773,6 +816,15 @@ export function CopilotPanel({ surface, user, onInsertDraft, onAfterTurn, onBack
               }
             }}
           />
+          {mode !== 'paused' && !streaming && (
+            <VoiceDictationButton
+              className="copilot-dictate"
+              iconSize={15}
+              title="Dictar por voz"
+              onFinalTranscript={(t) => setInput((prev) => (prev.trim() ? `${prev.trimEnd()} ${t}` : t))}
+              onStart={() => textareaRef.current?.focus()}
+            />
+          )}
           {streaming ? (
             <button type="button" className="copilot-send is-stop" onClick={stop} aria-label="Detener">
               <Square size={14} />

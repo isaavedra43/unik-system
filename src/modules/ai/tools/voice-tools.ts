@@ -7,8 +7,7 @@ import {
   createOutboundCall,
   getTranscript,
   listCalls,
-  pauseAi,
-} from '@/modules/voice/voice-service';
+  pauseAi, getCall } from '@/modules/voice/voice-service';
 
 /**
  * Voice tools for the assistant.
@@ -175,26 +174,50 @@ registerTool({
     if (a.mode === 'ai' && !a.brief?.trim()) return { error: 'Para que la IA llame necesitas indicar qué debe decir (brief).' };
     const contact = await resolveContact(a.contact);
     if (!contact.phone) return { error: `${contact.displayName} no tiene teléfono registrado` };
+    const toNumber = contact.phone.replace(/[\s().-]/g, '');
+    if (!/^\+[1-9]\d{6,14}$/.test(toNumber)) return { error: `El teléfono de ${contact.displayName} (${contact.phone}) no está en formato internacional (+52…). Corrígelo en el contacto.` };
+    // Voice-capable account: the one the user named, or the first Twilio account of their teams.
+    let accountId = a.accountId ?? null;
+    if (!accountId) {
+      const account = await prisma.commAccount.findFirst({
+        where: {
+          status: 'active',
+          provider: { startsWith: 'twilio' },
+          ...(actor.isSuperAdmin ? {} : { OR: [{ teamKeys: { isEmpty: true } }, { teamKeys: { hasSome: actor.roleKeys } }] }),
+        },
+        orderBy: [{ provider: 'asc' }, { label: 'asc' }],
+        select: { id: true },
+      });
+      accountId = account?.id ?? null;
+    }
     const { call, mock } = await createOutboundCall(actor, {
-      toNumber: contact.phone,
-      accountId: a.accountId ?? null,
+      toNumber,
+      accountId,
       contactId: contact.commContactId ?? null,
       aiAnswers: a.mode === 'ai',
       aiBrief: a.mode === 'ai' ? a.brief ?? null : null,
     }).then((r) => ({ call: r.call, mock: r.call.mock }));
+    // Give the SIP bridge a moment: a call that died right away must not be reported as "sonando".
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    const fresh = await getCall(actor, call.id).catch(() => call);
+    if (fresh.status === 'failed' || fresh.status === 'missed') {
+      throw new Error(`La llamada a ${contact.displayName} no pudo iniciarse (estado: ${fresh.status}). Revisa la cuenta de voz de Twilio y el trunk saliente de LiveKit; el administrador puede probar desde Llamadas → Nueva llamada.`);
+    }
     return {
       callId: call.id,
       to: contact.displayName,
-      phone: contact.phone,
-      status: call.status,
+      phone: toNumber,
+      status: fresh.status,
       mode: a.mode,
       mock,
+      accountId,
       joinUrl: absoluteUrl(`/app/calls?call=${call.id}`),
       dock: 'auto',
-      note:
-        a.mode === 'ai'
+      note: mock
+        ? 'ATENCIÓN: la telefonía está en MODO SIMULACIÓN (LiveKit/Twilio sin configurar): la llamada NO sonará en el teléfono real. Dilo claramente al usuario y que el administrador configure LIVEKIT_URL, LIVEKIT_API_KEY/SECRET y LIVEKIT_SIP_TRUNK_ID.'
+        : a.mode === 'ai'
           ? 'La asistente de voz ya está marcando; la llamada aparece en la barra flotante de UNIK (el usuario puede escuchar, intervenir, pausar la IA o colgar). Al terminar usa getCallTranscript para el resumen. No pidas abrir enlaces.'
-          : 'La llamada ya está sonando y se abrió automáticamente en la barra flotante de UNIK: el usuario contesta ahí con su micrófono, aunque cambie de módulo. No le pidas abrir enlaces; solo confirma que está marcando.',
+          : 'La llamada ya está sonando y se abrió automáticamente en la barra flotante de UNIK (abajo a la derecha): el usuario contesta ahí con su micrófono, aunque cambie de módulo. No le pidas abrir enlaces; solo confirma que está marcando.',
     };
   },
 });

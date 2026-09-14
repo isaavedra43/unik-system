@@ -167,10 +167,14 @@ export const openaiProvider: AiProvider = {
     const start = Date.now();
 
     try {
+      const tools = toOpenAITools(opts.tools);
+      const choice = opts.toolChoice && opts.toolChoice !== 'auto' ? opts.toolChoice : null;
+      const forced = choice && tools?.some((t) => t.type === 'function' && t.function.name === choice.function.name) ? choice : null;
       const stream = await c.chat.completions.create({
         model,
         messages: toOpenAIMessages(opts.messages),
-        tools: toOpenAITools(opts.tools),
+        tools,
+        ...(forced ? { tool_choice: forced } : {}),
         temperature: opts.temperature ?? 0.3,
         max_tokens: opts.maxTokens ?? 2000,
         stream: true,

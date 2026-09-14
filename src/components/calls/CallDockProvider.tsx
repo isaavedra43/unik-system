@@ -140,7 +140,9 @@ export function CallDockProvider({ user, children }: { user: CurrentUser; childr
         persist({ callId, label: label ?? null, aiCall: Boolean(aiCall) });
       } catch (err) {
         const message = err instanceof Error ? err.message : 'No se pudo unir a la llamada';
-        setActive((prev) => (prev && prev.callId === callId ? { ...prev, ended: true, error: message } : prev));
+        const call = await refresh(callId);
+        const status = call ? (STATUS_LABEL[call.status] ?? call.status) : null;
+        setActive((prev) => (prev && prev.callId === callId ? { ...prev, call, ended: true, error: status && call && !LIVE_STATUSES.has(call.status) ? `${message} · estado: ${status}` : message } : prev));
         persist(null);
       }
     },
@@ -258,9 +260,10 @@ export function CallDockProvider({ user, children }: { user: CurrentUser; childr
     return () => window.clearInterval(interval);
   }, [active]);
 
+  // A finished call closes itself after a moment; an error stays until the user closes it.
   useEffect(() => {
-    if (!active?.ended) return;
-    const timeout = window.setTimeout(() => setActive((prev) => (prev?.ended ? null : prev)), active.error ? 12_000 : 7_000);
+    if (!active?.ended || active.error) return;
+    const timeout = window.setTimeout(() => setActive((prev) => (prev?.ended && !prev.error ? null : prev)), 7_000);
     return () => window.clearTimeout(timeout);
   }, [active?.ended, active?.error, active]);
 

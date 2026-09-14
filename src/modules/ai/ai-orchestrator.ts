@@ -78,6 +78,8 @@ const INBOX_ONLY_TOOLS = new Set([
 ]);
 /** Tools that only exist inside the internal-chat copilot. */
 const CHAT_ONLY_TOOLS = new Set(['proposeChatDraft']);
+/** In the inbox the quote path is draftQuoteFromRequest → sendQuoteToContact (one approval); the manual builders only confuse the model there. */
+const INBOX_HIDDEN_TOOLS = new Set(['createQuote', 'previewQuote']);
 /** Chat tools whose `chatChannelId` defaults to the current channel. */
 const CHAT_CHANNEL_ID_TOOLS = new Set([
   'getChatChannelMessages',
@@ -384,6 +386,7 @@ export async function* runAssistant(
   )
     .filter((t) => inboxConversationId || chatChannelId || !SURFACE_ONLY_TOOLS.has(t.name))
     .filter((t) => inboxConversationId || !INBOX_ONLY_TOOLS.has(t.name))
+    .filter((t) => !inboxConversationId || !INBOX_HIDDEN_TOOLS.has(t.name))
     .filter((t) => chatChannelId || !CHAT_ONLY_TOOLS.has(t.name));
   // 8.5. Offer only the tools that matter this turn (OpenAI accepts ≤128; every tool costs tokens).
   // Core + surface tools are always present; the rest is chosen by relevance and recent use.
@@ -1048,11 +1051,20 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
     let finishReason: string | undefined;
 
     const modelToUse = usingFallback ? fallbackModel : effectiveModel;
+    // Copilot auto-analysis (open / inbound): the first call MUST produce the clickable
+    // action chips instead of prose, so the user only clicks.
+    const forceActions =
+      iteration === 1 &&
+      isAutoTrigger &&
+      !input.message.startsWith('⟦auto:action_failed') &&
+      Boolean(inboxConversationId || chatChannelId) &&
+      offeredTools.some((t) => t.name === 'suggestNextActions');
 
     try {
       for await (const chunk of chatCompletionStream({
         messages,
         tools: toolSpecs.length > 0 ? toolSpecs : undefined,
+        toolChoice: forceActions ? { type: 'function', function: { name: 'suggestNextActions' } } : undefined,
         temperature: settings.temperature,
         maxTokens: settings.maxTokens,
         userId: input.actor.id,

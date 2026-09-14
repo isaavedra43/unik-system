@@ -17886,3 +17886,12 @@ textarea.input {
 .copilot-mode-option-hint { font-size: 11px; color: var(--unik-text-muted); line-height: 1.35; }
 .copilot-mode-more { display: inline-flex; align-items: center; gap: 5px; padding: 8px 10px; font-size: 11.5px; color: var(--unik-text-secondary); text-decoration: none; border-top: 1px solid var(--unik-border-subtle); margin-top: 4px; }
 .copilot-mode-more:hover { color: var(--unik-brand-text); }
+
+/* ---- Copilot: editable drafts, action buttons on system cards, dictation ---- */
+.copilot-draft-edit { width: 100%; box-sizing: border-box; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--unik-border); background: var(--unik-surface); font: inherit; font-size: 13px; line-height: 1.5; color: var(--unik-text); resize: vertical; margin: 6px 0; }
+.copilot-draft-edit:focus { outline: none; box-shadow: var(--unik-shadow-focus); }
+.copilot-draft.is-sent { opacity: 0.8; }
+.copilot-draft.is-sent .copilot-draft-head { color: var(--unik-success); }
+.copilot-sysevent-btn { margin-top: 8px; padding: 6px 12px; font-size: 12.5px; }
+.copilot-dictate { width: 34px; height: 34px; border-radius: 10px; border: 1px solid var(--unik-border); background: var(--unik-surface); color: var(--unik-text-secondary); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; }
+.copilot-dictate:hover { background: var(--unik-surface-hover); color: var(--unik-text); }

@@ -44,5 +44,25 @@ export function ChatCopilotPanel({ channelId, user, activityAt, onInsertDraft, o
     [channelId, activityAt]
   );
 
-  return <SharedCopilotPanel surface={surface} user={user} onInsertDraft={onInsertDraft} onAfterTurn={onAfterTurn} onBack={onBack} />;
+  return (
+    <SharedCopilotPanel
+      surface={surface}
+      user={user}
+      onInsertDraft={onInsertDraft}
+      onSendDraft={async (text) => {
+        const res = await fetch(`/app/chat/api/channels/${channelId}/messages`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ content: text }),
+        });
+        if (!res.ok) {
+          const data = (await res.json().catch(() => ({}))) as { error?: string };
+          throw new Error(data.error ?? 'No se pudo enviar el mensaje');
+        }
+        onAfterTurn?.();
+      }}
+      onAfterTurn={onAfterTurn}
+      onBack={onBack}
+    />
+  );
 }

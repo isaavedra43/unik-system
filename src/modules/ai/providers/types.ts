@@ -60,6 +60,8 @@ export interface ChatCompletionOptions {
   conversationId?: string;
   /** Override the configured model for this call. */
   model?: string;
+  /** Force one tool on this call (OpenAI `tool_choice`); 'auto' lets the model decide. */
+  toolChoice?: 'auto' | { type: 'function'; function: { name: string } };
 }
 
 export interface ChatCompletionResult {

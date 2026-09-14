@@ -48,6 +48,18 @@ export function CopilotPanel({ conversation, user, onInsertDraft, onRefreshConve
       surface={surface}
       user={{ id: user.id, name: user.name }}
       onInsertDraft={onInsertDraft}
+      onSendDraft={async (text) => {
+        const res = await fetch(`/app/inbox/api/conversations/${conversation.id}/messages`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ body: text }),
+        });
+        if (!res.ok) {
+          const data = (await res.json().catch(() => ({}))) as { error?: string };
+          throw new Error(data.error ?? 'No se pudo enviar el mensaje');
+        }
+        onRefreshConversation();
+      }}
       onAfterTurn={onRefreshConversation}
       onBack={onBack}
     />
