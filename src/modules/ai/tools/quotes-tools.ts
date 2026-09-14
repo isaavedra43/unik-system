@@ -168,11 +168,49 @@ function friendlyQuoteError(err: unknown): Error {
   return err instanceof Error ? err : new Error('Error desconocido al cotizar');
 }
 
+function normalizeName(text: string): string {
+  return text.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Zoho Books can require a salesperson on estimates. Order of preference:
+ * the one the model named (resolved to its Zoho id), the user themself when
+ * they are a Zoho salesperson, the salesperson of the customer's latest quote
+ * or order, and finally the first salesperson of the organization.
+ */
+async function resolveSalesperson(actor: { name: string }, input: { salespersonId?: string | null; salespersonName?: string | null; customerId?: string | null; customerName?: string | null }): Promise<{ salespersonId: string | null; salespersonName: string | null; note: string | null }> {
+  const { getSalespersonsForQuote } = await import('@/modules/quotes/quotes-salespersons');
+  const list = await getSalespersonsForQuote().catch(() => [] as Array<{ id: string | null; name: string }>);
+  const byName = (name: string | null | undefined) => (name ? list.find((s) => normalizeName(s.name) === normalizeName(name)) ?? null : null);
+  if (input.salespersonId) {
+    const found = list.find((s) => s.id === input.salespersonId);
+    return { salespersonId: input.salespersonId, salespersonName: found?.name ?? input.salespersonName ?? null, note: null };
+  }
+  const named = byName(input.salespersonName);
+  if (named) return { salespersonId: named.id, salespersonName: named.name, note: null };
+  if (input.salespersonName?.trim()) return { salespersonId: null, salespersonName: input.salespersonName.trim(), note: null };
+  const self = byName(actor.name);
+  if (self) return { salespersonId: self.id, salespersonName: self.name, note: `vendedor: ${self.name} (tú)` };
+  const lastQuote = input.customerId ? await prisma.quote.findFirst({ where: { zohoCustomerId: input.customerId, salespersonName: { not: null } }, orderBy: { createdAt: 'desc' }, select: { salespersonName: true, salespersonId: true } }) : null;
+  if (lastQuote?.salespersonName) {
+    const match = byName(lastQuote.salespersonName);
+    return { salespersonId: match?.id ?? lastQuote.salespersonId ?? null, salespersonName: match?.name ?? lastQuote.salespersonName, note: `vendedor: ${lastQuote.salespersonName} (última cotización del cliente)` };
+  }
+  const lastOrder = input.customerName ? await prisma.salesOrder.findFirst({ where: { customerName: { equals: input.customerName, mode: 'insensitive' }, salespersonName: { not: null } }, orderBy: { createdAt: 'desc' }, select: { salespersonName: true } }) : null;
+  if (lastOrder?.salespersonName) {
+    const match = byName(lastOrder.salespersonName);
+    return { salespersonId: match?.id ?? null, salespersonName: match?.name ?? lastOrder.salespersonName, note: `vendedor: ${lastOrder.salespersonName} (última orden del cliente)` };
+  }
+  const first = list[0];
+  if (first) return { salespersonId: first.id, salespersonName: first.name, note: `vendedor: ${first.name} (primero de la lista de Zoho)` };
+  return { salespersonId: null, salespersonName: null, note: 'sin vendedor: Zoho no tiene vendedores configurados' };
+}
+
 /**
  * Completes the lines from the catalog BEFORE the approval card (create/preview)
  * and refuses lines Zoho would reject: no product and no name, or price 0.
  */
-async function prepareQuoteArgs(rawArgs: unknown, options: { forUpdate?: boolean } = {}): Promise<{ args: unknown } | { error: string }> {
+async function prepareQuoteArgs(rawArgs: unknown, options: { forUpdate?: boolean; actor?: { name: string } } = {}): Promise<{ args: unknown } | { error: string }> {
   const args = rawArgs as { items: RawQuoteItem[]; customerId?: string };
   const customer = args.customerId ? await prisma.contact.findUnique({ where: { zohoContactId: args.customerId }, select: { zohoContactId: true, contactName: true } }) : null;
   if (args.customerId && !customer) {
@@ -185,7 +223,10 @@ async function prepareQuoteArgs(rawArgs: unknown, options: { forUpdate?: boolean
     else if (!line.rate || line.rate <= 0) problems.push(`línea ${i + 1} (${line.name}): precio 0 y sin precio de lista. Indica rate.`);
   });
   if (problems.length > 0) return { error: `Cotización incompleta — ${problems.join(' ')}` };
-  return { args: { ...args, items: items.map((l) => ({ ...l, lineItemId: options.forUpdate ? l.lineItemId : undefined })), _prepared: notes } };
+  const a = args as { salespersonId?: string | null; salespersonName?: string | null };
+  const sp = await resolveSalesperson(options.actor ?? { name: '' }, { salespersonId: a.salespersonId, salespersonName: a.salespersonName, customerId: args.customerId ?? null, customerName: customer?.contactName ?? null });
+  if (sp.note) notes.push(sp.note);
+  return { args: { ...args, salespersonId: sp.salespersonId ?? undefined, salespersonName: sp.salespersonName ?? undefined, items: items.map((l) => ({ ...l, lineItemId: options.forUpdate ? l.lineItemId : undefined })), _prepared: notes } };
 }
 
 const quoteDraftShape = {
@@ -193,7 +234,8 @@ const quoteDraftShape = {
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe('yyyy-mm-dd; por defecto hoy'),
   expiryDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
   referenceNumber: z.string().max(100).optional().nullable(),
-  salespersonName: z.string().max(120).optional().nullable(),
+  salespersonName: z.string().max(120).optional().nullable().describe('Vendedor de Zoho; si lo omites se usa el usuario actual o el de la última venta del cliente'),
+  salespersonId: z.string().max(40).optional().nullable(),
   notes: z.string().max(5000).optional().nullable(),
   terms: z.string().max(5000).optional().nullable(),
   discountMode: z.enum(DISCOUNT_MODES).default('none'),
@@ -377,7 +419,7 @@ registerTool({
   effect: 'business_write',
   summarize: (args) => draftSummary(args, 'Crear'),
   parameters: z.object(quoteDraftShape),
-  prepareArgs: (_actor, args) => prepareQuoteArgs(args),
+  prepareArgs: (actor, args) => prepareQuoteArgs(args, { actor }),
   execute: async (actor, rawArgs) => {
     const args = rawArgs as z.infer<z.ZodObject<typeof quoteDraftShape>>;
     const today = new Date().toISOString().slice(0, 10);
@@ -401,7 +443,7 @@ registerTool({
   effect: 'business_write',
   summarize: (args) => draftSummary(args, `Editar (${(args as { quoteId: string }).quoteId})`),
   parameters: z.object({ quoteId: z.string().min(1), ...quoteDraftShape }),
-  prepareArgs: (_actor, args) => prepareQuoteArgs(args, { forUpdate: true }),
+  prepareArgs: (actor, args) => prepareQuoteArgs(args, { forUpdate: true, actor }),
   execute: async (actor, rawArgs) => {
     const { quoteId, ...args } = rawArgs as { quoteId: string } & z.infer<z.ZodObject<typeof quoteDraftShape>>;
     const current = await aiGetQuote(quoteId);
@@ -590,10 +632,11 @@ registerTool({
     delivery: z.object({ mode: z.enum(['pickup', 'delivery']), address: z.string().max(400).optional() }).optional(),
     notes: z.string().max(2000).optional(),
     referenceNumber: z.string().max(100).optional(),
+    salesperson: z.string().max(120).optional().describe('Vendedor de Zoho; por defecto el usuario actual o el de la última venta del cliente'),
     expiryDays: z.number().int().min(1).max(90).default(15),
   }),
   execute: async (actor, rawArgs) => {
-    const a = rawArgs as { inboxConversationId?: string; customer?: string; items: Array<{ query: string; quantity: number; unit?: string; rate?: number; notes?: string }>; delivery?: { mode: 'pickup' | 'delivery'; address?: string }; notes?: string; referenceNumber?: string; expiryDays: number };
+    const a = rawArgs as { inboxConversationId?: string; customer?: string; items: Array<{ query: string; quantity: number; unit?: string; rate?: number; notes?: string }>; delivery?: { mode: 'pickup' | 'delivery'; address?: string }; notes?: string; referenceNumber?: string; salesperson?: string; expiryDays: number };
 
     // 1. Customer
     let customerId: string | null = null;
@@ -639,11 +682,14 @@ registerTool({
     const notes = [deliveryText, a.notes].filter(Boolean).join('\n') || null;
     const today = new Date();
     const expiry = new Date(today.getTime() + a.expiryDays * 86_400_000);
+    const salesperson = await resolveSalesperson(actor, { salespersonName: a.salesperson ?? null, customerId, customerName: customerLabel || null });
     const form = {
       customerId: customerId!,
       date: today.toISOString().slice(0, 10),
       expiryDate: expiry.toISOString().slice(0, 10),
       referenceNumber: a.referenceNumber ?? null,
+      salespersonId: salesperson.salespersonId,
+      salespersonName: salesperson.salespersonName,
       notes,
       discountMode: 'none' as const,
       discountIsPercent: true,
@@ -684,6 +730,7 @@ registerTool({
       currency: quote.currencyCode,
       expiryDate: quote.expiryDate?.slice(0, 10) ?? null,
       delivery: a.delivery ?? null,
+      salesperson: salesperson.salespersonName,
       lines: matched.map((l) => ({ product: l.name, sku: l.sku, quantity: l.quantity, unit: l.unit, rate: l.rate, stock: l.stock, lowStock: l.stock !== null && l.stock < l.quantity, requested: l.query, alternatives: l.alternatives })),
       unmatched: unmatched.map((l) => ({ requested: l.query, alternatives: l.alternatives })),
       url: absoluteUrl(`/app/quotes/${quote.id}`),
