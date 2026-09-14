@@ -127,7 +127,20 @@ function spec(): ComposedDocumentSpec {
   };
 }
 
+async function realPageCount(file: string): Promise<number> {
+  const pdfParseModule = await import('pdf-parse/lib/pdf-parse.js');
+  const pdfParse = (pdfParseModule as unknown as { default?: (b: Buffer) => Promise<{ numpages: number }> }).default ?? (pdfParseModule as unknown as (b: Buffer) => Promise<{ numpages: number }>);
+  const parsed = await pdfParse(fs.readFileSync(file));
+  return parsed.numpages;
+}
+
 describe('generateComposedPdf', () => {
+  it('reports the REAL page count (the footer must never push blank pages)', async () => {
+    const out = tmp('pdf');
+    const info = await generateComposedPdf(out, { ...spec(), footerLabel: 'Confidencial' });
+    expect(await realPageCount(out)).toBe(info.pageCount);
+  });
+
   it('renders cover, every block type, a long paginated table and the image appendix', async () => {
     const out = tmp('pdf');
     const info = await generateComposedPdf(out, spec());

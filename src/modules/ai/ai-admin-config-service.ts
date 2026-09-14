@@ -99,6 +99,10 @@ export interface AiSettings {
   /** Evaluación automática de calidad con un modelo juez (no bloquea la respuesta). */
   qualityJudgeEnabled: boolean;
   qualityJudgeModel: string;
+  /** Esfuerzo de razonamiento (GPT-5 / o-series) en tareas complejas: low | medium | high. */
+  reasoningEffort: 'minimal' | 'low' | 'medium' | 'high';
+  /** Revisión interna de las respuestas complejas antes de entregarlas (una pasada extra del modelo). */
+  answerReviewEnabled: boolean;
 }
 
 /** Tipos permitidos antes de la ampliación (se migran automáticamente si nunca se personalizaron). */
@@ -298,6 +302,7 @@ export const DEFAULT_AI_SETTINGS: AiSettings = {
     'listConversationAttachments',
     'readAttachment',
     'composeDocument',
+    'lookupSalesOrdersByNumber',
     'extractDocumentData',
     'draftBillFromDocument',
     'getZohoBooksStatus',
@@ -355,6 +360,8 @@ export const DEFAULT_AI_SETTINGS: AiSettings = {
   ocrFallbackEnabled: true,
   qualityJudgeEnabled: false,
   qualityJudgeModel: 'gpt-4o-mini',
+  reasoningEffort: 'high',
+  answerReviewEnabled: true,
 };
 
 interface CachedConfig {

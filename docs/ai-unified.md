@@ -125,6 +125,22 @@ Caso que motivó el cambio: el usuario adjuntó 3 fotos de una libreta (folio �
 - `extractDocumentData` ahora acepta 8k tokens de salida y su error indica usar `readAttachment` cuando el archivo no es una factura.
 - Etiquetas de UI en `copilot-types.ts` ("Leyendo el adjunto", "Redactando el documento"). Tools habilitadas por defecto y en `CORE_TOOL_NAMES`.
 
+## Nivel ChatGPT: razonamiento, cruce determinista y revisión (2026-09-14, tarde)
+
+Segunda ronda tras comparar de nuevo con ChatGPT (GPT-5 "Alta", 3 min de razonamiento): nuestra IA con gpt-4o transcribió mal folios (23328 por 23338, 23359 por 23378…), no cruzó contra el sistema, dijo "un momento", escribió una imagen markdown rota y el PDF salió con 16 páginas reales (12 en blanco por el pie de página). Cambios:
+
+- **Modelos con razonamiento** (`providers/openai.ts`): `isReasoningModel` (gpt-5*, o*) → `max_completion_tokens` + `reasoning_effort`, sin `temperature` (`buildGenerationParams`, con test). `ChatCompletionOptions.reasoningEffort`. Catálogo: `gpt-5`, `gpt-5-mini`, `gpt-5.1`. `listRemoteModels` en OpenAI + ruta `POST /app/admin/assistant/api/providers/openai/models` (guarda los ids de chat en `providerConfigs.openai.models`). Panel "Reparto de modelos": botón **Detectar modelos de OpenAI** y preset **Máxima calidad (GPT-5, como ChatGPT)** (complejo/principal = GPT-5, rutina en Canopy si está, `reasoningEffort=high`, revisión activada). Settings nuevos: `reasoningEffort` (default high, solo tareas complejas; estándar = low, simple = minimal) y `answerReviewEnabled` (default true).
+- **Presupuesto**: turnos complejos o con adjuntos piden ≥ 32k tokens de salida en modelos que razonan (≥ 12k en los demás), tope `maxOutput`.
+- **Adjuntos previos siempre disponibles** (orquestador 7.4): los archivos de mensajes anteriores (hasta 6) se re-adjuntan al turno actual si no es un saludo, etiquetados "enviado en un mensaje anterior". "Dame un PDF con todo" vuelve a ver las fotos.
+- **Directivas por turno** (`turn-directives.ts`, puro, con tests): al final del system prompt se agrega el protocolo concreto del turno — adjuntos + análisis (readAttachment por imagen con `validateOrders`, `lookupSalesOrdersByNumber` con todos los folios, clasificación, estructura de respuesta obligatoria, prohibiciones), documento (composeDocument vs generatePdfReport) o tarea compleja.
+- **Cruce determinista** (`tools/lookup-tools.ts`): `lookupSalesOrdersByNumber(numbers[])` busca hasta 400 folios en una llamada (cliente, vendedor, ticket, pago, envío, saldo) y para los que no existen sugiere folios reales a un dígito de distancia (`nearbyNumberVariants`: sustitución, transposición, dígito de más/menos). `readAttachment` ahora devuelve `orderCheck` (folios transcritos que no existen + lectura probable) y usa `reasoningEffort=medium`, 12k tokens, timeout 180 s.
+- **Consistencia del documento**: `composeDocument` rechaza (no genera) cuando un título anuncia "N órdenes/registros…" y su tabla trae otro número (`findCountMismatches`, con test); timeout 180 s.
+- **Respuestas a medias y revisión interna** (orquestador): si la respuesta final termina en "un momento / voy a…", el modelo recibe una nota interna y continúa (una vez). En turnos complejos los tokens se retienen (`bufferAnswer`), un revisor (`ai-answer-review.ts`, modelo complejo con esfuerzo bajo) busca faltantes, cifras que no cuadran, tablas cortadas o categorías inventadas, y el modelo reescribe una vez con la crítica; la UI muestra el chip "Revisando la respuesta" (`reviewAnswer`). Las imágenes markdown se eliminan del texto (`stripMarkdownImages`).
+- **PDF**: el pie de página se dibuja con `margins.bottom = 0` y el generador verifica que el número de páginas no cambió; test con `pdf-parse` (`numpages === pageCount`).
+- Prompt: sección "CÓMO TRABAJA UN ANALISTA SENIOR" y excepción a "más de 8 filas → generateTable" para tablas de análisis propias.
+
+**Cómo activarlo en producción:** Admin → Asistente IA → Configuración → Reparto de modelos → "Detectar modelos de OpenAI" (confirma que la llave lista gpt-5) → "Máxima calidad" → Guardar. Sin GPT-5 la llave sigue funcionando con gpt-4o pero sin razonamiento previo.
+
 ## Capa de inteligencia (2026-09-13, tarde)
 
 Fix raíz del error `400 Invalid 'tools': array too long … 130` de OpenAI: ya no se manda el catálogo completo.

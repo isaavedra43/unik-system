@@ -18,7 +18,7 @@ import {
 import { recordAiToolCall } from './ai-audit';
 import { checkRateLimit, recordTokenUsage } from './ai-rate-limit';
 import { validateInput, validateOutput } from './ai-guardrails';
-import { processAttachment, resolveAttachmentsForMessage, type AttachmentResult } from './ai-attachments-service';
+import { listAttachments, processAttachment, resolveAttachmentsForMessage, type AttachmentResult } from './ai-attachments-service';
 import { prisma } from '@/lib/prisma';
 import { buildReportSubtitle, buildSummaryCards } from './ai-report-helpers';
 import { resolveReportCustomization, type ReportCustomization } from './report-customization';
@@ -38,6 +38,9 @@ import type { ToolDefinition, ToolExecutionResult } from './tools/registry';
 import { CORE_TOOL_NAMES, PROVIDER_MAX_TOOLS, findToolsByTopic, selectToolsForTurn } from './tool-selector';
 import { classifyTask, resolveTurnModel } from './model-router';
 import { getModelById } from './model-catalog';
+import { isReasoningModel } from './providers/openai';
+import { buildTurnDirectives, looksUnfinished, stripMarkdownImages } from './turn-directives';
+import { reviewComplexAnswer } from './ai-answer-review';
 import { inferConfidence, parseConfidence } from './confidence';
 import { mergeMessageMeta } from './ai-sessions-service';
 import { attachmentKind } from './ai-attachments-service';
@@ -325,8 +328,51 @@ export async function* runAssistant(
     }),
   ];
 
+  // 7.4. Files sent EARLIER in this thread stay available, like in ChatGPT: a follow-up
+  // ("dame un PDF con todo", "revisa la segunda hoja") must not depend on the model's own
+  // earlier transcription. They are re-attached (newest first, bounded) on every turn that
+  // is not a trivial acknowledgement.
+  const recentToolNames = [
+    ...new Set(
+      history
+        .filter((m) => m.role === 'assistant' && Array.isArray(m.toolCalls))
+        .flatMap((m) => (m.toolCalls as Array<{ name?: string }>).map((tc) => tc.name).filter((n): n is string => typeof n === 'string'))
+    ),
+  ];
+  const isAutoTrigger = input.message.startsWith('⟦auto:');
+  let priorAttachments: AttachmentResult[] = [];
+  if (!isAutoTrigger && !input.context?.voice) {
+    try {
+      const priorRows = await prisma.aiAttachment.findMany({
+        where: { conversationId: input.conversationId, messageId: { not: null }, NOT: { messageId: userMessage.id } },
+        select: { id: true },
+        orderBy: { createdAt: 'desc' },
+        take: 6,
+      });
+      if (priorRows.length > 0) {
+        const wanted = new Set(priorRows.map((r) => r.id));
+        const all = await listAttachments(input.conversationId);
+        const candidates = all.filter((a) => wanted.has(a.id) && (a.status === 'ready' || a.status === 'legacy'));
+        const prelim = classifyTask({
+          message: input.message,
+          attachmentKinds: [...resolvedAttachments, ...candidates].map((a) => {
+            const k = attachmentKind(a.mimeType);
+            return k === 'text' ? 'other' : k;
+          }),
+          planFirst: input.planFirst,
+          recentToolNames,
+        });
+        if (prelim.tier !== 'simple') priorAttachments = candidates;
+      }
+    } catch (err) {
+      console.warn('[orchestrator] prior attachments skipped:', err instanceof Error ? err.message : err);
+    }
+  }
+  const priorIds = new Set(priorAttachments.map((a) => a.id));
+  const attachmentsForContext = [...resolvedAttachments, ...priorAttachments];
+
   // 7.5. Process attachments — inject multimodal content into the last user message
-  if (resolvedAttachments.length > 0) {
+  if (attachmentsForContext.length > 0) {
     // Find the last user message (the one just added)
     let lastUserIdx = -1;
     for (let i = messages.length - 1; i >= 0; i--) {
@@ -341,12 +387,14 @@ export async function* runAssistant(
       const contentParts: ContentPart[] = [{ type: 'text', text: userText }];
 
       // Process each attachment
-      for (const att of resolvedAttachments) {
+      for (const att of attachmentsForContext) {
         try {
           const processed = await processAttachment(att);
+          const priorTag = priorIds.has(att.id) ? ' (enviado en un mensaje anterior de esta conversación)' : '';
 
           if (processed.type === 'image') {
             // Add image content part for OpenAI Vision
+            contentParts.push({ type: 'text', text: `[Imagen adjunta "${att.fileName}"${priorTag}]` });
             contentParts.push({
               type: 'image_url',
               image_url: { url: processed.dataUrl },
@@ -354,13 +402,13 @@ export async function* runAssistant(
           } else if (processed.type === 'text') {
             // Add extracted text (PDF, Word, Excel, transcript, plain text) as a text content part
             const kind = attachmentKind(att.mimeType);
-            const label = att.mimeType === 'application/pdf'
-              ? `[Contenido del PDF "${att.fileName}"]`
+            const label = (att.mimeType === 'application/pdf'
+              ? `[Contenido del PDF "${att.fileName}"`
               : kind === 'audio'
-                ? `[Audio "${att.fileName}"]`
+                ? `[Audio "${att.fileName}"`
                 : kind === 'document'
-                  ? `[Contenido del documento "${att.fileName}"]`
-                  : `[Contenido del archivo "${att.fileName}"]`;
+                  ? `[Contenido del documento "${att.fileName}"`
+                  : `[Contenido del archivo "${att.fileName}"`) + `${priorTag}]`;
             contentParts.push({
               type: 'text',
               text: `${label}:\n${processed.content}`,
@@ -410,13 +458,6 @@ export async function* runAssistant(
   // 8.5. Offer only the tools that matter this turn (OpenAI accepts ≤128; every tool costs tokens).
   // Core + surface tools are always present; the rest is chosen by relevance and recent use.
   // `loadMoreTools` lets the model pull any other tool by topic in one extra step.
-  const recentToolNames = [
-    ...new Set(
-      history
-        .filter((m) => m.role === 'assistant' && Array.isArray(m.toolCalls))
-        .flatMap((m) => (m.toolCalls as Array<{ name?: string }>).map((tc) => tc.name).filter((n): n is string => typeof n === 'string'))
-    ),
-  ];
   const pinnedTools = [
     ...(inboxConversationId ? [...INBOX_ONLY_TOOLS, ...INBOX_CONVERSATION_ID_TOOLS, 'suggestNextActions', 'draftQuoteFromRequest', 'sendQuoteToContact'] : []),
     ...(chatChannelId ? [...CHAT_ONLY_TOOLS, ...CHAT_CHANNEL_ID_TOOLS, 'suggestNextActions', 'listChatChannels', 'startInternalCall', 'createChatEvent'] : []),
@@ -436,10 +477,9 @@ export async function* runAssistant(
   }
 
   // 8.6. Model routing: explicit choice wins; "auto"/none → classify the task and pick the cheapest capable model.
-  const isAutoTrigger = input.message.startsWith('⟦auto:');
   const classification = classifyTask({
     message: input.message,
-    attachmentKinds: resolvedAttachments.map((a) => {
+    attachmentKinds: attachmentsForContext.map((a) => {
       const k = attachmentKind(a.mimeType);
       return k === 'text' ? 'other' : k;
     }),
@@ -456,12 +496,26 @@ export async function* runAssistant(
   // The admin's maxTokens is the floor; the model's own output cap is the ceiling.
   const resolveTurnMaxTokens = (model: string): number => {
     const cap = getModelById(model)?.maxOutput;
-    const wanted =
-      classification.tier === 'complex' || resolvedAttachments.length > 0
-        ? Math.max(settings.maxTokens, 12_000)
-        : settings.maxTokens;
+    const heavy = classification.tier === 'complex' || attachmentsForContext.length > 0;
+    // Reasoning models spend part of the budget thinking: give them room for both.
+    const wanted = heavy ? Math.max(settings.maxTokens, isReasoningModel(model) ? 32_000 : 12_000) : settings.maxTokens;
     return cap && cap > 0 ? Math.min(wanted, cap) : wanted;
   };
+  const turnReasoningEffort = classification.tier === 'complex' ? settings.reasoningEffort || 'high' : classification.tier === 'simple' ? 'minimal' : 'low';
+
+  // 8.65. Working instructions for THIS turn go last in the system prompt (most recent = most
+  // followed): the attachment/analysis protocol, the document protocol or the complex-task bar.
+  const directives = buildTurnDirectives({
+    message: input.message,
+    tier: classification.tier,
+    attachmentKinds: resolvedAttachments.map((a) => attachmentKind(a.mimeType)),
+    priorAttachmentKinds: priorAttachments.map((a) => attachmentKind(a.mimeType)),
+    voice: Boolean(input.context?.voice),
+    autoTrigger: isAutoTrigger,
+  });
+  if (directives && messages[0] && typeof messages[0].content === 'string') {
+    messages[0].content += `\n\n${directives}`;
+  }
 
   // 8.7. Live data requested explicitly → bypass the short-TTL read cache this turn.
   const wantsFreshData = /\b(actualiza\w*|en tiempo real|refresca\w*|sin cach[eé]|datos de ahora|ahorita mismo|al momento)\b/i.test(input.message);
@@ -477,6 +531,12 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
   let totalPromptTokens = 0;
   let totalCompletionTokens = 0;
   let usingFallback = false;
+  // Complex answers are reviewed before the user sees them, so their tokens are held back
+  // and released in one piece (or rewritten once). Everything else streams as usual.
+  const bufferAnswer =
+    settings.answerReviewEnabled !== false && classification.tier === 'complex' && !isAutoTrigger && !input.context?.voice;
+  let nudges = 0;
+  let reviews = 0;
   const turnStats = { calls: 0, cachedHits: 0, parallelBatches: 0, dataToolsSucceeded: 0, failed: 0, loadedMore: 0 };
   const toolsUsedThisTurn: Array<{ name: string; success: boolean; cached?: boolean }> = [];
 
@@ -1156,13 +1216,14 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
         toolChoice: forceActions ? { type: 'function', function: { name: 'suggestNextActions' } } : undefined,
         temperature: settings.temperature,
         maxTokens: resolveTurnMaxTokens(modelToUse),
+        reasoningEffort: turnReasoningEffort,
         userId: input.actor.id,
         conversationId: input.conversationId,
         model: modelToUse,
       })) {
         if (chunk.delta) {
           iterationContent += chunk.delta;
-          yield { type: 'token', data: { delta: chunk.delta } };
+          if (!bufferAnswer) yield { type: 'token', data: { delta: chunk.delta } };
         }
         if (chunk.toolCalls) {
           iterationToolCalls = chunk.toolCalls;
@@ -1190,6 +1251,63 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
 
     // If no tool calls, we're done
     if (!iterationToolCalls || iterationToolCalls.length === 0 || finishReason === 'stop') {
+      iterationContent = stripMarkdownImages(iterationContent);
+
+      // "Un momento, voy a generar…" is not an answer. Send the model back to finish the work
+      // (once) instead of delivering a promise.
+      if (nudges < 1 && iteration < settings.maxToolIterations && looksUnfinished(iterationContent)) {
+        nudges += 1;
+        console.log(JSON.stringify({ event: 'ai.answer.unfinished', conversationId: input.conversationId, iteration }));
+        messages.push({ role: 'assistant', content: iterationContent });
+        messages.push({
+          role: 'system',
+          content:
+            'Revisión interna: tu respuesta se detuvo prometiendo trabajo ("un momento", "voy a…"). El usuario no ve mensajes parciales. Ejecuta ahora las tools que faltan y entrega el resultado COMPLETO en esta misma respuesta, sin volver a prometer.',
+        });
+        if (bufferAnswer) {
+          yield { type: 'tool_call_start', data: { name: 'reviewAnswer', args: '{}' } };
+          yield { type: 'tool_call_end', data: { name: 'reviewAnswer', success: true, needsApproval: false, errorCode: null, error: null, durationMs: 0, cached: false } };
+        }
+        continue;
+      }
+
+      // Internal review of complex answers: a second pass looks for missing parts, numbers
+      // that do not add up and cut tables; the model rewrites once with the critique.
+      if (bufferAnswer && reviews < 1 && iteration < settings.maxToolIterations && iterationContent.trim().length >= 80) {
+        reviews += 1;
+        const reviewStart = Date.now();
+        yield { type: 'tool_call_start', data: { name: 'reviewAnswer', args: '{}' } };
+        let verdict: Awaited<ReturnType<typeof reviewComplexAnswer>> = null;
+        try {
+          verdict = await reviewComplexAnswer(settings, {
+            userMessage: input.message,
+            answer: iterationContent,
+            toolsUsed: toolsUsedThisTurn,
+            hadAttachments: attachmentsForContext.length > 0,
+            documentGenerated: toolsUsedThisTurn.some((t) => t.name === 'composeDocument' && t.success),
+          });
+        } catch (err) {
+          console.warn('[ai-orchestrator] answer review failed:', err instanceof Error ? err.message : err);
+        }
+        yield {
+          type: 'tool_call_end',
+          data: { name: 'reviewAnswer', success: true, needsApproval: false, errorCode: null, error: null, durationMs: Date.now() - reviewStart, cached: false },
+        };
+        console.log(JSON.stringify({ event: 'ai.answer.review', conversationId: input.conversationId, approved: verdict?.approved ?? null, issues: verdict?.issues ?? [] }));
+        if (verdict && !verdict.approved && verdict.issues.length > 0) {
+          messages.push({ role: 'assistant', content: iterationContent });
+          messages.push({
+            role: 'system',
+            content:
+              'Revisión interna de tu borrador (el usuario NO lo vio). Corrige estos puntos y entrega la respuesta final completa — vuelve a llamar tools si hace falta para verificar:\n' +
+              verdict.issues.map((i, n) => `${n + 1}. ${i}`).join('\n'),
+          });
+          continue;
+        }
+      }
+
+      if (bufferAnswer && iterationContent) yield { type: 'token', data: { delta: iterationContent } };
+
       // Validate output for potential leaked secrets
       const outputValidation = validateOutput(iterationContent);
       if (!outputValidation.valid && (outputValidation.warnings?.length ?? 0) > 0) {
@@ -1267,6 +1385,9 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
       };
       return;
     }
+
+    // Text the model wrote before calling tools is shown as it was (usually one line).
+    if (bufferAnswer && iterationContent.trim()) yield { type: 'token', data: { delta: iterationContent } };
 
     // Has tool calls: persist assistant message with tool_calls
     const assistantMessage = await addMessage(

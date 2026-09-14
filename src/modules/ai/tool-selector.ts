@@ -64,6 +64,7 @@ export const CORE_TOOL_NAMES: readonly string[] = [
   'listConversationAttachments',
   'readAttachment',
   'composeDocument',
+  'lookupSalesOrdersByNumber',
 ];
 
 export function normalizeText(text: string): string {
@@ -276,7 +277,7 @@ interface DomainRule {
 /** Coarse intent → categories/tools boost. Regexes run on the normalized message. */
 const DOMAIN_RULES: DomainRule[] = [
   { domain: 'quotes', test: /\bcotiz|presupuest|estimate/, categories: [], tools: ['queryQuotes', 'getQuoteDetail', 'searchQuoteCustomers', 'searchQuoteProducts', 'previewQuote', 'createQuote', 'updateQuote', 'getQuotePdf', 'draftQuoteFromRequest', 'sendQuoteToContact', 'findSimilarPastQuotes', 'checkStockForRequest', 'getCustomerPriceHistory'] },
-  { domain: 'sales', test: /\bvent|\borden|pedido|vendi|efectivo|corte|caja|pie de obra|entreg|reparto/, categories: ['sales'], tools: ['querySalesOrders', 'getSalesOrderDetail', 'auditPendingDeliveries', 'getCashCloseReconciliation', 'getOrdersWithBalance', 'notifyDelayedDeliveries', 'getDealBlockers'] },
+  { domain: 'sales', test: /\bvent|\borden|pedido|vendi|efectivo|corte|caja|pie de obra|entreg|reparto/, categories: ['sales'], tools: ['querySalesOrders', 'getSalesOrderDetail', 'lookupSalesOrdersByNumber', 'auditPendingDeliveries', 'getCashCloseReconciliation', 'getOrdersWithBalance', 'notifyDelayedDeliveries', 'getDealBlockers'] },
   { domain: 'invoices', test: /factur|cfdi|timbr/, categories: ['invoices'], tools: ['queryInvoices', 'getInvoiceDetail', 'queryBills', 'getBillDetail', 'extractDocumentData', 'draftBillFromDocument'] },
   { domain: 'payments', test: /\bpago|\bcobr|abono|saldo|adeud|deud|deben|moros|vencid|antigued/, categories: ['payments', 'finance'], tools: ['queryPayments', 'getPaymentDetail', 'getAccountsReceivable', 'getBalanceAging', 'getOrdersWithBalance', 'draftCollectionReminders'] },
   { domain: 'purchases', test: /compra|proveedor|\bbill|gasto/, categories: ['purchases'], tools: ['queryPurchaseOrders', 'getPurchaseOrderDetail', 'queryBills', 'getBillDetail', 'queryVendorCredits', 'getVendorCreditDetail', 'draftBillFromDocument', 'extractDocumentData'] },
@@ -293,7 +294,7 @@ const DOMAIN_RULES: DomainRule[] = [
   { domain: 'memory', test: /recuerd|memoria|olvid|preferenc|anota|apunta/, categories: [], tools: ['rememberForUser', 'listUserMemory', 'forgetMemory'] },
   { domain: 'skills', test: /skill|receta|rutina|automatiz/, categories: ['skill'], tools: ['listSkills', 'runSkill', 'getSkillRunStatus'] },
   { domain: 'digest', test: /como voy|mi dia|jornada|que hice|digest|ponme al dia|resumen del dia|pendientes de hoy/, categories: [], tools: ['getWorkDigest', 'getRecentActivity', 'getNotifications', 'getDealBlockers'] },
-  { domain: 'attachments', test: /adjunt|subi|archivo|factura|recibo|extrae|\bocr\b|lee el|leer el|documento/, categories: [], tools: ['listConversationAttachments', 'readAttachment', 'composeDocument', 'extractDocumentData', 'draftBillFromDocument'] },
+  { domain: 'attachments', test: /adjunt|subi|archivo|factura|recibo|extrae|\bocr\b|lee el|leer el|documento/, categories: [], tools: ['listConversationAttachments', 'readAttachment', 'composeDocument', 'lookupSalesOrdersByNumber', 'extractDocumentData', 'draftBillFromDocument'] },
   { domain: 'system', test: /integraci|zoho|sincroniz|notificaci|modulo|sistema|quien soy|permiso/, categories: ['system'], tools: ['getIntegrationStatus', 'getNotifications', 'getModuleList', 'getCurrentUserContext'] },
   { domain: 'planning', test: /\bplan\b|planea|paso a paso|primero.*luego|trimestral|anual|completo|integral/, categories: [], tools: ['proposePlan'] },
 ];

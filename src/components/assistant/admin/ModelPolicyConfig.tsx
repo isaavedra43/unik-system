@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { Coins, Sparkles, Zap } from 'lucide-react';
+import { Coins, RefreshCw, Sparkles, Trophy, Zap } from 'lucide-react';
 import { AI_TASK_LABELS, type AiTask } from '@/modules/ai/model-policy';
 import { CANOPY_PLAN_MODELS } from './CanopyWaveSetup';
 
@@ -143,6 +143,55 @@ export function ModelPolicyConfig({ settings, canManage, canopyConfigured, opena
       fallbackDeployment: MINIMAX.id,
     });
 
+  // "Como ChatGPT": the thinking model for everything hard (and for reading photos/documents,
+  // which follows the complex row); the flat-rate provider keeps the daily volume when present.
+  const presetMaxQuality = () => {
+    const gpt5 = options.find((m) => /^gpt-5(\.\d+)?$/.test(m.id))?.id ?? 'gpt-5';
+    const cheap = canopyConfigured ? MINIMAX.id : options.some((m) => m.id === 'gpt-5-mini') ? 'gpt-5-mini' : 'gpt-4o-mini';
+    const routine = canopyConfigured ? KIMI.id : cheap;
+    onChange({
+      routingEnabled: true,
+      routingSimpleModel: cheap,
+      routingStandardModel: routine,
+      routingComplexModel: gpt5,
+      utilityModel: cheap,
+      qualityJudgeModel: cheap,
+      deployment: gpt5,
+      fallbackDeployment: 'gpt-4o',
+      reasoningEffort: 'high',
+      answerReviewEnabled: true,
+    });
+  };
+
+  const [detecting, setDetecting] = useState(false);
+  const [detectNote, setDetectNote] = useState<string | null>(null);
+  const detectOpenAiModels = async () => {
+    setDetecting(true);
+    setDetectNote(null);
+    try {
+      const res = await fetch('/app/admin/assistant/api/providers/openai/models', { method: 'POST' });
+      const json = (await res.json()) as { ok?: boolean; error?: string; models?: string[]; hasGpt5?: boolean; recommended?: string | null };
+      if (!json.ok) {
+        setDetectNote(json.error ?? 'No se pudo detectar');
+        return;
+      }
+      const ids = json.models ?? [];
+      setOptions((prev) => {
+        const known = new Set(prev.map((m) => m.id));
+        return [...prev, ...ids.filter((id) => !known.has(id)).map((id) => ({ id, label: id, provider: 'openai' }))];
+      });
+      setDetectNote(
+        json.hasGpt5
+          ? `Tu llave lista ${ids.length} modelos de chat, incluido ${json.recommended ?? 'GPT-5'}. Aplica "Máxima calidad" para usarlo en lo complejo.`
+          : `Tu llave lista ${ids.length} modelos de chat pero ninguno GPT-5: revisa el acceso de tu cuenta en OpenAI.`
+      );
+    } catch (err) {
+      setDetectNote(err instanceof Error ? err.message : 'Error al detectar');
+    } finally {
+      setDetecting(false);
+    }
+  };
+
   const presetAllOpenAi = () =>
     onChange({
       routingEnabled: true,
@@ -182,6 +231,18 @@ export function ModelPolicyConfig({ settings, canManage, canopyConfigured, opena
         <button type="button" className="btn btn-secondary btn-sm" onClick={presetAllOpenAi} disabled={!canManage || !openaiConfigured}>
           <Sparkles size={14} /> Todo en OpenAI
         </button>
+        <button
+          type="button"
+          className="btn btn-secondary btn-sm"
+          onClick={presetMaxQuality}
+          disabled={!canManage || !openaiConfigured}
+          title="GPT-5 (razonamiento) para análisis, documentos y lectura de fotos; revisión interna activada"
+        >
+          <Trophy size={14} /> Máxima calidad (GPT-5, como ChatGPT)
+        </button>
+        <button type="button" className="btn btn-secondary btn-sm" onClick={detectOpenAiModels} disabled={!canManage || !openaiConfigured || detecting}>
+          <RefreshCw size={14} className={detecting ? 'copilot-spin' : undefined} /> {detecting ? 'Detectando…' : 'Detectar modelos de OpenAI'}
+        </button>
         <label className="model-policy-toggle">
           <input
             type="checkbox"
@@ -192,6 +253,8 @@ export function ModelPolicyConfig({ settings, canManage, canopyConfigured, opena
           <span>Clasificar mensajes automáticamente (si se apaga, todo usa el modelo principal)</span>
         </label>
       </div>
+
+      {detectNote && <p className="assistant-admin-config-hint" style={{ marginTop: 8 }}>{detectNote}</p>}
 
       <datalist id="model-policy-options">
         {options.map((m) => (

@@ -239,6 +239,8 @@ const TOOL_LABELS: Record<string, { running: string; done: string }> = {
   extractDocumentData: { running: 'Leyendo el documento', done: 'Documento extraído' },
   readAttachment: { running: 'Leyendo el adjunto', done: 'Adjunto leído' },
   composeDocument: { running: 'Redactando el documento', done: 'Documento listo' },
+  lookupSalesOrdersByNumber: { running: 'Cruzando folios con el sistema', done: 'Folios cruzados' },
+  reviewAnswer: { running: 'Revisando la respuesta', done: 'Respuesta revisada' },
   draftBillFromDocument: { running: 'Preparando factura de proveedor', done: 'Borrador de factura listo' },
   callContact: { running: 'Preparando llamada', done: 'Llamada propuesta' },
   startInternalCall: { running: 'Preparando llamada interna', done: 'Llamada interna lista' },

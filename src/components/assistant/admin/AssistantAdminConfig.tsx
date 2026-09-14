@@ -75,6 +75,8 @@ const SETTING_FIELDS: Array<{ key: string; label: string; type: 'number' | 'stri
   { key: 'ragRerankEnabled', label: 'Re-ranking con modelo', type: 'boolean', hint: 'Más preciso; una llamada extra por búsqueda' },
   { key: 'ocrFallbackEnabled', label: 'OCR de PDF escaneados (visión)', type: 'boolean', hint: 'Si el PDF no tiene texto, el modelo lo lee como imagen' },
   { key: 'qualityJudgeEnabled', label: 'Juez de calidad automático', type: 'boolean', hint: 'Califica cada respuesta (1-5) con un modelo barato después de entregarla' },
+  { key: 'reasoningEffort', label: 'Razonamiento en tareas complejas', type: 'string', hint: 'low | medium | high — solo aplica a modelos que piensan (GPT-5, o-series)' },
+  { key: 'answerReviewEnabled', label: 'Revisión interna de respuestas complejas', type: 'boolean', hint: 'Antes de entregar un análisis, un revisor detecta faltantes o cifras que no cuadran y el modelo corrige una vez' },
 ];
 
 export function AssistantAdminConfig({ canManage }: { canManage: boolean }) {

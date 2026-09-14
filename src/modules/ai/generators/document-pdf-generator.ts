@@ -112,6 +112,10 @@ function drawFooter(l: Layout, pageNumber: number, totalPages: number, spec: Com
   const { doc } = l;
   const y = doc.page.height - PAGE_MARGIN - 12;
   const cw = contentWidth(doc);
+  // The footer sits INSIDE the bottom margin. pdfkit adds a page whenever text is written
+  // below `page.height - margins.bottom`, which turned a 4-page report into 16 pages (each
+  // footer line pushed a blank page). Lift the margin while drawing it.
+  doc.page.margins.bottom = 0;
   doc.moveTo(PAGE_MARGIN, y - 6).lineTo(doc.page.width - PAGE_MARGIN, y - 6).lineWidth(0.5).strokeColor(RULE).stroke();
   doc.font('Helvetica-Bold').fontSize(7).fillColor(l.brand)
     .text(spec.logoText ?? 'UNIK', PAGE_MARGIN, y, { width: cw / 4, lineBreak: false });
@@ -557,6 +561,10 @@ export function generateComposedPdf(outputPath: string, spec: ComposedDocumentSp
     for (let i = range.start; i < range.start + range.count; i++) {
       doc.switchToPage(i);
       drawFooter(l, i - range.start + 1, pageCount, spec, generatedAt);
+    }
+    if (doc.bufferedPageRange().count !== pageCount) {
+      reject(new Error(`El pie de página agregó páginas (${doc.bufferedPageRange().count} vs ${pageCount})`));
+      return;
     }
     doc.end();
 

@@ -63,7 +63,11 @@ export interface ChatCompletionOptions {
   model?: string;
   /** Force one tool on this call (OpenAI `tool_choice`); 'auto' lets the model decide. */
   toolChoice?: 'auto' | { type: 'function'; function: { name: string } };
+  /** Thinking budget for reasoning models (GPT-5 / o-series); ignored by the others. */
+  reasoningEffort?: ReasoningEffort;
 }
+
+export type ReasoningEffort = 'minimal' | 'low' | 'medium' | 'high';
 
 export interface ChatCompletionResult {
   content: string | null;
@@ -129,6 +133,9 @@ export interface AiProvider {
 
   /** Text-to-Speech: generate audio buffer from text. */
   speak?(text: string, voice?: string): Promise<Buffer>;
+
+  /** Model ids the configured key can use (GET /models), when the API exposes it. */
+  listRemoteModels?(): Promise<string[]>;
 }
 
 /** Error thrown by providers, with a stable code for auditing. */

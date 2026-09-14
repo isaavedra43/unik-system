@@ -60,6 +60,9 @@ import './audit-tools';
 // Composed documents (PDF/Word narrativos) + lectura de adjuntos
 import './compose-document-tools';
 
+// Batch lookups / cross-checks (folios de libretas, PDFs, mensajes contra el sistema)
+import './lookup-tools';
+
 // Artifact tools (PDF, Excel, CSV, tablas, gráficas)
 import './artifact-tools';
 

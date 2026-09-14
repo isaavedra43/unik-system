@@ -66,6 +66,31 @@ function toOpenAIMessages(messages: ChatMessage[]): OpenAI.Chat.Completions.Chat
 /** Hard limit of the Chat Completions API; the orchestrator selects fewer, this is the last guard. */
 const OPENAI_MAX_TOOLS = 128;
 
+/**
+ * GPT-5 and o-series models "think" before answering: they take `max_completion_tokens`
+ * (reasoning + answer) instead of `max_tokens`, reject `temperature`, and accept
+ * `reasoning_effort`. Sending the GPT-4o parameters to them fails with a 400.
+ */
+export function isReasoningModel(model: string): boolean {
+  return /^(o\d|gpt-5)/i.test(model.trim());
+}
+
+/** Request parameters that differ between reasoning and classic models. Pure. */
+export function buildGenerationParams(
+  model: string,
+  opts: Pick<ChatCompletionOptions, 'temperature' | 'maxTokens' | 'reasoningEffort'>
+): Record<string, unknown> {
+  if (isReasoningModel(model)) {
+    // "minimal" exists only on GPT-5; o-series accept low | medium | high.
+    const effort = opts.reasoningEffort === 'minimal' && !/^gpt-5/i.test(model.trim()) ? 'low' : opts.reasoningEffort;
+    return {
+      max_completion_tokens: opts.maxTokens ?? 4000,
+      ...(effort ? { reasoning_effort: effort } : {}),
+    };
+  }
+  return { temperature: opts.temperature ?? 0.3, max_tokens: opts.maxTokens ?? 2000 };
+}
+
 function toOpenAITools(tools?: ToolSpec[]): OpenAI.Chat.Completions.ChatCompletionTool[] | undefined {
   if (!tools || tools.length === 0) return undefined;
   if (tools.length > OPENAI_MAX_TOOLS) {
@@ -107,9 +132,8 @@ export const openaiProvider: AiProvider = {
         model,
         messages: toOpenAIMessages(opts.messages),
         tools: toOpenAITools(opts.tools),
-        temperature: opts.temperature ?? 0.3,
-        max_tokens: opts.maxTokens ?? 2000,
-      });
+        ...buildGenerationParams(model, opts),
+      } as OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming);
 
       const choice = response.choices[0];
       const usage = response.usage;
@@ -175,11 +199,10 @@ export const openaiProvider: AiProvider = {
         messages: toOpenAIMessages(opts.messages),
         tools,
         ...(forced ? { tool_choice: forced } : {}),
-        temperature: opts.temperature ?? 0.3,
-        max_tokens: opts.maxTokens ?? 2000,
+        ...buildGenerationParams(model, opts),
         stream: true,
         stream_options: { include_usage: true },
-      });
+      } as OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming);
 
       const accumulatedToolCalls = new Map<
         number,
@@ -274,6 +297,18 @@ export const openaiProvider: AiProvider = {
         error: apiErr.message,
         errorCode: apiErr.code,
       };
+    }
+  },
+
+  /** Model ids this key can use (GET /models) — lets the admin pick GPT-5 & co. without a catalog update. */
+  async listRemoteModels(): Promise<string[]> {
+    const c = await getClient();
+    try {
+      const ids: string[] = [];
+      for await (const m of c.models.list()) ids.push(m.id);
+      return [...new Set(ids)].sort();
+    } catch (err) {
+      throw classifyError(err);
     }
   },
 

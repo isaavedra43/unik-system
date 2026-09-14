@@ -19,6 +19,7 @@ import { generateComposedPdf } from '../generators/document-pdf-generator';
 import { generateComposedDocx } from '../generators/document-docx-generator';
 import { imageDimensions, type ComposedDocumentSpec, type DocBlock, type DocColumn, type DocImage, type DocKpi } from '../generators/document-spec';
 import { parseJsonObject } from './documents-tools';
+import { matchSalesOrderNumbers, normalizeOrderNumber } from './lookup-tools';
 
 /**
  * Elaborate documents and attachment reading.
@@ -159,6 +160,39 @@ function toKpis(items: BlockArgs['kpis']): DocKpi[] {
   return (items ?? []).map((k) => ({ label: k.label, value: k.value, note: k.note, tone: k.tone }));
 }
 
+/**
+ * A title that announces a count ("Recolección — 20 órdenes") must be followed by a table
+ * with exactly that many rows: the document is the deliverable and a wrong number in a
+ * heading is the first thing the reader catches. Pure — unit tested.
+ */
+export function findCountMismatches(blocks: Array<{ type: string; text?: string; title?: string; rows?: unknown[] }>): string[] {
+  const out: string[] = [];
+  const countRe = /(?:^|[\s(—–-])(\d{1,4})\s*(órdenes|ordenes|registros|filas|casos|clientes|productos|facturas|pedidos|partidas)\b/i;
+  for (let i = 0; i < blocks.length; i++) {
+    const b = blocks[i];
+    const label = b.type === 'heading' ? b.text : b.type === 'table' ? b.title : undefined;
+    if (!label) continue;
+    const m = label.match(countRe);
+    if (!m) continue;
+    const declared = Number(m[1]);
+    // The table is this block (table with title) or the next table before another heading.
+    let table: { rows?: unknown[] } | null = b.type === 'table' ? b : null;
+    if (!table) {
+      for (let j = i + 1; j < blocks.length; j++) {
+        if (blocks[j].type === 'table') {
+          table = blocks[j];
+          break;
+        }
+        if (blocks[j].type === 'heading') break;
+      }
+    }
+    if (!table || !Array.isArray(table.rows)) continue;
+    const actual = table.rows.length;
+    if (actual !== declared) out.push(`"${label}" anuncia ${declared} pero la tabla trae ${actual} filas`);
+  }
+  return out;
+}
+
 /** Turns the flat tool blocks into the typed spec; collects problems instead of throwing. */
 async function buildBlocks(
   blocks: BlockArgs[],
@@ -231,6 +265,7 @@ registerTool({
   name: 'composeDocument',
   category: 'export',
   effect: 'draft',
+  timeoutMs: 180_000,
   enabledByDefault: true,
   requiredPermission: 'assistant.use',
   description:
@@ -266,6 +301,14 @@ registerTool({
       if (img) images.set(id, img);
     }
 
+    const mismatches = findCountMismatches(args.blocks);
+    if (mismatches.length > 0) {
+      return {
+        error:
+          'El documento NO se generó: los conteos de los títulos no coinciden con las filas de sus tablas. Corrige las filas (deben estar TODAS) o el número del título y vuelve a llamar composeDocument con el contenido completo.',
+        mismatches,
+      };
+    }
     const built = await buildBlocks(args.blocks, images, warnings);
     if (built.blocks.length === 0) return { error: 'Ningún bloque tenía contenido válido. Revisa que cada bloque traiga text/items/rows según su tipo.', warnings };
     if (built.rowCount > MAX_TOTAL_ROWS) return { error: `Demasiadas filas (${built.rowCount}); máximo ${MAX_TOTAL_ROWS}. Divide el documento.`, warnings };
@@ -381,14 +424,36 @@ const readParams = z.object({
   fileName: z.string().max(200).optional().describe('Parte del nombre del archivo, si no tienes el id.'),
   mode: z.enum(['auto', 'text', 'table']).default('auto').describe('table = pide explícitamente filas estructuradas (folio → nota). auto decide.'),
   hints: z.string().max(500).optional().describe('Qué buscar o cómo interpretar (ej. "son órdenes de venta OV-xxxxx con el motivo de no entrega").'),
+  validateOrders: z.boolean().default(true).describe('true (default): cada número de 5-6 dígitos transcrito se verifica contra las órdenes de venta del sistema; los que no existen regresan con la lectura probable (un dígito de diferencia).'),
   maxChars: z.number().int().min(1000).max(200_000).default(40_000).describe('Límite de caracteres para documentos de texto.'),
   conversationId: z.string().optional().describe('Se inyecta automáticamente, no lo pongas.'),
 });
+
+/** Numbers that look like sales-order folios (5-6 digits), in order of appearance, unique. Pure. */
+export function extractFolioCandidates(text: string, rows: unknown[] | null): string[] {
+  const found: string[] = [];
+  const push = (v: string) => {
+    const n = normalizeOrderNumber(v);
+    if (n && n.length >= 5 && n.length <= 6 && !found.includes(n)) found.push(n);
+  };
+  if (rows) {
+    for (const r of rows) {
+      if (!r || typeof r !== 'object') continue;
+      for (const v of Object.values(r as Record<string, unknown>)) {
+        if (typeof v === 'string' && /^\s*(ov[\s-]*)?\d{5,6}\s*$/i.test(v)) push(v);
+        else if (typeof v === 'number' && Number.isInteger(v) && v >= 10000 && v <= 999999) push(String(v));
+      }
+    }
+  }
+  for (const m of text.matchAll(/(?:^|[^\d])(\d{5,6})(?!\d)/g)) push(m[1]);
+  return found.slice(0, 400);
+}
 
 registerTool({
   name: 'readAttachment',
   category: 'system',
   effect: 'read',
+  timeoutMs: 180_000,
   enabledByDefault: true,
   description:
     'Lee un archivo adjunto de esta conversación y devuelve su contenido completo: texto de PDF/Word/Excel/CSV, o transcripción fiel con visión de fotos e imágenes (notas manuscritas, libretas, tickets, capturas) y PDFs escaneados, opcionalmente como filas estructuradas. ' +
@@ -441,7 +506,8 @@ registerTool({
     const res = await chatCompletion({
       model,
       temperature: 0,
-      maxTokens: 8000,
+      maxTokens: 12_000,
+      reasoningEffort: 'medium',
       messages: [
         { role: 'system', content: TRANSCRIBE_SYSTEM_PROMPT },
         { role: 'user', content: parts },
@@ -458,6 +524,35 @@ registerTool({
     const text = typeof parsed.text === 'string' ? parsed.text : raw;
     const rows = Array.isArray(parsed.rows) ? (parsed.rows as unknown[]).filter((r) => r && typeof r === 'object') : null;
     const uncertain = Array.isArray(parsed.uncertain) ? (parsed.uncertain as unknown[]).map(String) : [];
+
+    // Deterministic cross-check: which transcribed folios exist in the system, and the likely
+    // reading for the ones that do not (one digit off). This is what turns a plausible
+    // transcription into a verified one.
+    let orderCheck: Record<string, unknown> | null = null;
+    if (args.validateOrders !== false) {
+      const candidates = extractFolioCandidates(text, rows);
+      if (candidates.length >= 3) {
+        try {
+          const match = await matchSalesOrderNumbers(candidates);
+          orderCheck = {
+            checked: candidates.length,
+            found: match.found.length,
+            notFound: match.notFound.map((n) => ({
+              read: n.requested,
+              likely: n.suggestions[0]?.number ?? null,
+              suggestions: n.suggestions,
+            })),
+            note:
+              match.notFound.length > 0
+                ? 'Los folios en notFound no existen en el sistema: usa "likely" como lectura correcta y dilo explícitamente en tu respuesta. Luego llama lookupSalesOrdersByNumber con TODOS los folios (ya corregidos) para traer cliente, ticket y pago.'
+                : 'Todos los folios transcritos existen en el sistema. Llama lookupSalesOrdersByNumber con todos para traer cliente, ticket y pago.',
+          };
+        } catch (err) {
+          orderCheck = { error: err instanceof Error ? err.message : 'No se pudo verificar contra el sistema' };
+        }
+      }
+    }
+
     return {
       ...base,
       source: 'vision',
@@ -466,7 +561,8 @@ registerTool({
       rows: args.mode === 'text' ? null : rows,
       lineCount: text.split('\n').filter((l) => l.trim().length > 0).length,
       uncertain,
-      note: 'Transcripción hecha por IA con visión: los folios dudosos vienen en "uncertain"; verifícalos contra el sistema (querySalesOrders) antes de afirmar algo sobre ellos.',
+      orderCheck,
+      note: 'Transcripción hecha por IA con visión: los folios dudosos vienen en "uncertain" y la verificación contra el sistema en "orderCheck". Nunca afirmes algo de un folio que no existe sin decir que es una lectura probable.',
     };
   },
 });
