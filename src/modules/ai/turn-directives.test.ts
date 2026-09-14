@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildTurnDirectives, looksUnfinished, stripMarkdownImages } from './turn-directives';
+import { buildTurnDirectives, looksUnfinished, stripMarkdownImages, wantsDocument } from './turn-directives';
 
 describe('buildTurnDirectives', () => {
   it('gives the attachment protocol when photos come with an analysis request', () => {
@@ -12,7 +12,7 @@ describe('buildTurnDirectives', () => {
     expect(d).toContain('readAttachment');
     expect(d).toContain('lookupSalesOrdersByNumber');
     expect(d).toContain('UNA tabla markdown por grupo');
-    expect(d).toContain('no lo generes sin que lo pida');
+    expect(d).toContain('NO pidió archivo');
     expect(d).not.toContain('El usuario pide un archivo');
   });
 
@@ -59,5 +59,16 @@ describe('stripMarkdownImages', () => {
       'Aquí tienes la tabla:\n\nÓrdenes de Venta Pendientes\n\nSi necesitas más.'
     );
     expect(stripMarkdownImages('Texto\n!\nMás')).toBe('Texto\n\nMás');
+  });
+});
+
+describe('wantsDocument', () => {
+  it('detects explicit requests and acceptances of an offer, nothing else', () => {
+    expect(wantsDocument('Dame un pdf con todo')).toBe(true);
+    expect(wantsDocument('pásamelo en excel')).toBe(true);
+    expect(wantsDocument('Quiero que me hagas una tabla poniéndome cada orden de venta')).toBe(false);
+    expect(wantsDocument('sí, dale', '…¿Quieres que te genere el PDF con todo esto?')).toBe(true);
+    expect(wantsDocument('sí, dale', 'Aquí está la tabla completa.')).toBe(false);
+    expect(wantsDocument('ok gracias')).toBe(false);
   });
 });

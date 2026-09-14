@@ -34,6 +34,33 @@ function renderInline(text: string): string {
   return html;
 }
 
+const BULLET_RE = /^(\s*)[-*•]\s+/;
+const ORDERED_RE = /^(\s*)\d+[.)]\s+/;
+
+/** Nested bullet lists: indentation of 2+ spaces opens a sub-list (what models write for sub-points). */
+function renderBulletList(items: Array<{ indent: number; text: string }>, keyBase: number): React.ReactNode {
+  const base = items[0]?.indent ?? 0;
+  const nodes: React.ReactNode[] = [];
+  let i = 0;
+  while (i < items.length) {
+    const item = items[i];
+    const children: Array<{ indent: number; text: string }> = [];
+    let j = i + 1;
+    while (j < items.length && items[j].indent > base) {
+      children.push(items[j]);
+      j++;
+    }
+    nodes.push(
+      <li key={`${keyBase}-${i}`}>
+        <span dangerouslySetInnerHTML={{ __html: renderInline(item.text) }} />
+        {children.length > 0 && renderBulletList(children, keyBase * 31 + i + 1)}
+      </li>
+    );
+    i = j;
+  }
+  return <ul className="assistant-md-list">{nodes}</ul>;
+}
+
 export function AssistantMarkdown({ content }: { content: string }) {
   const lines = content.split('\n');
   const blocks: React.ReactNode[] = [];
@@ -108,15 +135,23 @@ export function AssistantMarkdown({ content }: { content: string }) {
       continue;
     }
 
-    // Headings
-    const headingMatch = line.match(/^(#{1,4})\s+(.+)$/);
+    // Headings (# … ####) — rendered as h3/h4 with a size per level so "## Resumen" and
+    // "### Recolección — 20" read as sections and sub-sections, not as body text.
+    const headingMatch = line.match(/^(#{1,6})\s+(.+?)\s*#*\s*$/);
     if (headingMatch) {
-      const level = headingMatch[1].length;
+      const level = Math.min(headingMatch[1].length, 4);
       const text = headingMatch[2];
-      const Tag = `h${Math.min(level + 2, 6)}` as 'h3' | 'h4' | 'h5' | 'h6';
+      const Tag = (level <= 2 ? 'h3' : 'h4') as 'h3' | 'h4';
       blocks.push(
-        <Tag key={key++} className="assistant-md-heading" dangerouslySetInnerHTML={{ __html: renderInline(text) }} />
+        <Tag key={key++} className={`assistant-md-heading assistant-md-heading-${level}`} dangerouslySetInnerHTML={{ __html: renderInline(text) }} />
       );
+      i++;
+      continue;
+    }
+
+    // Horizontal rule
+    if (/^\s*([-*_])(\s*\1){2,}\s*$/.test(line)) {
+      blocks.push(<hr key={key++} className="assistant-md-hr" />);
       i++;
       continue;
     }
@@ -134,28 +169,24 @@ export function AssistantMarkdown({ content }: { content: string }) {
       continue;
     }
 
-    // Unordered list
-    if (/^\s*[-*]\s+/.test(line)) {
-      const items: string[] = [];
-      while (i < lines.length && /^\s*[-*]\s+/.test(lines[i])) {
-        items.push(lines[i].replace(/^\s*[-*]\s+/, ''));
+    // Unordered list (with nesting by indentation)
+    if (BULLET_RE.test(line)) {
+      const items: Array<{ indent: number; text: string }> = [];
+      while (i < lines.length && BULLET_RE.test(lines[i])) {
+        const m = lines[i].match(BULLET_RE);
+        items.push({ indent: (m?.[1] ?? '').replace(/\t/g, '  ').length, text: lines[i].replace(BULLET_RE, '') });
         i++;
       }
-      blocks.push(
-        <ul key={key++} className="assistant-md-list">
-          {items.map((item, idx) => (
-            <li key={idx} dangerouslySetInnerHTML={{ __html: renderInline(item) }} />
-          ))}
-        </ul>
-      );
+      const listKey = key++;
+      blocks.push(<React.Fragment key={listKey}>{renderBulletList(items, listKey)}</React.Fragment>);
       continue;
     }
 
-    // Ordered list
-    if (/^\s*\d+\.\s+/.test(line)) {
+    // Ordered list ("1. " and "1) ")
+    if (ORDERED_RE.test(line)) {
       const items: string[] = [];
-      while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i])) {
-        items.push(lines[i].replace(/^\s*\d+\.\s+/, ''));
+      while (i < lines.length && ORDERED_RE.test(lines[i])) {
+        items.push(lines[i].replace(ORDERED_RE, ''));
         i++;
       }
       blocks.push(
@@ -183,15 +214,18 @@ export function AssistantMarkdown({ content }: { content: string }) {
       !lines[i].trim().startsWith('|') &&
       !lines[i].trim().startsWith('#') &&
       !lines[i].trim().startsWith('>') &&
-      !/^\s*[-*]\s+/.test(lines[i]) &&
-      !/^\s*\d+\.\s+/.test(lines[i])
+      !BULLET_RE.test(lines[i]) &&
+      !ORDERED_RE.test(lines[i]) &&
+      !/^\s*([-*_])(\s*\1){2,}\s*$/.test(lines[i])
     ) {
       paraLines.push(lines[i]);
       i++;
     }
     if (paraLines.length > 0) {
+      // A line break inside a paragraph is a line break (chat style), not a soft join:
+      // "Folio: 23354\nCliente: …" must stay on two lines.
       blocks.push(
-        <p key={key++} className="assistant-md-p" dangerouslySetInnerHTML={{ __html: renderInline(paraLines.join(' ')) }} />
+        <p key={key++} className="assistant-md-p" dangerouslySetInnerHTML={{ __html: paraLines.map((l) => renderInline(l.trim())).join('<br />') }} />
       );
     }
   }

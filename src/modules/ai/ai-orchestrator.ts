@@ -39,7 +39,7 @@ import { CORE_TOOL_NAMES, PROVIDER_MAX_TOOLS, findToolsByTopic, selectToolsForTu
 import { classifyTask, resolveTurnModel } from './model-router';
 import { getModelById } from './model-catalog';
 import { isReasoningModel } from './providers/openai';
-import { buildTurnDirectives, looksUnfinished, stripMarkdownImages } from './turn-directives';
+import { buildTurnDirectives, looksUnfinished, stripMarkdownImages, wantsDocument } from './turn-directives';
 import { reviewComplexAnswer } from './ai-answer-review';
 import { inferConfidence, parseConfidence } from './confidence';
 import { mergeMessageMeta } from './ai-sessions-service';
@@ -370,6 +370,18 @@ export async function* runAssistant(
   }
   const priorIds = new Set(priorAttachments.map((a) => a.id));
   const attachmentsForContext = [...resolvedAttachments, ...priorAttachments];
+  // Order numbers listed in text attachments (a PDF/CSV of orders) = the universe handwritten
+  // folios are reconciled against (lookupSalesOrdersByNumber reads it from the tool context).
+  const attachmentOrderNumbers: string[] = [];
+  const collectOrderNumbers = (text: string) => {
+    const seen = new Set(attachmentOrderNumbers);
+    for (const m of text.matchAll(/\b(?:OV|SO)-?\s?(\d{4,7})\b/gi)) {
+      if (!seen.has(m[1])) {
+        seen.add(m[1]);
+        attachmentOrderNumbers.push(m[1]);
+      }
+    }
+  };
 
   // 7.5. Process attachments — inject multimodal content into the last user message
   if (attachmentsForContext.length > 0) {
@@ -400,6 +412,7 @@ export async function* runAssistant(
               image_url: { url: processed.dataUrl },
             });
           } else if (processed.type === 'text') {
+            if (attachmentOrderNumbers.length < 5000) collectOrderNumbers(processed.content);
             // Add extracted text (PDF, Word, Excel, transcript, plain text) as a text content part
             const kind = attachmentKind(att.mimeType);
             const label = (att.mimeType === 'application/pdf'
@@ -446,11 +459,16 @@ export async function* runAssistant(
   // Paused mode: the assistant keeps answering and drafting, but tools with side
   // effects are not even offered to the model.
   const preferences = await getPreferences(input.actor.id).catch(() => null);
+  const lastAssistantContent = [...history].reverse().find((m) => m.role === 'assistant' && typeof m.content === 'string' && m.content.trim().length > 0)?.content ?? null;
+  const documentRequested = wantsDocument(input.message, lastAssistantContent);
   const availableTools = (
     preferences?.mode === 'paused'
       ? loadedTools.filter((t) => !PAUSED_MODE_HIDDEN_EFFECTS.has(t.effect ?? 'read'))
       : loadedTools
   )
+    // An elaborate document is only offered when the user asked for one (or accepted an offer):
+    // otherwise the model spends minutes writing a 15-page file nobody requested.
+    .filter((t) => documentRequested || isAutoTrigger || t.name !== 'composeDocument')
     .filter((t) => inboxConversationId || chatChannelId || !SURFACE_ONLY_TOOLS.has(t.name))
     .filter((t) => inboxConversationId || !INBOX_ONLY_TOOLS.has(t.name))
     .filter((t) => !inboxConversationId || !INBOX_HIDDEN_TOOLS.has(t.name))
@@ -514,6 +532,7 @@ export async function* runAssistant(
     voice: Boolean(input.context?.voice),
     autoTrigger: isAutoTrigger,
     modelReasonsWithVision: isReasoningModel(effectiveModel) && (getModelById(effectiveModel)?.capabilities.includes('vision') ?? true),
+    lastAssistantContent,
   });
   if (directives && messages[0] && typeof messages[0].content === 'string') {
     messages[0].content += `\n\n${directives}`;
@@ -535,8 +554,14 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
   let usingFallback = false;
   // Complex answers are reviewed before the user sees them, so their tokens are held back
   // and released in one piece (or rewritten once). Everything else streams as usual.
+  // A reasoning model already checks its own work while thinking; a second pass would add
+  // minutes for little gain. The review is for the models that answer in one shot.
   const bufferAnswer =
-    settings.answerReviewEnabled !== false && classification.tier === 'complex' && !isAutoTrigger && !input.context?.voice;
+    settings.answerReviewEnabled !== false &&
+    classification.tier === 'complex' &&
+    !isAutoTrigger &&
+    !input.context?.voice &&
+    !isReasoningModel(effectiveModel);
   let nudges = 0;
   let reviews = 0;
   const turnStats = { calls: 0, cachedHits: 0, parallelBatches: 0, dataToolsSucceeded: 0, failed: 0, loadedMore: 0 };
@@ -994,6 +1019,7 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
     messageId: assistantMessageId,
     enabledToolNames: settings.enabledTools,
     skipCache: wantsFreshData,
+    attachmentOrderNumbers: attachmentOrderNumbers.length > 0 ? attachmentOrderNumbers : undefined,
   });
 
   async function runTool(tc: { id: string; name: string; arguments: string }, parsedArgs: unknown, assistantMessageId: string): Promise<ToolExecutionResult> {

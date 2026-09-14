@@ -146,6 +146,12 @@ Segunda ronda tras comparar de nuevo con ChatGPT (GPT-5 "Alta", 3 min de razonam
 - `reasoningEffort` por defecto baja a `medium` (high multiplicaba minutos en cada pasada); el cliente OpenAI tiene `timeout` 15 min y `maxRetries: 1` (un reintento silencioso duplicaba llamadas de minutos). Turnos con adjuntos ofrecen ≤ 48 tools (prompt más corto en cada pasada).
 - En modo búfer la UI muestra el chip "Redactando la respuesta" (`draftAnswer`) mientras el modelo escribe, y "Revisando la respuesta" durante la revisión.
 
+**Cuarta ronda (GPT-5 ya responde, pero 10 min, PDF no pedido y presentación pobre).**
+- **Universo de folios** (`lookup-tools.ts` → `reconcileWithExpected`, puro con test): el orquestador extrae los `OV-xxxxx` de los adjuntos de texto (el PDF de órdenes) y los pasa a las tools como `ctx.attachmentOrderNumbers`; `lookupSalesOrdersByNumber` acepta `expectedNumbers` (o usa el del contexto) y devuelve `universe`: `misreadCorrected` (folio anotado que no está en la lista pero está a un dígito de uno no reclamado → se corrige aunque exista en la BD como otra orden), `withoutRequest` (órdenes de la lista sin nota) y `notInUniverse`. Corrige el fallo de "existe en el sistema, luego está bien" (23359/23385/23338/23384 eran lecturas erróneas que sí existían como otras órdenes cerradas).
+- **Documentos solo si se piden**: `wantsDocument(message, lastAssistantContent)` (petición explícita o "sí/dale" tras una oferta) decide si `composeDocument` se ofrece al modelo; si no, la tool ni aparece. La directiva dice explícitamente "el usuario NO pidió archivo".
+- **Sin revisión para modelos que razonan**: `bufferAnswer`/revisión interna solo cuando el modelo del turno no es GPT-5/o-series (esos ya verifican mientras piensan); con GPT-5 la respuesta se transmite en vivo. Menos pasadas: lectura+cruce (1) → respuesta (2).
+- **Formato**: la directiva pide `##`/`###`, listas de una por línea y párrafos cortos; `AssistantMarkdown` ahora distingue tamaños de encabezado (`assistant-md-heading-1..4`), soporta listas `1)`, viñetas anidadas por sangría, `---` y saltos de línea dentro de un párrafo.
+
 **Cómo activarlo en producción:** Admin → Asistente IA → Configuración → Reparto de modelos → "Detectar modelos de OpenAI" (confirma que la llave lista gpt-5) → "Máxima calidad" → Guardar. Sin GPT-5 la llave sigue funcionando con gpt-4o pero sin razonamiento previo.
 
 ## Capa de inteligencia (2026-09-13, tarde)

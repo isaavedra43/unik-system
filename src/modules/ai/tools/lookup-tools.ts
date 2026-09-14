@@ -59,6 +59,39 @@ export interface OrderLookupResult {
   duplicates: string[];
 }
 
+export interface ExpectedReconciliation {
+  expectedCount: number;
+  /** Requested numbers that are NOT in the expected list, with the expected number they most likely are (one digit off). */
+  notInExpected: Array<{ requested: string; likely: string | null }>;
+  /** Expected numbers nobody requested (e.g. orders of the PDF with no handwritten note), after applying the likely corrections. */
+  expectedWithoutRequest: string[];
+}
+
+/**
+ * Reconciles a set of numbers someone wrote (handwritten notes) against the universe they
+ * were supposed to come from (the orders listed in the attached PDF or a system query).
+ * A written number that is not in the universe but is one edit away from an unclaimed
+ * universe number is almost certainly a misreading of it — even when it happens to exist
+ * in the database as some other order. Pure — unit tested.
+ */
+export function reconcileWithExpected(requested: string[], expected: string[]): ExpectedReconciliation {
+  const expectedSet = new Set(expected.map((e) => normalizeOrderNumber(e)).filter((n): n is string => Boolean(n)));
+  const requestedNorm = requested.map((r) => normalizeOrderNumber(r)).filter((n): n is string => Boolean(n));
+  const claimed = new Set(requestedNorm.filter((n) => expectedSet.has(n)));
+  const notInExpected: ExpectedReconciliation['notInExpected'] = [];
+  for (const n of requestedNorm) {
+    if (expectedSet.has(n)) continue;
+    const likely = nearbyNumberVariants(n).find((v) => expectedSet.has(v) && !claimed.has(v)) ?? null;
+    if (likely) claimed.add(likely);
+    notInExpected.push({ requested: n, likely });
+  }
+  return {
+    expectedCount: expectedSet.size,
+    notInExpected,
+    expectedWithoutRequest: [...expectedSet].filter((e) => !claimed.has(e)),
+  };
+}
+
 function fmtDate(d: Date | null | undefined): string | null {
   if (!d) return null;
   return d.toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'America/Mexico_City' });
@@ -196,22 +229,61 @@ registerTool({
     'Úsala siempre que cruces folios escritos por alguien contra el sistema; acepta "23354", "OV-23354" u "ov 23354".',
   parameters: z.object({
     numbers: z.array(z.string().max(30)).min(1).max(MAX_LOOKUP).describe('Folios a buscar (hasta 400). Pasa TODOS en una sola llamada.'),
+    expectedNumbers: z
+      .array(z.string().max(30))
+      .max(2000)
+      .optional()
+      .describe(
+        'El UNIVERSO del que deberían salir los folios: los del PDF/lista adjunta o de la consulta (ej. las 65 órdenes no cerradas). Si el usuario adjuntó un PDF con órdenes, el sistema lo llena solo. ' +
+          'Un folio anotado que no esté en esta lista pero esté a un dígito de uno que sí está (y nadie más reclamó) es una lectura errónea aunque exista en el sistema como otra orden.'
+      ),
     conversationId: z.string().optional().describe('Se inyecta automáticamente, no lo pongas.'),
   }),
-  execute: async (_actor, rawArgs) => {
-    const args = rawArgs as { numbers: string[] };
-    const result = await matchSalesOrderNumbers(args.numbers);
+  execute: async (_actor, rawArgs, ctx) => {
+    const args = rawArgs as { numbers: string[]; expectedNumbers?: string[] };
+    const expected = args.expectedNumbers && args.expectedNumbers.length > 0 ? args.expectedNumbers : ctx.attachmentOrderNumbers ?? [];
+    const reconciliation = expected.length > 0 ? reconcileWithExpected(args.numbers, expected) : null;
+    // Look up the corrected set (likely readings replace the misread numbers) plus the expected
+    // numbers nobody wrote, so the model gets every row it needs in ONE call.
+    const corrected = new Map<string, string>();
+    for (const n of args.numbers) {
+      const norm = normalizeOrderNumber(n);
+      if (!norm) continue;
+      const fix = reconciliation?.notInExpected.find((x) => x.requested === norm)?.likely;
+      corrected.set(fix ?? norm, n);
+    }
+    const toLookup = [...new Set([...corrected.keys(), ...(reconciliation?.expectedWithoutRequest ?? [])])];
+    const result = await matchSalesOrderNumbers(toLookup);
+    const expectedWithout = new Set(reconciliation?.expectedWithoutRequest ?? []);
     return {
       requested: args.numbers.length,
       foundCount: result.found.length,
       notFoundCount: result.notFound.length,
-      orders: result.found,
+      orders: result.found.map((o) => ({
+        ...o,
+        requested: reconciliation?.notInExpected.find((x) => x.likely === o.requested)?.requested ?? o.requested,
+        correctedFrom: reconciliation?.notInExpected.find((x) => x.likely === o.requested)?.requested ?? null,
+        noNote: expectedWithout.has(o.requested) ? true : undefined,
+      })),
       notFound: result.notFound,
       duplicates: result.duplicates,
-      note:
+      universe: reconciliation
+        ? {
+            expectedCount: reconciliation.expectedCount,
+            source: args.expectedNumbers && args.expectedNumbers.length > 0 ? 'expectedNumbers' : 'adjunto (PDF/lista de la conversación)',
+            misreadCorrected: reconciliation.notInExpected.filter((x) => x.likely).map((x) => ({ written: x.requested, actual: x.likely })),
+            notInUniverse: reconciliation.notInExpected.filter((x) => !x.likely).map((x) => x.requested),
+            withoutRequest: reconciliation.expectedWithoutRequest,
+          }
+        : null,
+      note: [
         result.notFound.length > 0
-          ? 'Los folios en notFound no existen tal cual: si traen suggestions, lo más probable es que el número se leyó/escribió mal; usa la sugerencia y dilo explícitamente ("23364 no existe; se asocia a 23354"). Si no hay sugerencias, repórtalo como folio no encontrado.'
-          : 'Todos los folios existen en el sistema.',
+          ? 'Los folios en notFound no existen tal cual: si traen suggestions, lo más probable es que el número se leyó/escribió mal; usa la sugerencia y dilo explícitamente. Si no hay sugerencias, repórtalo como folio no encontrado.'
+          : 'Todos los folios consultados existen en el sistema.',
+        reconciliation
+          ? `Universo de ${reconciliation.expectedCount} folios. "universe.misreadCorrected" son lecturas corregidas (di "23364 → 23354"); "universe.notInUniverse" son folios que no pertenecen a la lista (sistema los tiene como otra orden: repórtalos aparte, no los mezcles en los grupos); "universe.withoutRequest" son folios de la lista SIN nota (van en "Sin nota"). Las filas con noNote=true son esos.`
+          : 'Sin universo de referencia: si el usuario adjuntó una lista/PDF de órdenes, pásala en expectedNumbers para detectar lecturas erróneas que existen como otra orden.',
+      ].join(' '),
     };
   },
 });

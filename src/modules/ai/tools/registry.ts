@@ -108,6 +108,8 @@ export interface ToolExecutionContext {
   skillRunId?: string;
   /** Bypass the read-result cache for this call (user asked for live data). */
   skipCache?: boolean;
+  /** Sales-order numbers found in the text attachments of this turn (a PDF/CSV listing orders): the universe to reconcile handwritten folios against. */
+  attachmentOrderNumbers?: string[];
 }
 
 export interface ProposalSummary {
