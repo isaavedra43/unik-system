@@ -19,6 +19,7 @@ import { absoluteUrl } from '@/lib/app-url';
 import { parseNumeric, sumColumn } from '../ai-report-helpers';
 import {
   applyColumnCustomization,
+  mergeReportCustomization,
   applyRowCustomization,
   applySummaryCardCustomization,
   formatItemsList,
@@ -375,7 +376,12 @@ function prepareReportData(
   totalsRow: Record<string, unknown> | null;
 } {
   const keys = rawRows.length > 0 ? Object.keys(rawRows[0]) : [];
-  const cust = normalizeCustomization((rawCustomization as ReportCustomization | undefined) ?? {}, keys);
+  // Money is opt-in HERE, not only in the orchestrator: a report generated through any other
+  // path (voice agent, MCP, a direct tool call) must not print amounts nobody asked for either.
+  const cust = normalizeCustomization(
+    mergeReportCustomization({ showTotals: false }, rawCustomization as ReportCustomization | undefined),
+    keys
+  );
   const flatRows = rawRows.map((r) => flattenRow(r, cust));
   const rows = applyRowCustomization(flatRows, cust, parseNumeric);
   const baseColumns = explicitColumns && explicitColumns.length > 0 ? explicitColumns : autoColumns(flatRows);

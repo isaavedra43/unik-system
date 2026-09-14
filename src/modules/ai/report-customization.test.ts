@@ -9,6 +9,7 @@ import {
   mergeReportCustomization,
   normalizeCustomization,
   resolveColumnKey,
+  resolveReportCustomization,
   wantsTotalsRow,
 } from './report-customization';
 import { parseNumeric } from './ai-report-helpers';
@@ -72,6 +73,12 @@ describe('detectReportCustomization — layout instructions', () => {
 
   it('reads colors, orientation and font size', () => {
     expect(detectReportCustomization('pon el encabezado en rojo').brandColor).toBe('#dc2626');
+    expect(detectReportCustomization('ponlo en verde').brandColor).toBe('#16a34a');
+    expect(detectReportCustomization('usa el color #123456').brandColor).toBe('#123456');
+    // A color that is part of the DATA, not a styling instruction.
+    expect(
+      detectReportCustomization('dame las ventas de marmol verde de este mes').brandColor
+    ).toBeUndefined();
     expect(detectReportCustomization('ponlo en vertical').orientation).toBe('portrait');
     expect(detectReportCustomization('con la letra más grande').fontSize).toBe(9.5);
   });
@@ -187,6 +194,27 @@ describe('applySummaryCardCustomization', () => {
   it('hides every card on request', () => {
     expect(applySummaryCardCustomization(cards, { showSummaryCards: false })).toBeUndefined();
   });
+
+  it('strips a money card the model typed without a "$"', () => {
+    const typed = [
+      { label: 'Órdenes', value: '65' },
+      { label: 'Total', value: '3,080,682.99' },
+      { label: 'Saldo pendiente', value: '689124.14 MXN' },
+      { label: 'Ingresos', value: '1.2M' },
+    ];
+    expect(applySummaryCardCustomization(typed, { showTotals: false })).toEqual([
+      { label: 'Órdenes', value: '65' },
+    ]);
+  });
+
+  it('keeps count cards whose label is not about money', () => {
+    const counts = [
+      { label: 'Órdenes', value: '65' },
+      { label: 'Clientes', value: '12' },
+      { label: 'Grupos', value: '4' },
+    ];
+    expect(applySummaryCardCustomization(counts, { showTotals: false })).toEqual(counts);
+  });
 });
 
 describe('wantsTotalsRow', () => {
@@ -293,5 +321,42 @@ describe('detectReportCustomization — compound instructions', () => {
     expect(detectReportCustomization('quita la columna método de pago').hideColumns).toEqual([
       'metodo de pago',
     ]);
+  });
+});
+
+describe('resolveReportCustomization — who decides the amounts', () => {
+  it('no money words in the message: amounts stay off even if the model asks for them', () => {
+    const cust = resolveReportCustomization('dame el PDF de esas órdenes', { showTotals: true });
+    expect(cust.showTotals).toBe(false);
+  });
+
+  it('the user asking for amounts turns them on', () => {
+    expect(resolveReportCustomization('dame el PDF con el total y el saldo').showTotals).toBe(true);
+  });
+
+  it('"sin totales" keeps them off', () => {
+    expect(
+      resolveReportCustomization('el PDF pero sin totales', { showTotals: true }).showTotals
+    ).toBe(false);
+  });
+
+  it("every other field still takes the model's value", () => {
+    const cust = resolveReportCustomization('genera el PDF', {
+      brandColor: '#111111',
+      hideColumns: ['salesperson'],
+      itemsStyle: 'compact',
+    });
+    expect(cust).toMatchObject({
+      showTotals: false,
+      brandColor: '#111111',
+      hideColumns: ['salesperson'],
+      itemsStyle: 'compact',
+    });
+  });
+
+  it('what the user says still wins over the model for the rest', () => {
+    const cust = resolveReportCustomization('ponlo en rojo', { brandColor: '#111111' });
+    expect(cust.brandColor).toBe('#111111');
+    expect(resolveReportCustomization('ponlo en rojo').brandColor).toBe('#dc2626');
   });
 });

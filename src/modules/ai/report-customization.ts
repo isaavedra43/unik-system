@@ -437,9 +437,17 @@ export function detectReportCustomization(message: string): ReportCustomization 
     const c = colorFrom(rowColor[0]);
     if (c) cust.rowStripeColor = c;
   }
-  if (!cust.brandColor && /\b(?:color|colores|en)\b/.test(norm)) {
-    const c = colorFrom(text);
-    if (c && /\b(?:color|colores)\b/.test(norm)) cust.brandColor = c;
+  if (!cust.brandColor) {
+    // A color only counts as a styling instruction when something asks for it: "de color rojo",
+    // "ponlo en rojo", a hex code. Otherwise "las ventas de marmol verde" would repaint the
+    // report green.
+    const styled =
+      norm.match(/\b(?:de\s+)?colores?\s+([a-z]+)/) ??
+      norm.match(
+        /\b(?:pon(?:lo|le|me)?|hazlo|haz|cambia(?:lo|le|selo)?|dejalo|quiero(?:lo)?|estilo)\b[^.;]{0,25}?\ben\s+([a-z]+)/
+      );
+    const c = HEX_RE.test(text) ? colorFrom(text) : styled ? colorFrom(styled[1]) : undefined;
+    if (c) cust.brandColor = c;
   }
   if (/\b(?:sin|quita(?:r|le)?)\b[^.;]{0,20}\b(?:rayado|zebra|franjas|sombreado)\b/.test(norm))
     cust.zebra = false;
@@ -498,6 +506,22 @@ export function mergeReportCustomization(
     }
   }
   return out;
+}
+
+/**
+ * The customization a report is actually generated with: the layout the user described in
+ * THIS message, with whatever the model passed on top — except `showTotals`, which only the
+ * user's own words can turn on. The model deciding by itself that a report wants amounts is
+ * exactly how Total/Saldo kept appearing unrequested.
+ */
+export function resolveReportCustomization(
+  message: string,
+  modelCustomization?: ReportCustomization | null
+): ReportCustomization {
+  const detected = detectReportCustomization(message);
+  return mergeReportCustomization(detected, modelCustomization, {
+    showTotals: detected.showTotals === true,
+  });
 }
 
 /** Resolves every column name the caller used (Spanish labels included) to real row keys. */
@@ -601,7 +625,23 @@ export function applyRowCustomization(
   });
 }
 
-/** KPI cards: hidden entirely, or stripped of money cards when no amounts were asked for. */
+/** Labels of KPI cards that report an amount, however the value happens to be written. */
+const MONEY_CARD_LABEL =
+  /\b(total(?:es)?|saldo(?:s)?|importe|monto|ingreso|ingresos|revenue|balance|adeudo|cobrar|facturad|venta\s+total)\b/i;
+
+/** A card is about money when its value is an amount or its label names one. */
+export function isMoneyCard(card: { label: string; value: string }): boolean {
+  const value = card.value.trim();
+  if (/^[-(]?\s*\$/.test(value)) return true;
+  if (/\b(?:mxn|usd|pesos)\b/i.test(value)) return true;
+  return MONEY_CARD_LABEL.test(card.label);
+}
+
+/**
+ * KPI cards: hidden entirely, or stripped of the money ones when no amounts were asked for.
+ * Matching on the label too (not just a leading "$") is what keeps a hand-typed
+ * {label: "Total", value: "3,080,682.99"} from slipping past.
+ */
 export function applySummaryCardCustomization(
   cards: Array<{ label: string; value: string }> | undefined,
   cust: ReportCustomization
@@ -609,7 +649,7 @@ export function applySummaryCardCustomization(
   if (!cards || cards.length === 0) return undefined;
   if (cust.showSummaryCards === false) return undefined;
   if (cust.showTotals === false && cust.showSummaryCards !== true) {
-    const kept = cards.filter((c) => !/^\$/.test(c.value.trim()));
+    const kept = cards.filter((c) => !isMoneyCard(c));
     return kept.length > 0 ? kept : undefined;
   }
   return cards;
