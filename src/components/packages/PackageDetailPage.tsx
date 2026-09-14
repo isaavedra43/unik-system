@@ -33,6 +33,7 @@ import {
   PackageZohoRefresh,
   RelatedLink,
 } from './package-view';
+import { PackageShipmentActions } from './PackageShipmentActions';
 
 interface RelatedSalesOrderSummary {
   id: string;
@@ -66,6 +67,8 @@ interface PackageDetailPageProps {
   relatedContact?: RelatedContactSummary | null;
   relatedSalesOrder?: RelatedSalesOrderSummary | null;
   relatedInvoices?: RelatedInvoiceSummary[];
+  canShip?: boolean;
+  canEdit?: boolean;
 }
 
 export function PackageDetailPage({
@@ -80,6 +83,8 @@ export function PackageDetailPage({
   relatedContact,
   relatedSalesOrder,
   relatedInvoices,
+  canShip = false,
+  canEdit = false,
 }: PackageDetailPageProps) {
   const router = useRouter();
   const [watched, setWatched] = useState(initialWatched);
@@ -137,6 +142,8 @@ export function PackageDetailPage({
           <PackagePdfActions pkgId={pkg.id} basePath={basePath} />
         </div>
       </div>
+
+      <PackageShipmentActions pkg={pkg} basePath={basePath} canShip={canShip} canEdit={canEdit} onUpdated={() => router.refresh()} />
 
       <PackageZohoRefresh pkg={pkg} basePath={basePath} onRefreshed={() => router.refresh()} />
 

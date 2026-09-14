@@ -113,7 +113,9 @@ async function refreshCandidate(candidate: RefreshCandidate): Promise<void> {
   });
 }
 
-export const ON_DEMAND_REFRESH_MAX_AGE_MS = 15 * 60 * 1000;
+/** Undelivered packages are re-read on open after this age (delivered ones stay at 15 min). */
+export const ON_DEMAND_REFRESH_MAX_AGE_MS = 3 * 60 * 1000;
+const ON_DEMAND_REFRESH_FINAL_MAX_AGE_MS = 15 * 60 * 1000;
 
 /** True when the stored row may be behind Zoho: never re-read, still changeable, or missing data. */
 export function packageNeedsRefresh(
@@ -127,8 +129,8 @@ export function packageNeedsRefresh(
 ): boolean {
   if (!pkg.lastDetailFetchedAt) return true;
   const age = now.getTime() - pkg.lastDetailFetchedAt.getTime();
-  if (age < ON_DEMAND_REFRESH_MAX_AGE_MS) return false;
   const final = pkg.status ? FINAL_STATUSES.includes(pkg.status.toLowerCase()) : false;
+  if (age < (final ? ON_DEMAND_REFRESH_FINAL_MAX_AGE_MS : ON_DEMAND_REFRESH_MAX_AGE_MS)) return false;
   return !final || !pkg.carrier || pkg.itemCount === 0;
 }
 

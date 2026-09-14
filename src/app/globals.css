@@ -20695,6 +20695,11 @@ button.calls-stat:focus-visible { outline: none; box-shadow: var(--unik-shadow-f
 }
 
 /* Packages: refresh from Zoho */
+.pkg-ship-actions { display: flex; flex-wrap: wrap; gap: var(--unik-space-2); margin-bottom: var(--unik-space-4); }
+.pkg-ship-form { display: flex; flex-direction: column; gap: var(--unik-space-4); }
+.pkg-ship-delivered { display: flex; flex-wrap: wrap; align-items: center; gap: var(--unik-space-3); }
+.pkg-check { display: inline-flex; align-items: center; gap: 8px; font-size: var(--unik-text-sm); color: var(--unik-text); cursor: pointer; }
+@media (max-width: 640px) { .pkg-ship-form .form-grid { grid-template-columns: 1fr; } }
 .pkg-refresh { display: flex; flex-wrap: wrap; align-items: center; gap: var(--unik-space-2) var(--unik-space-3); }
 .pkg-refresh-note { display: inline-flex; align-items: center; gap: 5px; font-size: var(--unik-text-xs); color: var(--unik-text-muted); }
 .pkg-refresh-note.is-warning { color: var(--unik-warning); }

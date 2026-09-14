@@ -213,6 +213,19 @@ export async function zohoGet<T = unknown>(
   return zohoRequest<T>('GET', path, { product: 'inventory', query });
 }
 
+/** Writes against Zoho Inventory (packages, shipment orders). */
+export async function zohoPost<T = unknown>(path: string, body?: unknown, query?: Record<string, string>): Promise<T> {
+  return zohoRequest<T>('POST', path, { product: 'inventory', body, query });
+}
+
+export async function zohoPut<T = unknown>(path: string, body?: unknown, query?: Record<string, string>): Promise<T> {
+  return zohoRequest<T>('PUT', path, { product: 'inventory', body, query });
+}
+
+export async function zohoDelete<T = unknown>(path: string, query?: Record<string, string>): Promise<T> {
+  return zohoRequest<T>('DELETE', path, { product: 'inventory', query });
+}
+
 // ---------------------------------------------------------------------------
 // Zoho Books helpers (cotizaciones / estimates)
 // ---------------------------------------------------------------------------

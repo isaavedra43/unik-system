@@ -20,6 +20,18 @@ export const PACKAGES_PERMISSIONS: PermissionDefinition[] = [
     description: 'Permite marcar paquetes para recibir notificaciones cuando cambien',
   },
   {
+    key: 'packages.ship',
+    group: 'Paquetes',
+    label: 'Enviar paquetes y asignar transportista',
+    description: 'Permite crear, editar y eliminar la orden de envío del paquete en Zoho, asignar transportista y marcarlo como entregado',
+  },
+  {
+    key: 'packages.edit',
+    group: 'Paquetes',
+    label: 'Editar paquetes',
+    description: 'Permite cambiar la fecha y las notas del paquete en Zoho',
+  },
+  {
     key: 'packages.share_views',
     group: 'Paquetes',
     label: 'Compartir vistas de paquetes',

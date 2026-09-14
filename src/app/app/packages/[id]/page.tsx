@@ -1,5 +1,5 @@
 import { notFound } from 'next/navigation';
-import { getCurrentSession } from '@/modules/auth/authorization';
+import { getCurrentSession, hasPermission } from '@/modules/auth/authorization';
 import { getPackageForDisplay } from '@/modules/packages/packages-refresh';
 import { isEntityWatched } from '@/modules/sales/entity-watch-service';
 import { PACKAGE_ENTITY_TYPE } from '@/modules/packages/permissions';
@@ -93,6 +93,8 @@ export default async function PackageDetailRoute({ params }: { params: Promise<{
       relatedContact={relatedContact}
       relatedSalesOrder={relatedSalesOrder}
       relatedInvoices={relatedInvoices}
+      canShip={hasPermission(session!.user, 'packages.ship')}
+      canEdit={hasPermission(session!.user, 'packages.edit')}
     />
   );
 }
