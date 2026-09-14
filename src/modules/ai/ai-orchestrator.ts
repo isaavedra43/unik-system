@@ -1037,6 +1037,7 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
         success: result.success,
         needsApproval: Boolean(result.needsApproval),
         errorCode: result.errorCode ?? null,
+        error: !result.success && !result.needsApproval ? (result.error ?? null) : null,
         durationMs: result.durationMs,
         cached: Boolean(result.cached),
       },

@@ -86,6 +86,8 @@ export interface LiveStep {
   id: string;
   name: string;
   status: 'running' | 'done' | 'failed' | 'pending';
+  /** Failure reason (or the tool's own `error` field) shown under a red chip. */
+  detail?: string | null;
 }
 
 export const AUTO_PREFIX = '⟦auto:';

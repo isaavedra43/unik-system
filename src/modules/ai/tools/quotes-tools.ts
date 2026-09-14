@@ -115,7 +115,7 @@ async function enrichQuoteItems(items: QuoteLineInput[]): Promise<{ items: Quote
       }
     }
     if (!product && name) {
-      const found = await aiSearchProducts(name, 5);
+      const found = await findCatalogProducts(name, 5);
       const q = name.toLowerCase();
       const exact = found.find((p) => (p.name ?? '').toLowerCase() === q || (p.sku ?? '').toLowerCase() === q);
       const best = exact ?? found[0] ?? null;
@@ -479,8 +479,78 @@ interface ResolvedProductLine {
   notes: string | null;
 }
 
+const PRODUCT_STOPWORDS = new Set(['de', 'del', 'la', 'el', 'los', 'las', 'un', 'una', 'y', 'con', 'para', 'por', 'm2', 'm²', 'metros', 'metro', 'piezas', 'pieza', 'pza', 'pzas', 'cm', 'mts']);
+
+function productTokens(text: string): string[] {
+  return text
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .split(/[^a-z0-9ñ]+/)
+    .filter((t) => t.length >= 2 && !PRODUCT_STOPWORDS.has(t) && !/^\d+$/.test(t));
+}
+
+const ACCENTS: Record<string, string> = { a: 'á', e: 'é', i: 'í', o: 'ó', u: 'ú' };
+
+/** "lamina" → ["lamina", "lámina", "lamína", "laminá"] (one accented vowel per word covers Spanish). */
+function accentVariants(token: string): string[] {
+  const out = [token];
+  for (let i = 0; i < token.length; i++) {
+    const acc = ACCENTS[token[i]];
+    if (acc) out.push(`${token.slice(0, i)}${acc}${token.slice(i + 1)}`);
+  }
+  return out;
+}
+
+/**
+ * Catalog search that survives word order and extra words: "piel de elefante 10xLL"
+ * must find "Piel de Elefante Cafe 10xLL". Full text first, then all tokens (AND),
+ * then progressively fewer tokens; candidates are ranked by matched tokens with a
+ * bonus for size tokens ("10xll", "40x60"), which are what tells variants apart.
+ */
+export async function findCatalogProducts(query: string, limit = 6) {
+  const direct = await aiSearchProducts(query, limit);
+  if (direct.length > 0) return direct;
+  const tokens = productTokens(query);
+  if (tokens.length === 0) return [];
+  const sizeTokens = tokens.filter((t) => /\d+x\d*[a-z]*|\d+[a-z]{1,3}$/.test(t));
+  const wordTokens = tokens.filter((t) => !sizeTokens.includes(t));
+  const attempts: string[][] = [tokens, wordTokens, wordTokens.slice(0, 2), wordTokens.slice(0, 1)].filter((a) => a.length > 0);
+  for (const attempt of attempts) {
+    const rows = await prisma.product.findMany({
+      // Postgres `contains` is not accent-insensitive: "lamina" must still hit "Lámina".
+      where: { AND: attempt.map((t) => ({ OR: accentVariants(t).map((v) => ({ name: { contains: v, mode: 'insensitive' as const } })) })) },
+      take: 40,
+      select: { zohoItemId: true, name: true, sku: true, description: true, rate: true, unit: true, taxName: true, taxPercentage: true, availableStock: true, status: true },
+    });
+    if (rows.length === 0) continue;
+    const scored = rows
+      .map((r) => {
+        const name = (r.name ?? '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+        let score = 0;
+        for (const t of tokens) if (name.includes(t)) score += sizeTokens.includes(t) ? 5 : 1;
+        if (r.status && r.status !== 'active') score -= 2;
+        return { r, score };
+      })
+      .sort((a, b) => b.score - a.score);
+    return scored.slice(0, limit).map(({ r }) => ({
+      zohoItemId: r.zohoItemId,
+      name: r.name,
+      sku: r.sku,
+      description: r.description,
+      rate: r.rate?.toString() ?? null,
+      unit: r.unit,
+      taxName: r.taxName,
+      taxPercentage: r.taxPercentage?.toString() ?? null,
+      availableStock: r.availableStock?.toString() ?? null,
+      status: r.status,
+    }));
+  }
+  return [];
+}
+
 async function resolveRequestedLine(line: { query: string; quantity: number; unit?: string; rate?: number; notes?: string }): Promise<ResolvedProductLine> {
-  const candidates = await aiSearchProducts(line.query, 6);
+  const candidates = await findCatalogProducts(line.query, 6);
   const q = line.query.trim().toLowerCase();
   const exact = candidates.find((p) => (p.name ?? '').toLowerCase() === q || (p.sku ?? '').toLowerCase() === q);
   const best = exact ?? candidates[0] ?? null;
@@ -557,7 +627,12 @@ registerTool({
     const lines = await Promise.all(a.items.map(resolveRequestedLine));
     const unmatched = lines.filter((l) => !l.matched);
     const matched = lines.filter((l) => l.matched);
-    if (matched.length === 0) return { error: 'Ningún producto coincidió con el catálogo.', unmatched: unmatched.map((l) => l.query) };
+    if (matched.length === 0) {
+      return {
+        error: `Ningún producto del catálogo coincidió con: ${unmatched.map((l) => `"${l.query}"`).join(', ')}. Busca con searchQuoteProducts (una o dos palabras clave, ej. "elefante") y vuelve a llamar draftQuoteFromRequest con el nombre exacto del producto en "query".`,
+        unmatched: unmatched.map((l) => ({ requested: l.query, alternatives: l.alternatives })),
+      };
+    }
 
     // 3. Delivery + notes
     const deliveryText = a.delivery ? (a.delivery.mode === 'pickup' ? 'Entrega: el cliente RECOGE EN BODEGA.' : `Entrega: A DOMICILIO${a.delivery.address ? ` — ${a.delivery.address}` : ' (dirección por confirmar)'}.`) : null;

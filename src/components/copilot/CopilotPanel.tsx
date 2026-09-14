@@ -295,15 +295,34 @@ function DraftCard({ draft, onInsert, onSend }: { draft: DraftData; onInsert?: (
 }
 
 function Steps({ steps }: { steps: LiveStep[] }) {
+  const [open, setOpen] = useState<string | null>(null);
   if (steps.length === 0) return null;
+  const detail = open ? steps.find((s) => s.id === open)?.detail : null;
   return (
     <div className="copilot-steps">
       {steps.map((s) => (
-        <motion.span key={s.id} className={cn('copilot-step', `is-${s.status}`)} initial={{ opacity: 0, x: -4 }} animate={{ opacity: 1, x: 0 }} transition={spring}>
+        <motion.span
+          key={s.id}
+          className={cn('copilot-step', `is-${s.status}`, s.detail && 'has-detail', open === s.id && 'is-open')}
+          title={s.detail ?? undefined}
+          role={s.detail ? 'button' : undefined}
+          tabIndex={s.detail ? 0 : undefined}
+          onClick={() => s.detail && setOpen((v) => (v === s.id ? null : s.id))}
+          onKeyDown={(e) => {
+            if (s.detail && (e.key === 'Enter' || e.key === ' ')) {
+              e.preventDefault();
+              setOpen((v) => (v === s.id ? null : s.id));
+            }
+          }}
+          initial={{ opacity: 0, x: -4 }}
+          animate={{ opacity: 1, x: 0 }}
+          transition={spring}
+        >
           {s.status === 'running' ? <Loader2 size={11} className="copilot-spin" /> : s.status === 'done' ? <Check size={11} /> : s.status === 'pending' ? <Clock size={11} /> : <X size={11} />}
           {s.status === 'pending' ? `${toolLabel(s.name, 'done')} · esperando tu aprobación` : toolLabel(s.name, s.status === 'running' ? 'running' : 'done')}
         </motion.span>
       ))}
+      {detail && <div className="copilot-step-detail">{detail}</div>}
     </div>
   );
 }
@@ -429,7 +448,7 @@ export function CopilotPanel({ surface, user, onInsertDraft, onSendDraft, onAfte
                 const idx = prev.findIndex((s) => s.name === name && s.status === 'running');
                 if (idx < 0) return prev;
                 const next = [...prev];
-                next[idx] = { ...next[idx], status: pending ? 'pending' : d.success ? 'done' : 'failed' };
+                next[idx] = { ...next[idx], status: pending ? 'pending' : d.success ? 'done' : 'failed', detail: typeof d.error === 'string' ? d.error : next[idx].detail ?? null };
                 return next;
               });
               if (name === draftTool && !d.success) setLiveDraft(null);
@@ -595,7 +614,11 @@ export function CopilotPanel({ surface, user, onInsertDraft, onSendDraft, onAfte
         const plan = planRecord ? parsePlan(planRecord.args) : null;
         const steps: LiveStep[] = records
           .filter((r) => r.toolName !== 'suggestNextActions' && r.toolName !== draftTool && r.toolName !== 'proposePlan')
-          .map((r) => ({ id: r.id, name: r.toolName, status: r.errorCode === 'needs_approval' ? 'pending' : r.success ? 'done' : 'failed' }));
+          .map((r) => {
+            const resultError = r.result && typeof r.result === 'object' ? (r.result as { error?: unknown }).error : null;
+            const detail = !r.success && r.errorCode !== 'needs_approval' ? (typeof resultError === 'string' ? resultError : r.errorCode) : typeof resultError === 'string' ? resultError : null;
+            return { id: r.id, name: r.toolName, status: r.errorCode === 'needs_approval' ? 'pending' : r.success && !resultError ? 'done' : r.success ? 'failed' : 'failed', detail } as LiveStep;
+          });
         const parsedText = parseConfidence(m.content);
         const text = parsedText.content.trim();
         const artifacts = m.artifacts ?? [];

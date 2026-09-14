@@ -17895,3 +17895,5 @@ textarea.input {
 .copilot-sysevent-btn { margin-top: 8px; padding: 6px 12px; font-size: 12.5px; }
 .copilot-dictate { width: 34px; height: 34px; border-radius: 10px; border: 1px solid var(--unik-border); background: var(--unik-surface); color: var(--unik-text-secondary); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; }
 .copilot-dictate:hover { background: var(--unik-surface-hover); color: var(--unik-text); }
+.copilot-step.has-detail { cursor: pointer; }
+.copilot-step-detail { flex-basis: 100%; margin-top: 4px; font-size: 12px; line-height: 1.4; color: var(--unik-danger); background: var(--unik-danger-bg); padding: 6px 10px; border-radius: 8px; white-space: pre-wrap; }
