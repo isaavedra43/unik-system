@@ -4,7 +4,7 @@ import os from 'os';
 import path from 'path';
 import { getCurrentSession, hasPermission } from '@/modules/auth/authorization';
 import { getContactById } from '@/modules/contacts/contacts-service';
-import { getVendorStatement } from '@/modules/contacts/vendor-statement-service';
+import { getStatementSyncDiagnostics, getVendorStatement } from '@/modules/contacts/vendor-statement-service';
 import { isIsoDay, parseStatementShow, type VendorStatement } from '@/modules/contacts/vendor-statement';
 import { formatCurrency, formatDateOnly } from '@/modules/contacts/contacts-helpers';
 import { getBillStatusConfig } from '@/modules/bills/bills-helpers';
@@ -52,7 +52,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   };
   const format = sp.get('format');
   if (format !== 'pdf' && format !== 'xlsx' && format !== 'csv') {
-    return NextResponse.json({ ...statement, company });
+    const sync = await getStatementSyncDiagnostics(contact.zohoContactId, contact.contactName).catch(() => null);
+    return NextResponse.json({ ...statement, company, sync });
   }
 
   const currency = contact.currencyCode;

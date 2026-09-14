@@ -20490,6 +20490,9 @@ button.calls-stat:focus-visible { outline: none; box-shadow: var(--unik-shadow-f
 .vd-statement-filters .vd-chips {
   margin-bottom: 0;
 }
+.vd-statement-sync {
+  margin-bottom: var(--unik-space-3);
+}
 .vd-statement-actions {
   display: flex;
   flex-wrap: wrap;
@@ -20612,7 +20615,7 @@ button.calls-stat:focus-visible { outline: none; box-shadow: var(--unik-shadow-f
   padding-left: var(--unik-space-3);
 }
 @media print {
-  .app-sidebar, .topbar, .vd-back, .vd-header, .vd-kpis, .vd-alert, .vd-tabs, .vd-statement-toolbar {
+  .app-sidebar, .topbar, .vd-back, .vd-header, .vd-kpis, .vd-alert, .vd-tabs, .vd-statement-toolbar, .vd-statement-sync {
     display: none !important;
   }
   .vd-card, .vd-doc {

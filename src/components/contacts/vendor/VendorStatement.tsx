@@ -1,10 +1,12 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { AlertTriangle, FileSpreadsheet, FileText, Loader2, Printer } from 'lucide-react';
-import { formatCurrency, formatDateOnly } from '@/modules/contacts/contacts-helpers';
+import { AlertTriangle, FileSpreadsheet, FileText, Info, Loader2, Printer, RefreshCw } from 'lucide-react';
+import { formatCurrency, formatDateOnly, formatDateTime } from '@/modules/contacts/contacts-helpers';
+import type { StatementSyncDiagnostics } from '@/modules/contacts/vendor-statement-service';
 import { presetRange, type StatementPreset, type StatementShow, type VendorStatement as Statement } from '@/modules/contacts/vendor-statement';
+import { toast } from 'sonner';
 import { StatusPill } from './vendor-ui';
 
 const PRESETS: Array<{ id: StatementPreset; label: string }> = [
@@ -22,7 +24,7 @@ const SHOW_OPTIONS: Array<{ id: StatementShow; label: string }> = [
   { id: 'credits', label: 'Solo créditos' },
 ];
 
-type StatementResponse = Statement & { company: { name: string; phone: string | null; address: string | null } };
+type StatementResponse = Statement & { company: { name: string; phone: string | null; address: string | null }; sync: StatementSyncDiagnostics | null };
 
 interface VendorStatementProps {
   contactId: string;
@@ -43,6 +45,8 @@ export function VendorStatement({ contactId, vendorName, vendorRfc, currencyCode
   const [data, setData] = useState<StatementResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [syncing, setSyncing] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
 
   const range = useMemo(() => (preset === 'custom' ? { from: custom.from || null, to: custom.to || null } : presetRange(preset)), [preset, custom]);
   const query = useMemo(() => {
@@ -70,7 +74,38 @@ export function VendorStatement({ contactId, vendorName, vendorRfc, currencyCode
     return () => {
       cancelled = true;
     };
-  }, [contactId, query, preset, custom.from, custom.to]);
+  }, [contactId, query, preset, custom.from, custom.to, reloadKey]);
+
+  /** Pull the latest bills and credits from Zoho, then recompute. */
+  const syncNow = useCallback(async () => {
+    setSyncing(true);
+    try {
+      const results = await Promise.all(
+        ['/app/bills/sync', '/app/vendor-credits/sync'].map((url) => fetch(url, { method: 'POST' }).then((r) => r.ok || r.status === 202 || r.status === 409))
+      );
+      if (results.every(Boolean)) toast.success('Sincronización iniciada; el estado de cuenta se actualizó con lo ya descargado.');
+      else toast.error('No se pudo iniciar la sincronización de facturas o créditos.');
+    } catch {
+      toast.error('No se pudo iniciar la sincronización.');
+    } finally {
+      setSyncing(false);
+      setReloadKey((k) => k + 1);
+    }
+  }, []);
+
+  const syncNotes = useMemo(() => {
+    const sync = data?.sync;
+    if (!sync) return [] as string[];
+    const notes: string[] = [];
+    if (sync.bills.pendingSnapshots > 0) notes.push(`${sync.bills.pendingSnapshots} factura(s) descargadas de Zoho aún sin procesar`);
+    if (sync.vendorCredits.pendingSnapshots > 0) notes.push(`${sync.vendorCredits.pendingSnapshots} crédito(s) descargados de Zoho aún sin procesar`);
+    if (sync.bills.failedSnapshots > 0) notes.push(`${sync.bills.failedSnapshots} factura(s) no se pudieron procesar`);
+    if (sync.vendorCredits.failedSnapshots > 0) notes.push(`${sync.vendorCredits.failedSnapshots} crédito(s) no se pudieron procesar`);
+    if (sync.unlinkedBills > 0) notes.push(`${sync.unlinkedBills} factura(s) con este nombre están ligadas a otro proveedor en Zoho`);
+    if (sync.unlinkedCredits > 0) notes.push(`${sync.unlinkedCredits} crédito(s) con este nombre están ligados a otro proveedor en Zoho`);
+    if (sync.bills.lastStatus && sync.bills.lastStatus !== 'completed') notes.push(`la última sincronización de facturas terminó en "${sync.bills.lastStatus}"`);
+    return notes;
+  }, [data?.sync]);
 
   const money = (n: number) => formatCurrency(n, currencyCode);
   const download = (format: 'pdf' | 'xlsx' | 'csv') => `/app/contacts/vendors/${contactId}/statement?${query ? `${query}&` : ''}format=${format}`;
@@ -128,8 +163,22 @@ export function VendorStatement({ contactId, vendorName, vendorRfc, currencyCode
           <button type="button" className="btn btn-secondary btn-sm" onClick={() => window.print()}>
             <Printer size={13} aria-hidden="true" /> Imprimir
           </button>
+          <button type="button" className="btn btn-secondary btn-sm" onClick={syncNow} disabled={syncing} title="Trae de Zoho las facturas y créditos más recientes">
+            {syncing ? <Loader2 size={13} className="vd-spin" aria-hidden="true" /> : <RefreshCw size={13} aria-hidden="true" />} Sincronizar
+          </button>
         </div>
       </div>
+
+      {data?.sync ? (
+        <div className={`vd-alert ${syncNotes.length ? 'vd-alert-warning' : 'vd-alert-info'} vd-statement-sync`} role="status">
+          {syncNotes.length ? <AlertTriangle size={15} aria-hidden="true" /> : <Info size={15} aria-hidden="true" />}
+          <div>
+            Facturas sincronizadas {data.sync.bills.lastCompletedAt ? formatDateTime(data.sync.bills.lastCompletedAt) : 'nunca'} · créditos{' '}
+            {data.sync.vendorCredits.lastCompletedAt ? formatDateTime(data.sync.vendorCredits.lastCompletedAt) : 'nunca'}.
+            {syncNotes.length ? <> Si falta un documento de Zoho: {syncNotes.join('; ')}. Usa “Sincronizar”.</> : ' Si falta una factura reciente de Zoho, usa “Sincronizar”.'}
+          </div>
+        </div>
+      ) : null}
 
       {error ? (
         <div className="vd-alert vd-alert-danger" role="alert">

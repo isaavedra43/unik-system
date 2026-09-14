@@ -245,11 +245,24 @@ export async function normalizePendingBillSnapshots(options: { limit: number }):
   state.batchInProgress = true;
 
   try {
-    const pending = await prisma.integrationSnapshot.findMany({
-      where: { source: SOURCE, entityType: BILLS_ENTITY_TYPE, normalizationVersion: { lt: CURRENT_BILL_NORMALIZER_VERSION } },
-      orderBy: { createdAt: 'asc' },
-      take: Math.max(1, Math.min(options.limit, 500)),
+    // Fresh snapshots first (newest documents land quickly); snapshots that already failed keep
+    // their old version, so they are retried only with the capacity left over. Otherwise a backlog
+    // of failed rows at the head of the queue starves every new document forever.
+    const limit = Math.max(1, Math.min(options.limit, 500));
+    const base = { source: SOURCE, entityType: BILLS_ENTITY_TYPE, normalizationVersion: { lt: CURRENT_BILL_NORMALIZER_VERSION } };
+    const fresh = await prisma.integrationSnapshot.findMany({
+      where: { ...base, normalizationErrorCode: null },
+      orderBy: { createdAt: 'desc' },
+      take: limit,
     });
+    const retries = fresh.length < limit
+      ? await prisma.integrationSnapshot.findMany({
+          where: { ...base, normalizationErrorCode: { not: null } },
+          orderBy: { createdAt: 'desc' },
+          take: limit - fresh.length,
+        })
+      : [];
+    const pending = [...fresh, ...retries];
 
     let normalized = 0, skipped = 0, failed = 0;
 
