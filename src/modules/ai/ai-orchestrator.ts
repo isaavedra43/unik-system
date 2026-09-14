@@ -22,6 +22,11 @@ import { processAttachment, resolveAttachmentsForMessage, type AttachmentResult 
 import { prisma } from '@/lib/prisma';
 import { buildReportSubtitle, buildSummaryCards } from './ai-report-helpers';
 import {
+  detectReportCustomization,
+  mergeReportCustomization,
+  type ReportCustomization,
+} from './report-customization';
+import {
   ARTIFACT_TOOL_NAMES,
   collectRowArrays,
   declaredRowTotal,
@@ -723,6 +728,14 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
 
     // Auto-inject rows and title for artifact tools
     if (ARTIFACT_TOOLS.has(tc.name)) {
+      // How the report should LOOK comes from the user's own words ("sin totales", "quita la
+      // columna vendedor", "ordénalo por cliente", "en rojo"); whatever the model passed
+      // explicitly wins field by field. `showTotals` defaults to false so a report never
+      // carries amounts (Total/Saldo columns, TOTAL row, money KPIs) that nobody asked for.
+      const detected = detectReportCustomization(input.message);
+      const modelCustomization = (argsObj.customization ?? undefined) as ReportCustomization | undefined;
+      const customization = mergeReportCustomization({ showTotals: false }, detected, modelCustomization);
+      argsObj.customization = customization;
       const modelRows = Array.isArray(argsObj.rows) ? (argsObj.rows as Record<string, unknown>[]) : null;
       const subsetOnly = argsObj.subsetOnly === true;
       let decision: ReportRowsDecision | null = null;
