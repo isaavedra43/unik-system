@@ -19750,6 +19750,12 @@ button.calls-stat:focus-visible { outline: none; box-shadow: var(--unik-shadow-f
   flex-direction: column;
   gap: var(--unik-space-4);
 }
+/* `.vd` lives on `.app-content` (fixed height, scrolls). In a column flex box a child with
+   overflow (the tabs row scrolls horizontally) may shrink to 0 px — the tabs vanished and only
+   their border stayed. Nothing here should shrink; the container scrolls instead. */
+.vd > * {
+  flex-shrink: 0;
+}
 .vd-back {
   display: inline-flex;
   align-items: center;
