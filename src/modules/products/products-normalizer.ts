@@ -2,6 +2,7 @@ import { Prisma, PrismaClient } from '@prisma/client';
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { SOURCE, PRODUCTS_ENTITY_TYPE } from '@/modules/integrations/zoho/products-sync';
+import { recordProductChange, PRODUCT_CHANGE_SELECT } from './products-change-events';
 
 const CURRENT_PRODUCT_NORMALIZER_VERSION = 2;
 
@@ -284,7 +285,7 @@ export async function normalizeProductSnapshot(
   return prisma.$transaction(async (tx) => {
     const existing = await tx.product.findUnique({
       where: { zohoItemId: payload.item_id },
-      select: { id: true, sourceRemoteModifiedAt: true },
+      select: { ...PRODUCT_CHANGE_SELECT, sourceRemoteModifiedAt: true },
     });
 
     if (
@@ -300,6 +301,15 @@ export async function normalizeProductSnapshot(
       create: productData,
       update: productData,
     });
+
+    if (existing) {
+      await recordProductChange(tx, {
+        before: existing,
+        after: product,
+        sourceSnapshotId: snapshot.id,
+        sourceRemoteModifiedAt: snapshot.remoteModifiedAt,
+      });
+    }
 
     await markSnapshotProcessed(tx, snapshot.id, CURRENT_PRODUCT_NORMALIZER_VERSION, null);
 

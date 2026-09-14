@@ -1,6 +1,8 @@
 import { prisma } from '@/lib/prisma';
 import { Prisma } from '@prisma/client';
 import { QUOTE_ENTITY_TYPE } from './permissions';
+import { QUOTE_CHANGE_FIELD_LABELS as FIELD_LABELS } from './quotes-change-labels';
+import { notifyUser } from '@/modules/notifications/notification-service';
 
 /**
  * Change detection and notification service for Quotes (cotizaciones).
@@ -48,12 +50,6 @@ const MEANINGFUL_FIELDS: (keyof QuoteSnapshot)[] = [
   'notes', 'terms',
 ];
 
-const FIELD_LABELS: Record<string, string> = {
-  status: 'Estado', customerName: 'Cliente', salespersonName: 'Vendedor', date: 'Fecha',
-  expiryDate: 'Vencimiento', referenceNumber: 'Referencia', discount: 'Descuento', subTotal: 'Subtotal',
-  discountTotal: 'Descuento total', taxTotal: 'Impuestos', shippingCharge: 'Envío', adjustment: 'Ajuste',
-  total: 'Total', notes: 'Notas', terms: 'Términos',
-};
 
 function serialize(v: unknown): unknown {
   if (v instanceof Prisma.Decimal) return v.toString();
@@ -190,20 +186,21 @@ export async function recordQuoteChange(tx: Prisma.TransactionClient, input: Rec
     .join(', ');
 
   for (const watcher of watchers) {
-    if (input.actorUserId && watcher.userId === input.actorUserId) continue;
-    const existingNotif = await tx.notification.findFirst({ where: { userId: watcher.userId, changeEventId: event.id }, select: { id: true } });
-    if (existingNotif) continue;
-    await tx.notification.create({
-      data: {
-        userId: watcher.userId,
-        type: 'quote_changed',
-        title,
-        body: body || 'Se detectaron cambios en la cotización',
-        entityType: QUOTE_ENTITY_TYPE,
-        entityId: input.quoteId,
-        changeEventId: event.id,
-        metadata: { estimateNumber: input.estimateNumber } as Prisma.InputJsonValue,
-      },
+    await notifyUser({
+      tx,
+      userId: watcher.userId,
+      actorUserId: input.actorUserId ?? null,
+      category: 'entity_change',
+      type: 'quote_changed',
+      title,
+      body: body || 'Se detectaron cambios en la cotización',
+      url: `/app/quotes/${input.quoteId}`,
+      entityType: QUOTE_ENTITY_TYPE,
+      entityId: input.quoteId,
+      changeEventId: event.id,
+      dedupeKey: `change:${event.id}:${watcher.userId}`,
+      metadata: { estimateNumber: input.estimateNumber },
+      push: { tag: `entity:${QUOTE_ENTITY_TYPE}:${input.quoteId}` },
     });
   }
 }
@@ -221,4 +218,3 @@ export async function getQuoteChangeEvents(quoteId: string, limit = 50): Promise
   }));
 }
 
-export { FIELD_LABELS as QUOTE_CHANGE_FIELD_LABELS };

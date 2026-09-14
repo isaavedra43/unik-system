@@ -26,6 +26,7 @@ import { getStorageSettings } from '@/modules/storage/storage-settings-service';
 import * as livekit from './livekit-service';
 import type { SupervisionMode } from './livekit-service';
 import { aiAnswersAccount, getVoiceSettings } from './voice-settings';
+import { notifyCallTransfer, notifyIncomingCall, notifyMissedCall } from './voice-notifications';
 
 /**
  * Voice service — calls over LiveKit (internal, inbound and outbound through
@@ -589,6 +590,8 @@ export async function registerInboundCall(input: {
     callId: id,
     accountId: account?.id ?? null,
   });
+  // Phones ring only when a person has to answer; AI-handled calls notify on transfer/summary.
+  if (!aiAnswers) notifyIncomingCall(id).catch(() => undefined);
   if (aiAnswers) {
     // Voice agent worker (services/voice-agent): dispatched now so it is in
     // the room when the PSTN leg lands. Failures are logged, never fatal.
@@ -907,6 +910,9 @@ export async function transferToHuman(
     callId,
     from: { id: actor.id, name: actor.name },
   });
+  notifyCallTransfer({ callId, targetUserId: target.id, fromUserId: actor.id, fromName: actor.name }).catch(
+    () => undefined
+  );
   return publishCall(await loadCall(callId), 'transfer', {
     targetUserId: target.id,
     targetName: target.name,
@@ -1047,6 +1053,7 @@ async function finishCall(callId: string, status: 'ended' | 'failed' | 'missed',
   await livekit.deleteRoom(call.roomName);
   const updated = await loadCall(callId);
   await publishCall(updated, 'call_ended', { by });
+  if (status === 'missed') notifyMissedCall(callId).catch(() => undefined);
   if (status === 'ended' && updated.aiState === 'active') {
     const segments = await prisma.voiceTranscriptSegment.count({ where: { callId } });
     if (segments > 0) {

@@ -2,6 +2,7 @@ import { Prisma, PrismaClient } from '@prisma/client';
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { SOURCE, CONTACTS_ENTITY_TYPE } from '@/modules/integrations/zoho/contacts-sync';
+import { recordContactChange, CONTACT_CHANGE_SELECT } from './contacts-change-events';
 
 const CURRENT_CONTACT_NORMALIZER_VERSION = 2;
 
@@ -314,7 +315,7 @@ export async function normalizeContactSnapshot(
   return prisma.$transaction(async (tx) => {
     const existing = await tx.contact.findUnique({
       where: { zohoContactId: payload.contact_id },
-      select: { id: true, sourceRemoteModifiedAt: true },
+      select: { ...CONTACT_CHANGE_SELECT, sourceRemoteModifiedAt: true },
     });
 
     if (
@@ -330,6 +331,15 @@ export async function normalizeContactSnapshot(
       create: contactData,
       update: contactData,
     });
+
+    if (existing) {
+      await recordContactChange(tx, {
+        before: existing,
+        after: contact,
+        sourceSnapshotId: snapshot.id,
+        sourceRemoteModifiedAt: snapshot.remoteModifiedAt,
+      });
+    }
 
     await markSnapshotProcessed(tx, snapshot.id, CURRENT_CONTACT_NORMALIZER_VERSION, null);
 

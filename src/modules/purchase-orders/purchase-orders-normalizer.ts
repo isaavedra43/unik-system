@@ -2,6 +2,7 @@ import { Prisma, PrismaClient } from '@prisma/client';
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { SOURCE, PURCHASE_ORDERS_ENTITY_TYPE } from '@/modules/integrations/zoho/purchase-orders-sync';
+import { recordPurchaseOrderChange, PURCHASE_ORDER_CHANGE_SELECT } from './purchase-orders-change-events';
 
 const CURRENT_PURCHASE_ORDER_NORMALIZER_VERSION = 1;
 
@@ -238,7 +239,7 @@ export async function normalizePurchaseOrderSnapshot(
   return prisma.$transaction(async (tx) => {
     const existing = await tx.purchaseOrder.findUnique({
       where: { zohoPurchaseOrderId: payload.purchaseorder_id },
-      select: { id: true, sourceRemoteModifiedAt: true },
+      select: { ...PURCHASE_ORDER_CHANGE_SELECT, sourceRemoteModifiedAt: true },
     });
 
     if (existing && existing.sourceRemoteModifiedAt.getTime() > snapshot.remoteModifiedAt.getTime()) {
@@ -251,6 +252,15 @@ export async function normalizePurchaseOrderSnapshot(
       create: purchaseOrderData,
       update: purchaseOrderData,
     });
+
+    if (existing) {
+      await recordPurchaseOrderChange(tx, {
+        before: existing,
+        after: purchaseOrder,
+        sourceSnapshotId: snapshot.id,
+        sourceRemoteModifiedAt: snapshot.remoteModifiedAt,
+      });
+    }
 
     await tx.purchaseOrderItem.deleteMany({ where: { purchaseOrderId: purchaseOrder.id } });
     if (items.length > 0) {

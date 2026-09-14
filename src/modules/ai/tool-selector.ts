@@ -196,7 +196,7 @@ const SYNONYMS: Record<string, string[]> = {
   user: ['usuario', 'usuarios', 'quien soy', 'mi'],
   module: ['modulo', 'modulos', 'sistema'],
   time: ['hora', 'fecha', 'hoy', 'dia'],
-  notifications: ['notificacion', 'notificaciones', 'aviso', 'avisos', 'alerta'],
+  notifications: ['notificacion', 'notificaciones', 'aviso', 'avisos', 'alerta', 'avisa', 'avisale', 'notifica', 'notificale', 'dile'],
   integration: ['integracion', 'zoho', 'sincronizacion', 'sync'],
   status: ['estado', 'estatus', 'situacion'],
   search: ['busca', 'buscar', 'encuentra', 'donde', 'localiza'],

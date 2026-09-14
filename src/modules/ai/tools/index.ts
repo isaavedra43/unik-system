@@ -96,5 +96,8 @@ import './planning-tools';
 // Documents (adjuntos de la conversación, extracción estructurada de facturas/recibos, borrador de bill)
 import './documents-tools';
 
+// Notifications (avisar a otros usuarios, configuración de notificaciones)
+import './notifications-tools';
+
 // Export the registry API for consumers
 export * from './registry';

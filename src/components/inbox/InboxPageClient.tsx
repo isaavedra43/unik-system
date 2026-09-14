@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
+import { useSearchParams } from 'next/navigation';
 import { ConversationList } from './ConversationList';
 import { ConversationView } from './ConversationView';
 import { CopilotPanel } from './copilot/CopilotPanel';
@@ -44,8 +45,11 @@ export function InboxPageClient({ user }: { user: InboxUserInfo }) {
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [listLoading, setListLoading] = useState(true);
   const [listError, setListError] = useState<string | null>(null);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [mobileView, setMobileView] = useState<MobileView>('list');
+  const searchParams = useSearchParams();
+  const [selectedId, setSelectedId] = useState<string | null>(() => searchParams.get('conversation'));
+  const [mobileView, setMobileView] = useState<MobileView>(() =>
+    searchParams.get('conversation') ? 'conversation' : 'list'
+  );
   const [aiOpen, setAiOpen] = useState(true);
   const [draft, setDraft] = useState('');
   const [attachSeed, setAttachSeed] = useState<ComposerAttachment | null>(null);

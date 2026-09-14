@@ -12,7 +12,7 @@ import {
   formatCurrency, formatDateOnly, formatDateTime, formatNumber, getQuoteStatusConfig, getQuoteExpiryInfo,
   isQuoteEditable, canMarkSent, canDecide,
 } from '@/modules/quotes/quotes-helpers';
-import { QUOTE_CHANGE_FIELD_LABELS } from '@/modules/quotes/quotes-change-events';
+import { QUOTE_CHANGE_FIELD_LABELS } from '@/modules/quotes/quotes-change-labels';
 import type { RelatedContactSummary } from '@/modules/cross-module/relationships-service';
 import type { QuoteWriteResult } from '@/app/app/quotes/actions';
 import type { QuoteEmailInput } from '@/modules/quotes/quotes-form-schema';

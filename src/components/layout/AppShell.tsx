@@ -34,10 +34,12 @@ import {
   PhoneCall,
   BookOpen,
   Radio,
+  SlidersHorizontal,
 } from 'lucide-react';
 import { AssistantWidget } from '@/components/assistant/AssistantWidget';
 import { CallDockProvider } from '@/components/calls/CallDockProvider';
 import { ThemeToggle } from '@/components/layout/ThemeToggle';
+import { useNotificationStream } from '@/components/notifications/useNotificationStream';
 import { SeedDemoDataButton } from '@/components/dev/SeedDemoDataButton';
 
 interface AppShellProps {
@@ -244,6 +246,11 @@ function AccountMenu({ user }: { user: CurrentUser }) {
             icon: <Shield size={16} />,
           },
           {
+            label: 'Mis notificaciones',
+            href: '/app/account/notifications',
+            icon: <Bell size={16} />,
+          },
+          {
             label: 'Cerrar sesión',
             icon: <LogOut size={16} />,
             onClick: () => {
@@ -263,32 +270,29 @@ function AccountMenu({ user }: { user: CurrentUser }) {
 function Topbar({ user, onToggleSidebar }: { user: CurrentUser; onToggleSidebar: () => void }) {
   const pathname = usePathname();
   const crumbs = buildBreadcrumbs(pathname);
-  const [unread, setUnread] = useState(0);
+  const { unread, setUnread } = useNotificationStream(user.id);
   const [bellOpen, setBellOpen] = useState(false);
   const [recent, setRecent] = useState<
-    { id: string; title: string; body: string | null; readAt: string | null; createdAt: string }[]
+    {
+      id: string;
+      title: string;
+      body: string | null;
+      url: string | null;
+      readAt: string | null;
+      createdAt: string;
+    }[]
   >([]);
 
-  React.useEffect(() => {
-    let active = true;
-    async function load() {
-      try {
-        const res = await fetch('/app/notifications/api/unread-count');
-        if (res.ok) {
-          const json = await res.json();
-          if (active) setUnread(json.count);
-        }
-      } catch {
-        // silent
-      }
-    }
-    load();
-    const interval = setInterval(load, 90_000);
-    return () => {
-      active = false;
-      clearInterval(interval);
-    };
-  }, []);
+  function openNotification(n: { id: string; readAt: string | null }) {
+    setBellOpen(false);
+    if (n.readAt) return;
+    setUnread((u) => Math.max(0, u - 1));
+    void fetch('/app/notifications/api/read', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: n.id }),
+    }).catch(() => undefined);
+  }
 
   async function openBell() {
     if (bellOpen) {
@@ -359,9 +363,9 @@ function Topbar({ user, onToggleSidebar }: { user: CurrentUser; onToggleSidebar:
                   recent.map((n) => (
                     <Link
                       key={n.id}
-                      href="/app/notifications"
+                      href={n.url ?? '/app/notifications'}
                       className={`so-notification-item ${n.readAt === null ? 'unread' : ''}`}
-                      onClick={() => setBellOpen(false)}
+                      onClick={() => openNotification(n)}
                       style={{ textDecoration: 'none', color: 'inherit' }}
                     >
                       <div className="so-notification-title">{n.title}</div>
@@ -468,6 +472,9 @@ function buildBreadcrumbs(pathname: string): { label: string; href?: string }[] 
   }
   if (pathname.startsWith('/app/account/security')) {
     return [{ label: 'Cuenta' }, { label: 'Seguridad' }];
+  }
+  if (pathname.startsWith('/app/account/notifications')) {
+    return [{ label: 'Cuenta' }, { label: 'Mis notificaciones' }];
   }
   if (pathname === '/app/sales/orders') {
     return [{ label: 'Ventas' }, { label: 'Órdenes de venta' }];
@@ -830,6 +837,12 @@ export default function AppShell({ user, children }: AppShellProps) {
           href: '/app/notifications',
           label: 'Notificaciones',
           icon: <Bell size={18} />,
+          visible: true,
+        },
+        {
+          href: '/app/account/notifications',
+          label: 'Configurar avisos',
+          icon: <SlidersHorizontal size={18} />,
           visible: true,
         },
       ],

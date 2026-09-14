@@ -2,6 +2,7 @@ import { Prisma, PrismaClient } from '@prisma/client';
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { SOURCE, BILLS_ENTITY_TYPE } from '@/modules/integrations/zoho/bills-sync';
+import { recordBillChange, BILL_CHANGE_SELECT } from './bills-change-events';
 
 export const CURRENT_BILL_NORMALIZER_VERSION = 1;
 
@@ -198,7 +199,7 @@ export async function normalizeBillSnapshot(
   return prisma.$transaction(async (tx) => {
     const existing = await tx.bill.findUnique({
       where: { zohoBillId: payload.bill_id },
-      select: { id: true, sourceRemoteModifiedAt: true },
+      select: { ...BILL_CHANGE_SELECT, sourceRemoteModifiedAt: true },
     });
 
     if (existing && existing.sourceRemoteModifiedAt.getTime() > snapshot.remoteModifiedAt.getTime()) {
@@ -211,6 +212,15 @@ export async function normalizeBillSnapshot(
       create: billData,
       update: billData,
     });
+
+    if (existing) {
+      await recordBillChange(tx, {
+        before: existing,
+        after: bill,
+        sourceSnapshotId: snapshot.id,
+        sourceRemoteModifiedAt: snapshot.remoteModifiedAt,
+      });
+    }
 
     await markSnapshotProcessed(tx, snapshot.id, CURRENT_BILL_NORMALIZER_VERSION, null);
 

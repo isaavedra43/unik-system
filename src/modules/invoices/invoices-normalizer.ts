@@ -2,6 +2,7 @@ import { Prisma, PrismaClient } from '@prisma/client';
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { SOURCE, INVOICES_ENTITY_TYPE } from '@/modules/integrations/zoho/invoices-sync';
+import { recordInvoiceChange, INVOICE_CHANGE_SELECT } from './invoices-change-events';
 
 const CURRENT_INVOICE_NORMALIZER_VERSION = 2;
 
@@ -297,7 +298,7 @@ export async function normalizeInvoiceSnapshot(
   return prisma.$transaction(async (tx) => {
     const existing = await tx.invoice.findUnique({
       where: { zohoInvoiceId: payload.invoice_id },
-      select: { id: true, sourceRemoteModifiedAt: true },
+      select: { ...INVOICE_CHANGE_SELECT, sourceRemoteModifiedAt: true },
     });
 
     if (existing && existing.sourceRemoteModifiedAt.getTime() > snapshot.remoteModifiedAt.getTime()) {
@@ -310,6 +311,15 @@ export async function normalizeInvoiceSnapshot(
       create: invoiceData,
       update: invoiceData,
     });
+
+    if (existing) {
+      await recordInvoiceChange(tx, {
+        before: existing,
+        after: invoice,
+        sourceSnapshotId: snapshot.id,
+        sourceRemoteModifiedAt: snapshot.remoteModifiedAt,
+      });
+    }
 
     // Delete old items and insert new ones
     await tx.invoiceItem.deleteMany({ where: { invoiceId: invoice.id } });

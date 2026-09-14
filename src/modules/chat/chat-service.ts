@@ -14,6 +14,7 @@ import type {
 } from './chat-events';
 import { getPresence } from './chat-presence-service';
 import { detectChatAlerts } from './chat-admin-service';
+import { notifyChatMessage } from './chat-notifications';
 
 class ChatError extends Error {
   constructor(message: string) {
@@ -667,13 +668,13 @@ export async function sendMessage(
     }
   }
 
+  const mentionUserIds = new Set<string>();
   if (mentionedUsernames.length > 0) {
     const channelMembers = await prisma.internalChatMember.findMany({
       where: { channelId: input.channelId, leftAt: null },
       include: { user: { select: { username: true } } },
     });
     const memberUsernames = new Map(channelMembers.map((m) => [m.user.username, m.userId]));
-    const mentionUserIds = new Set<string>();
     for (const username of mentionedUsernames) {
       const userId = memberUsernames.get(username);
       if (userId) mentionUserIds.add(userId);
@@ -712,6 +713,28 @@ export async function sendMessage(
     createdAt: message.createdAt,
   }).catch(() => {
     // silent — alert detection failures should not block message sending
+  });
+
+  // In-app + push for the other members (async, never blocks the sender).
+  notifyChatMessage({
+    messageId: message.id,
+    channelId: input.channelId,
+    senderId: actor.id,
+    senderName: actor.name,
+    content,
+    priority: input.priority ?? 'normal',
+    mentionedUserIds: mentionUserIds,
+    kind: input.attachmentIds?.length
+      ? 'attachment'
+      : input.location
+        ? 'location'
+        : input.poll
+          ? 'poll'
+          : input.event
+            ? 'event'
+            : 'text',
+  }).catch(() => {
+    // silent — notification failures never block message sending
   });
 
   return toMessageDTO(fullMessage, actor.id);
@@ -1874,6 +1897,18 @@ export async function broadcastMessage(
     await prisma.internalChatChannel.update({
       where: { id: channelId },
       data: { lastMessageAt: message.createdAt },
+    });
+
+    notifyChatMessage({
+      messageId: message.id,
+      channelId,
+      senderId: actor.id,
+      senderName: actor.name,
+      content: trimmed,
+      priority: input.priority ?? 'normal',
+      kind: input.attachmentIds?.length ? 'attachment' : 'text',
+    }).catch(() => {
+      // silent
     });
 
     const fullMsg = await prisma.internalChatMessage.findUnique({

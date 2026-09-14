@@ -164,6 +164,9 @@ export const DEFAULT_AI_SETTINGS: AiSettings = {
     'getProductBundles',
     // Operations
     'getNotifications',
+    'findUsers',
+    'notifyUser',
+    'getMyNotificationSettings',
     'getIntegrationStatus',
     // Purchases
     'queryPurchaseOrders',

@@ -53,6 +53,8 @@ export async function startNodeInstrumentation() {
     const { startRecurringScheduler } = await import('@/modules/jobs/scheduled-jobs');
     startJobWorker();
     startRecurringScheduler();
+    const { startNotificationDispatcher } = await import('@/modules/notifications/notification-jobs');
+    startNotificationDispatcher();
     log('jobs.worker_start_requested');
   } catch (err) {
     console.error(

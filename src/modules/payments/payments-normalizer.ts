@@ -2,6 +2,7 @@ import { Prisma, PrismaClient } from '@prisma/client';
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { SOURCE, PAYMENTS_ENTITY_TYPE } from '@/modules/integrations/zoho/payments-sync';
+import { recordPaymentChange, PAYMENT_CHANGE_SELECT } from './payments-change-events';
 
 const CURRENT_PAYMENT_NORMALIZER_VERSION = 1;
 
@@ -196,7 +197,7 @@ export async function normalizePaymentSnapshot(
   return prisma.$transaction(async (tx) => {
     const existing = await tx.customerPayment.findUnique({
       where: { zohoPaymentId: payload.payment_id },
-      select: { id: true, sourceRemoteModifiedAt: true },
+      select: { ...PAYMENT_CHANGE_SELECT, sourceRemoteModifiedAt: true },
     });
 
     if (existing && existing.sourceRemoteModifiedAt.getTime() > snapshot.remoteModifiedAt.getTime()) {
@@ -209,6 +210,15 @@ export async function normalizePaymentSnapshot(
       create: paymentData,
       update: paymentData,
     });
+
+    if (existing) {
+      await recordPaymentChange(tx, {
+        before: existing,
+        after: payment,
+        sourceSnapshotId: snapshot.id,
+        sourceRemoteModifiedAt: snapshot.remoteModifiedAt,
+      });
+    }
 
     await markSnapshotProcessed(tx, snapshot.id, CURRENT_PAYMENT_NORMALIZER_VERSION, null);
 

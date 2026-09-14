@@ -2,6 +2,7 @@ import { Prisma, PrismaClient } from '@prisma/client';
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { SOURCE, VENDOR_CREDITS_ENTITY_TYPE } from '@/modules/integrations/zoho/vendor-credits-sync';
+import { recordVendorCreditChange, VENDOR_CREDIT_CHANGE_SELECT } from './vendor-credits-change-events';
 
 const CURRENT_VENDOR_CREDIT_NORMALIZER_VERSION = 1;
 
@@ -188,7 +189,7 @@ export async function normalizeVendorCreditSnapshot(
   return prisma.$transaction(async (tx) => {
     const existing = await tx.vendorCredit.findUnique({
       where: { zohoVendorCreditId: payload.vendor_credit_id },
-      select: { id: true, sourceRemoteModifiedAt: true },
+      select: { ...VENDOR_CREDIT_CHANGE_SELECT, sourceRemoteModifiedAt: true },
     });
 
     if (existing && existing.sourceRemoteModifiedAt.getTime() > snapshot.remoteModifiedAt.getTime()) {
@@ -201,6 +202,15 @@ export async function normalizeVendorCreditSnapshot(
       create: vendorCreditData,
       update: vendorCreditData,
     });
+
+    if (existing) {
+      await recordVendorCreditChange(tx, {
+        before: existing,
+        after: vendorCredit,
+        sourceSnapshotId: snapshot.id,
+        sourceRemoteModifiedAt: snapshot.remoteModifiedAt,
+      });
+    }
 
     await markSnapshotProcessed(tx, snapshot.id, CURRENT_VENDOR_CREDIT_NORMALIZER_VERSION, null);
 

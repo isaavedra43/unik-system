@@ -553,6 +553,10 @@ export async function runAgentTool(
         reason: motivo,
       }).catch(() => undefined);
     }
+    {
+      const { notifyTransferRequested } = await import('./voice-notifications');
+      notifyTransferRequested(call.id, motivo ?? null).catch(() => undefined);
+    }
     return {
       ok: true,
       result: {

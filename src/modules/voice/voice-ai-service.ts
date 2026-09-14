@@ -444,5 +444,7 @@ export async function summarizeCall(
   await prisma.voiceCall.update({ where: { id: callId }, data: { summary } });
 
   await publishRealtime(REALTIME_CHANNELS.call(callId), 'summary_ready', { summary });
+  const { notifyCallSummary } = await import('./voice-notifications');
+  notifyCallSummary(callId, summary).catch(() => undefined);
   return { summary };
 }

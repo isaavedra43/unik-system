@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentSession } from '@/modules/auth/authorization';
-import { getNotifications } from '@/modules/sales/notifications-service';
+import { getNotifications } from '@/modules/notifications/notification-service';
 
 export const runtime = 'nodejs';
 
@@ -14,7 +14,8 @@ export async function GET(req: NextRequest) {
   const page = searchParams.get('page') ? Number(searchParams.get('page')) : 1;
   const pageSize = searchParams.get('page_size') ? Number(searchParams.get('page_size')) : 25;
   const unreadOnly = searchParams.get('unread') === 'true';
+  const category = searchParams.get('category') || undefined;
 
-  const result = await getNotifications(session.user.id, { page, pageSize, unreadOnly });
+  const result = await getNotifications(session.user.id, { page, pageSize, unreadOnly, category });
   return NextResponse.json(result);
 }

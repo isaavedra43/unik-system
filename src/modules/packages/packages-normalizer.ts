@@ -2,6 +2,7 @@ import { Prisma, PrismaClient } from '@prisma/client';
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { SOURCE, PACKAGES_ENTITY_TYPE } from '@/modules/integrations/zoho/packages-sync';
+import { recordPackageChange, PACKAGE_CHANGE_SELECT } from './packages-change-events';
 
 const CURRENT_PACKAGE_NORMALIZER_VERSION = 3;
 
@@ -295,7 +296,7 @@ export async function normalizePackageSnapshot(
   return prisma.$transaction(async (tx) => {
     const existing = await tx.package.findUnique({
       where: { zohoPackageId: payload.package_id },
-      select: { id: true, sourceRemoteModifiedAt: true },
+      select: { ...PACKAGE_CHANGE_SELECT, sourceRemoteModifiedAt: true },
     });
 
     if (
@@ -312,6 +313,15 @@ export async function normalizePackageSnapshot(
       create: packageData,
       update: packageData,
     });
+
+    if (existing) {
+      await recordPackageChange(tx, {
+        before: existing,
+        after: pkg,
+        sourceSnapshotId: snapshot.id,
+        sourceRemoteModifiedAt: snapshot.remoteModifiedAt,
+      });
+    }
 
     // Delete old items and insert new ones to preserve traceability
     await tx.packageItem.deleteMany({ where: { packageId: pkg.id } });

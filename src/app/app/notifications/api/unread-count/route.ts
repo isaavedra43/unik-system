@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getCurrentSession } from '@/modules/auth/authorization';
-import { getUnreadNotificationCount } from '@/modules/sales/notifications-service';
+import { getUnreadNotificationCount } from '@/modules/notifications/notification-service';
 
 export const runtime = 'nodejs';
 

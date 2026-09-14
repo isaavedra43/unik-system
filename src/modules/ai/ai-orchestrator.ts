@@ -40,6 +40,7 @@ import { inferConfidence, parseConfidence } from './confidence';
 import { mergeMessageMeta } from './ai-sessions-service';
 import { attachmentKind } from './ai-attachments-service';
 import { judgeTurnQuality } from './ai-quality-judge';
+import { notifyAiTaskDone } from './ai-notifications';
 
 interface OrchestratorInput {
   conversationId: string;
@@ -57,6 +58,8 @@ interface OrchestratorInput {
   model?: string;
   /** Plan-then-execute requested for this message: propose steps, wait for confirmation. */
   planFirst?: boolean;
+  /** Always notify (in-app + push) when this turn finishes, even if it was quick. */
+  notifyWhenDone?: boolean;
   /**
    * Optional attachment IDs (images/PDFs uploaded by the user). They are
    * resolved server-side: must belong to this conversation and user, be
@@ -245,6 +248,8 @@ export async function* runAssistant(
       console.warn('[orchestrator] Some attachments were ignored (not ready or not owned)');
     }
   }
+
+  const runStartedAt = Date.now();
 
   // 4. Persist user message
   const userMessage = await addMessage(input.conversationId, 'user', input.message, null, 0, 0, 0);
@@ -1210,6 +1215,19 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
           toolsUsed: toolsUsedThisTurn,
           confidence,
         }).catch((err) => console.warn('[ai-orchestrator] judge failed:', err instanceof Error ? err.message : err));
+      }
+      // Long turns notify their owner (phone push + bell) so they can come back to the answer.
+      if (!isAutoTrigger) {
+        void notifyAiTaskDone({
+          userId: input.actor.id,
+          conversationId: input.conversationId,
+          messageId: finalMessage.id,
+          content: iterationContent,
+          elapsedMs: Date.now() - runStartedAt,
+          toolCalls: turnStats.calls,
+          surface: { inboxConversationId, chatChannelId },
+          force: Boolean(input.notifyWhenDone),
+        }).catch((err) => console.warn('[ai-orchestrator] notify failed:', err instanceof Error ? err.message : err));
       }
       yield {
         type: 'done',

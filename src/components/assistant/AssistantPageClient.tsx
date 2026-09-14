@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { Menu, X } from 'lucide-react';
 import type { CurrentUser } from '@/modules/auth/authorization';
 import { AssistantChat } from './AssistantChat';
@@ -11,8 +12,15 @@ export interface AssistantPageClientProps {
 }
 
 export function AssistantPageClient({ user }: AssistantPageClientProps) {
-  const [activeId, setActiveId] = useState<string | null>(null);
+  const searchParams = useSearchParams();
+  const requestedId = searchParams.get('c');
+  const [activeId, setActiveId] = useState<string | null>(requestedId);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  // Deep link from a notification ("the assistant finished"): open that thread.
+  useEffect(() => {
+    if (requestedId) setActiveId(requestedId);
+  }, [requestedId]);
 
   return (
     <div className="assistant-page-body">

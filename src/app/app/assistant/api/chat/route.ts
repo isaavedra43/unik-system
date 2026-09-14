@@ -18,6 +18,8 @@ const chatRequestSchema = z.object({
   model: z.string().optional(),
   /** Plan-then-execute for this message: the assistant proposes steps and waits for confirmation. */
   planFirst: z.boolean().optional(),
+  /** Notify (bell + push) when the answer is ready even if the turn is short. */
+  notifyWhenDone: z.boolean().optional(),
   // Attachments are referenced by ID only. Older clients may still send objects
   // with fileName/mimeType/storagePath: only the id is used, the rest is ignored.
   attachments: z
@@ -61,6 +63,21 @@ export async function POST(request: NextRequest) {
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
     async start(controller) {
+      // When the phone locks or the user switches app, the SSE connection drops.
+      // The run keeps going to completion (its result is persisted and the
+      // "assistant finished" notification fires) — we just stop writing frames.
+      let clientGone = false;
+      const write = (payload: unknown) => {
+        if (clientGone) return;
+        try {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(payload)}\n\n`));
+        } catch {
+          clientGone = true;
+        }
+      };
+      request.signal.addEventListener('abort', () => {
+        clientGone = true;
+      });
       try {
         for await (const event of runAssistant({
           conversationId: parsed.data.conversationId,
@@ -69,19 +86,22 @@ export async function POST(request: NextRequest) {
           context: parsed.data.context,
           model: parsed.data.model,
           planFirst: parsed.data.planFirst,
+          notifyWhenDone: parsed.data.notifyWhenDone,
           attachmentIds: parsed.data.attachments,
         })) {
-          const data = `data: ${JSON.stringify(event)}\n\n`;
-          controller.enqueue(encoder.encode(data));
+          write(event);
         }
       } catch (e) {
-        const data = `data: ${JSON.stringify({
+        write({
           type: 'error',
           data: { message: e instanceof Error ? e.message : 'Error desconocido' },
-        })}\n\n`;
-        controller.enqueue(encoder.encode(data));
+        });
       } finally {
-        controller.close();
+        try {
+          controller.close();
+        } catch {
+          // already closed
+        }
       }
     },
   });

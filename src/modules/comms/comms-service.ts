@@ -27,6 +27,7 @@ import {
   type CommContactDTO,
 } from './comms-contacts-service';
 import { CommsError, assertFound } from './comms-errors';
+import { notifyConversationAssigned, notifyInboundMessage } from './comms-notifications';
 import { filterReadableObjectIds } from './comms-storage';
 import { channelForProvider, detectConsentKeyword, normalizePhone, previewText } from './normalize';
 import './comms-storage';
@@ -418,6 +419,14 @@ export async function updateConversation(
   await publishToTeams(updated.account, updated, 'conversation', { fields: Object.keys(patch) }, [
     conversation.assignedToUserId,
   ]);
+  if (patch.assignedToUserId && patch.assignedToUserId !== conversation.assignedToUserId) {
+    notifyConversationAssigned({
+      conversation: updated,
+      contactName: updated.contact.displayName,
+      actorUserId: actor.id,
+      actorName: actor.name,
+    }).catch(() => undefined);
+  }
   return (await toConversationDTOs([updated]))[0];
 }
 
@@ -805,6 +814,15 @@ export async function recordInboundMessage(
     reopened,
     consent,
   });
+  // In-app + push to the assignee (or the account's agents). Never blocks the webhook.
+  notifyInboundMessage({
+    account,
+    conversation,
+    message,
+    contactName: contact.displayName,
+    from: inbound.fromName ?? inbound.from,
+    hasMedia: inbound.media.length > 0,
+  }).catch(() => undefined);
   return { created: true, message, conversation };
 }
 

@@ -10,3 +10,4 @@ import '@/modules/voice/voice-jobs';
 import '@/modules/campaigns/campaigns-jobs';
 import '@/modules/comms/comms-jobs';
 import '@/modules/ai/ai-jobs';
+import '@/modules/notifications/notification-jobs';

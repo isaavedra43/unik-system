@@ -1,6 +1,7 @@
 import { prisma } from '@/lib/prisma';
 import { Prisma } from '@prisma/client';
 import { getActiveWatchers } from './entity-watch-service';
+import { notifyUser } from '@/modules/notifications/notification-service';
 
 /**
  * Change detection and notification service for Sales Orders.
@@ -268,7 +269,7 @@ export async function recordSalesOrderChange(
     },
   });
 
-  // Create notifications for active watchers (idempotent).
+  // Notify active watchers through the central service (preferences, push, idempotent).
   const watchers = await tx.entityWatch.findMany({
     where: { entityType: SALES_ORDER_ENTITY_TYPE, entityId: salesOrderId, isActive: true },
     select: { userId: true },
@@ -282,25 +283,21 @@ export async function recordSalesOrderChange(
     .map((f) => `${f}: ${fieldChanges[f].before ?? '—'} → ${fieldChanges[f].after ?? '—'}`)
     .join(', ');
 
-  // Check for existing notifications to maintain idempotency.
   for (const watcher of watchers) {
-    const existingNotif = await tx.notification.findFirst({
-      where: { userId: watcher.userId, changeEventId: event.id },
-      select: { id: true },
-    });
-    if (existingNotif) continue;
-
-    await tx.notification.create({
-      data: {
-        userId: watcher.userId,
-        type: 'sales_order_changed',
-        title,
-        body: body || 'Se detectaron cambios en la orden',
-        entityType: SALES_ORDER_ENTITY_TYPE,
-        entityId: salesOrderId,
-        changeEventId: event.id,
-        metadata: { salesOrderNumber } as Prisma.InputJsonValue,
-      },
+    await notifyUser({
+      tx,
+      userId: watcher.userId,
+      category: 'entity_change',
+      type: 'sales_order_changed',
+      title,
+      body: body || (itemChanges ? 'Cambiaron las partidas de la orden' : 'Se detectaron cambios en la orden'),
+      url: `/app/sales/orders/${salesOrderId}`,
+      entityType: SALES_ORDER_ENTITY_TYPE,
+      entityId: salesOrderId,
+      changeEventId: event.id,
+      dedupeKey: `change:${event.id}:${watcher.userId}`,
+      metadata: { salesOrderNumber },
+      push: { tag: `entity:${SALES_ORDER_ENTITY_TYPE}:${salesOrderId}` },
     });
   }
 }

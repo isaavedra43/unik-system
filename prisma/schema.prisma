@@ -187,6 +187,8 @@ model User {
   tableViews           TableView[]
   entityWatches        EntityWatch[]
   notifications        Notification[]
+  pushSubscriptions    PushSubscription[]
+  notificationSettings UserNotificationSettings?
   aiConversations      AiConversation[]
   chatMemberships      InternalChatMember[]
   chatMessages         InternalChatMessage[]
@@ -944,12 +946,22 @@ model Notification {
   id            String    @id @default(cuid())
   userId        String
   type          String
+  /// Preference bucket (see NOTIFICATION_CATEGORIES in src/modules/notifications/catalog.ts).
+  category      String    @default("system")
   title         String
   body          String?
+  /// In-app path opened when the notification (or its push) is tapped.
+  url           String?
   entityType    String?
   entityId      String?
   changeEventId String?
+  /// Optional idempotency key (e.g. "chat_message:{messageId}:{userId}").
+  dedupeKey     String?   @unique
   metadata      Json?
+  /// Push delivery state: pending | sent | skipped | failed. Rows created inside a
+  /// transaction stay pending until the dispatcher picks them up after commit.
+  pushStatus    String    @default("pending")
+  pushedAt      DateTime?
   readAt        DateTime?
   createdAt     DateTime  @default(now())
   user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -957,6 +969,45 @@ model Notification {
   @@index([userId, readAt])
   @@index([userId, createdAt])
   @@index([userId, changeEventId])
+  @@index([pushStatus, createdAt])
+}
+
+/// Web Push subscription of one browser/device (VAPID). A user has one row per
+/// device; the endpoint is unique across users (a device re-login moves it).
+model PushSubscription {
+  id           String    @id @default(cuid())
+  userId       String
+  endpoint     String    @unique
+  p256dh       String
+  auth         String
+  userAgent    String?
+  /// ios | android | desktop | unknown (best effort, for the settings screen).
+  platform     String    @default("unknown")
+  failureCount Int       @default(0)
+  lastUsedAt   DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+/// Per-user notification configuration. `preferences` is a map
+/// { [category]: { inApp: boolean, push: boolean } }; categories missing from the
+/// map use the catalog defaults.
+model UserNotificationSettings {
+  userId          String    @id
+  pushEnabled     Boolean   @default(true)
+  /// Do-not-disturb window (local hour 0-23, in `timezone`). null = disabled.
+  quietHoursStart Int?
+  quietHoursEnd   Int?
+  timezone        String    @default("America/Mexico_City")
+  /// Temporary mute of every push (in-app rows are still created).
+  mutedUntil      DateTime?
+  preferences     Json      @default("{}")
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 // =====================================================
@@ -965,20 +1016,20 @@ model Notification {
 
 /// Una conversación entre un usuario y el asistente IA.
 model AiConversation {
-  id        String       @id @default(cuid())
-  userId    String
-  title     String       @default("Nueva conversación")
-  context   Json?
-  isStarred Boolean      @default(false)
+  id                  String       @id @default(cuid())
+  userId              String
+  title               String       @default("Nueva conversación")
+  context             Json?
+  isStarred           Boolean      @default(false)
   /// Rolling summary of the thread (shared context across assistant + copilots).
   summary             String?
   summaryUpdatedAt    DateTime?
   summaryMessageCount Int          @default(0)
-  createdAt DateTime     @default(now())
-  updatedAt DateTime     @updatedAt
-  user      User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  messages  AiMessage[]
-  artifacts AiArtifact[]
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
+  user                User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages            AiMessage[]
+  artifacts           AiArtifact[]
 
   @@index([userId, updatedAt])
   @@index([isStarred])
@@ -986,17 +1037,17 @@ model AiConversation {
 
 /// Un mensaje dentro de una conversación (user, assistant, o tool).
 model AiMessage {
-  id              String         @id @default(cuid())
+  id              String             @id @default(cuid())
   conversationId  String
   role            String
   content         String?
   toolCalls       Json?
   toolCallId      String?
-  tokensIn        Int            @default(0)
-  tokensOut       Int            @default(0)
-  latencyMs       Int            @default(0)
-  createdAt       DateTime       @default(now())
-  conversation    AiConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  tokensIn        Int                @default(0)
+  tokensOut       Int                @default(0)
+  latencyMs       Int                @default(0)
+  createdAt       DateTime           @default(now())
+  conversation    AiConversation     @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   toolCallRecords AiToolCall[]
   attachments     AiAttachment[]
   artifacts       AiArtifact[]
@@ -2088,18 +2139,18 @@ model KnowledgeSourceVersion {
 }
 
 model KnowledgeChunk {
-  id        String                 @id @default(cuid())
-  sourceId  String
-  versionId String
-  ordinal   Int
-  section   String?
-  content   String
-  tokens    Int                    @default(0)
+  id             String                 @id @default(cuid())
+  sourceId       String
+  versionId      String
+  ordinal        Int
+  section        String?
+  content        String
+  tokens         Int                    @default(0)
   /// Semantic vector (text-embedding-3-small by default). Empty until embedded.
-  embedding      Float[]           @default([])
+  embedding      Float[]                @default([])
   embeddingModel String?
-  createdAt DateTime               @default(now())
-  version   KnowledgeSourceVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  createdAt      DateTime               @default(now())
+  version        KnowledgeSourceVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
 
   @@index([versionId, ordinal])
   @@index([sourceId])
