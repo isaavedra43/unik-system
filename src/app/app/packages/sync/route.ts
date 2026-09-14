@@ -7,11 +7,14 @@ import {
   SyncFailedError,
   SyncAlreadyRunningError,
 } from '@/modules/integrations/zoho/packages-sync';
+import { sweepPackageShipments } from '@/modules/integrations/zoho/packages-shipment-sweep';
 
 export const runtime = 'nodejs';
 
 /** Max time the HTTP request stays open; the sync itself continues in `after()`. */
 const SYNC_ROUTE_TIMEOUT_MS = 25_000;
+/** Package details re-read per manual refresh (unshipped or carrier-less first). */
+const SWEEP_LIMIT = 40;
 
 const ERROR_MESSAGES: Record<string, string> = {
   ZOHO_API_ERROR: 'Zoho rechazó la consulta de paquetes. Revisa la conexión en Integraciones.',
@@ -50,6 +53,8 @@ export async function POST() {
       } catch {
         // Errors are already logged inside syncPackages.
       }
+      // Carrier / shipment refresh for packages Zoho did not report as modified.
+      await sweepPackageShipments({ limit: SWEEP_LIMIT }).catch(() => undefined);
     });
 
     const result = await Promise.race([

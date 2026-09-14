@@ -91,6 +91,13 @@ export const packagesAdapter: ZohoEntityAdapter = {
   },
 
   currentNormalizerVersion: CURRENT_PACKAGE_NORMALIZER_VERSION,
+
+  /** Carrier lives in Zoho's shipment order, which never bumps the package's
+   *  modified time: re-read details of unshipped / carrier-less packages. */
+  async afterSync({ maxDetailFetches }) {
+    const { sweepPackageShipments } = await import('./packages-shipment-sweep');
+    await sweepPackageShipments({ limit: Math.max(120, maxDetailFetches) });
+  },
 };
 
 // ---------------------------------------------------------------------------

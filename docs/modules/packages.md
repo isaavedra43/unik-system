@@ -38,6 +38,20 @@ Columnas nuevas (migración `20260914170000_package_shipment_fields`, aditiva): 
 - `CURRENT_PACKAGE_NORMALIZER_VERSION = 4`: en la siguiente sincronización se re-normalizan todos los
   snapshots guardados, así los paquetes existentes obtienen transportista, envío y artículos.
 
+## Barrido de envíos (transportista siempre vinculado)
+
+Zoho guarda el transportista en la orden de envío y **no actualiza `last_modified_time` del paquete** al
+crearla, así que el sync normal no vuelve a leer un paquete que se envió después de sincronizarlo.
+`packages-shipment-sweep.ts` corrige eso: tras cada sincronización (manual: 40 paquetes; scheduler: 120)
+vuelve a pedir el detalle a Zoho y lo normaliza al momento, en este orden:
+
+1. Paquetes nunca releídos (`Package.lastDetailFetchedAt` nulo), sin transportista primero y luego los más
+   recientes: así se rellena el histórico completo poco a poco (25 mil ≈ unos días con la cuota diaria).
+2. Después, solo los que aún pueden cambiar (no entregados ni devueltos), como máximo cada 6 horas.
+
+Respeta el presupuesto compartido de llamadas a Zoho (`withZohoRateBudget`) y se detiene si se agota la
+cuota diaria. Un paquete borrado en Zoho (404) se marca como leído para no reintentarlo cada corrida.
+
 ## Pendiente de validación manual (producción)
 
 - Aplicar la migración (`npx prisma migrate deploy` en el Pre-deploy de Railway).

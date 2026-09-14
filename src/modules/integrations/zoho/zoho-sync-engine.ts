@@ -177,6 +177,13 @@ export interface ZohoEntityAdapter {
   currentNormalizerVersion?: number;
 
   /**
+   * Optional: extra work after a scheduled run completes (e.g. a targeted
+   * refresh that does not depend on `last_modified_time`). Errors are logged,
+   * never propagated.
+   */
+  afterSync?(opts: { maxDetailFetches: number }): Promise<void>;
+
+  /**
    * Wall-clock timeout overrides per mode. If omitted, engine defaults are used.
    */
   timeouts?: {
@@ -288,6 +295,38 @@ async function waitForRateBudget(config: RateBudgetConfig): Promise<void> {
     const waitMs = 60_000 - (Date.now() - oldestTs) + 100;
     await sleep(waitMs);
   }
+}
+
+/**
+ * Runs one Zoho call outside the sync engine (e.g. a targeted detail refresh)
+ * while still honouring the shared per-minute and daily budget.
+ */
+export async function withZohoRateBudget<T>(call: () => Promise<T>): Promise<T> {
+  let settings: ZohoSettings;
+  try {
+    settings = await getIntegrationSettings(INTEGRATION_SOURCE_ZOHO);
+  } catch {
+    settings = DEFAULT_SETTINGS[INTEGRATION_SOURCE_ZOHO];
+  }
+  const config = resolveRateBudgetConfig(settings);
+  for (let attempt = 0; ; attempt++) {
+    await waitForRateBudget(config);
+    try {
+      recordApiCall(config);
+      break;
+    } catch (error) {
+      if (error instanceof RateLimitError && error.limitType === 'per_minute' && attempt < 3) {
+        handleRateLimitError(error);
+        continue;
+      }
+      throw error;
+    }
+  }
+  return call();
+}
+
+export function isDailyLimitError(error: unknown): boolean {
+  return error instanceof RateLimitError && error.limitType === 'daily';
 }
 
 class RateLimitError extends Error {
@@ -461,9 +500,20 @@ async function scanRecentPages(
   let foundRecent = false;
 
   type PageFetcher = (opts: { page: number; perPage: number }) => Promise<unknown>;
-  const tryPage = async (page: number, sorted: boolean, fetcher?: PageFetcher): Promise<boolean | null> => {
+  const tryPage = async (
+    page: number,
+    sorted: boolean,
+    fetcher?: PageFetcher
+  ): Promise<boolean | null> => {
     try {
-      const rawPage = await fetchListPage(adapter, page, params.perPage, sorted, budgetConfig, fetcher);
+      const rawPage = await fetchListPage(
+        adapter,
+        page,
+        params.perPage,
+        sorted,
+        budgetConfig,
+        fetcher
+      );
       apiCalls += 1;
       pagesScanned += 1;
 
@@ -536,7 +586,14 @@ async function scanRecentPages(
     for (let page = 1; page <= maxOpenPages; page++) {
       let hasMore = false;
       try {
-        const rawPage = await fetchListPage(adapter, page, params.perPage, false, budgetConfig, open);
+        const rawPage = await fetchListPage(
+          adapter,
+          page,
+          params.perPage,
+          false,
+          budgetConfig,
+          open
+        );
         apiCalls += 1;
         pagesScanned += 1;
         const { summaries, rawRecords } = extractSummariesWithRaw(adapter, rawPage);

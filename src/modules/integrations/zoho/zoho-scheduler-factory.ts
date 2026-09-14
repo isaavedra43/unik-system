@@ -104,7 +104,11 @@ async function isSyncCoolingDown(entityType: string, now: Date = new Date()): Pr
  * Quick runs only read recent pages; the full scan refreshes everything else (a vendor's balances,
  * an old credit that was applied, entities Zoho can't sort by modified time).
  */
-async function isFullScanDue(entityType: string, intervalMs: number, now: Date = new Date()): Promise<boolean> {
+async function isFullScanDue(
+  entityType: string,
+  intervalMs: number,
+  now: Date = new Date()
+): Promise<boolean> {
   if (!intervalMs || intervalMs <= 0) return false;
   const lastFull = await prisma.integrationSyncRun.findFirst({
     where: { source: 'zoho', entityType, mode: 'sync', status: SYNC_STATUS.COMPLETED },
@@ -156,7 +160,8 @@ async function runSchedulerCheck(adapter: ZohoEntityAdapter): Promise<void> {
     log({ event: 'zoho.scheduler.sync_started', entityType: adapter.entityType });
 
     const mode: SyncMode =
-      settings.schedulerMode === 'quick' && (await isFullScanDue(adapter.entityType, settings.fullScanIntervalMs))
+      settings.schedulerMode === 'quick' &&
+      (await isFullScanDue(adapter.entityType, settings.fullScanIntervalMs))
         ? 'sync'
         : (settings.schedulerMode as SyncMode);
     if (mode !== settings.schedulerMode) {
@@ -180,6 +185,18 @@ async function runSchedulerCheck(adapter: ZohoEntityAdapter): Promise<void> {
       apiCalls: result.apiCalls,
       durationMs: Date.now() - startedAt,
     });
+
+    if (adapter.afterSync) {
+      try {
+        await adapter.afterSync({ maxDetailFetches: settings.schedulerMaxDetailFetches });
+      } catch (error) {
+        log({
+          event: 'zoho.scheduler.after_sync_failed',
+          entityType: adapter.entityType,
+          reason: error instanceof Error ? error.message : 'unknown',
+        });
+      }
+    }
   } catch (error) {
     if (error instanceof SyncAlreadyRunningError) {
       log({
@@ -216,10 +233,7 @@ export interface ZohoScheduler {
  * @param startOffsetMs  Additional delay before the first tick, used to
  *                      stagger entities so they don't all fire at once.
  */
-export function createZohoScheduler(
-  adapter: ZohoEntityAdapter,
-  startOffsetMs = 0
-): ZohoScheduler {
+export function createZohoScheduler(adapter: ZohoEntityAdapter, startOffsetMs = 0): ZohoScheduler {
   let intervalId: ReturnType<typeof setInterval> | null = null;
   let startupTimeoutId: ReturnType<typeof setTimeout> | null = null;
 
