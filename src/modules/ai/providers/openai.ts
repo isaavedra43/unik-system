@@ -42,6 +42,9 @@ async function getClient(): Promise<OpenAI> {
   client = new OpenAI({
     apiKey: config.apiKey,
     ...(config.endpoint ? { baseURL: config.endpoint } : {}),
+    // Reasoning models can take minutes on a single request; a silent retry would double it.
+    timeout: 15 * 60 * 1000,
+    maxRetries: 1,
   });
   cachedKey = config.apiKey;
   cachedEndpoint = config.endpoint;

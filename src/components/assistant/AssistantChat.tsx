@@ -251,7 +251,20 @@ export function AssistantChat({
       }
     } catch (e) {
       if ((e as Error).name !== 'AbortError') {
-        setError(e instanceof Error ? e.message : 'Error de conexión');
+        // The stream was cut (proxy idle limit, phone lock, flaky network) but the run keeps
+        // going on the server and its answer is persisted: wait for it instead of failing.
+        if (convId) {
+          setError('Se perdió la conexión, pero el asistente sigue trabajando. Esperando la respuesta…');
+          const recovered = await waitForPersistedAnswer(convId, userMsg.createdAt);
+          if (recovered) {
+            setError(null);
+            await loadConversation(convId);
+          } else {
+            setError('Se perdió la conexión. Recarga la conversación en unos minutos para ver la respuesta.');
+          }
+        } else {
+          setError(e instanceof Error ? e.message : 'Error de conexión');
+        }
       }
     } finally {
       setStreaming(false);
@@ -259,6 +272,27 @@ export function AssistantChat({
       setActiveToolCalls([]);
       abortRef.current = null;
     }
+  }
+
+  /** Polls the conversation until an assistant answer newer than `sinceIso` exists (up to ~15 min). */
+  async function waitForPersistedAnswer(convId: string, sinceIso: string): Promise<boolean> {
+    const since = Date.parse(sinceIso) - 5_000;
+    const deadline = Date.now() + 15 * 60 * 1000;
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 6_000));
+      try {
+        const res = await fetch(`/app/assistant/api/conversations/${convId}`);
+        if (!res.ok) continue;
+        const data = (await res.json()) as { messages?: Array<{ role: string; content: string | null; createdAt: string; toolCalls?: unknown }> };
+        const done = (data.messages ?? []).some(
+          (m) => m.role === 'assistant' && Date.parse(m.createdAt) > since && typeof m.content === 'string' && m.content.trim().length > 0 && !m.toolCalls
+        );
+        if (done) return true;
+      } catch {
+        // keep waiting
+      }
+    }
+    return false;
   }
 
   const suggestions = getSuggestionsForPage(context?.page);

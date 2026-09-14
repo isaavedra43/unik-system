@@ -360,7 +360,7 @@ export const DEFAULT_AI_SETTINGS: AiSettings = {
   ocrFallbackEnabled: true,
   qualityJudgeEnabled: false,
   qualityJudgeModel: 'gpt-4o-mini',
-  reasoningEffort: 'high',
+  reasoningEffort: 'medium',
   answerReviewEnabled: true,
 };
 

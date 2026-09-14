@@ -102,8 +102,24 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
     async start(controller) {
-      const send = (event: unknown) =>
-        controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+      let clientGone = false;
+      const send = (event: unknown) => {
+        if (clientGone) return;
+        try {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+        } catch {
+          clientGone = true;
+        }
+      };
+      // Keep long copilot turns alive through proxies (an SSE comment every 15 s).
+      const heartbeat = setInterval(() => {
+        if (clientGone) return;
+        try {
+          controller.enqueue(encoder.encode(`: ping ${Date.now()}\n\n`));
+        } catch {
+          clientGone = true;
+        }
+      }, 15_000);
       try {
         send({ type: 'meta', data: { conversationId: aiConversationId } });
         for await (const event of runAssistant({
@@ -121,7 +137,12 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
           data: { message: e instanceof Error ? e.message : 'Error desconocido' },
         });
       } finally {
-        controller.close();
+        clearInterval(heartbeat);
+        try {
+          controller.close();
+        } catch {
+          // already closed
+        }
       }
     },
   });

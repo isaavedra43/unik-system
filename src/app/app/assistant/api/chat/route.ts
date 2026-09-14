@@ -78,6 +78,17 @@ export async function POST(request: NextRequest) {
       request.signal.addEventListener('abort', () => {
         clientGone = true;
       });
+      // Long turns (GPT-5 reasoning, several tools, a reviewed answer) can go minutes without
+      // a frame; proxies and browsers drop idle streams ("network error"). An SSE comment
+      // every 15 s keeps the connection alive; parsers ignore lines that are not "data:".
+      const heartbeat = setInterval(() => {
+        if (clientGone) return;
+        try {
+          controller.enqueue(encoder.encode(`: ping ${Date.now()}\n\n`));
+        } catch {
+          clientGone = true;
+        }
+      }, 15_000);
       try {
         for await (const event of runAssistant({
           conversationId: parsed.data.conversationId,
@@ -97,6 +108,7 @@ export async function POST(request: NextRequest) {
           data: { message: e instanceof Error ? e.message : 'Error desconocido' },
         });
       } finally {
+        clearInterval(heartbeat);
         try {
           controller.close();
         } catch {

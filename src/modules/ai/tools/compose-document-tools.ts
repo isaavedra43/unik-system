@@ -453,7 +453,7 @@ registerTool({
   name: 'readAttachment',
   category: 'system',
   effect: 'read',
-  timeoutMs: 180_000,
+  timeoutMs: 300_000,
   enabledByDefault: true,
   description:
     'Lee un archivo adjunto de esta conversación y devuelve su contenido completo: texto de PDF/Word/Excel/CSV, o transcripción fiel con visión de fotos e imágenes (notas manuscritas, libretas, tickets, capturas) y PDFs escaneados, opcionalmente como filas estructuradas. ' +
@@ -506,8 +506,9 @@ registerTool({
     const res = await chatCompletion({
       model,
       temperature: 0,
-      maxTokens: 12_000,
-      reasoningEffort: 'medium',
+      // Reading handwriting is perception, not reasoning: low effort keeps the call under a minute.
+      maxTokens: 6_000,
+      reasoningEffort: 'low',
       messages: [
         { role: 'system', content: TRANSCRIBE_SYSTEM_PROMPT },
         { role: 'user', content: parts },

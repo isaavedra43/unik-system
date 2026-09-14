@@ -20,6 +20,8 @@ export interface TurnDirectiveInput {
   priorAttachmentKinds: AttachmentKind[];
   voice?: boolean;
   autoTrigger?: boolean;
+  /** The turn's model thinks before answering and sees images: it can transcribe photos itself. */
+  modelReasonsWithVision?: boolean;
 }
 
 const DOC_REQUEST = /\b(pdf|word|docx|documento|reporte|informe|archivo|expórtalo|exporta|descargar|imprimir)\b/i;
@@ -41,7 +43,9 @@ export function buildTurnDirectives(input: TurnDirectiveInput): string {
     lines.push(
       '## INSTRUCCIONES PARA ESTE TURNO (adjuntos + análisis)',
       'Trabaja como un analista senior y entrega TODO en este mismo turno. Protocolo:',
-      `1. Lee los adjuntos que tienes en el mensaje${input.priorAttachmentKinds.length > 0 ? ' (incluye los enviados en mensajes anteriores, re-adjuntados aquí)' : ''}. Para cada FOTO o imagen con texto, llama readAttachment (mode="table", validateOrders=true) — una llamada por imagen, todas en paralelo — y usa ESA transcripción (trae "orderCheck" con los folios que no existen y su lectura probable). Un PDF/Excel/CSV ya viene como texto: úsalo directo.`,
+      input.modelReasonsWithVision
+        ? `1. Lee los adjuntos que tienes en el mensaje${input.priorAttachmentKinds.length > 0 ? ' (incluye los enviados en mensajes anteriores, re-adjuntados aquí)' : ''}. Transcribe TÚ cada foto línea por línea con cuidado en los dígitos (no llames readAttachment salvo que una imagen no esté en tu contexto o sea ilegible). Un PDF/Excel/CSV ya viene como texto: úsalo directo.`
+        : `1. Lee los adjuntos que tienes en el mensaje${input.priorAttachmentKinds.length > 0 ? ' (incluye los enviados en mensajes anteriores, re-adjuntados aquí)' : ''}. Para cada FOTO o imagen con texto, llama readAttachment (mode="table", validateOrders=true) — una llamada por imagen, todas en paralelo — y usa ESA transcripción (trae "orderCheck" con los folios que no existen y su lectura probable). Un PDF/Excel/CSV ya viene como texto: úsalo directo.`,
       '2. Cruza contra el sistema: reúne TODOS los folios/números y llama lookupSalesOrdersByNumber UNA sola vez con todos (cliente, vendedor, ticket, pago). Un folio inexistente con sugerencia = lectura errónea: usa la sugerencia y dilo ("23364 no existe; corresponde a 23354").',
       '3. Clasifica cada registro con las categorías que el usuario pidió o, si no las dio, con grupos operativos claros (p. ej. Producción/material, Recolección, Envío/programación, Entregado/cierre, Pago, Sin nota). No inventes categorías que la fuente no diga: si "Producción" no dice "con proveedor", explícalo en una línea.',
       '4. Responde en este orden, sin omitir nada: (a) 2-4 líneas con los números clave (total del sistema, cuántos tienen nota, faltantes, lecturas dudosas); (b) tabla resumen por grupo con conteo y % cuya suma sea EXACTAMENTE el total; (c) UNA tabla markdown por grupo con orden, cliente, ticket/pago del sistema y la nota literal — todas las filas, aunque pasen de 8; (d) discrepancias sistema vs nota (anotado como entregado pero abierto en el sistema, pagos, folios sin nota, folios que no existen); (e) 3-5 prioridades accionables.',

@@ -467,7 +467,8 @@ export async function* runAssistant(
     message: input.message,
     recentToolNames,
     pinned: pinnedTools,
-    maxTools: Math.min(Math.max(8, Number(settings.maxToolsPerTurn) || 96), PROVIDER_MAX_TOOLS),
+    // Attachment turns are long already: fewer tools = smaller prompt on every pass.
+    maxTools: Math.min(Math.max(8, Number(settings.maxToolsPerTurn) || 96), PROVIDER_MAX_TOOLS, attachmentsForContext.length > 0 ? 48 : PROVIDER_MAX_TOOLS),
   });
   let offeredTools: ToolDefinition[] = selection.offered;
   let toolSpecs: ToolSpec[] = toOpenAiTools(offeredTools);
@@ -512,6 +513,7 @@ export async function* runAssistant(
     priorAttachmentKinds: priorAttachments.map((a) => attachmentKind(a.mimeType)),
     voice: Boolean(input.context?.voice),
     autoTrigger: isAutoTrigger,
+    modelReasonsWithVision: isReasoningModel(effectiveModel) && (getModelById(effectiveModel)?.capabilities.includes('vision') ?? true),
   });
   if (directives && messages[0] && typeof messages[0].content === 'string') {
     messages[0].content += `\n\n${directives}`;
@@ -1209,6 +1211,15 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
       Boolean(inboxConversationId || chatChannelId) &&
       offeredTools.some((t) => t.name === 'suggestNextActions');
 
+    // Buffered turns show a chip while the answer is being written instead of a blank wait.
+    const draftStartedAt = Date.now();
+    if (bufferAnswer) yield { type: 'tool_call_start', data: { name: 'draftAnswer', args: '{}' } };
+    let draftChipClosed = false;
+    const closeDraftChip = function* (): Generator<OrchestratorEvent> {
+      if (!bufferAnswer || draftChipClosed) return;
+      draftChipClosed = true;
+      yield { type: 'tool_call_end', data: { name: 'draftAnswer', success: true, needsApproval: false, errorCode: null, error: null, durationMs: Date.now() - draftStartedAt, cached: false } };
+    };
     try {
       for await (const chunk of chatCompletionStream({
         messages,
@@ -1238,6 +1249,7 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
         }
       }
     } catch (err) {
+      yield* closeDraftChip();
       // Handle 429 rate limit: try fallback model
       if (err instanceof AiApiError && err.code === 'rate_limit' && !usingFallback && fallbackModel) {
         console.warn(`[ai-orchestrator] Rate limited on ${modelToUse}, falling back to ${fallbackModel}`);
@@ -1248,6 +1260,8 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
       // Re-throw other errors
       throw err;
     }
+
+    yield* closeDraftChip();
 
     // If no tool calls, we're done
     if (!iterationToolCalls || iterationToolCalls.length === 0 || finishReason === 'stop') {

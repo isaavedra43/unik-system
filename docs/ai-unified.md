@@ -139,6 +139,13 @@ Segunda ronda tras comparar de nuevo con ChatGPT (GPT-5 "Alta", 3 min de razonam
 - **PDF**: el pie de página se dibuja con `margins.bottom = 0` y el generador verifica que el número de páginas no cambió; test con `pdf-parse` (`numpages === pageCount`).
 - Prompt: sección "CÓMO TRABAJA UN ANALISTA SENIOR" y excepción a "más de 8 filas → generateTable" para tablas de análisis propias.
 
+**Tercera ronda (misma tarde): 10 minutos y "network error".** Con GPT-5 el turno tardó ~10 min y la conexión se cortó. Causas y fixes:
+- Sin latidos en el SSE y con la respuesta en búfer pasaban minutos sin bytes → el proxy/navegador corta el stream. Ahora `/app/assistant/api/chat` y las rutas de copiloto mandan un comentario SSE (`: ping`) cada 15 s; los parsers ignoran las líneas que no empiezan con `data:`.
+- Si aun así se corta, `AssistantChat` no falla: muestra "el asistente sigue trabajando" y sondea la conversación cada 6 s (hasta 15 min) hasta que aparece la respuesta persistida (`waitForPersistedAnswer`).
+- `readAttachment` con GPT-5 corría sin streaming con 12k tokens y esfuerzo medium bajo un timeout de 180 s (expiraba y el modelo reintentaba). Ahora: esfuerzo low, 6k tokens, timeout 300 s. Y cuando el modelo del turno razona y ve imágenes (GPT-5), la directiva le pide transcribir él mismo y saltarse esa pasada (una llamada pesada menos); `lookupSalesOrdersByNumber` sigue corrigiendo folios.
+- `reasoningEffort` por defecto baja a `medium` (high multiplicaba minutos en cada pasada); el cliente OpenAI tiene `timeout` 15 min y `maxRetries: 1` (un reintento silencioso duplicaba llamadas de minutos). Turnos con adjuntos ofrecen ≤ 48 tools (prompt más corto en cada pasada).
+- En modo búfer la UI muestra el chip "Redactando la respuesta" (`draftAnswer`) mientras el modelo escribe, y "Revisando la respuesta" durante la revisión.
+
 **Cómo activarlo en producción:** Admin → Asistente IA → Configuración → Reparto de modelos → "Detectar modelos de OpenAI" (confirma que la llave lista gpt-5) → "Máxima calidad" → Guardar. Sin GPT-5 la llave sigue funcionando con gpt-4o pero sin razonamiento previo.
 
 ## Capa de inteligencia (2026-09-13, tarde)

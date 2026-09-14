@@ -16,6 +16,13 @@ describe('buildTurnDirectives', () => {
     expect(d).not.toContain('El usuario pide un archivo');
   });
 
+  it('lets a reasoning vision model transcribe photos itself (no extra readAttachment pass)', () => {
+    const d = buildTurnDirectives({ message: 'hazme una tabla con cada orden y su motivo', tier: 'complex', attachmentKinds: ['image'], priorAttachmentKinds: [], modelReasonsWithVision: true });
+    expect(d).toContain('Transcribe TÚ cada foto');
+    expect(d).toContain('lookupSalesOrdersByNumber');
+    expect(d).not.toContain('una llamada por imagen');
+  });
+
   it('adds the composeDocument step when a file is requested, also for prior attachments', () => {
     const d = buildTurnDirectives({ message: 'Dame un pdf con todo', tier: 'complex', attachmentKinds: [], priorAttachmentKinds: ['image'] });
     expect(d).toContain('composeDocument');

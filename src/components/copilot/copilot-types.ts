@@ -241,6 +241,7 @@ const TOOL_LABELS: Record<string, { running: string; done: string }> = {
   composeDocument: { running: 'Redactando el documento', done: 'Documento listo' },
   lookupSalesOrdersByNumber: { running: 'Cruzando folios con el sistema', done: 'Folios cruzados' },
   reviewAnswer: { running: 'Revisando la respuesta', done: 'Respuesta revisada' },
+  draftAnswer: { running: 'Redactando la respuesta', done: 'Respuesta redactada' },
   draftBillFromDocument: { running: 'Preparando factura de proveedor', done: 'Borrador de factura listo' },
   callContact: { running: 'Preparando llamada', done: 'Llamada propuesta' },
   startInternalCall: { running: 'Preparando llamada interna', done: 'Llamada interna lista' },

@@ -158,7 +158,7 @@ export function ModelPolicyConfig({ settings, canManage, canopyConfigured, opena
       qualityJudgeModel: cheap,
       deployment: gpt5,
       fallbackDeployment: 'gpt-4o',
-      reasoningEffort: 'high',
+      reasoningEffort: 'medium',
       answerReviewEnabled: true,
     });
   };
