@@ -27,6 +27,8 @@ import {
   Pencil,
   Phone,
   ExternalLink,
+  Plus,
+  History,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
@@ -366,11 +368,14 @@ export function CopilotPanel({ surface, user, onInsertDraft, onSendDraft, onAfte
   modeRef.current = mode;
   const threadUrl = surface.endpoints.thread;
   const draftTool = surface.draftTool;
+  /** Thread being shown (null = the latest one of this surface). */
+  const threadIdRef = useRef<string | null>(null);
   const onAfterTurnRef = useRef(onAfterTurn);
   onAfterTurnRef.current = onAfterTurn;
 
   const loadThread = useCallback(async () => {
-    const data = await apiJson<{ conversationId: string; mode: CopilotMode; messages: CopilotMessage[]; proposals: CopilotProposal[] }>(threadUrl);
+    const data = await apiJson<{ conversationId: string; mode: CopilotMode; messages: CopilotMessage[]; proposals: CopilotProposal[] }>(threadIdRef.current ? `${threadUrl}?thread=${encodeURIComponent(threadIdRef.current)}` : threadUrl);
+    threadIdRef.current = data.conversationId;
     setMessages(data.messages);
     setProposals(data.proposals);
     setMode(data.mode);
@@ -397,7 +402,7 @@ export function CopilotPanel({ surface, user, onInsertDraft, onSendDraft, onAfte
       const controller = new AbortController();
       abortRef.current = controller;
       try {
-        const res = await fetch(threadUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), signal: controller.signal });
+        const res = await fetch(threadUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...payload, threadId: threadIdRef.current ?? undefined }), signal: controller.signal });
         const type = res.headers.get('content-type') ?? '';
         if (!res.ok) {
           const data = (await res.json().catch(() => ({}))) as { error?: string; code?: string };
@@ -497,6 +502,7 @@ export function CopilotPanel({ surface, user, onInsertDraft, onSendDraft, onAfte
     setError(null);
     setMessages([]);
     setProposals([]);
+    threadIdRef.current = null;
     loadThreadRef
       .current()
       .then((data) => {
@@ -562,6 +568,56 @@ export function CopilotPanel({ surface, user, onInsertDraft, onSendDraft, onAfte
   );
 
   const [modeBusy, setModeBusy] = useState(false);
+  const [threads, setThreads] = useState<Array<{ id: string; title: string; updatedAt: string; messageCount: number }>>([]);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const historyRef = useRef<HTMLDivElement>(null);
+  const [threadBusy, setThreadBusy] = useState(false);
+
+  const startNewThread = useCallback(async () => {
+    if (streamingRef.current) return;
+    setThreadBusy(true);
+    try {
+      const data = await apiJson<{ conversationId: string; mode: CopilotMode; messages: CopilotMessage[]; proposals: CopilotProposal[] }>(`${threadUrl}?new=1`);
+      threadIdRef.current = data.conversationId;
+      setMessages(data.messages);
+      setProposals(data.proposals);
+      setHistoryOpen(false);
+      toast.success('Conversación nueva');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'No se pudo crear la conversación');
+    } finally {
+      setThreadBusy(false);
+    }
+  }, [threadUrl]);
+
+  const openHistory = useCallback(async () => {
+    setHistoryOpen((v) => !v);
+    try {
+      const data = await apiJson<{ threads: Array<{ id: string; title: string; updatedAt: string; messageCount: number }> }>(`${threadUrl}?list=1`);
+      setThreads(data.threads);
+    } catch {
+      /* keep whatever we had */
+    }
+  }, [threadUrl]);
+
+  const openThread = useCallback(
+    async (id: string) => {
+      if (streamingRef.current) return;
+      threadIdRef.current = id;
+      setHistoryOpen(false);
+      await loadThread().catch((err) => setError(err instanceof Error ? err.message : 'No se pudo abrir la conversación'));
+    },
+    [loadThread]
+  );
+
+  useEffect(() => {
+    if (!historyOpen) return;
+    const onDoc = (e: MouseEvent) => {
+      if (historyRef.current && !historyRef.current.contains(e.target as Node)) setHistoryOpen(false);
+    };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [historyOpen]);
   const changeMode = useCallback(
     async (next: CopilotMode) => {
       setModeBusy(true);
@@ -674,6 +730,28 @@ export function CopilotPanel({ surface, user, onInsertDraft, onSendDraft, onAfte
               {statusText}
             </motion.span>
           </AnimatePresence>
+        </div>
+        <div className="copilot-threads" ref={historyRef}>
+          <button type="button" className="copilot-iconbtn" onClick={() => void startNewThread()} disabled={threadBusy || streaming} aria-label="Conversación nueva con el copiloto" title="Conversación nueva">
+            <Plus size={16} />
+          </button>
+          <button type="button" className={cn('copilot-iconbtn', historyOpen && 'is-active')} onClick={() => void openHistory()} aria-label="Conversaciones anteriores" aria-expanded={historyOpen} title="Conversaciones anteriores">
+            <History size={16} />
+          </button>
+          {historyOpen && (
+            <div className="copilot-threads-pop" role="menu" aria-label="Conversaciones anteriores">
+              <div className="copilot-threads-head">Conversaciones con el copiloto aquí</div>
+              {threads.length === 0 && <div className="copilot-muted copilot-threads-empty">Aún no hay conversaciones anteriores.</div>}
+              {threads.map((t) => (
+                <button key={t.id} type="button" role="menuitem" className={cn('copilot-thread-item', t.id === threadIdRef.current && 'is-current')} onClick={() => void openThread(t.id)}>
+                  <span className="copilot-thread-title">{t.title}</span>
+                  <span className="copilot-thread-meta">
+                    {new Date(t.updatedAt).toLocaleString('es-MX', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })} · {t.messageCount} msgs
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
         <ModeBadge mode={mode} onChange={(m) => void changeMode(m)} busy={modeBusy} />
       </header>

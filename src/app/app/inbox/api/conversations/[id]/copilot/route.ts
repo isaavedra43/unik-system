@@ -8,6 +8,7 @@ import {
   autoTriggerMessage,
   getInboxCopilotMode,
   getOrCreateCopilotConversation,
+  listCopilotConversations,
   shouldRunAutoAnalysis,
 } from '@/modules/comms/inbox-copilot';
 
@@ -15,14 +16,22 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 120;
 
-/** GET — the copilot thread of this inbox conversation for the current user. */
-export async function GET(_request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+/**
+ * GET — the copilot thread of this inbox conversation for the current user.
+ * `?thread=<id>` opens a previous thread, `?new=1` starts a fresh one,
+ * `?list=1` returns the thread history instead.
+ */
+export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const auth = await requireInboxUser();
   if ('response' in auth) return auth.response;
   const { id } = await params;
   try {
+    const q = request.nextUrl.searchParams;
+    if (q.get('list') === '1') {
+      return NextResponse.json({ threads: await listCopilotConversations(auth.user, id) });
+    }
     const [{ id: aiConversationId }, mode] = await Promise.all([
-      getOrCreateCopilotConversation(auth.user, id),
+      getOrCreateCopilotConversation(auth.user, id, { threadId: q.get('thread'), createNew: q.get('new') === '1' }),
       getInboxCopilotMode(auth.user.id),
     ]);
     const [thread, proposals] = await Promise.all([
@@ -47,6 +56,8 @@ const postSchema = z
     /** For action_failed: which tool and what error, so the copilot fixes it on its own. */
     detail: z.object({ tool: z.string().max(80).optional(), error: z.string().max(800).optional() }).optional(),
     model: z.string().optional(),
+    /** Thread to continue (a previous one); default: the latest. */
+    threadId: z.string().optional(),
   })
   .refine((v) => Boolean(v.message) !== Boolean(v.trigger), {
     message: 'Envía "message" o "trigger", no ambos',
@@ -71,7 +82,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     if (mode === 'paused') {
       return NextResponse.json({ error: 'El copiloto está en pausa', code: 'paused' }, { status: 409 });
     }
-    aiConversationId = (await getOrCreateCopilotConversation(auth.user, id)).id;
+    aiConversationId = (await getOrCreateCopilotConversation(auth.user, id, { threadId: input.threadId })).id;
     if (input.trigger === 'action_failed') {
       // A failed approved action: the copilot diagnoses and retries regardless of proactivity.
       text = autoTriggerMessage('action_failed', input.detail);

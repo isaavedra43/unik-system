@@ -8,6 +8,7 @@ import {
   autoTriggerMessage,
   getOrCreateSurfaceConversation,
   getSurfaceMode,
+  listSurfaceConversations,
   shouldRunAutoTurn,
 } from '@/modules/ai/copilot-surfaces';
 import { chatAutoAnchor, requireChannelForActor } from '@/modules/chat/chat-copilot';
@@ -17,14 +18,18 @@ export const dynamic = 'force-dynamic';
 export const maxDuration = 120;
 
 /** GET — the copilot thread of this internal-chat channel for the current user. */
-export async function GET(_request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const auth = await requireChatUser();
   if ('response' in auth) return auth.response;
   const { id } = await params;
   try {
     await requireChannelForActor(auth.user, id);
+    const q = request.nextUrl.searchParams;
+    if (q.get('list') === '1') {
+      return NextResponse.json({ threads: await listSurfaceConversations(auth.user, { kind: 'chat', id }) });
+    }
     const [{ id: aiConversationId }, mode] = await Promise.all([
-      getOrCreateSurfaceConversation(auth.user, { kind: 'chat', id }),
+      getOrCreateSurfaceConversation(auth.user, { kind: 'chat', id }, { threadId: q.get('thread'), createNew: q.get('new') === '1' }),
       getSurfaceMode(auth.user.id, 'chat'),
     ]);
     const [thread, proposals] = await Promise.all([
@@ -49,6 +54,7 @@ const postSchema = z
     /** For action_failed: which tool and what error, so the copilot fixes it on its own. */
     detail: z.object({ tool: z.string().max(80).optional(), error: z.string().max(800).optional() }).optional(),
     model: z.string().optional(),
+    threadId: z.string().optional(),
   })
   .refine((v) => Boolean(v.message) !== Boolean(v.trigger), { message: 'Envía "message" o "trigger", no ambos' });
 
@@ -68,7 +74,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     if (mode === 'paused') {
       return NextResponse.json({ error: 'El copiloto del chat está apagado', code: 'paused' }, { status: 409 });
     }
-    aiConversationId = (await getOrCreateSurfaceConversation(auth.user, { kind: 'chat', id })).id;
+    aiConversationId = (await getOrCreateSurfaceConversation(auth.user, { kind: 'chat', id }, { threadId: input.threadId })).id;
     if (input.trigger === 'action_failed') {
       // A failed approved action: the copilot diagnoses and retries regardless of proactivity.
       text = autoTriggerMessage('action_failed', 'chat', input.detail);

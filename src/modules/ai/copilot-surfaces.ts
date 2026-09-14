@@ -75,16 +75,63 @@ export interface SurfaceRef {
  * Finds (or creates) the AI thread for this user + surface. The caller MUST
  * have verified the user can see the host conversation/channel beforehand.
  */
+export interface SurfaceThreadOptions {
+  /** Open this thread (must belong to the user and this surface); otherwise the latest one. */
+  threadId?: string | null;
+  /** Start a fresh thread even when one exists. */
+  createNew?: boolean;
+}
+
+export interface SurfaceThreadSummary {
+  id: string;
+  title: string;
+  updatedAt: string;
+  messageCount: number;
+}
+
+/** Threads of this user for one surface, newest first (title = first real request). */
+export async function listSurfaceConversations(actor: CurrentUser, surface: SurfaceRef, limit = 30): Promise<SurfaceThreadSummary[]> {
+  const key = SURFACE_CONTEXT_KEY[surface.kind];
+  const rows = await prisma.aiConversation.findMany({
+    where: { userId: actor.id, context: { path: [key], equals: surface.id } },
+    orderBy: { updatedAt: 'desc' },
+    take: limit,
+    select: {
+      id: true,
+      title: true,
+      updatedAt: true,
+      _count: { select: { messages: true } },
+      messages: { where: { role: 'user', NOT: { content: { startsWith: AUTO_PREFIX } } }, orderBy: { createdAt: 'asc' }, take: 1, select: { content: true } },
+    },
+  });
+  return rows.map((r) => {
+    const first = r.messages[0]?.content?.trim();
+    const title = first ? (first.length > 70 ? `${first.slice(0, 70)}…` : first) : `${SURFACE_TITLES[surface.kind]} · ${r.updatedAt.toLocaleDateString('es-MX', { day: '2-digit', month: 'short' })}`;
+    return { id: r.id, title, updatedAt: r.updatedAt.toISOString(), messageCount: r._count.messages };
+  });
+}
+
 export async function getOrCreateSurfaceConversation(
   actor: CurrentUser,
-  surface: SurfaceRef
+  surface: SurfaceRef,
+  options: SurfaceThreadOptions = {}
 ): Promise<{ id: string; created: boolean }> {
   const key = SURFACE_CONTEXT_KEY[surface.kind];
-  const existing = await prisma.aiConversation.findFirst({
-    where: { userId: actor.id, context: { path: [key], equals: surface.id } },
-    select: { id: true },
-  });
-  if (existing) return { id: existing.id, created: false };
+  if (options.threadId) {
+    const chosen = await prisma.aiConversation.findFirst({
+      where: { id: options.threadId, userId: actor.id, context: { path: [key], equals: surface.id } },
+      select: { id: true },
+    });
+    if (chosen) return { id: chosen.id, created: false };
+  }
+  if (!options.createNew) {
+    const existing = await prisma.aiConversation.findFirst({
+      where: { userId: actor.id, context: { path: [key], equals: surface.id } },
+      orderBy: { updatedAt: 'desc' },
+      select: { id: true },
+    });
+    if (existing) return { id: existing.id, created: false };
+  }
   const created = await prisma.aiConversation.create({
     data: {
       userId: actor.id,

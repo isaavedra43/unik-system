@@ -11,6 +11,7 @@ import {
   COPILOT_KIND_BY_SURFACE,
   autoTriggerMessage as autoTriggerMessageFor,
   getOrCreateSurfaceConversation,
+  listSurfaceConversations,
   isAutoTurn,
   relativeTime,
   shouldRunAutoTurn,
@@ -36,11 +37,18 @@ export function autoTriggerMessage(trigger: AutoTrigger, detail?: { tool?: strin
 /** AI thread for (user, inbox conversation). Same orchestrator, tools, approvals and memory as the assistant. */
 export async function getOrCreateCopilotConversation(
   actor: CurrentUser,
-  inboxConversationId: string
+  inboxConversationId: string,
+  options: { threadId?: string | null; createNew?: boolean } = {}
 ): Promise<{ id: string; created: boolean }> {
   // Visibility check (throws 404 when the user cannot see the conversation).
   await getConversation(actor, inboxConversationId);
-  return getOrCreateSurfaceConversation(actor, { kind: 'inbox', id: inboxConversationId });
+  return getOrCreateSurfaceConversation(actor, { kind: 'inbox', id: inboxConversationId }, options);
+}
+
+/** Previous copilot threads of this user for the inbox conversation (newest first). */
+export async function listCopilotConversations(actor: CurrentUser, inboxConversationId: string) {
+  await getConversation(actor, inboxConversationId);
+  return listSurfaceConversations(actor, { kind: 'inbox', id: inboxConversationId });
 }
 
 /** Proactivity for the inbox surface — configured in "Asistente IA → Preferencias y memoria". */
