@@ -1,7 +1,10 @@
 'use client';
 
 import React, { useEffect, useState, useRef, useCallback } from 'react';
-import { ChevronDown, Zap, Check, Eye, Wrench, Radio, Brain, Code2 } from 'lucide-react';
+import { ChevronDown, Zap, Check, Eye, Wrench, Radio, Brain, Code2, Wand2 } from 'lucide-react';
+
+/** Pseudo model id: the server routes by task (see model-router.ts). */
+export const AUTO_MODEL_ID = 'auto';
 
 export interface ModelOption {
   id: string;
@@ -78,6 +81,7 @@ export function ModelSelector({ value, onChange }: ModelSelectorProps) {
   const [open, setOpen] = useState(false);
   const [models, setModels] = useState<ModelOption[]>([]);
   const [defaultModel, setDefaultModel] = useState<string>('');
+  const [routingEnabled, setRoutingEnabled] = useState(false);
   const [loading, setLoading] = useState(true);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -88,9 +92,10 @@ export function ModelSelector({ value, onChange }: ModelSelectorProps) {
         const data = await res.json();
         setModels(data.models ?? []);
         setDefaultModel(data.defaultModel ?? 'gpt-4o');
-        // Set initial value if not set
+        setRoutingEnabled(Boolean(data.routingEnabled));
+        // Set initial value if not set: automatic routing when the admin enabled it
         if (!value && data.defaultModel) {
-          onChange(data.defaultModel);
+          onChange(data.routingEnabled ? AUTO_MODEL_ID : data.defaultModel);
         }
       }
     } finally {
@@ -113,7 +118,8 @@ export function ModelSelector({ value, onChange }: ModelSelectorProps) {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const selectedModel = models.find((m) => m.id === value) ?? models.find((m) => m.id === defaultModel);
+  const isAuto = value === AUTO_MODEL_ID;
+  const selectedModel = isAuto ? null : (models.find((m) => m.id === value) ?? models.find((m) => m.id === defaultModel));
 
   // Group models by provider
   const grouped = models.reduce<Record<string, ModelOption[]>>((acc, m) => {
@@ -131,15 +137,47 @@ export function ModelSelector({ value, onChange }: ModelSelectorProps) {
         aria-label="Seleccionar modelo"
         aria-expanded={open}
       >
-        <Zap size={14} />
+        {isAuto ? <Wand2 size={14} /> : <Zap size={14} />}
         <span className="model-selector-label">
-          {loading ? 'Cargando…' : selectedModel ? selectedModel.label : 'Seleccionar'}
+          {loading ? 'Cargando…' : isAuto ? 'Automático' : selectedModel ? selectedModel.label : 'Seleccionar'}
         </span>
         <ChevronDown size={14} className={`model-selector-chevron ${open ? 'open' : ''}`} />
       </button>
 
       {open && (
         <div className="model-selector-dropdown" role="listbox">
+          <div className="model-selector-group">
+            <div className="model-selector-group-header">Recomendado</div>
+            <div
+              className={`model-selector-item model-selector-item-auto ${isAuto ? 'selected' : ''}`}
+              onClick={() => {
+                onChange(AUTO_MODEL_ID);
+                setOpen(false);
+              }}
+              role="option"
+              aria-selected={isAuto}
+              tabIndex={0}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  onChange(AUTO_MODEL_ID);
+                  setOpen(false);
+                }
+              }}
+            >
+              <div className="model-selector-item-header">
+                <div className="model-selector-item-name">
+                  {isAuto && <Check size={14} className="model-selector-check" />}
+                  <Wand2 size={13} /> Automático
+                </div>
+              </div>
+              <div className="model-selector-item-best-for">
+                {routingEnabled
+                  ? `Elige el modelo por tarea: rápido y barato para lo simple, ${defaultModel || 'el principal'} para análisis y documentos.`
+                  : `Usa el modelo principal (${defaultModel || 'gpt-4o'}). El administrador puede activar el routing por tarea.`}
+              </div>
+            </div>
+          </div>
           {Object.entries(grouped).map(([provider, providerModels]) => (
             <div key={provider} className="model-selector-group">
               <div className="model-selector-group-header">

@@ -16,6 +16,8 @@ const chatRequestSchema = z.object({
     })
     .optional(),
   model: z.string().optional(),
+  /** Plan-then-execute for this message: the assistant proposes steps and waits for confirmation. */
+  planFirst: z.boolean().optional(),
   // Attachments are referenced by ID only. Older clients may still send objects
   // with fileName/mimeType/storagePath: only the id is used, the rest is ignored.
   attachments: z
@@ -66,6 +68,7 @@ export async function POST(request: NextRequest) {
           actor: session.user,
           context: parsed.data.context,
           model: parsed.data.model,
+          planFirst: parsed.data.planFirst,
           attachmentIds: parsed.data.attachments,
         })) {
           const data = `data: ${JSON.stringify(event)}\n\n`;

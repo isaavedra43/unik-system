@@ -69,7 +69,34 @@ export interface AiSettings {
   warehouseMapsUrl: string;
   warehouseHours: string;
   pickupInstructions: string;
+  // Inteligencia: routing de modelos, herramientas por turno, caché, RAG, OCR y calidad
+  /** Elige el modelo por tipo de tarea cuando el usuario no fija uno ("Automático"). */
+  routingEnabled: boolean;
+  /** Modelo para tareas simples (saludos, aclaraciones, formato). Vacío = fallbackDeployment. */
+  routingSimpleModel: string;
+  /** Modelo para tareas complejas (análisis multi-paso, documentos). Vacío = deployment. */
+  routingComplexModel: string;
+  /** Máximo de tools ofrecidas al modelo por turno (OpenAI admite 128). */
+  maxToolsPerTurn: number;
+  toolCacheEnabled: boolean;
+  /** TTL de caché para consultas de datos "vivos" (hoy, esta semana). */
+  toolCacheTtlLiveSeconds: number;
+  /** TTL de caché para consultas históricas (meses/años cerrados). */
+  toolCacheTtlHistoricalSeconds: number;
+  /** Búsqueda semántica (embeddings) además de la léxica en la biblioteca. */
+  ragSemanticEnabled: boolean;
+  /** Re-ranking con modelo de los mejores candidatos (más preciso, más lento). */
+  ragRerankEnabled: boolean;
+  embeddingModel: string;
+  /** PDFs escaneados: enviarlos al modelo con visión para leerlos (OCR). */
+  ocrFallbackEnabled: boolean;
+  /** Evaluación automática de calidad con un modelo juez (no bloquea la respuesta). */
+  qualityJudgeEnabled: boolean;
+  qualityJudgeModel: string;
 }
+
+/** Tipos permitidos antes de la ampliación (se migran automáticamente si nunca se personalizaron). */
+const LEGACY_DEFAULT_MIME_TYPES = new Set(['image/png', 'image/jpeg', 'application/pdf', 'text/plain', 'text/csv']);
 
 export const DEFAULT_AI_SETTINGS: AiSettings = {
   isEnabled: true,
@@ -254,9 +281,33 @@ export const DEFAULT_AI_SETTINGS: AiSettings = {
     'getCurrentUserContext',
     'getModuleList',
     'getSystemTime',
+    // Orquestación (más tools bajo demanda, planes) y documentos (extracción estructurada)
+    'loadMoreTools',
+    'proposePlan',
+    'listConversationAttachments',
+    'extractDocumentData',
+    'draftBillFromDocument',
   ],
-  maxAttachmentSizeMb: 10,
-  allowedMimeTypes: ['image/png', 'image/jpeg', 'application/pdf', 'text/plain', 'text/csv'],
+  maxAttachmentSizeMb: 25,
+  allowedMimeTypes: [
+    'image/png',
+    'image/jpeg',
+    'image/webp',
+    'image/gif',
+    'application/pdf',
+    'text/plain',
+    'text/csv',
+    'text/markdown',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'audio/webm',
+    'audio/mpeg',
+    'audio/wav',
+    'audio/mp4',
+    'audio/ogg',
+    'video/webm',
+    'video/mp4',
+  ],
   artifactTtlHours: 2160, // 90 días (los compartidos quedan protegidos y no se borran)
   voiceEnabled: false,
   sttModel: 'whisper-1',
@@ -275,6 +326,19 @@ export const DEFAULT_AI_SETTINGS: AiSettings = {
   warehouseMapsUrl: '',
   warehouseHours: '',
   pickupInstructions: '',
+  routingEnabled: true,
+  routingSimpleModel: 'gpt-4o-mini',
+  routingComplexModel: '',
+  maxToolsPerTurn: 96,
+  toolCacheEnabled: true,
+  toolCacheTtlLiveSeconds: 30,
+  toolCacheTtlHistoricalSeconds: 300,
+  ragSemanticEnabled: true,
+  ragRerankEnabled: false,
+  embeddingModel: 'text-embedding-3-small',
+  ocrFallbackEnabled: true,
+  qualityJudgeEnabled: false,
+  qualityJudgeModel: 'gpt-4o-mini',
 };
 
 interface CachedConfig {
@@ -317,6 +381,12 @@ function mergeWithDefaults(stored: unknown): AiSettings {
       'getOrderItems',
     ]);
     merged.enabledTools = mergedTools.filter((t) => !obsoleteTools.has(t));
+  }
+  // Attachments: installs that never customized the MIME list get the extended defaults
+  // (Word, Excel, audio, video, más imágenes); a customized list is respected as-is.
+  const storedMimes = s.allowedMimeTypes;
+  if (Array.isArray(storedMimes) && storedMimes.every((t) => typeof t === 'string' && LEGACY_DEFAULT_MIME_TYPES.has(t))) {
+    merged.allowedMimeTypes = [...defaults.allowedMimeTypes];
   }
   return merged as unknown as AiSettings;
 }

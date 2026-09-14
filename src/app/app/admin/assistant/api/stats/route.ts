@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getCurrentSession, hasPermission } from '@/modules/auth/authorization';
 import { getAiStats, getAiStatsByDay, getTopTools, getTopUsers } from '@/modules/ai/ai-admin-service';
+import { getFeedbackStats } from '@/modules/ai/ai-feedback-service';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -14,12 +15,13 @@ export async function GET() {
     return NextResponse.json({ error: 'Sin permiso' }, { status: 403 });
   }
 
-  const [stats, byDay, topTools, topUsers] = await Promise.all([
+  const [stats, byDay, topTools, topUsers, feedback] = await Promise.all([
     getAiStats(),
     getAiStatsByDay(30),
     getTopTools(10),
     getTopUsers(10),
+    getFeedbackStats(30).catch(() => null),
   ]);
 
-  return NextResponse.json({ stats, byDay, topTools, topUsers });
+  return NextResponse.json({ stats, byDay, topTools, topUsers, feedback });
 }

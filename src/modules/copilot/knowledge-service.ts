@@ -18,6 +18,9 @@ import { StorageError } from '@/modules/storage/storage-service';
 import { safeFetch } from '@/modules/extensions/safe-fetch';
 import { bufferRandomAccess, readZipDirectory, readZipEntry } from '@/modules/storage/zip-reader';
 import { buildTsQuery, chunkText, normalizeText } from './knowledge-chunker';
+import { embedQuery, embedVersionChunks } from '@/modules/ai/embeddings-service';
+import { cosineSimilarity, reciprocalRankFusion } from '@/modules/ai/rag-fusion';
+import { getAiSettings } from '@/modules/ai/ai-admin-config-service';
 
 /**
  * Approved knowledge library.
@@ -308,6 +311,12 @@ export async function processVersion(
         data: { status: 'ready', chunkCount: chunks.length, error: null },
       });
     });
+    // Semantic vectors (never block the lexical index; the backfill job retries later).
+    try {
+      await embedVersionChunks(versionId);
+    } catch (err) {
+      console.warn(JSON.stringify({ event: 'knowledge.embed_failed', versionId, message: err instanceof Error ? err.message : 'unknown' }));
+    }
     return { chunks: chunks.length };
   } catch (err) {
     await prisma.knowledgeSourceVersion.update({
@@ -393,35 +402,41 @@ export interface KnowledgeHit {
   section: string | null;
   excerpt: string;
   rank: number;
+  /** How the fragment was found: exact words, meaning, or both. */
+  match?: 'lexical' | 'semantic' | 'hybrid';
 }
 
-/**
- * Full-text search over APPROVED current versions. `visibility` narrows to
- * publishable-only content when the answer is meant for a customer.
- */
-export async function searchKnowledge(
-  query: string,
-  options: { visibility?: 'internal' | 'publishable'; limit?: number } = {}
-): Promise<KnowledgeHit[]> {
+interface ChunkRow {
+  chunkId: string;
+  sourceId: string;
+  title: string;
+  visibility: string;
+  version: number;
+  section: string | null;
+  content: string;
+  rank: number;
+}
+
+function toHit(r: ChunkRow, rank: number, match: KnowledgeHit['match']): KnowledgeHit {
+  return {
+    sourceId: r.sourceId,
+    title: r.title,
+    visibility: r.visibility,
+    version: r.version,
+    section: r.section,
+    excerpt: r.content.length > 1200 ? `${r.content.slice(0, 1200)}…` : r.content,
+    rank,
+    match,
+  };
+}
+
+/** Lexical (tsvector) candidates, ranked. */
+async function lexicalCandidates(query: string, visibility: 'internal' | 'publishable' | undefined, limit: number): Promise<ChunkRow[]> {
   const tsquery = buildTsQuery(query);
   if (!tsquery) return [];
-  const limit = Math.min(options.limit ?? 8, 20);
-  const visibilityFilter =
-    options.visibility === 'publishable'
-      ? Prisma.sql`AND s."visibility" = 'publishable'`
-      : Prisma.empty;
-  const rows = await prisma.$queryRaw<
-    Array<{
-      sourceId: string;
-      title: string;
-      visibility: string;
-      version: number;
-      section: string | null;
-      content: string;
-      rank: number;
-    }>
-  >`
-    SELECT s."id" AS "sourceId", s."title", s."visibility", v."version", c."section", c."content",
+  const visibilityFilter = visibility === 'publishable' ? Prisma.sql`AND s."visibility" = 'publishable'` : Prisma.empty;
+  return prisma.$queryRaw<ChunkRow[]>`
+    SELECT c."id" AS "chunkId", s."id" AS "sourceId", s."title", s."visibility", v."version", c."section", c."content",
            ts_rank_cd(to_tsvector('spanish', c."content"), to_tsquery('spanish', ${tsquery})) AS "rank"
     FROM "KnowledgeChunk" c
     JOIN "KnowledgeSourceVersion" v ON v."id" = c."versionId"
@@ -432,13 +447,136 @@ export async function searchKnowledge(
     ORDER BY "rank" DESC
     LIMIT ${limit}
   `;
-  return rows.map((r) => ({
-    sourceId: r.sourceId,
-    title: r.title,
-    visibility: r.visibility,
-    version: r.version,
-    section: r.section,
-    excerpt: r.content.length > 1200 ? `${r.content.slice(0, 1200)}…` : r.content,
-    rank: Number(r.rank),
-  }));
+}
+
+const SEMANTIC_SCAN_LIMIT = 6000;
+
+/** Semantic candidates: cosine similarity between the query vector and every embedded chunk of the approved library. */
+async function semanticCandidates(query: string, visibility: 'internal' | 'publishable' | undefined, limit: number): Promise<ChunkRow[]> {
+  const vector = await embedQuery(query);
+  if (!vector) return [];
+  const rows = await prisma.knowledgeChunk.findMany({
+    where: {
+      embeddingModel: { not: null },
+      version: { status: 'ready', source: { status: 'approved', ...(visibility === 'publishable' ? { visibility: 'publishable' } : {}) } },
+    },
+    select: {
+      id: true,
+      section: true,
+      content: true,
+      embedding: true,
+      version: { select: { id: true, version: true, source: { select: { id: true, title: true, visibility: true, currentVersionId: true } } } },
+    },
+    take: SEMANTIC_SCAN_LIMIT,
+  });
+  const scored: ChunkRow[] = [];
+  for (const r of rows) {
+    if (r.version.source.currentVersionId !== r.version.id) continue;
+    const sim = cosineSimilarity(vector, r.embedding);
+    if (sim < 0.2) continue;
+    scored.push({
+      chunkId: r.id,
+      sourceId: r.version.source.id,
+      title: r.version.source.title,
+      visibility: r.version.source.visibility,
+      version: r.version.version,
+      section: r.section,
+      content: r.content,
+      rank: sim,
+    });
+  }
+  scored.sort((a, b) => b.rank - a.rank);
+  return scored.slice(0, limit);
+}
+
+/** Optional LLM re-ranking of the fused top candidates (admin setting `ragRerankEnabled`). */
+async function rerankWithModel(query: string, candidates: ChunkRow[]): Promise<Map<string, number> | null> {
+  if (candidates.length < 2) return null;
+  try {
+    const { chatCompletion } = await import('@/modules/ai/ai-client');
+    const settings = await getAiSettings();
+    const listing = candidates
+      .map((c, i) => `[${i}] (${c.title}${c.section ? ` › ${c.section}` : ''}) ${c.content.replace(/\s+/g, ' ').slice(0, 700)}`)
+      .join('\n\n');
+    const res = await chatCompletion({
+      model: settings.qualityJudgeModel?.trim() || settings.fallbackDeployment || settings.deployment,
+      temperature: 0,
+      maxTokens: 400,
+      messages: [
+        {
+          role: 'system',
+          content:
+            'Eres un re-ranker. Para cada fragmento numerado, califica de 0 a 10 qué tan bien responde la pregunta. Responde SOLO JSON: {"scores":{"0":n,"1":n,...}}.',
+        },
+        { role: 'user', content: `Pregunta: ${query}\n\nFragmentos:\n${listing}` },
+      ],
+    });
+    const text = res.content ?? '';
+    const json = text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1);
+    const parsed = JSON.parse(json) as { scores?: Record<string, number> };
+    if (!parsed.scores) return null;
+    const out = new Map<string, number>();
+    candidates.forEach((c, i) => {
+      const v = Number(parsed.scores?.[String(i)]);
+      if (Number.isFinite(v)) out.set(c.chunkId, v);
+    });
+    return out;
+  } catch (err) {
+    console.warn(JSON.stringify({ event: 'knowledge.rerank_failed', message: err instanceof Error ? err.message : 'unknown' }));
+    return null;
+  }
+}
+
+/**
+ * Full-text search over APPROVED current versions. `visibility` narrows to
+ * publishable-only content when the answer is meant for a customer.
+ */
+/**
+ * Hybrid search over the approved library: lexical (tsvector, exact words) +
+ * semantic (embeddings, meaning) fused with Reciprocal Rank Fusion, with an
+ * optional model re-ranking of the top candidates. Falls back to lexical-only
+ * when embeddings are not configured or fail, so results never disappear.
+ */
+export async function searchKnowledge(
+  query: string,
+  options: { visibility?: 'internal' | 'publishable'; limit?: number; mode?: 'hybrid' | 'lexical' } = {}
+): Promise<KnowledgeHit[]> {
+  const cleanQuery = query.trim();
+  if (cleanQuery.length < 2) return [];
+  const limit = Math.min(options.limit ?? 8, 20);
+  const candidateLimit = Math.max(limit * 3, 12);
+  const settings = await getAiSettings().catch(() => null);
+  const semanticOn = options.mode !== 'lexical' && (settings?.ragSemanticEnabled ?? false);
+
+  const [lexical, semantic] = await Promise.all([
+    lexicalCandidates(cleanQuery, options.visibility, candidateLimit).catch((err) => {
+      console.warn(JSON.stringify({ event: 'knowledge.lexical_failed', message: err instanceof Error ? err.message : 'unknown' }));
+      return [] as ChunkRow[];
+    }),
+    semanticOn
+      ? semanticCandidates(cleanQuery, options.visibility, candidateLimit).catch((err) => {
+          console.warn(JSON.stringify({ event: 'knowledge.semantic_failed', message: err instanceof Error ? err.message : 'unknown' }));
+          return [] as ChunkRow[];
+        })
+      : Promise.resolve([] as ChunkRow[]),
+  ]);
+
+  if (lexical.length === 0 && semantic.length === 0) return [];
+  if (semantic.length === 0) return lexical.slice(0, limit).map((r, i) => toHit(r, Number(r.rank) || 1 / (i + 1), 'lexical'));
+  if (lexical.length === 0) return semantic.slice(0, limit).map((r) => toHit(r, r.rank, 'semantic'));
+
+  const fused = reciprocalRankFusion([
+    lexical.map((r) => ({ key: r.chunkId, item: r })),
+    semantic.map((r) => ({ key: r.chunkId, item: r })),
+  ]);
+  let top = fused.slice(0, Math.max(limit, 10));
+
+  if (settings?.ragRerankEnabled) {
+    const scores = await rerankWithModel(cleanQuery, top.map((f) => f.item));
+    if (scores) {
+      top = [...top].sort((a, b) => (scores.get(b.key) ?? 0) - (scores.get(a.key) ?? 0) || b.score - a.score);
+    }
+  }
+
+  return top.slice(0, limit).map((f) => toHit(f.item, f.score, f.sources.length > 1 ? 'hybrid' : f.sources[0] === 0 ? 'lexical' : 'semantic'));
 }

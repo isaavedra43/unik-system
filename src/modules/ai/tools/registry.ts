@@ -1,6 +1,7 @@
 import { z, ZodType } from 'zod';
 import type { CurrentUser } from '@/modules/auth/authorization';
 import { zodToJsonSchema } from './zod-to-json-schema';
+import { cacheKeyFor, isCacheableTool, toolResultCache, ttlForArgs } from './tool-cache';
 
 /**
  * Tool registry and COMMON EXECUTOR.
@@ -99,6 +100,8 @@ export interface ToolExecutionContext {
   contextHash?: string;
   /** Skill run that invoked the tool (limits which tools are allowed). */
   skillRunId?: string;
+  /** Bypass the read-result cache for this call (user asked for live data). */
+  skipCache?: boolean;
 }
 
 export interface ProposalSummary {
@@ -122,6 +125,35 @@ export interface ToolExecutionResult {
   truncated?: boolean;
   /** Outcome unknown (e.g. timeout after the request may have completed). */
   uncertain?: boolean;
+  /** Served from the short-TTL read cache. */
+  cached?: boolean;
+  cachedAt?: string;
+}
+
+interface ToolCacheSettings {
+  enabled: boolean;
+  liveMs: number;
+  historicalMs: number;
+}
+
+let cacheSettingsMemo: { value: ToolCacheSettings; at: number } | null = null;
+
+async function getToolCacheSettings(): Promise<ToolCacheSettings> {
+  if (cacheSettingsMemo && Date.now() - cacheSettingsMemo.at < 10_000) return cacheSettingsMemo.value;
+  let value: ToolCacheSettings = { enabled: true, liveMs: 30_000, historicalMs: 300_000 };
+  try {
+    const { getAiSettings } = await import('../ai-admin-config-service');
+    const s = await getAiSettings();
+    value = {
+      enabled: s.toolCacheEnabled !== false,
+      liveMs: Math.max(0, Number(s.toolCacheTtlLiveSeconds) || 30) * 1000,
+      historicalMs: Math.max(0, Number(s.toolCacheTtlHistoricalSeconds) || 300) * 1000,
+    };
+  } catch {
+    // settings unavailable (tests, early boot): keep defaults
+  }
+  cacheSettingsMemo = { value, at: Date.now() };
+  return value;
 }
 
 const registry = new Map<string, ToolDefinition>();
@@ -417,10 +449,18 @@ export async function executeTool(
     };
   }
 
-  // 6. Execution with timeout and result bound
+  // 6. Execution with timeout and result bound (read tools go through the short-TTL cache)
   const timeoutMs = tool.timeoutMs ?? (source === 'builtin' ? BUILTIN_DEFAULT_TIMEOUT_MS : 15_000);
   const maxResultBytes = tool.maxResultBytes ?? (source === 'builtin' ? 0 : 64 * 1024);
   const requestBytes = Buffer.byteLength(JSON.stringify(parsed.data ?? {}));
+  const cacheSettings = await getToolCacheSettings();
+  const cacheKey = cacheSettings.enabled && !ctx.skipCache && isCacheableTool(tool) ? cacheKeyFor(tool, actor, parsed.data) : null;
+  if (cacheKey) {
+    const hit = toolResultCache.get(cacheKey);
+    if (hit) {
+      return { success: true, result: hit.value, durationMs: 0, cached: true, cachedAt: new Date(hit.storedAt).toISOString() };
+    }
+  }
   const start = Date.now();
   try {
     const raw = await withTimeout(tool.execute(actor, parsed.data, ctx), timeoutMs);
@@ -436,6 +476,16 @@ export async function executeTool(
       responseBytes: bounded.bytes,
       proposalId: ctx.approvedProposalId,
     });
+    const effect = tool.effect ?? 'read';
+    if (effect !== 'read') {
+      // Business data changed (or may have): every cached read is now suspect.
+      toolResultCache.clear();
+    } else if (cacheKey && !uncertain && !bounded.truncated) {
+      const value = bounded.value as { error?: unknown } | null;
+      if (!(value && typeof value === 'object' && value.error)) {
+        toolResultCache.set(cacheKey, bounded.value, ttlForArgs(parsed.data, cacheSettings.liveMs, cacheSettings.historicalMs));
+      }
+    }
     return {
       success: true,
       result: bounded.value,

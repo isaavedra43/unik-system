@@ -90,5 +90,11 @@ import './messaging-tools';
 // Insights & proactive work (salud del cliente, cobranza, retrasos, scorecards, reactivación, digest)
 import './insights-tools';
 
+// Orchestration helpers (más tools bajo demanda, planes antes de ejecutar)
+import './planning-tools';
+
+// Documents (adjuntos de la conversación, extracción estructurada de facturas/recibos, borrador de bill)
+import './documents-tools';
+
 // Export the registry API for consumers
 export * from './registry';

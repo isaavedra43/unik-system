@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { AlertCircle, Bot, Loader2, Check, X } from 'lucide-react';
+import { AlertCircle, Bot, Loader2, Check, X, ListChecks } from 'lucide-react';
 import { AnimatePresence } from 'framer-motion';
 import type { CurrentUser } from '@/modules/auth/authorization';
 import { AssistantMessage, type AssistantMessageData } from './AssistantMessage';
@@ -46,6 +46,7 @@ export function AssistantChat({
   const [error, setError] = useState<string | null>(null);
   const [loadingConv, setLoadingConv] = useState(false);
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
+  const [planFirst, setPlanFirst] = useState(false);
   const [voiceModeOpen, setVoiceModeOpen] = useState(false);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -83,6 +84,8 @@ export function AssistantChat({
           toolCallRecords: m.toolCallRecords as AssistantMessageData['toolCallRecords'],
           attachments: m.attachments as AssistantMessageData['attachments'],
           artifacts: m.artifacts as AssistantMessageData['artifacts'],
+          meta: (m.meta as AssistantMessageData['meta']) ?? null,
+          feedback: (m.feedback as AssistantMessageData['feedback']) ?? null,
           createdAt: m.createdAt as string,
         }))
       );
@@ -162,6 +165,7 @@ export function AssistantChat({
     setStreamingContent('');
     setActiveToolCalls([]);
     setArtifacts([]);
+    setPlanFirst(false);
 
     const controller = new AbortController();
     abortRef.current = controller;
@@ -175,6 +179,7 @@ export function AssistantChat({
           message: text,
           context,
           model: selectedModel ?? undefined,
+          planFirst: planFirst || undefined,
           // Only ids: the server resolves ownership, conversation and READY state.
           attachments: attachments.length > 0 ? attachments.map((a) => a.id) : undefined,
         }),
@@ -255,6 +260,8 @@ export function AssistantChat({
   }
 
   const suggestions = getSuggestionsForPage(context?.page);
+  // A proposed plan stays actionable until the user writes something after it.
+  const lastUserIndex = messages.reduce((acc, m, i) => (m.role === 'user' ? i : acc), -1);
 
   const isEmpty = messages.length === 0 && !streaming;
 
@@ -273,8 +280,8 @@ export function AssistantChat({
             </p>
           </div>
         )}
-        {messages.map((m) => (
-          <AssistantMessage key={m.id} message={m} />
+        {messages.map((m, i) => (
+          <AssistantMessage key={m.id} message={m} onSendText={(text) => void handleSend(text)} isLatest={i > lastUserIndex && !streaming} />
         ))}
         {(streaming || streamingContent || activeToolCalls.length > 0) && (
           <div className="assistant-msg-row assistant-msg-row-assistant">
@@ -343,6 +350,15 @@ export function AssistantChat({
       <div className="assistant-input-bar">
         <div className="assistant-input-topbar">
           <ModelSelector value={selectedModel} onChange={setSelectedModel} />
+          <button
+            type="button"
+            className={`assistant-plan-toggle ${planFirst ? 'is-on' : ''}`}
+            onClick={() => setPlanFirst((v) => !v)}
+            aria-pressed={planFirst}
+            title="La IA propone los pasos y espera tu confirmación antes de ejecutar"
+          >
+            <ListChecks size={13} /> Planear primero
+          </button>
         </div>
         <AssistantInput
           onSend={handleSend}

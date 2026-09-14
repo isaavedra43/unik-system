@@ -25,7 +25,9 @@ export const PROVIDER_LABELS: Record<ProviderId, string> = {
 /** Content part for multimodal messages (OpenAI Vision format). */
 export type ContentPart =
   | { type: 'text'; text: string }
-  | { type: 'image_url'; image_url: { url: string } };
+  | { type: 'image_url'; image_url: { url: string } }
+  /** Whole document (PDF as data URL) for models that read files natively — used as OCR fallback. */
+  | { type: 'file'; file: { filename: string; file_data: string } };
 
 /** A single chat message in the canonical (OpenAI-style) format. */
 export interface ChatMessage {

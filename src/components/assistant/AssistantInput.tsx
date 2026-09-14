@@ -289,7 +289,7 @@ export function AssistantInput({
                   ref={fileInputRef}
                   type="file"
                   multiple
-                  accept="image/png,image/jpeg,application/pdf,text/plain,text/csv"
+                  accept="image/png,image/jpeg,image/webp,image/gif,application/pdf,text/plain,text/csv,text/markdown,.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,audio/*,video/mp4,video/webm"
                   onChange={handleFileSelect}
                   style={{ display: 'none' }}
                   aria-label="Adjuntar archivos"

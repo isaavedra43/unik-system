@@ -25,6 +25,13 @@ import { ARTIFACT_TOOL_NAMES, collectRowArrays, findLastDataToolResult } from '.
 import { maybeSummarizeConversation } from './ai-conversation-summary';
 import { absoluteUrl } from '@/lib/app-url';
 import type { Prisma } from '@prisma/client';
+import type { ToolDefinition, ToolExecutionResult } from './tools/registry';
+import { CORE_TOOL_NAMES, PROVIDER_MAX_TOOLS, findToolsByTopic, selectToolsForTurn } from './tool-selector';
+import { classifyTask, resolveTurnModel } from './model-router';
+import { inferConfidence, parseConfidence } from './confidence';
+import { mergeMessageMeta } from './ai-sessions-service';
+import { attachmentKind } from './ai-attachments-service';
+import { judgeTurnQuality } from './ai-quality-judge';
 
 interface OrchestratorInput {
   conversationId: string;
@@ -38,8 +45,10 @@ interface OrchestratorInput {
     /** Set when the assistant runs as the internal-chat copilot of this channel. */
     chatChannelId?: string;
   };
-  /** Optional model override — user can pick a model in the chat UI. */
+  /** Optional model override — user can pick a model in the chat UI ("auto" = routing). */
   model?: string;
+  /** Plan-then-execute requested for this message: propose steps, wait for confirmation. */
+  planFirst?: boolean;
   /**
    * Optional attachment IDs (images/PDFs uploaded by the user). They are
    * resolved server-side: must belong to this conversation and user, be
@@ -319,14 +328,25 @@ export async function* runAssistant(
               image_url: { url: processed.dataUrl },
             });
           } else if (processed.type === 'text') {
-            // Add extracted text as a text content part
+            // Add extracted text (PDF, Word, Excel, transcript, plain text) as a text content part
+            const kind = attachmentKind(att.mimeType);
             const label = att.mimeType === 'application/pdf'
               ? `[Contenido del PDF "${att.fileName}"]`
-              : `[Contenido del archivo "${att.fileName}"]`;
+              : kind === 'audio'
+                ? `[Audio "${att.fileName}"]`
+                : kind === 'document'
+                  ? `[Contenido del documento "${att.fileName}"]`
+                  : `[Contenido del archivo "${att.fileName}"]`;
             contentParts.push({
               type: 'text',
               text: `${label}:\n${processed.content}`,
             });
+          } else if (processed.type === 'file_part') {
+            // Scanned PDF: the model reads the file itself (OCR fallback with vision)
+            contentParts.push({ type: 'text', text: processed.note });
+            contentParts.push({ type: 'file', file: { filename: processed.filename, file_data: processed.dataUrl } });
+          } else if (processed.type === 'file') {
+            contentParts.push({ type: 'text', text: processed.content });
           }
         } catch (err) {
           console.error(`[orchestrator] Error processing attachment ${att.fileName}:`, err);
@@ -362,17 +382,66 @@ export async function* runAssistant(
     .filter((t) => inboxConversationId || chatChannelId || !SURFACE_ONLY_TOOLS.has(t.name))
     .filter((t) => inboxConversationId || !INBOX_ONLY_TOOLS.has(t.name))
     .filter((t) => chatChannelId || !CHAT_ONLY_TOOLS.has(t.name));
-  const toolSpecs: ToolSpec[] = toOpenAiTools(availableTools);
+  // 8.5. Offer only the tools that matter this turn (OpenAI accepts ≤128; every tool costs tokens).
+  // Core + surface tools are always present; the rest is chosen by relevance and recent use.
+  // `loadMoreTools` lets the model pull any other tool by topic in one extra step.
+  const recentToolNames = [
+    ...new Set(
+      history
+        .filter((m) => m.role === 'assistant' && Array.isArray(m.toolCalls))
+        .flatMap((m) => (m.toolCalls as Array<{ name?: string }>).map((tc) => tc.name).filter((n): n is string => typeof n === 'string'))
+    ),
+  ];
+  const pinnedTools = [
+    ...(inboxConversationId ? [...INBOX_ONLY_TOOLS, ...INBOX_CONVERSATION_ID_TOOLS, 'suggestNextActions', 'draftQuoteFromRequest', 'sendQuoteToContact'] : []),
+    ...(chatChannelId ? [...CHAT_ONLY_TOOLS, ...CHAT_CHANNEL_ID_TOOLS, 'suggestNextActions', 'listChatChannels', 'startInternalCall', 'createChatEvent'] : []),
+  ];
+  const selection = selectToolsForTurn({
+    tools: availableTools,
+    message: input.message,
+    recentToolNames,
+    pinned: pinnedTools,
+    maxTools: Math.min(Math.max(8, Number(settings.maxToolsPerTurn) || 96), PROVIDER_MAX_TOOLS),
+  });
+  let offeredTools: ToolDefinition[] = selection.offered;
+  let toolSpecs: ToolSpec[] = toOpenAiTools(offeredTools);
+  const availableByName = new Map(availableTools.map((t) => [t.name, t] as const));
+  if (selection.dropped.length > 0) {
+    console.log(JSON.stringify({ event: 'ai.tools.selected', offered: offeredTools.length, dropped: selection.dropped.length, domains: selection.domains }));
+  }
 
-  // Resolve effective model: user override > default
-  const effectiveModel = input.model ?? settings.deployment;
+  // 8.6. Model routing: explicit choice wins; "auto"/none → classify the task and pick the cheapest capable model.
+  const isAutoTrigger = input.message.startsWith('⟦auto:');
+  const classification = classifyTask({
+    message: input.message,
+    attachmentKinds: resolvedAttachments.map((a) => {
+      const k = attachmentKind(a.mimeType);
+      return k === 'text' ? 'other' : k;
+    }),
+    planFirst: input.planFirst,
+    autoTrigger: isAutoTrigger,
+    recentToolNames,
+  });
+  const routing = resolveTurnModel(settings, input.model, classification);
+  const effectiveModel = routing.model;
   const fallbackModel = settings.fallbackDeployment;
+
+  // 8.7. Live data requested explicitly → bypass the short-TTL read cache this turn.
+  const wantsFreshData = /\b(actualiza\w*|en tiempo real|refresca\w*|sin cach[eé]|datos de ahora|ahorita mismo|al momento)\b/i.test(input.message);
+
+  // 8.8. Plan-then-execute requested from the UI for this message.
+  if (input.planFirst && messages[0] && typeof messages[0].content === 'string') {
+    messages[0].content += `\n\n## PLANEAR PRIMERO (activado por el usuario en este mensaje)
+Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los pasos concretos y DETENTE. No ejecutes ningún paso hasta que el usuario confirme ("Ejecutar plan"). Si el mensaje del usuario ES la confirmación de un plan anterior, ejecútalo en orden.`;
+  }
 
   // 9. Agent loop (max maxToolIterations)
   let iteration = 0;
   let totalPromptTokens = 0;
   let totalCompletionTokens = 0;
   let usingFallback = false;
+  const turnStats = { calls: 0, cachedHits: 0, parallelBatches: 0, dataToolsSucceeded: 0, failed: 0, loadedMore: 0 };
+  const toolsUsedThisTurn: Array<{ name: string; success: boolean; cached?: boolean }> = [];
 
   // Track the last DATA tool result so we can auto-inject it into artifact tools.
   // Seeded from the conversation history ("generame un excel con la info que te pedí"), skipping
@@ -599,6 +668,365 @@ export async function* runAssistant(
     return titleMap[toolName] ?? 'Reporte UNIK';
   }
 
+  /** Parses the model's JSON args and injects surface ids, report rows/titles and chart params. */
+  async function prepareArgs(tc: { name: string; arguments: string }): Promise<unknown> {
+    let parsedArgs: unknown;
+    try {
+      parsedArgs = JSON.parse(tc.arguments);
+    } catch {
+      parsedArgs = {};
+    }
+    if (!parsedArgs || typeof parsedArgs !== 'object') return parsedArgs;
+    const argsObj = parsedArgs as Record<string, unknown>;
+    // Inbox tools work on the INBOX conversation, never on this AI thread.
+    if (inboxConversationId) {
+      if (INBOX_ONLY_TOOLS.has(tc.name) && !argsObj.inboxConversationId) {
+        argsObj.inboxConversationId = inboxConversationId;
+      }
+      if (INBOX_CONVERSATION_ID_TOOLS.has(tc.name) && !argsObj.conversationId) {
+        argsObj.conversationId = inboxConversationId;
+      }
+    }
+    // Chat tools work on the current internal-chat channel by default.
+    if (chatChannelId) {
+      if (CHAT_CHANNEL_ID_TOOLS.has(tc.name) && !argsObj.chatChannelId) {
+        argsObj.chatChannelId = chatChannelId;
+      }
+      if (tc.name === 'sendInternalChatMessage' && !argsObj.channelId) {
+        argsObj.channelId = chatChannelId;
+      }
+    }
+    if (!argsObj.conversationId) {
+      argsObj.conversationId = input.conversationId;
+    }
+
+    // Auto-inject rows and title for artifact tools
+    if (ARTIFACT_TOOLS.has(tc.name)) {
+      const modelRows = Array.isArray(argsObj.rows) ? (argsObj.rows as Record<string, unknown>[]) : null;
+      const subsetOnly = argsObj.subsetOnly === true;
+      if (!argsObj.sections && !subsetOnly && lastToolRows && lastToolRows.length > 0) {
+        // The rows of a report ALWAYS come from the data tool, never from what the model
+        // re-typed: hand-typed rows are (a) a partial page ("solo algunos renglones"), and
+        // (b) already-formatted strings ("$1,797.00") that break totals ("$NaN").
+        // Chat results are paginated (pageSize ≤ 200) so the model's context stays small,
+        // but a report must contain EVERY matching row — re-run the data tool page by page
+        // (never through the model) when the last result was only a partial page.
+        const exportRows = await fetchAllRowsForExport(lastToolName, lastToolArgs, lastToolResult, lastToolRows, input.actor);
+        if (modelRows && modelRows.length > exportRows.length) {
+          // The model has more rows than we can reproduce (e.g. it merged several results):
+          // keep its rows rather than silently dropping data.
+          console.log(`[ai-orchestrator] Keeping ${modelRows.length} model rows for ${tc.name} (system has ${exportRows.length})`);
+        } else {
+          if (modelRows) {
+            console.log(`[ai-orchestrator] Replacing ${modelRows.length} model-typed rows with ${exportRows.length} rows from ${lastToolName} for ${tc.name}`);
+          } else {
+            console.log(`[ai-orchestrator] Auto-injecting ${exportRows.length} rows from ${lastToolName} into ${tc.name}`);
+          }
+          argsObj.rows = exportRows;
+        }
+      }
+      if (!argsObj.subtitle && lastToolName === 'querySalesOrders') {
+        argsObj.subtitle = buildReportSubtitle(lastToolArgs, lastToolResult);
+      }
+      // Auto-inject sections for PDF when the tool result has multiple arrays
+      if (tc.name === 'generatePdfReport' && !argsObj.sections && !argsObj.rows && lastToolResult) {
+        const allArrays = collectRowArrays(lastToolResult);
+        if (Object.keys(allArrays).length > 1) {
+          const sectionLabels: Record<string, string> = {
+            byPaymentMethod: 'Por Método de Pago',
+            byStatus: 'Por Estado',
+            bySalesperson: 'Por Vendedor',
+            byLocation: 'Por Sucursal',
+            byDeliveryMethod: 'Por Método de Entrega',
+            byCustomer: 'Por Cliente',
+            byProduct: 'Por Producto',
+            byDate: 'Por Fecha',
+            orders: 'Órdenes',
+            topProducts: 'Productos Más Vendidos',
+            topCustomers: 'Top Clientes',
+          };
+          argsObj.sections = Object.entries(allArrays).map(([key, rows]) => ({
+            title: sectionLabels[key] ?? key,
+            rows,
+          }));
+          console.log(`[ai-orchestrator] Auto-injecting ${Object.keys(allArrays).length} sections from ${lastToolName} into ${tc.name}`);
+        }
+      }
+      if (!argsObj.title && lastToolName) {
+        // Build title dynamically based on tool name AND its arguments
+        argsObj.title = buildDynamicTitle(lastToolName, lastToolArgs);
+      }
+
+      // Auto-inject summary cards from scalar fields in the last tool result
+      if (!argsObj.summaryCards && lastToolResult) {
+        const cards = buildSummaryCards(lastToolResult);
+        if (cards.length > 0) {
+          argsObj.summaryCards = cards;
+        }
+      }
+    }
+
+    // Auto-inject chart params for generateChart
+    if (tc.name === 'generateChart' && lastToolRows && lastToolRows.length > 0) {
+      if (!argsObj.title) {
+        argsObj.title = buildDynamicTitle(lastToolName ?? '', lastToolArgs);
+      }
+      if (!argsObj.chartType) {
+        argsObj.chartType = 'bar';
+      }
+      if (!argsObj.labels && lastToolRows.length > 0) {
+        // Use 'customer' or 'number' or first string field as labels
+        const firstRow = lastToolRows[0];
+        let labelKey = 'customer';
+        if (!('customer' in firstRow)) {
+          // Find first string field
+          for (const k of Object.keys(firstRow)) {
+            if (typeof firstRow[k] === 'string' && k !== 'date' && k !== 'status') {
+              labelKey = k;
+              break;
+            }
+          }
+        }
+        argsObj.labels = lastToolRows.map((r) => String(r[labelKey] ?? '').slice(0, 30));
+      }
+      if (!argsObj.series && lastToolRows.length > 0) {
+        // Use 'total' or first numeric field as values
+        const firstRow = lastToolRows[0];
+        let valueKey = 'total';
+        if (!('total' in firstRow)) {
+          for (const k of Object.keys(firstRow)) {
+            const v = firstRow[k];
+            if (typeof v === 'number' || (typeof v === 'string' && !isNaN(Number(v)) && v !== '')) {
+              valueKey = k;
+              break;
+            }
+          }
+        }
+        const values = lastToolRows.map((r) => Number(r[valueKey] ?? 0));
+        argsObj.series = [{ label: argsObj.title as string, values }];
+      }
+    }
+    return parsedArgs;
+  }
+
+  /**
+   * `loadMoreTools` is resolved here (not in the registry): the matching tools
+   * are added to the tools offered in the next model call, within the API limit.
+   */
+  function loadMoreTools(parsedArgs: unknown): ToolExecutionResult {
+    const topic = String((parsedArgs as { topic?: unknown } | null)?.topic ?? '').trim();
+    const offeredNames = new Set(offeredTools.map((t) => t.name));
+    const matches = findToolsByTopic(availableTools, topic, 30);
+    const added = matches.filter((t) => !offeredNames.has(t.name));
+    if (added.length > 0) {
+      let next = [...offeredTools, ...added];
+      if (next.length > PROVIDER_MAX_TOOLS) {
+        const keep = new Set<string>([...CORE_TOOL_NAMES, ...pinnedTools, ...recentToolNames, ...toolsUsedThisTurn.map((t) => t.name), ...added.map((t) => t.name)]);
+        const removable = next.filter((t) => !keep.has(t.name)).map((t) => t.name);
+        const drop = new Set(removable.slice(Math.max(0, removable.length - (next.length - PROVIDER_MAX_TOOLS))));
+        next = next.filter((t) => !drop.has(t.name));
+      }
+      offeredTools = next;
+      toolSpecs = toOpenAiTools(offeredTools);
+      turnStats.loadedMore += added.length;
+    }
+    return {
+      success: true,
+      durationMs: 0,
+      result: {
+        topic,
+        added: added.map((t) => ({ name: t.name, description: t.description.slice(0, 220), effect: t.effect ?? 'read' })),
+        alreadyAvailable: matches.filter((t) => offeredNames.has(t.name)).map((t) => t.name),
+        note:
+          matches.length === 0
+            ? 'Ninguna herramienta coincide con ese tema. Revisa si el usuario tiene permiso o si el tema está mal escrito.'
+            : 'Estas herramientas ya están disponibles en tu siguiente paso: llámalas directamente.',
+      },
+    };
+  }
+
+  /** Read-only tools with no dependency on each other can run at the same time. */
+  function isParallelizable(name: string): boolean {
+    if (name === 'loadMoreTools' || name === 'proposePlan') return false;
+    if (ARTIFACT_TOOLS.has(name) || ARTIFACT_TOOL_NAMES.has(name) || name === 'generateChart') return false;
+    const def = availableByName.get(name);
+    if (!def) return false;
+    return (def.effect ?? 'read') === 'read';
+  }
+
+  const execCtx = (assistantMessageId: string) => ({
+    conversationId: input.conversationId,
+    messageId: assistantMessageId,
+    enabledToolNames: settings.enabledTools,
+    skipCache: wantsFreshData,
+  });
+
+  async function runTool(tc: { name: string; arguments: string }, parsedArgs: unknown, assistantMessageId: string): Promise<ToolExecutionResult> {
+    if (tc.name === 'loadMoreTools') return loadMoreTools(parsedArgs);
+    try {
+      return await executeTool(tc.name, input.actor, parsedArgs, execCtx(assistantMessageId));
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : 'Error desconocido', errorCode: 'error', durationMs: 0 };
+    }
+  }
+
+  /** Everything that happens after a tool ran: events, provenance, audit, context, persistence. */
+  async function* finalizeToolCall(
+    tc: { id: string; name: string; arguments: string },
+    parsedArgs: unknown,
+    result: ToolExecutionResult,
+    assistantMessageId: string
+  ): AsyncGenerator<OrchestratorEvent> {
+    turnStats.calls += 1;
+    if (result.cached) turnStats.cachedHits += 1;
+    if (!result.success && !result.needsApproval) turnStats.failed += 1;
+    toolsUsedThisTurn.push({ name: tc.name, success: result.success, cached: result.cached });
+
+    // Side-effecting action: a proposal was created and the user must approve it.
+    // The model receives an explicit tool result so it asks for confirmation instead
+    // of claiming the action happened.
+    if (result.needsApproval && result.proposal) {
+      yield {
+        type: 'proposal',
+        data: {
+          id: result.proposal.id,
+          toolName: result.proposal.toolName,
+          summary: result.proposal.summary,
+          effect: result.proposal.effect,
+          expiresAt: result.proposal.expiresAt,
+          args: parsedArgs,
+        },
+      };
+    }
+
+    // Track the last DATA tool result for auto-injection into artifact tools
+    if (
+      result.success &&
+      result.result &&
+      typeof result.result === 'object' &&
+      !ARTIFACT_TOOL_NAMES.has(tc.name) &&
+      tc.name !== 'loadMoreTools' &&
+      tc.name !== 'proposePlan' &&
+      !(result.result as Record<string, unknown>).error
+    ) {
+      const toolResult = result.result as Record<string, unknown>;
+      // Use the first array as the default rows (for simple mode); preserve the COMPLETE
+      // result for multi-section PDF injection and KPI cards.
+      const allArrays = collectRowArrays(toolResult);
+      const firstKey = Object.keys(allArrays)[0];
+      if (firstKey) {
+        lastToolResult = toolResult;
+        lastToolRows = allArrays[firstKey];
+        lastToolName = tc.name;
+        lastToolArgs = (parsedArgs as Record<string, unknown>) ?? null;
+      }
+      if (availableByName.get(tc.name)?.category !== 'system') turnStats.dataToolsSucceeded += 1;
+    }
+
+    // If the tool generated one or more artifacts, emit an artifact event per artifact.
+    // (generateReportImage returns MULTIPLE artifacts — "Parte 1 de 3", "Parte 2 de 3"...—
+    // when the data doesn't fit in a single image, instead of silently truncating.)
+    if (result.success && result.result && typeof result.result === 'object') {
+      const toolResult = result.result as Record<string, unknown>;
+      const artifactList = Array.isArray(toolResult.artifacts)
+        ? (toolResult.artifacts as Array<Record<string, unknown>>)
+        : toolResult.artifactId && toolResult.type
+          ? [toolResult]
+          : [];
+      if (artifactList.length > 0) {
+        // Persist provenance so a later "cámbiale X al reporte" can rebuild it, and
+        // attach the artifacts to this assistant message so they render forever.
+        const generatorArgs = { ...((parsedArgs as Record<string, unknown>) ?? {}) };
+        delete generatorArgs.rows;
+        delete generatorArgs.sections;
+        const spec = {
+          generatedBy: tc.name,
+          generatorArgs,
+          sourceTool: lastToolName,
+          sourceArgs: lastToolArgs,
+          generatedAt: new Date().toISOString(),
+        };
+        for (const a of artifactList) {
+          if (typeof a.artifactId !== 'string') continue;
+          await linkArtifactToMessage(a.artifactId, assistantMessageId, spec);
+        }
+      }
+      for (const a of artifactList) {
+        yield {
+          type: 'artifact',
+          data: {
+            artifactId: a.artifactId,
+            type: a.type,
+            title: a.title,
+            filename: a.filename,
+            downloadUrl: typeof a.downloadUrl === 'string' ? absoluteUrl(a.downloadUrl) : a.downloadUrl,
+            inlineRender: a.inlineRender,
+            rowCount: a.rowCount,
+            sizeBytes: a.sizeBytes,
+            pageCount: a.pageCount,
+            chartType: a.chartType,
+          },
+        };
+      }
+    }
+
+    // Audit tool call
+    await recordAiToolCall({
+      messageId: assistantMessageId,
+      toolName: tc.name,
+      args: parsedArgs,
+      result: result.result,
+      durationMs: result.durationMs,
+      success: result.success,
+      errorCode: result.needsApproval ? 'needs_approval' : (result.errorCode ?? result.error),
+    });
+
+    // Add result to context
+    const toolPayload = result.success
+      ? result.cached && result.result && typeof result.result === 'object' && !Array.isArray(result.result)
+        ? { ...(result.result as Record<string, unknown>), cached: true, cachedAt: result.cachedAt }
+        : result.result
+      : result.needsApproval && result.proposal
+        ? {
+            needsApproval: true,
+            proposalId: result.proposal.id,
+            summary: result.proposal.summary,
+            effect: result.proposal.effect,
+            instruction:
+              'NO afirmes que la acción se realizó. Explica al usuario qué se hará exactamente y pídele que apruebe la propuesta en la tarjeta mostrada.',
+          }
+        : { error: result.error, ...(result.uncertain ? { uncertain: true } : {}) };
+    messages.push({
+      role: 'tool',
+      content: JSON.stringify(toolPayload),
+      tool_call_id: tc.id,
+    });
+
+    // Persist tool message
+    await addMessage(
+      input.conversationId,
+      'tool',
+      JSON.stringify(toolPayload),
+      null,
+      0,
+      0,
+      result.durationMs,
+      tc.id
+    );
+
+    yield {
+      type: 'tool_call_end',
+      data: {
+        name: tc.name,
+        success: result.success,
+        needsApproval: Boolean(result.needsApproval),
+        errorCode: result.errorCode ?? null,
+        durationMs: result.durationMs,
+        cached: Boolean(result.cached),
+      },
+    };
+  }
+
   while (iteration < settings.maxToolIterations) {
     iteration++;
 
@@ -618,22 +1046,22 @@ export async function* runAssistant(
         conversationId: input.conversationId,
         model: modelToUse,
       })) {
-      if (chunk.delta) {
-        iterationContent += chunk.delta;
-        yield { type: 'token', data: { delta: chunk.delta } };
+        if (chunk.delta) {
+          iterationContent += chunk.delta;
+          yield { type: 'token', data: { delta: chunk.delta } };
+        }
+        if (chunk.toolCalls) {
+          iterationToolCalls = chunk.toolCalls;
+        }
+        if (chunk.finishReason) {
+          finishReason = chunk.finishReason;
+        }
+        if (chunk.usage) {
+          totalPromptTokens += chunk.usage.promptTokens;
+          totalCompletionTokens += chunk.usage.completionTokens;
+          recordTokenUsage(input.actor.id, chunk.usage.totalTokens);
+        }
       }
-      if (chunk.toolCalls) {
-        iterationToolCalls = chunk.toolCalls;
-      }
-      if (chunk.finishReason) {
-        finishReason = chunk.finishReason;
-      }
-      if (chunk.usage) {
-        totalPromptTokens += chunk.usage.promptTokens;
-        totalCompletionTokens += chunk.usage.completionTokens;
-        recordTokenUsage(input.actor.id, chunk.usage.totalTokens);
-      }
-    }
     } catch (err) {
       // Handle 429 rate limit: try fallback model
       if (err instanceof AiApiError && err.code === 'rate_limit' && !usingFallback && fallbackModel) {
@@ -654,7 +1082,7 @@ export async function* runAssistant(
         // Log warnings but don't block the response — the guardrail is heuristic
         console.warn('[ai-orchestrator] Output validation warnings:', outputValidation.warnings);
       }
-      await addMessage(
+      const finalMessage = await addMessage(
         input.conversationId,
         'assistant',
         iterationContent,
@@ -663,14 +1091,51 @@ export async function* runAssistant(
         totalCompletionTokens,
         0
       );
+
+      // Confidence label (the model writes it; if it forgot, derive it from what happened).
+      const parsedConfidence = parseConfidence(iterationContent);
+      const confidence = inferConfidence({
+        parsed: parsedConfidence.level,
+        dataToolsSucceeded: turnStats.dataToolsSucceeded,
+        toolsFailed: turnStats.failed,
+        hasNumbers: /\d/.test(iterationContent),
+      });
+      const meta = {
+        model: modelToUse,
+        routing: { tier: routing.tier, reason: routing.reason, routed: routing.routed },
+        confidence,
+        confidenceNote: parsedConfidence.note,
+        confidenceLabeled: parsedConfidence.level !== null,
+        tools: { ...turnStats, offered: offeredTools.length, used: toolsUsedThisTurn.map((t) => t.name) },
+        planFirst: Boolean(input.planFirst),
+      };
+      await mergeMessageMeta(finalMessage.id, meta);
+
       // Shared context: refresh this thread's rolling summary (never blocks the answer).
       void maybeSummarizeConversation(input.conversationId, input.actor.id);
+      // Optional automatic quality evaluation (admin setting) — after the answer, never blocking.
+      if (settings.qualityJudgeEnabled && !isAutoTrigger) {
+        void judgeTurnQuality({
+          messageId: finalMessage.id,
+          userMessage: input.message,
+          answer: iterationContent,
+          toolsUsed: toolsUsedThisTurn,
+          confidence,
+        }).catch((err) => console.warn('[ai-orchestrator] judge failed:', err instanceof Error ? err.message : err));
+      }
       yield {
         type: 'done',
         data: {
           content: iterationContent,
           promptTokens: totalPromptTokens,
           completionTokens: totalCompletionTokens,
+          messageId: finalMessage.id,
+          model: modelToUse,
+          routed: routing.routed,
+          tier: routing.tier,
+          confidence,
+          confidenceNote: parsedConfidence.note,
+          tools: { calls: turnStats.calls, cachedHits: turnStats.cachedHits, parallelBatches: turnStats.parallelBatches },
         },
       };
       return;
@@ -698,293 +1163,32 @@ export async function* runAssistant(
       })),
     });
 
-    // Execute each tool call
-    for (const tc of iterationToolCalls) {
-      yield { type: 'tool_call_start', data: { name: tc.name, args: tc.arguments } };
-
-      let parsedArgs: unknown;
-      try {
-        parsedArgs = JSON.parse(tc.arguments);
-      } catch {
-        parsedArgs = {};
+    // Execute the tool calls: independent READ tools run concurrently (results are
+    // finalized in the model's order); artifact, planning and side-effecting tools run
+    // one by one because they depend on previous results or create approval proposals.
+    let idx = 0;
+    while (idx < iterationToolCalls.length) {
+      const tc = iterationToolCalls[idx];
+      if (!isParallelizable(tc.name)) {
+        yield { type: 'tool_call_start', data: { name: tc.name, args: tc.arguments } };
+        const parsedArgs = await prepareArgs(tc);
+        const result = await runTool(tc, parsedArgs, assistantMessage.id);
+        yield* finalizeToolCall(tc, parsedArgs, result, assistantMessage.id);
+        idx += 1;
+        continue;
       }
-
-      // Inject conversationId for artifact tools that need it
-      if (parsedArgs && typeof parsedArgs === 'object') {
-        const argsObj = parsedArgs as Record<string, unknown>;
-        // Inbox tools work on the INBOX conversation, never on this AI thread.
-        if (inboxConversationId) {
-          if (INBOX_ONLY_TOOLS.has(tc.name) && !argsObj.inboxConversationId) {
-            argsObj.inboxConversationId = inboxConversationId;
-          }
-          if (INBOX_CONVERSATION_ID_TOOLS.has(tc.name) && !argsObj.conversationId) {
-            argsObj.conversationId = inboxConversationId;
-          }
-        }
-        // Chat tools work on the current internal-chat channel by default.
-        if (chatChannelId) {
-          if (CHAT_CHANNEL_ID_TOOLS.has(tc.name) && !argsObj.chatChannelId) {
-            argsObj.chatChannelId = chatChannelId;
-          }
-          if (tc.name === 'sendInternalChatMessage' && !argsObj.channelId) {
-            argsObj.channelId = chatChannelId;
-          }
-        }
-        if (!argsObj.conversationId) {
-          argsObj.conversationId = input.conversationId;
-        }
-
-        // Auto-inject rows and title for artifact tools
-        if (ARTIFACT_TOOLS.has(tc.name)) {
-          const modelRows = Array.isArray(argsObj.rows) ? (argsObj.rows as Record<string, unknown>[]) : null;
-          const subsetOnly = argsObj.subsetOnly === true;
-          if (!argsObj.sections && !subsetOnly && lastToolRows && lastToolRows.length > 0) {
-            // The rows of a report ALWAYS come from the data tool, never from what the model
-            // re-typed: hand-typed rows are (a) a partial page ("solo algunos renglones"), and
-            // (b) already-formatted strings ("$1,797.00") that break totals ("$NaN").
-            // Chat results are paginated (pageSize ≤ 200) so the model's context stays small,
-            // but a report must contain EVERY matching row — re-run the data tool page by page
-            // (never through the model) when the last result was only a partial page.
-            const exportRows = await fetchAllRowsForExport(lastToolName, lastToolArgs, lastToolResult, lastToolRows, input.actor);
-            if (modelRows && modelRows.length > exportRows.length) {
-              // The model has more rows than we can reproduce (e.g. it merged several results):
-              // keep its rows rather than silently dropping data.
-              console.log(`[ai-orchestrator] Keeping ${modelRows.length} model rows for ${tc.name} (system has ${exportRows.length})`);
-            } else {
-              if (modelRows) {
-                console.log(`[ai-orchestrator] Replacing ${modelRows.length} model-typed rows with ${exportRows.length} rows from ${lastToolName} for ${tc.name}`);
-              } else {
-                console.log(`[ai-orchestrator] Auto-injecting ${exportRows.length} rows from ${lastToolName} into ${tc.name}`);
-              }
-              argsObj.rows = exportRows;
-            }
-          }
-          if (!argsObj.subtitle && lastToolName === 'querySalesOrders') {
-            argsObj.subtitle = buildReportSubtitle(lastToolArgs, lastToolResult);
-          }
-          // Auto-inject sections for PDF when the tool result has multiple arrays
-          if (tc.name === 'generatePdfReport' && !argsObj.sections && !argsObj.rows && lastToolResult) {
-            const allArrays = collectRowArrays(lastToolResult);
-            if (Object.keys(allArrays).length > 1) {
-              const sectionLabels: Record<string, string> = {
-                byPaymentMethod: 'Por Método de Pago',
-                byStatus: 'Por Estado',
-                bySalesperson: 'Por Vendedor',
-                byLocation: 'Por Sucursal',
-                byDeliveryMethod: 'Por Método de Entrega',
-                byCustomer: 'Por Cliente',
-                byProduct: 'Por Producto',
-                byDate: 'Por Fecha',
-                orders: 'Órdenes',
-                topProducts: 'Productos Más Vendidos',
-                topCustomers: 'Top Clientes',
-              };
-              argsObj.sections = Object.entries(allArrays).map(([key, rows]) => ({
-                title: sectionLabels[key] ?? key,
-                rows,
-              }));
-              console.log(`[ai-orchestrator] Auto-injecting ${Object.keys(allArrays).length} sections from ${lastToolName} into ${tc.name}`);
-            }
-          }
-          if (!argsObj.title && lastToolName) {
-            // Build title dynamically based on tool name AND its arguments
-            argsObj.title = buildDynamicTitle(lastToolName, lastToolArgs);
-          }
-
-          // Auto-inject summary cards from scalar fields in the last tool result
-          if (!argsObj.summaryCards && lastToolResult) {
-            const cards = buildSummaryCards(lastToolResult);
-            if (cards.length > 0) {
-              argsObj.summaryCards = cards;
-            }
-          }
-        }
-
-        // Auto-inject chart params for generateChart
-        if (tc.name === 'generateChart' && lastToolRows && lastToolRows.length > 0) {
-          if (!argsObj.title) {
-            argsObj.title = buildDynamicTitle(lastToolName ?? '', lastToolArgs);
-          }
-          if (!argsObj.chartType) {
-            argsObj.chartType = 'bar';
-          }
-          if (!argsObj.labels && lastToolRows.length > 0) {
-            // Use 'customer' or 'number' or first string field as labels
-            const firstRow = lastToolRows[0];
-            let labelKey = 'customer';
-            if (!('customer' in firstRow)) {
-              // Find first string field
-              for (const k of Object.keys(firstRow)) {
-                if (typeof firstRow[k] === 'string' && k !== 'date' && k !== 'status') {
-                  labelKey = k;
-                  break;
-                }
-              }
-            }
-            argsObj.labels = lastToolRows.map((r) => String(r[labelKey] ?? '').slice(0, 30));
-          }
-          if (!argsObj.series && lastToolRows.length > 0) {
-            // Use 'total' or first numeric field as values
-            const firstRow = lastToolRows[0];
-            let valueKey = 'total';
-            if (!('total' in firstRow)) {
-              for (const k of Object.keys(firstRow)) {
-                const v = firstRow[k];
-                if (typeof v === 'number' || (typeof v === 'string' && !isNaN(Number(v)) && v !== '')) {
-                  valueKey = k;
-                  break;
-                }
-              }
-            }
-            const values = lastToolRows.map((r) => Number(r[valueKey] ?? 0));
-            argsObj.series = [{ label: argsObj.title as string, values }];
-          }
-        }
+      const batch: Array<{ tc: { id: string; name: string; arguments: string }; parsedArgs: unknown }> = [];
+      while (idx < iterationToolCalls.length && isParallelizable(iterationToolCalls[idx].name)) {
+        const call = iterationToolCalls[idx];
+        yield { type: 'tool_call_start', data: { name: call.name, args: call.arguments } };
+        batch.push({ tc: call, parsedArgs: await prepareArgs(call) });
+        idx += 1;
       }
-
-      const result = await executeTool(tc.name, input.actor, parsedArgs, {
-        conversationId: input.conversationId,
-        messageId: assistantMessage.id,
-        enabledToolNames: settings.enabledTools,
-      });
-
-      // Side-effecting action: a proposal was created and the user must approve it.
-      // The model receives an explicit tool result so it asks for confirmation instead
-      // of claiming the action happened.
-      if (result.needsApproval && result.proposal) {
-        yield {
-          type: 'proposal',
-          data: {
-            id: result.proposal.id,
-            toolName: result.proposal.toolName,
-            summary: result.proposal.summary,
-            effect: result.proposal.effect,
-            expiresAt: result.proposal.expiresAt,
-            args: parsedArgs,
-          },
-        };
+      if (batch.length > 1) turnStats.parallelBatches += 1;
+      const results = await Promise.all(batch.map((b) => runTool(b.tc, b.parsedArgs, assistantMessage.id)));
+      for (let k = 0; k < batch.length; k++) {
+        yield* finalizeToolCall(batch[k].tc, batch[k].parsedArgs, results[k], assistantMessage.id);
       }
-
-      // Track the last DATA tool result for auto-injection into artifact tools
-      if (
-        result.success &&
-        result.result &&
-        typeof result.result === 'object' &&
-        !ARTIFACT_TOOL_NAMES.has(tc.name) &&
-        !(result.result as Record<string, unknown>).error
-      ) {
-        const toolResult = result.result as Record<string, unknown>;
-        // Use the first array as the default rows (for simple mode); preserve the COMPLETE
-        // result for multi-section PDF injection and KPI cards.
-        const allArrays = collectRowArrays(toolResult);
-        const firstKey = Object.keys(allArrays)[0];
-        if (firstKey) {
-          lastToolResult = toolResult;
-          lastToolRows = allArrays[firstKey];
-          lastToolName = tc.name;
-          lastToolArgs = (parsedArgs as Record<string, unknown>) ?? null;
-        }
-      }
-
-      // If the tool generated one or more artifacts, emit an artifact event per artifact.
-      // (generateReportImage returns MULTIPLE artifacts — "Parte 1 de 3", "Parte 2 de 3"...—
-      // when the data doesn't fit in a single image, instead of silently truncating.)
-      if (result.success && result.result && typeof result.result === 'object') {
-        const toolResult = result.result as Record<string, unknown>;
-        const artifactList = Array.isArray(toolResult.artifacts)
-          ? (toolResult.artifacts as Array<Record<string, unknown>>)
-          : toolResult.artifactId && toolResult.type
-            ? [toolResult]
-            : [];
-        if (artifactList.length > 0) {
-          // Persist provenance so a later "cámbiale X al reporte" can rebuild it, and
-          // attach the artifacts to this assistant message so they render forever.
-          const generatorArgs = { ...((parsedArgs as Record<string, unknown>) ?? {}) };
-          delete generatorArgs.rows;
-          delete generatorArgs.sections;
-          const spec = {
-            generatedBy: tc.name,
-            generatorArgs,
-            sourceTool: lastToolName,
-            sourceArgs: lastToolArgs,
-            generatedAt: new Date().toISOString(),
-          };
-          for (const a of artifactList) {
-            if (typeof a.artifactId !== 'string') continue;
-            await linkArtifactToMessage(a.artifactId, assistantMessage.id, spec);
-          }
-        }
-        for (const a of artifactList) {
-          yield {
-            type: 'artifact',
-            data: {
-              artifactId: a.artifactId,
-              type: a.type,
-              title: a.title,
-              filename: a.filename,
-              downloadUrl: typeof a.downloadUrl === 'string' ? absoluteUrl(a.downloadUrl) : a.downloadUrl,
-              inlineRender: a.inlineRender,
-              rowCount: a.rowCount,
-              sizeBytes: a.sizeBytes,
-              pageCount: a.pageCount,
-              chartType: a.chartType,
-            },
-          };
-        }
-      }
-
-      // Audit tool call
-      await recordAiToolCall({
-        messageId: assistantMessage.id,
-        toolName: tc.name,
-        args: parsedArgs,
-        result: result.result,
-        durationMs: result.durationMs,
-        success: result.success,
-        errorCode: result.needsApproval ? 'needs_approval' : (result.errorCode ?? result.error),
-      });
-
-      // Add result to context
-      const toolPayload = result.success
-        ? result.result
-        : result.needsApproval && result.proposal
-          ? {
-              needsApproval: true,
-              proposalId: result.proposal.id,
-              summary: result.proposal.summary,
-              effect: result.proposal.effect,
-              instruction:
-                'NO afirmes que la acción se realizó. Explica al usuario qué se hará exactamente y pídele que apruebe la propuesta en la tarjeta mostrada.',
-            }
-          : { error: result.error, ...(result.uncertain ? { uncertain: true } : {}) };
-      messages.push({
-        role: 'tool',
-        content: JSON.stringify(toolPayload),
-        tool_call_id: tc.id,
-      });
-
-      // Persist tool message
-      await addMessage(
-        input.conversationId,
-        'tool',
-        JSON.stringify(toolPayload),
-        null,
-        0,
-        0,
-        result.durationMs,
-        tc.id
-      );
-
-      yield {
-        type: 'tool_call_end',
-        data: {
-          name: tc.name,
-          success: result.success,
-          needsApproval: Boolean(result.needsApproval),
-          errorCode: result.errorCode ?? null,
-          durationMs: result.durationMs,
-        },
-      };
     }
 
     // Loop: call the active provider again with tool results

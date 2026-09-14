@@ -30,6 +30,10 @@ import { cn } from '@/lib/utils';
 import { AssistantMarkdown } from '@/components/assistant/AssistantMarkdown';
 import { ArtifactRenderer, type ArtifactData } from '@/components/assistant/ArtifactRenderer';
 import { ProposalCard } from './ProposalCard';
+import { PlanCard } from './PlanCard';
+import { ConfidenceBadge } from './ConfidenceBadge';
+import { MessageFeedback } from './MessageFeedback';
+import { parseConfidence } from '@/modules/ai/confidence';
 import {
   AI_SETTINGS_HREF,
   autoKind,
@@ -39,6 +43,7 @@ import {
   toolLabel,
   type ActionKind,
   type CopilotMessage,
+  parsePlan,
   type CopilotMode,
   type CopilotProposal,
   type DraftData,
@@ -450,18 +455,37 @@ export function CopilotPanel({ surface, user, onInsertDraft, onAfterTurn, onBack
         const actionsRecord = records.find((r) => r.toolName === 'suggestNextActions');
         const actions = actionsRecord ? parseSuggestedActions(actionsRecord.args) : null;
         const drafts = records.filter((r) => r.toolName === draftTool && r.success).map((r) => parseDraft(r.args)).filter((d): d is DraftData => Boolean(d));
+        const planRecord = records.find((r) => r.toolName === 'proposePlan' && r.success);
+        const plan = planRecord ? parsePlan(planRecord.args) : null;
         const steps: LiveStep[] = records
-          .filter((r) => r.toolName !== 'suggestNextActions' && r.toolName !== draftTool)
+          .filter((r) => r.toolName !== 'suggestNextActions' && r.toolName !== draftTool && r.toolName !== 'proposePlan')
           .map((r) => ({ id: r.id, name: r.toolName, status: r.errorCode === 'needs_approval' ? 'pending' : r.success ? 'done' : 'failed' }));
-        const text = (m.content ?? '').trim();
+        const parsedText = parseConfidence(m.content);
+        const text = parsedText.content.trim();
         const artifacts = m.artifacts ?? [];
-        if (!text && !actions && drafts.length === 0 && steps.length === 0 && artifacts.length === 0) return null;
-        return { kind: 'assistant' as const, id: m.id, text, steps, actions, actionsCurrent: i === lastActionsIdx, drafts, artifacts };
+        if (!text && !actions && drafts.length === 0 && steps.length === 0 && artifacts.length === 0 && !plan) return null;
+        return {
+          kind: 'assistant' as const,
+          id: m.id,
+          text,
+          steps,
+          actions,
+          actionsCurrent: i === lastActionsIdx,
+          drafts,
+          artifacts,
+          plan,
+          meta: m.meta ?? null,
+          feedback: m.feedback ?? null,
+          confidence: m.meta?.confidence ?? parsedText.level ?? null,
+          confidenceNote: m.meta?.confidenceNote ?? parsedText.note ?? null,
+        };
       })
       .filter((x): x is NonNullable<typeof x> => x !== null);
   }, [messages, draftTool]);
 
   const pendingProposals = proposals.filter((p) => !p.status || p.status === 'pending');
+  // A proposed plan stays actionable until the user writes something after it.
+  const lastUserIndex = items.reduce((acc, it, i) => (it.kind === 'user' ? i : acc), -1);
   const isEmpty = items.length === 0 && !streaming && !loading;
   const orbState: 'idle' | 'thinking' | 'paused' = mode === 'paused' ? 'paused' : streaming ? 'thinking' : 'idle';
   const statusText =
@@ -515,7 +539,7 @@ export function CopilotPanel({ surface, user, onInsertDraft, onAfterTurn, onBack
         )}
 
         <AnimatePresence initial={false}>
-          {items.map((it) => {
+          {items.map((it, itemIndex) => {
             if (it.kind === 'event') {
               return (
                 <motion.div key={it.id} className="copilot-event" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.2 }}>
@@ -552,6 +576,17 @@ export function CopilotPanel({ surface, user, onInsertDraft, onAfterTurn, onBack
                     <AssistantMarkdown content={it.text} />
                   </div>
                 )}
+                {it.plan && (
+                  <PlanCard
+                    plan={it.plan}
+                    active={itemIndex > lastUserIndex && !streaming && mode !== 'paused'}
+                    onRun={send}
+                    onAdjust={() => {
+                      setInput('Ajusta el plan: ');
+                      textareaRef.current?.focus();
+                    }}
+                  />
+                )}
                 {it.artifacts.length > 0 && (
                   <div className="copilot-artifacts">
                     {it.artifacts.map((a) => (
@@ -563,6 +598,12 @@ export function CopilotPanel({ surface, user, onInsertDraft, onAfterTurn, onBack
                   <DraftCard key={`${it.id}-draft-${i}`} draft={d} onInsert={onInsertDraft} />
                 ))}
                 {it.actions && <ActionChips data={it.actions} onPick={send} disabled={streaming || mode === 'paused'} muted={!it.actionsCurrent} />}
+                {it.text && (
+                  <div className="copilot-msgfoot">
+                    <ConfidenceBadge level={it.confidence} note={it.confidenceNote} meta={it.meta} compact />
+                    <MessageFeedback messageId={it.id} initial={it.feedback} compact />
+                  </div>
+                )}
               </motion.div>
             );
           })}

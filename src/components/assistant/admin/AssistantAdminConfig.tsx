@@ -55,6 +55,20 @@ const SETTING_FIELDS: Array<{ key: string; label: string; type: 'number' | 'stri
   { key: 'warehouseMapsUrl', label: 'Enlace de Google Maps de la bodega', type: 'string', hint: 'Vacío = se genera desde la dirección' },
   { key: 'warehouseHours', label: 'Horario de recogida', type: 'string', hint: 'Ej. Lun-Vie 9:00-18:00, Sáb 9:00-14:00' },
   { key: 'pickupInstructions', label: 'Instrucciones para recoger', type: 'textarea', hint: 'Ej. Presentar folio y nombre; entrada por la puerta 2' },
+  // Inteligencia: routing, herramientas por turno, caché, RAG, OCR y calidad
+  { key: 'routingEnabled', label: 'Routing automático de modelo', type: 'boolean', hint: 'Con "Automático" en el chat, elige el modelo según la tarea (simple → barato, complejo → principal)' },
+  { key: 'routingSimpleModel', label: 'Modelo para tareas simples', type: 'string', hint: 'Ej. gpt-4o-mini (saludos, aclaraciones, formato)' },
+  { key: 'routingComplexModel', label: 'Modelo para tareas complejas', type: 'string', hint: 'Vacío = modelo principal' },
+  { key: 'maxToolsPerTurn', label: 'Tools ofrecidas por turno', type: 'number', hint: 'Máximo 128 (límite de OpenAI). Las demás se cargan bajo demanda con loadMoreTools' },
+  { key: 'toolCacheEnabled', label: 'Caché de consultas de lectura', type: 'boolean', hint: 'Dos usuarios que preguntan lo mismo en segundos comparten el resultado' },
+  { key: 'toolCacheTtlLiveSeconds', label: 'Caché datos vivos (segundos)', type: 'number', hint: 'Hoy, esta semana, sin periodo' },
+  { key: 'toolCacheTtlHistoricalSeconds', label: 'Caché datos históricos (segundos)', type: 'number', hint: 'Meses y años cerrados' },
+  { key: 'ragSemanticEnabled', label: 'Búsqueda semántica en biblioteca', type: 'boolean', hint: 'Embeddings de OpenAI + búsqueda híbrida (palabras + significado)' },
+  { key: 'embeddingModel', label: 'Modelo de embeddings', type: 'string', hint: 'text-embedding-3-small' },
+  { key: 'ragRerankEnabled', label: 'Re-ranking con modelo', type: 'boolean', hint: 'Más preciso; una llamada extra por búsqueda' },
+  { key: 'ocrFallbackEnabled', label: 'OCR de PDF escaneados (visión)', type: 'boolean', hint: 'Si el PDF no tiene texto, el modelo lo lee como imagen' },
+  { key: 'qualityJudgeEnabled', label: 'Juez de calidad automático', type: 'boolean', hint: 'Califica cada respuesta (1-5) con un modelo barato después de entregarla' },
+  { key: 'qualityJudgeModel', label: 'Modelo juez', type: 'string', hint: 'Ej. gpt-4o-mini' },
 ];
 
 export function AssistantAdminConfig({ canManage }: { canManage: boolean }) {

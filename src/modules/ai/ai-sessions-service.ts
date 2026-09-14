@@ -29,6 +29,10 @@ export interface MessageRow {
     mimeType: string;
     sizeBytes: number;
   }>;
+  /** Turn metadata (routing, confidence, judge, cache) — assistant messages only. */
+  meta?: Record<string, unknown> | null;
+  /** Owner's 👍/👎 on this assistant message. */
+  feedback?: { rating: number; comment: string | null } | null;
   toolCallRecords?: Array<{
     id: string;
     toolName: string;
@@ -88,6 +92,7 @@ function formatMsgWithToolCalls(
       artifacts: {
         select: { id: true; type: true; meta: true; storageObjectId: true; storagePath: true; createdAt: true };
       };
+      feedback: { select: { rating: true; comment: true } };
     };
   }>
 ): MessageRow {
@@ -101,6 +106,8 @@ function formatMsgWithToolCalls(
     tokensOut: m.tokensOut,
     latencyMs: m.latencyMs,
     createdAt: m.createdAt.toISOString(),
+    meta: (m.meta as Record<string, unknown> | null) ?? null,
+    feedback: m.feedback ? { rating: m.feedback.rating, comment: m.feedback.comment } : null,
     attachments: m.attachments.map((a) => ({
       id: a.id,
       fileName: a.fileName,
@@ -174,6 +181,7 @@ export async function getConversation(
         orderBy: { createdAt: 'asc' },
         select: { id: true, type: true, meta: true, storageObjectId: true, storagePath: true, createdAt: true },
       },
+      feedback: { select: { rating: true, comment: true } },
     },
   });
   const convRow = formatConv(conv);
@@ -262,6 +270,17 @@ export async function getMessages(
     take: limit,
   });
   return messages.reverse().map(formatMsg);
+}
+
+/** Merges turn metadata (routing decision, confidence, judge score…) into an assistant message. */
+export async function mergeMessageMeta(messageId: string, patch: Record<string, unknown>): Promise<void> {
+  try {
+    const row = await prisma.aiMessage.findUnique({ where: { id: messageId }, select: { meta: true } });
+    const current = (row?.meta as Record<string, unknown> | null) ?? {};
+    await prisma.aiMessage.update({ where: { id: messageId }, data: { meta: { ...current, ...patch } as Prisma.InputJsonValue } });
+  } catch (error) {
+    console.warn(JSON.stringify({ event: 'ai.message.meta_failed', messageId, message: error instanceof Error ? error.message : 'unknown' }));
+  }
 }
 
 export async function autoTitleConversation(

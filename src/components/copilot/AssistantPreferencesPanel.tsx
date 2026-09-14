@@ -20,7 +20,14 @@ interface Preferences {
   memoryEnabled: boolean;
   inboxCopilotMode: 'active' | 'on_demand' | 'paused';
   chatCopilotMode: 'active' | 'on_demand' | 'paused';
+  planMode: 'auto' | 'always' | 'never';
 }
+
+const PLAN_MODES: Array<{ value: Preferences['planMode']; label: string; hint: string }> = [
+  { value: 'auto', label: 'Automático', hint: 'Propone un plan solo en tareas complejas (varios pasos o fuentes) y espera tu confirmación.' },
+  { value: 'always', label: 'Siempre planear', hint: 'Antes de cualquier tarea con herramientas muestra el plan y espera "Ejecutar plan".' },
+  { value: 'never', label: 'Nunca', hint: 'Actúa directo; las acciones con efectos siguen pidiendo tu aprobación.' },
+];
 
 type CopilotMode = Preferences['inboxCopilotMode'];
 
@@ -243,6 +250,22 @@ export function AssistantPreferencesPanel({
                   </span>
                 </div>
               ))}
+              <div className="assistant-admin-config-field">
+                <label htmlFor="pref-planMode">Planear antes de ejecutar</label>
+                <select
+                  id="pref-planMode"
+                  className="assistant-admin-select"
+                  value={prefs.planMode ?? 'auto'}
+                  onChange={(e) => savePrefs({ planMode: e.target.value as Preferences['planMode'] })}
+                >
+                  {PLAN_MODES.map((m) => (
+                    <option key={m.value} value={m.value}>
+                      {m.label}
+                    </option>
+                  ))}
+                </select>
+                <span className="assistant-admin-muted">{PLAN_MODES.find((m) => m.value === (prefs.planMode ?? 'auto'))?.hint}</span>
+              </div>
             </div>
           </div>
           <div className="assistant-admin-section">

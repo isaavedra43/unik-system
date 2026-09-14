@@ -63,8 +63,15 @@ function toOpenAIMessages(messages: ChatMessage[]): OpenAI.Chat.Completions.Chat
   return messages as unknown as OpenAI.Chat.Completions.ChatCompletionMessageParam[];
 }
 
+/** Hard limit of the Chat Completions API; the orchestrator selects fewer, this is the last guard. */
+const OPENAI_MAX_TOOLS = 128;
+
 function toOpenAITools(tools?: ToolSpec[]): OpenAI.Chat.Completions.ChatCompletionTool[] | undefined {
   if (!tools || tools.length === 0) return undefined;
+  if (tools.length > OPENAI_MAX_TOOLS) {
+    console.warn(`[openai] ${tools.length} tools requested; truncating to ${OPENAI_MAX_TOOLS} (API limit)`);
+    tools = tools.slice(0, OPENAI_MAX_TOOLS);
+  }
   return tools as unknown as OpenAI.Chat.Completions.ChatCompletionTool[];
 }
 

@@ -20,6 +20,8 @@ import { prisma } from '@/lib/prisma';
  */
 
 export const COPILOT_MODES = ['active', 'on_demand', 'paused'] as const;
+export const PLAN_MODES = ['auto', 'always', 'never'] as const;
+export type PlanMode = (typeof PLAN_MODES)[number];
 export type CopilotMode = (typeof COPILOT_MODES)[number];
 export type CopilotSurfaceKind = 'inbox' | 'chat';
 
@@ -35,6 +37,8 @@ export const preferencesSchema = z.object({
   inboxCopilotMode: z.enum(COPILOT_MODES).default('active'),
   /** Internal chat copilot proactivity. */
   chatCopilotMode: z.enum(COPILOT_MODES).default('active'),
+  /** Plan-then-execute: auto (solo tareas complejas) | always | never. */
+  planMode: z.enum(PLAN_MODES).default('auto'),
 });
 
 export type AssistantPreferences = z.infer<typeof preferencesSchema>;
@@ -50,6 +54,7 @@ export const DEFAULT_PREFERENCES: AssistantPreferences = {
   memoryEnabled: true,
   inboxCopilotMode: 'active',
   chatCopilotMode: 'active',
+  planMode: 'auto',
 };
 
 export async function getPreferences(userId: string): Promise<AssistantPreferences> {
@@ -65,6 +70,7 @@ export async function getPreferences(userId: string): Promise<AssistantPreferenc
     memoryEnabled: row.memoryEnabled,
     inboxCopilotMode: row.inboxCopilotMode,
     chatCopilotMode: row.chatCopilotMode,
+    planMode: row.planMode,
   });
   return parsed.success ? parsed.data : { ...DEFAULT_PREFERENCES };
 }
@@ -108,6 +114,12 @@ export const COPILOT_MODE_LABELS: Record<CopilotMode, { label: string; hint: str
   },
 };
 
+export const PLAN_MODE_LABELS: Record<PlanMode, { label: string; hint: string }> = {
+  auto: { label: 'Automático', hint: 'Propone un plan solo en tareas complejas (varios pasos o fuentes) y espera tu confirmación.' },
+  always: { label: 'Siempre planear', hint: 'Antes de cualquier tarea con tools muestra el plan y espera "Ejecutar plan".' },
+  never: { label: 'Nunca', hint: 'Actúa directo; las acciones con efectos siguen pidiendo aprobación.' },
+};
+
 /** Prompt fragment describing how the assistant must behave for this user. Pure. */
 export function buildPreferencesPrompt(prefs: AssistantPreferences): string {
   const lines: string[] = ['## Personalización del usuario (aplica en todas las superficies: asistente, bandeja, chat interno, voz)'];
@@ -123,6 +135,13 @@ export function buildPreferencesPrompt(prefs: AssistantPreferences): string {
   );
   lines.push(
     `- Tono: ${prefs.tone === 'cercano' ? 'cercano y cálido, sin perder precisión' : prefs.tone === 'directo' ? 'directo y conciso, sin rodeos' : 'profesional y claro'}.`
+  );
+  lines.push(
+    prefs.planMode === 'always'
+      ? '- PLANEAR SIEMPRE: antes de ejecutar cualquier tarea que use tools (salvo una consulta puntual de un solo paso), llama proposePlan y espera a que el usuario confirme con "Ejecutar plan".'
+      : prefs.planMode === 'never'
+        ? '- Sin planificación previa: ejecuta directo (las acciones con efectos siguen pasando por aprobación).'
+        : '- Planificación automática: en tareas complejas (3+ pasos, varias fuentes, envíos múltiples) llama proposePlan primero y espera confirmación; en consultas simples actúa directo.'
   );
   lines.push(`- Idioma de respuesta: ${prefs.language === 'en' ? 'inglés' : 'español'}.`);
   lines.push(

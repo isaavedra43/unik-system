@@ -1,8 +1,9 @@
 import { NextResponse } from 'next/server';
 import { getCurrentSession, hasPermission } from '@/modules/auth/authorization';
 import { getConfiguredProviders, getActiveProviderId } from '@/modules/ai/ai-config';
-import { MODEL_CATALOG, getModelsByProvider, getDefaultModel, getModelById } from '@/modules/ai/model-catalog';
+import { MODEL_CATALOG, getModelsByProvider, getDefaultModel } from '@/modules/ai/model-catalog';
 import { PROVIDER_LABELS } from '@/modules/ai/providers';
+import { getAiSettings } from '@/modules/ai/ai-admin-config-service';
 import type { ProviderId } from '@/modules/ai/providers/types';
 
 export const runtime = 'nodejs';
@@ -32,8 +33,7 @@ export async function GET() {
     return NextResponse.json({ error: 'Sin permiso' }, { status: 403 });
   }
 
-  const configuredProviders = await getConfiguredProviders();
-  const defaultProvider = await getActiveProviderId();
+  const [configuredProviders, defaultProvider, settings] = await Promise.all([getConfiguredProviders(), getActiveProviderId(), getAiSettings()]);
 
   // If no providers are configured, return all available models (env var fallback)
   const providersToList = configuredProviders.length > 0 ? configuredProviders : [defaultProvider];
@@ -71,6 +71,7 @@ export async function GET() {
       available: m.available,
     })),
     defaultModel: defaultModel.id,
+    routingEnabled: settings.routingEnabled,
     providers,
   });
 }

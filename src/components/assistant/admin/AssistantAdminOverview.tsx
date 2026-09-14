@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useState, useCallback } from 'react';
-import { Activity, DollarSign, MessageSquare, Users, Zap } from 'lucide-react';
+import { Activity, DollarSign, MessageSquare, ShieldCheck, Star, ThumbsUp, Users, Zap } from 'lucide-react';
 import { AssistantAdminStatCard } from './AssistantAdminStatCard';
 
 interface StatsData {
@@ -22,6 +22,17 @@ interface StatsData {
   byDay: Array<{ date: string; messages: number; tokens: number; cost: number }>;
   topTools: Array<{ toolName: string; count: number; successRate: number; avgDurationMs: number }>;
   topUsers: Array<{ userId: string; userName: string; messageCount: number; tokenCount: number }>;
+  feedback?: {
+    days: number;
+    up: number;
+    down: number;
+    total: number;
+    helpfulRate: number;
+    judged: number;
+    avgJudgeScore: number | null;
+    verifiedShare: number | null;
+    recentComments: Array<{ messageId: string; rating: number; comment: string; createdAt: string }>;
+  } | null;
 }
 
 export function AssistantAdminOverview() {
@@ -90,6 +101,43 @@ export function AssistantAdminOverview() {
           tone={s.successRate > 95 ? 'success' : s.successRate > 80 ? 'warning' : 'danger'}
         />
       </div>
+
+      {data.feedback && (
+        <div className="assistant-admin-section">
+          <h3 className="assistant-admin-section-title">Calidad de respuestas (30 días)</h3>
+          <div className="assistant-admin-stat-grid">
+            <AssistantAdminStatCard
+              label="Respuestas útiles"
+              value={data.feedback.total > 0 ? `${data.feedback.helpfulRate.toFixed(0)}%` : '—'}
+              hint={`${data.feedback.up} 👍 · ${data.feedback.down} 👎`}
+              icon={<ThumbsUp size={20} />}
+              tone={data.feedback.total === 0 ? 'default' : data.feedback.helpfulRate >= 85 ? 'success' : data.feedback.helpfulRate >= 60 ? 'warning' : 'danger'}
+            />
+            <AssistantAdminStatCard
+              label="Juez automático"
+              value={data.feedback.avgJudgeScore != null ? `${data.feedback.avgJudgeScore.toFixed(2)} / 5` : 'Apagado'}
+              hint={data.feedback.judged > 0 ? `${data.feedback.judged} respuestas evaluadas` : 'Actívalo en Configuración'}
+              icon={<Star size={20} />}
+            />
+            <AssistantAdminStatCard
+              label="Con datos verificados"
+              value={data.feedback.verifiedShare != null ? `${data.feedback.verifiedShare.toFixed(0)}%` : '—'}
+              hint="Respuestas respaldadas por tools del mismo turno"
+              icon={<ShieldCheck size={20} />}
+            />
+          </div>
+          {data.feedback.recentComments.length > 0 && (
+            <div className="assistant-admin-list">
+              {data.feedback.recentComments.map((c) => (
+                <div key={c.messageId} className="assistant-admin-list-item">
+                  <span className="assistant-admin-list-name">{c.rating === 1 ? '👍' : '👎'} {c.comment}</span>
+                  <span className="assistant-admin-list-meta">{new Date(c.createdAt).toLocaleString('es-MX')}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="assistant-admin-section">
         <h3 className="assistant-admin-section-title">Uso por día (30 días)</h3>

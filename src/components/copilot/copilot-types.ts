@@ -10,12 +10,29 @@ export interface CopilotToolRecord {
   errorCode: string | null;
 }
 
+export interface TurnMeta {
+  model?: string;
+  routing?: { tier?: string; reason?: string; routed?: boolean };
+  confidence?: 'verified' | 'estimate' | 'assumption' | null;
+  confidenceNote?: string | null;
+  tools?: { calls?: number; cachedHits?: number; parallelBatches?: number; offered?: number; loadedMore?: number };
+  judge?: { score?: number; issues?: string[]; summary?: string };
+  planFirst?: boolean;
+}
+
+export interface MessageFeedbackData {
+  rating: number;
+  comment: string | null;
+}
+
 export interface CopilotMessage {
   id: string;
   role: 'user' | 'assistant' | 'tool' | 'system';
   content: string | null;
   toolCalls?: Array<{ id: string; name: string; arguments: string }> | null;
   toolCallRecords?: CopilotToolRecord[];
+  meta?: TurnMeta | null;
+  feedback?: MessageFeedbackData | null;
   artifacts?: Array<{
     artifactId: string;
     type: 'pdf' | 'xlsx' | 'docx' | 'csv' | 'table' | 'chart' | 'image';
@@ -138,8 +155,69 @@ const TOOL_LABELS: Record<string, { running: string; done: string }> = {
   runSkill: { running: 'Ejecutando skill', done: 'Skill ejecutada' },
   generatePdfReport: { running: 'Generando PDF', done: 'PDF generado' },
   generateExcelReport: { running: 'Generando Excel', done: 'Excel generado' },
+  generateWordReport: { running: 'Generando Word', done: 'Word generado' },
+  generateCsvExport: { running: 'Exportando CSV', done: 'CSV listo' },
+  generateChart: { running: 'Dibujando gráfica', done: 'Gráfica lista' },
+  generateReportImage: { running: 'Generando imagen', done: 'Imagen lista' },
   generateTable: { running: 'Armando tabla', done: 'Tabla lista' },
+  loadMoreTools: { running: 'Cargando más herramientas', done: 'Herramientas cargadas' },
+  proposePlan: { running: 'Armando el plan', done: 'Plan propuesto' },
+  listConversationAttachments: { running: 'Revisando adjuntos', done: 'Adjuntos revisados' },
+  extractDocumentData: { running: 'Leyendo el documento', done: 'Documento extraído' },
+  draftBillFromDocument: { running: 'Preparando factura de proveedor', done: 'Borrador de factura listo' },
+  callContact: { running: 'Preparando llamada', done: 'Llamada propuesta' },
+  startInternalCall: { running: 'Preparando llamada interna', done: 'Llamada interna lista' },
+  sendMessageToContact: { running: 'Preparando mensaje', done: 'Mensaje propuesto' },
+  sendBulkMessages: { running: 'Preparando envío masivo', done: 'Envío masivo propuesto' },
+  draftQuoteFromRequest: { running: 'Armando cotización en Zoho', done: 'Cotización en borrador' },
+  sendQuoteToContact: { running: 'Preparando envío de cotización', done: 'Envío de cotización propuesto' },
+  getPickupLocation: { running: 'Buscando ubicación de bodega', done: 'Ubicación lista' },
+  getWorkDigest: { running: 'Calculando tu digest', done: 'Digest listo' },
 };
+
+export interface PlanStep {
+  n: number;
+  title: string;
+  tool?: string;
+  detail?: string;
+  needsApproval?: boolean;
+}
+
+export interface PlanData {
+  goal: string;
+  steps: PlanStep[];
+  assumptions: string[];
+  deliverable: string | null;
+}
+
+/** Plan proposed with `proposePlan` (from the tool call args). */
+export function parsePlan(args: unknown): PlanData | null {
+  const obj = asObject(args);
+  if (!obj || typeof obj.goal !== 'string' || !Array.isArray(obj.steps)) return null;
+  const steps = obj.steps
+    .map((st, i) => {
+      const o = asObject(st);
+      if (!o || typeof o.title !== 'string') return null;
+      return {
+        n: i + 1,
+        title: o.title,
+        tool: typeof o.tool === 'string' ? o.tool : undefined,
+        detail: typeof o.detail === 'string' ? o.detail : undefined,
+        needsApproval: o.needsApproval === true,
+      } as PlanStep;
+    })
+    .filter((st): st is PlanStep => st !== null);
+  if (steps.length === 0) return null;
+  return {
+    goal: obj.goal,
+    steps,
+    assumptions: Array.isArray(obj.assumptions) ? obj.assumptions.filter((a): a is string => typeof a === 'string') : [],
+    deliverable: typeof obj.deliverable === 'string' ? obj.deliverable : null,
+  };
+}
+
+/** Message the host sends when the user confirms a plan. */
+export const RUN_PLAN_MESSAGE = 'Ejecuta el plan propuesto tal cual, paso por paso, e infórmame el avance de cada paso.';
 
 export function toolLabel(name: string, status: 'running' | 'done' = 'done'): string {
   const meta = TOOL_LABELS[name];

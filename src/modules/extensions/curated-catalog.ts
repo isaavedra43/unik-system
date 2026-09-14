@@ -13873,6 +13873,115 @@ export const CURATED_CATALOG: CuratedEntry[] = [
     verified: true,
     popularity: 'medium',
   },
+  // ============================================================
+  // Rive — Diseño y animación interactiva
+  // ============================================================
+  {
+    id: 'rive',
+    name: 'Rive',
+    category: 'Diseño',
+    kind: 'api',
+    description: 'Animaciones y gráficos interactivos .riv.',
+    longDescription:
+      'Conecta UNIK a Rive para crear, editar y exportar animaciones interactivas .riv. Genera gráficos con state machines, bones y runtime para web/móvil.',
+    icon: 'Sparkles',
+    color: '#1A1A1A',
+    capabilities: [
+      'Crear animaciones .riv',
+      'Editar state machines',
+      'Exportar a web/móvil (runtime JS/Flutter)',
+      'Leer archivos .riv',
+      'Gestionar bones y keyframes',
+      'Listar assets del equipo',
+    ],
+    connectionSteps: [
+      'Ve a rive.app → Settings → API Tokens',
+      'Crea un token con permisos de lectura/escritura',
+      'En UNIK, pega el token como "Bearer token" (header Authorization: Bearer)',
+      'Dominio aprobado: api.rive.app',
+    ],
+    securityInfo:
+      'Bearer Token con permisos granulares. HTTPS obligatorio. Token cifrado AES-256-GCM. Sin exposición de credenciales al cliente.',
+    docsUrl: 'https://rive.app/community/doc/api-reference',
+    authType: 'bearer',
+    allowedHosts: ['api.rive.app'],
+    verified: true,
+    popularity: 'medium',
+  },
+  // ============================================================
+  // Microsoft Office (Graph API) — Crear y editar documentos
+  // ============================================================
+  {
+    id: 'microsoft-office',
+    name: 'Microsoft Office',
+    category: 'Productividad',
+    kind: 'api',
+    description: 'Crear y editar Word, Excel y PowerPoint.',
+    longDescription:
+      'Conecta UNIK a Microsoft Graph para crear, editar y leer documentos Word (.docx), Excel (.xlsx) y PowerPoint (.pptx) directamente desde el asistente. Incluye OneDrive para almacenamiento.',
+    icon: 'FileText',
+    color: '#D83B01',
+    capabilities: [
+      'Crear documentos Word (.docx)',
+      'Crear hojas Excel (.xlsx)',
+      'Crear presentaciones PowerPoint (.pptx)',
+      'Leer y editar documentos existentes',
+      'Subir a OneDrive',
+      'Listar archivos de OneDrive',
+      'Convertir a PDF',
+      'Compartir documentos',
+    ],
+    connectionSteps: [
+      'Ve a portal.azure.com → App Registrations → New registration',
+      'Configura redirect URI: https://[tu-dominio]/api/extensions/oauth/callback',
+      'Solicita permisos: Files.ReadWrite, Files.Read.All, User.Read',
+      'Crea un client secret y guárdalo',
+      'En UNIK, crea extensión OAuth 2.0 con clientId, clientSecret y scopes',
+      'Dominio aprobado: graph.microsoft.com',
+    ],
+    securityInfo:
+      'OAuth 2.0 con PKCE. Scopes granulares (Files.ReadWrite). Client secret cifrado AES-256-GCM. HTTPS obligatorio. Sin exposición de tokens al navegador.',
+    docsUrl: 'https://learn.microsoft.com/graph/api/overview',
+    authType: 'oauth',
+    allowedHosts: ['graph.microsoft.com', 'login.microsoftonline.com'],
+    verified: true,
+    popularity: 'high',
+  },
+  // ============================================================
+  // Microsoft Office MCP — Crear documentos vía MCP
+  // ============================================================
+  {
+    id: 'mcp-office',
+    name: 'Office MCP',
+    category: 'Productividad',
+    kind: 'mcp',
+    description: 'Crear Word, Excel y PowerPoint locales.',
+    longDescription:
+      'Servidor MCP que permite al asistente crear y editar documentos Word, Excel y PowerPoint de forma local sin necesidad de OAuth. Ideal para documentos que no requieren OneDrive.',
+    icon: 'FileText',
+    color: '#D83B01',
+    capabilities: [
+      'Crear documentos Word (.docx)',
+      'Crear hojas Excel (.xlsx)',
+      'Crear presentaciones PowerPoint (.pptx)',
+      'Editar contenido de documentos',
+      'Insertar tablas y gráficas',
+      'Exportar a PDF',
+    ],
+    connectionSteps: [
+      'Instala el servidor MCP de Office (npm/@modelcontextprotocol/office)',
+      'Configura la ruta de salida para documentos',
+      'En UNIK, pega la URL del servidor MCP (https://)',
+      'Dominio aprobado: el host de tu servidor MCP',
+    ],
+    securityInfo:
+      'Conexión MCP sobre HTTPS. Sin credenciales externas. Documentos generados localmente.',
+    docsUrl: 'https://github.com/modelcontextprotocol/servers',
+    authType: 'none',
+    allowedHosts: [],
+    verified: true,
+    popularity: 'medium',
+  },
 ];
 
 /** Group entries by category for display. */

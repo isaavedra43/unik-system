@@ -1,10 +1,14 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Bot, Check, ChevronDown, ChevronRight, Clock, FileText, Image as ImageIcon, ShieldCheck, ShieldX, Sparkles, User as UserIcon, X } from 'lucide-react';
+import { Bot, Check, ChevronDown, ChevronRight, Clock, Database, FileText, Image as ImageIcon, ShieldCheck, ShieldX, Sparkles, User as UserIcon, X } from 'lucide-react';
 import { AssistantMarkdown } from './AssistantMarkdown';
 import { ArtifactRenderer, type ArtifactData } from './ArtifactRenderer';
-import { toolLabel } from '@/components/copilot/copilot-types';
+import { parsePlan, toolLabel, type MessageFeedbackData, type TurnMeta } from '@/components/copilot/copilot-types';
+import { ConfidenceBadge } from '@/components/copilot/ConfidenceBadge';
+import { MessageFeedback } from '@/components/copilot/MessageFeedback';
+import { PlanCard } from '@/components/copilot/PlanCard';
+import { parseConfidence } from '@/modules/ai/confidence';
 
 export interface AttachmentDisplay {
   id: string;
@@ -31,6 +35,8 @@ export interface AssistantMessageData {
   toolCallRecords?: ToolCallRecordDisplay[];
   attachments?: AttachmentDisplay[];
   artifacts?: ArtifactData[];
+  meta?: TurnMeta | null;
+  feedback?: MessageFeedbackData | null;
   createdAt: string;
 }
 
@@ -44,6 +50,10 @@ function isImage(mimeType: string): boolean {
   return mimeType.startsWith('image/');
 }
 
+function wasCached(result: unknown): boolean {
+  return Boolean(result && typeof result === 'object' && (result as { cached?: unknown }).cached === true);
+}
+
 /** Compact, human step chips with an optional exact detail (args/result). */
 function ToolSteps({ records }: { records: ToolCallRecordDisplay[] }) {
   const [open, setOpen] = useState<string | null>(null);
@@ -54,15 +64,16 @@ function ToolSteps({ records }: { records: ToolCallRecordDisplay[] }) {
         {records.map((r) => {
           const pending = r.errorCode === 'needs_approval';
           const status = pending ? 'pending' : r.success ? 'done' : 'failed';
+          const cached = wasCached(r.result);
           return (
             <button
               key={r.id}
               type="button"
               className={`assistant-step is-${status} ${open === r.id ? 'is-open' : ''}`}
               onClick={() => setOpen((v) => (v === r.id ? null : r.id))}
-              title={`${r.toolName} · ${r.durationMs} ms`}
+              title={`${r.toolName} · ${r.durationMs} ms${cached ? ' · desde caché' : ''}`}
             >
-              {status === 'done' ? <Check size={11} /> : status === 'pending' ? <Clock size={11} /> : <X size={11} />}
+              {status === 'done' ? cached ? <Database size={11} /> : <Check size={11} /> : status === 'pending' ? <Clock size={11} /> : <X size={11} />}
               {pending ? `${toolLabel(r.toolName, 'done')} · esperando aprobación` : toolLabel(r.toolName, 'done')}
               {open === r.id ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
             </button>
@@ -112,9 +123,13 @@ function parseSystemEvent(text: string): { kind: 'approved' | 'rejected' | 'othe
 
 export interface AssistantMessageProps {
   message: AssistantMessageData;
+  /** Lets cards inside the message (plan) send a message on the user's behalf. */
+  onSendText?: (text: string) => void;
+  /** True for the latest assistant message: plan buttons stay enabled only there. */
+  isLatest?: boolean;
 }
 
-export function AssistantMessage({ message }: AssistantMessageProps) {
+export function AssistantMessage({ message, onSendText, isLatest = false }: AssistantMessageProps) {
   if (message.role === 'tool') return null;
 
   if (message.role === 'system') {
@@ -133,6 +148,12 @@ export function AssistantMessage({ message }: AssistantMessageProps) {
   const isUser = message.role === 'user';
   const records = message.toolCallRecords ?? [];
   const artifacts = message.artifacts ?? [];
+  const planRecord = !isUser ? records.find((r) => r.toolName === 'proposePlan' && r.success) : undefined;
+  const plan = planRecord ? parsePlan(planRecord.args) : null;
+  const parsed = !isUser ? parseConfidence(message.content) : null;
+  const content = parsed ? parsed.content : message.content;
+  const confidence = message.meta?.confidence ?? parsed?.level ?? null;
+  const confidenceNote = message.meta?.confidenceNote ?? parsed?.note ?? null;
 
   return (
     <div className={`assistant-msg-row ${isUser ? 'assistant-msg-row-user' : 'assistant-msg-row-assistant'}`}>
@@ -151,12 +172,13 @@ export function AssistantMessage({ message }: AssistantMessageProps) {
             ))}
           </div>
         )}
-        {!isUser && <ToolSteps records={records} />}
-        {message.content && (
+        {!isUser && <ToolSteps records={records.filter((r) => r.toolName !== 'proposePlan')} />}
+        {content && (
           <div className="assistant-msg-content">
-            <AssistantMarkdown content={message.content} />
+            <AssistantMarkdown content={content} />
           </div>
         )}
+        {plan && onSendText && <PlanCard plan={plan} active={isLatest} onRun={onSendText} />}
         {artifacts.length > 0 && (
           <div className="assistant-artifacts assistant-artifacts-inline">
             {artifacts.map((a) => (
@@ -171,6 +193,12 @@ export function AssistantMessage({ message }: AssistantMessageProps) {
                 {toolLabel(tc.name, 'running')}
               </span>
             ))}
+          </div>
+        )}
+        {!isUser && content && (
+          <div className="assistant-msg-foot">
+            <ConfidenceBadge level={confidence} note={confidenceNote} meta={message.meta} />
+            <MessageFeedback messageId={message.id} initial={message.feedback} />
           </div>
         )}
       </div>

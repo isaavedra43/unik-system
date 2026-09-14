@@ -1000,8 +1000,27 @@ model AiMessage {
   toolCallRecords AiToolCall[]
   attachments     AiAttachment[]
   artifacts       AiArtifact[]
+  feedback        AiMessageFeedback?
+  /// Turn metadata: model routing decision, confidence label, judge score, cache hits.
+  meta            Json?
 
   @@index([conversationId, createdAt])
+}
+
+/// Explicit quality feedback (👍/👎) left by the conversation owner on an assistant message.
+model AiMessageFeedback {
+  id        String    @id @default(cuid())
+  messageId String    @unique
+  userId    String
+  /// 1 = útil, -1 = no útil
+  rating    Int
+  comment   String?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  message   AiMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([createdAt])
 }
 
 /// Registro detallado de cada tool call ejecutado (para auditoría del admin).
@@ -1986,6 +2005,8 @@ model AiUserPreference {
   inboxCopilotMode   String   @default("active")
   /// Internal chat copilot: active (proactive) | on_demand | paused
   chatCopilotMode    String   @default("active")
+  /// Plan-then-execute: auto (only complex tasks) | always | never
+  planMode           String   @default("auto")
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 }
@@ -2060,6 +2081,9 @@ model KnowledgeChunk {
   section   String?
   content   String
   tokens    Int                    @default(0)
+  /// Semantic vector (text-embedding-3-small by default). Empty until embedded.
+  embedding      Float[]           @default([])
+  embeddingModel String?
   createdAt DateTime               @default(now())
   version   KnowledgeSourceVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
 
