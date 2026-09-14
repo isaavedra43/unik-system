@@ -51,6 +51,11 @@ export const paymentsAdapter: ZohoEntityAdapter = {
     return listCustomerPayments({ page, perPage });
   },
 
+  /** Zoho can't sort this list by modified time, but it can by `date`: newest documents first. */
+  async listRecentPage({ page, perPage }) {
+    return listCustomerPayments({ page, perPage, sortColumn: 'date', sortOrder: 'D' });
+  },
+
   async getDetail(externalId: string) {
     return getCustomerPayment(externalId);
   },

@@ -139,6 +139,7 @@ const SETTING_FIELDS: SettingField[] = [
   { key: 'businessHoursStart', label: 'Inicio horario laboral', help: 'Hora (0-23) desde la que aplica cadencia corta (America/Mexico_City)', unit: 'h', min: 0, max: 23, step: 1 },
   { key: 'businessHoursEnd', label: 'Fin horario laboral', help: 'Hora (0-23) desde la que aplica cadencia larga (America/Mexico_City)', unit: 'h', min: 0, max: 23, step: 1 },
   { key: 'businessHoursIntervalMs', label: 'Intervalo horario laboral', help: 'Tiempo entre syncs en horario laboral (ej. 8am-7pm)', unit: 'ms', min: 60_000, max: 3_600_000, step: 60_000 },
+  { key: 'fullScanIntervalMs', label: 'Barrido completo cada', help: 'Con modo Quick, cada cuánto recorrer todas las páginas de cada módulo (0 = nunca). Atrapa cambios en documentos antiguos', unit: 'ms', min: 0, max: 7 * 86_400_000, step: 3_600_000 },
   { key: 'offHoursIntervalMs', label: 'Intervalo fuera horario', help: 'Tiempo entre syncs fuera de horario laboral', unit: 'ms', min: 600_000, max: 86_400_000, step: 600_000 },
   { key: 'maxDailyCalls', label: 'Límite diario', help: 'Máximo de llamadas a Zoho por día (presupuesto compartido)', unit: '', min: 100, max: 10000, step: 100 },
   { key: 'maxCallsPerMinute', label: 'Límite por minuto', help: 'Máximo de llamadas a Zoho por minuto', unit: '', min: 5, max: 100, step: 5 },
@@ -159,6 +160,7 @@ const STRING_SETTINGS: { key: string; label: string; help: string; options: { va
 
 const DEFAULT_VALUES: Record<string, number> = {
   syncIntervalMs: 3_600_000,
+  fullScanIntervalMs: 43_200_000,
   checkIntervalMs: 300_000,
   startupDelayMs: 30_000,
   schedulerMaxDetailFetches: 30,

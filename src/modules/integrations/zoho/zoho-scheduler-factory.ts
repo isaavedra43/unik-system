@@ -250,8 +250,9 @@ export function createZohoScheduler(
       }
 
       if (!enabled) {
+        // Not returning: the loop starts anyway and every tick re-reads the flag, so enabling
+        // the integration from the admin panel takes effect without a restart.
         log({ event: 'zoho.scheduler.disabled', entityType: adapter.entityType });
-        return;
       }
 
       state.started = true;

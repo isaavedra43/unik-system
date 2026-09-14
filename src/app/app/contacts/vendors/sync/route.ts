@@ -10,9 +10,10 @@ import {
 
 export const runtime = 'nodejs';
 
-/** Max time we keep the HTTP request open before responding. The actual
+/** Quick sync (recent + open documents only): a full scan is Administración → Integraciones.
+ * Max time we keep the HTTP request open before responding. The actual
  *  sync work is handed to `after` so it continues even if the client drops. */
-const SYNC_ROUTE_TIMEOUT_MS = 120_000;
+const SYNC_ROUTE_TIMEOUT_MS = 25_000;
 
 export async function POST() {
   const session = await getCurrentSession();
@@ -29,7 +30,7 @@ export async function POST() {
       return NextResponse.json({ already_running: true, run_id: activeRun.runId }, { status: 409 });
     }
 
-    const syncPromise = syncContacts({ mode: 'sync' });
+    const syncPromise = syncContacts({ mode: 'quick', maxDetailFetches: 30 });
 
     after(async () => {
       try {

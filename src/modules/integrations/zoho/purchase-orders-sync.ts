@@ -51,6 +51,16 @@ export const purchaseOrdersAdapter: ZohoEntityAdapter = {
     return listPurchaseOrders({ page, perPage });
   },
 
+  /** Zoho can't sort this list by modified time, but it can by `date`: newest documents first. */
+  async listRecentPage({ page, perPage }) {
+    return listPurchaseOrders({ page, perPage, sortColumn: 'date', sortOrder: 'D' });
+  },
+
+  /** Documents still open: the ones whose status/balance changes without a new date. */
+  async listOpenPage({ page, perPage }) {
+    return listPurchaseOrders({ page, perPage, filterBy: 'Status.Issued' });
+  },
+
   async getDetail(externalId: string) {
     return getPurchaseOrder(externalId);
   },

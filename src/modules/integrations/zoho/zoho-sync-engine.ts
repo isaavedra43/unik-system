@@ -114,6 +114,20 @@ export interface ZohoEntityAdapter {
   supportsModifiedTimeSort: boolean;
 
   /**
+   * Optional: one LIST page sorted by document `date` desc (Zoho allows it where
+   * `last_modified_time` sorting is not available). QUICK mode reads these pages first so
+   * newly created documents are always picked up.
+   */
+  listRecentPage?(opts: { page: number; perPage: number }): Promise<unknown>;
+
+  /**
+   * Optional: one LIST page of OPEN documents (unpaid bills, open credits...). QUICK mode
+   * re-reads them every run because their status/balance changes without a new date;
+   * combined with payload comparison this keeps balances current for a few API calls.
+   */
+  listOpenPage?(opts: { page: number; perPage: number }): Promise<unknown>;
+
+  /**
    * If true, the engine saves each LIST record directly as a snapshot
    * during SCAN and skips HYDRATE entirely. This is far more efficient
    * for entities where the LIST response already contains all the
@@ -446,9 +460,10 @@ async function scanRecentPages(
   const now = Date.now();
   let foundRecent = false;
 
-  const tryPage = async (page: number, sorted: boolean): Promise<boolean | null> => {
+  type PageFetcher = (opts: { page: number; perPage: number }) => Promise<unknown>;
+  const tryPage = async (page: number, sorted: boolean, fetcher?: PageFetcher): Promise<boolean | null> => {
     try {
-      const rawPage = await fetchListPage(adapter, page, params.perPage, sorted, budgetConfig);
+      const rawPage = await fetchListPage(adapter, page, params.perPage, sorted, budgetConfig, fetcher);
       apiCalls += 1;
       pagesScanned += 1;
 
@@ -502,6 +517,54 @@ async function scanRecentPages(
     }
   }
 
+  // Pass 1b: sorted by document date desc (entities Zoho can't sort by modified time).
+  // Keep reading while pages still contain recent documents.
+  if (!foundRecent && adapter.listRecentPage) {
+    const recent = adapter.listRecentPage.bind(adapter);
+    for (let page = 1; page <= params.quickScanPages; page++) {
+      const r = await tryPage(page, false, recent);
+      if (r === null || r === false) break;
+      foundRecent = true;
+    }
+  }
+
+  // Pass 1c: OPEN documents (unpaid bills, open credits...). Their balance/status changes
+  // without a new date, so they are re-read every run; unchanged payloads cost no DB writes.
+  if (adapter.listOpenPage) {
+    const open = adapter.listOpenPage.bind(adapter);
+    const maxOpenPages = Math.max(params.quickScanPages, 3) * 2;
+    for (let page = 1; page <= maxOpenPages; page++) {
+      let hasMore = false;
+      try {
+        const rawPage = await fetchListPage(adapter, page, params.perPage, false, budgetConfig, open);
+        apiCalls += 1;
+        pagesScanned += 1;
+        const { summaries, rawRecords } = extractSummariesWithRaw(adapter, rawPage);
+        for (let i = 0; i < summaries.length; i++) {
+          const summary = summaries[i];
+          if (adapter.useListAsSnapshot && rawRecords[i]) {
+            await recordSummaryWithSnapshot(adapter, summary.id, summary.modifiedAt, rawRecords[i]);
+          } else {
+            await recordSummary(adapter, summary.id, summary.modifiedAt);
+          }
+          recordsSeen += 1;
+        }
+        hasMore = hasMorePages(rawPage);
+      } catch (error) {
+        console.warn(
+          JSON.stringify({
+            event: 'zoho.sync.quick_scan.open_page_failed',
+            entityType: adapter.entityType,
+            page,
+            reason: error instanceof Error ? error.message : 'unknown',
+          })
+        );
+        break;
+      }
+      if (!hasMore) break;
+    }
+  }
+
   if (foundRecent) return { pagesScanned, recordsSeen, apiCalls };
 
   // Pass 2: unsorted — Zoho default order
@@ -547,7 +610,8 @@ async function fetchListPage(
   page: number,
   perPage: number,
   sorted: boolean,
-  budgetConfig: RateBudgetConfig
+  budgetConfig: RateBudgetConfig,
+  fetcher?: (opts: { page: number; perPage: number }) => Promise<unknown>
 ): Promise<unknown> {
   for (let attempt = 0; ; attempt++) {
     await waitForRateBudget(budgetConfig);
@@ -564,7 +628,7 @@ async function fetchListPage(
       }
       throw error;
     }
-    return adapter.listPage({ page, perPage, sorted });
+    return fetcher ? fetcher({ page, perPage }) : adapter.listPage({ page, perPage, sorted });
   }
 }
 

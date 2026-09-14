@@ -14,6 +14,8 @@ interface ListInvoicesOptions {
   sortColumn?: string;
   /** Zoho API expects 'A' (ascending) or 'D' (descending). */
   sortOrder?: 'A' | 'D';
+  /** Zoho `filter_by`, e.g. 'Status.Unpaid'. */
+  filterBy?: string;
 }
 
 /**
@@ -37,6 +39,10 @@ export async function listInvoices(options?: ListInvoicesOptions): Promise<unkno
 
   if (options?.sortOrder) {
     query.sort_order = options.sortOrder;
+  }
+
+  if (options?.filterBy) {
+    query.filter_by = options.filterBy;
   }
 
   return zohoGet('/invoices', Object.keys(query).length > 0 ? query : undefined);

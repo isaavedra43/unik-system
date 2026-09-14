@@ -155,8 +155,23 @@ export async function runSchedulerCheck(): Promise<void> {
 
     log({ event: 'zoho.sales_orders.scheduler.sync_started' });
 
+    // Quick mode reads only recent pages; a full scan every `fullScanIntervalMs` (0 = never)
+    // refreshes older orders too (same policy as the other entities' scheduler).
+    let mode: 'sync' | 'quick' = settings.schedulerMode === 'sync' ? 'sync' : 'quick';
+    if (mode === 'quick' && settings.fullScanIntervalMs > 0) {
+      const lastFull = await prisma.integrationSyncRun.findFirst({
+        where: { source: SOURCE, entityType: ENTITY_TYPE, mode: 'sync', status: SYNC_STATUS.COMPLETED },
+        orderBy: { completedAt: 'desc' },
+        select: { completedAt: true },
+      });
+      if (!lastFull?.completedAt || Date.now() - lastFull.completedAt.getTime() >= settings.fullScanIntervalMs) {
+        mode = 'sync';
+        log({ event: 'zoho.sales_orders.scheduler.full_scan_due' });
+      }
+    }
+
     const result = await syncSalesOrders({
-      mode: settings.schedulerMode === 'sync' ? 'sync' : 'quick',
+      mode,
       maxDetailFetches: settings.schedulerMaxDetailFetches,
     });
 
@@ -224,8 +239,8 @@ export async function startSalesOrdersScheduler(startOffsetMs = 0): Promise<void
   }
 
   if (!enabled) {
+    // Not returning: every tick re-reads the flag, so enabling it from the panel needs no restart.
     log({ event: 'zoho.sales_orders.scheduler.disabled' });
-    return;
   }
 
   state.started = true;

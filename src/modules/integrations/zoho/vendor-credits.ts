@@ -14,6 +14,8 @@ interface ListVendorCreditsOptions {
   sortColumn?: string;
   /** Zoho API expects 'A' (ascending) or 'D' (descending). */
   sortOrder?: 'A' | 'D';
+  /** Zoho `filter_by`, e.g. 'Status.Unpaid'. */
+  filterBy?: string;
 }
 
 /**
@@ -37,6 +39,10 @@ export async function listVendorCredits(options?: ListVendorCreditsOptions): Pro
 
   if (options?.sortOrder) {
     query.sort_order = options.sortOrder;
+  }
+
+  if (options?.filterBy) {
+    query.filter_by = options.filterBy;
   }
 
   return zohoGet('/vendorcredits', Object.keys(query).length > 0 ? query : undefined);
