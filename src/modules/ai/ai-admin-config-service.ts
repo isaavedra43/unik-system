@@ -17,6 +17,8 @@ export interface ProviderConfigEntry {
   apiKey: string; // stored in DB, NEVER sent to client
   endpoint: string; // custom endpoint, empty = provider default
   enabled: boolean; // whether this provider is available for selection
+  /** Model ids the provider's key reported (GET /models), saved by the admin provider test. */
+  models?: string[];
 }
 
 export interface AiSettings {
@@ -105,6 +107,7 @@ export const DEFAULT_AI_SETTINGS: AiSettings = {
   endpoint: '', // empty = use provider default endpoint
   providerConfigs: {
     openai: { apiKey: '', endpoint: '', enabled: true },
+    canopywave: { apiKey: '', endpoint: '', enabled: false, models: [] },
     anthropic: { apiKey: '', endpoint: '', enabled: false },
     gemini: { apiKey: '', endpoint: '', enabled: false },
     local: { apiKey: 'ollama', endpoint: '', enabled: false },
@@ -505,5 +508,36 @@ export async function updateAiConfig(patch: {
     },
   });
 
+  invalidateAiConfigCache();
+}
+
+/**
+ * Stores the model ids a provider's key reported, keeping its key, endpoint and enabled flag.
+ * Written by the admin provider test so the chat selector and model→provider resolution know them.
+ */
+export async function saveDiscoveredProviderModels(provider: string, models: string[]): Promise<void> {
+  const current = await listAiConfig();
+  const settings =
+    current.settings && typeof current.settings === 'object' ? (current.settings as Record<string, unknown>) : {};
+  const configs = (settings.providerConfigs as Record<string, Partial<ProviderConfigEntry>> | undefined) ?? {};
+  const existing = configs[provider] ?? {};
+  const unique = [...new Set(models.filter((m) => typeof m === 'string' && m.length > 0 && m.length <= 160))].slice(0, 300);
+  await prisma.aiConfig.update({
+    where: { key: AI_CONFIG_KEY },
+    data: {
+      settings: {
+        ...settings,
+        providerConfigs: {
+          ...configs,
+          [provider]: {
+            apiKey: existing.apiKey ?? '',
+            endpoint: existing.endpoint ?? '',
+            enabled: existing.enabled ?? true,
+            models: unique,
+          },
+        },
+      } as unknown as Prisma.InputJsonValue,
+    },
+  });
   invalidateAiConfigCache();
 }

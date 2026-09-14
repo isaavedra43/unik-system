@@ -1,4 +1,5 @@
 import { Prisma } from '@prisma/client';
+import { payloadChanged } from './snapshot-diff';
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { ZohoApiError } from './client';
@@ -679,6 +680,47 @@ async function recordSummaryWithSnapshot(
   );
 
   const hasChanged = !existing || existing.remoteModifiedAt.getTime() !== remoteModifiedAt.getTime();
+
+  // Same last_modified_time, different content: Zoho doesn't bump a contact's modified time when
+  // its balances move (bills paid, credits applied). Refresh the snapshot in place and queue it for
+  // re-normalization; before, the upsert below kept the old payload and balances froze at the
+  // record's last edit.
+  if (existing && !hasChanged) {
+    const current = await withTimeout(
+      prisma.integrationSnapshot.findUnique({
+        where: {
+          source_entityType_externalId_remoteModifiedAt: {
+            source: SOURCE,
+            entityType: adapter.entityType,
+            externalId,
+            remoteModifiedAt,
+          },
+        },
+        select: { id: true, payload: true },
+      })
+    );
+    if (current && payloadChanged(current.payload, rawRecord)) {
+      await withTimeout(
+        prisma.$transaction([
+          prisma.integrationSnapshot.update({
+            where: { id: current.id },
+            data: {
+              payload: rawRecord as Prisma.InputJsonValue,
+              fetchedAt,
+              normalizationVersion: 0,
+              normalizedAt: null,
+              normalizationErrorCode: null,
+            },
+          }),
+          prisma.integrationEntityState.update({
+            where: { id: existing.id },
+            data: { lastSeenAt: now, lastDetailFetchedAt: fetchedAt },
+          }),
+        ])
+      );
+      return;
+    }
+  }
 
   await withTimeout(
     prisma.$transaction([

@@ -6,11 +6,10 @@ import {
   updateAiConfig,
 } from '@/modules/ai/ai-admin-config-service';
 import { recordAiAuditEvent } from '@/modules/ai/ai-audit';
+import { PROVIDER_IDS } from '@/modules/ai/providers/types';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-
-const PROVIDER_IDS = ['openai', 'anthropic', 'gemini', 'local'];
 
 /**
  * Sanitizes settings for the GET response:
@@ -35,6 +34,7 @@ function sanitizeSettings(settings: Record<string, unknown>): Record<string, unk
       endpoint: entry.endpoint ?? '',
       enabled: Boolean(entry.enabled),
       hasApiKey: providerHasKey,
+      models: Array.isArray(entry.models) ? entry.models : [],
     };
   }
   safe.providerConfigs = safeProviderConfigs;
@@ -62,6 +62,8 @@ function mergeProviderConfigs(
       apiKey,
       endpoint: inc.endpoint ?? ex.endpoint ?? '',
       enabled: Boolean(inc.enabled ?? ex.enabled ?? false),
+      // Detected models are written by the provider test route; keep them across saves.
+      models: Array.isArray(inc.models) ? inc.models : Array.isArray(ex.models) ? ex.models : [],
     };
   }
   return merged;

@@ -11,6 +11,7 @@ import {
   formatDateTime,
   getContactStatusConfig,
 } from '@/modules/contacts/contacts-helpers';
+import { VendorPreviewSummary } from './vendor/VendorPreviewSummary';
 
 interface PreviewDrawerProps {
   contactId: string;
@@ -208,6 +209,10 @@ export function ContactPreviewDrawer({
                   </div>
                 ) : null}
               </div>
+
+              {contact.contactType === 'vendor' ? (
+                <VendorPreviewSummary contactId={contactId} basePath={basePath} currencyCode={contact.currencyCode} />
+              ) : null}
 
               {/* General */}
               <div className="so-detail-section">

@@ -73,6 +73,8 @@ export interface ZohoSettings {
   schedulerEnabled: boolean;
   /** Scheduler mode for automatic runs: 'quick' (recent pages only) or 'sync' (full scan). */
   schedulerMode: 'quick' | 'sync';
+  /** Full scan cadence when schedulerMode is 'quick' (0 = never). Picks up changes outside recent pages. */
+  fullScanIntervalMs: number;
   /** Start of business hours (hour 0-23 in America/Mexico_City). */
   businessHoursStart: number;
   /** End of business hours (hour 0-23 in America/Mexico_City). */
@@ -110,6 +112,7 @@ export const DEFAULT_SETTINGS: Record<IntegrationSourceKey, IntegrationSettings>
     staleRunThresholdMs: 10 * 60 * 1000,
     schedulerEnabled: false,
     schedulerMode: 'quick',
+    fullScanIntervalMs: 12 * 60 * 60 * 1000,
     businessHoursStart: 8,
     businessHoursEnd: 19,
     businessHoursIntervalMs: 30 * 60 * 1000,

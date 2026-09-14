@@ -1,15 +1,10 @@
 import { notFound } from 'next/navigation';
-import { getCurrentSession } from '@/modules/auth/authorization';
+import { getCurrentSession, hasPermission } from '@/modules/auth/authorization';
 import { getContactById } from '@/modules/contacts/contacts-service';
 import { isEntityWatched } from '@/modules/sales/entity-watch-service';
 import { CONTACT_ENTITY_TYPE_VENDOR } from '@/modules/contacts/permissions';
-import { ContactDetailPage } from '@/components/contacts/ContactDetailPage';
-import {
-  getPurchaseOrdersByVendorZohoId,
-  getBillsByVendorZohoId,
-  getVendorCreditsByVendorZohoId,
-  getProductsByVendorZohoId,
-} from '@/modules/cross-module/relationships-service';
+import { getVendorProfile } from '@/modules/contacts/vendor-profile-service';
+import { VendorDetailView } from '@/components/contacts/vendor/VendorDetailView';
 import { watchAction, unwatchAction } from '../actions';
 
 export const runtime = 'nodejs';
@@ -36,38 +31,28 @@ export default async function VendorDetailPage({
     notFound();
   }
 
-  const isWatched = await isEntityWatched(session!.user.id, CONTACT_ENTITY_TYPE_VENDOR, id);
-  const canWatch = session!.user.isSuperAdmin || session!.user.permissionKeys.includes('vendors.watch');
+  const user = session!.user;
+  const isWatched = await isEntityWatched(user.id, CONTACT_ENTITY_TYPE_VENDOR, id);
+  const canWatch = user.isSuperAdmin || user.permissionKeys.includes('vendors.watch');
 
-  let relatedPurchaseOrders: Awaited<ReturnType<typeof getPurchaseOrdersByVendorZohoId>> = [];
-  let relatedBills: Awaited<ReturnType<typeof getBillsByVendorZohoId>> = [];
-  let relatedVendorCredits: Awaited<ReturnType<typeof getVendorCreditsByVendorZohoId>> = [];
-  let relatedProducts: Awaited<ReturnType<typeof getProductsByVendorZohoId>> = [];
-  try {
-    [relatedPurchaseOrders, relatedBills, relatedVendorCredits, relatedProducts] = await Promise.all([
-      getPurchaseOrdersByVendorZohoId(contact!.zohoContactId),
-      getBillsByVendorZohoId(contact!.zohoContactId),
-      getVendorCreditsByVendorZohoId(contact!.zohoContactId),
-      getProductsByVendorZohoId(contact!.zohoContactId),
-    ]);
-  } catch (error) {
-    console.error('Error loading vendor relationships:', error);
-  }
+  // Every document is linked by the Zoho vendor id; sections the user can't see are omitted.
+  const profile = await getVendorProfile(contact!, {
+    recent: 8,
+    access: {
+      purchaseOrders: hasPermission(user, 'purchase_orders.view'),
+      bills: hasPermission(user, 'bills.view'),
+      vendorCredits: hasPermission(user, 'vendor_credits.view'),
+    },
+  });
 
   return (
-    <ContactDetailPage
+    <VendorDetailView
       contact={contact!}
-      entityLabel="Proveedor"
-      entityLabelPlural="Proveedores"
-      basePath="/app/contacts/vendors"
+      profile={profile}
       isWatched={isWatched}
       canWatch={canWatch}
       watchAction={watchAction}
       unwatchAction={unwatchAction}
-      relatedPurchaseOrders={relatedPurchaseOrders}
-      relatedBills={relatedBills}
-      relatedVendorCredits={relatedVendorCredits}
-      relatedProducts={relatedProducts}
     />
   );
 }

@@ -4,10 +4,12 @@ import { openaiProvider } from './openai';
 import { anthropicProvider } from './anthropic';
 import { geminiProvider } from './gemini';
 import { localProvider } from './local';
+import { canopywaveProvider } from './canopywave';
 import { getActiveProviderId } from '../ai-config';
 
 const REGISTRY: Record<ProviderId, AiProvider> = {
   openai: openaiProvider,
+  canopywave: canopywaveProvider,
   anthropic: anthropicProvider,
   gemini: geminiProvider,
   local: localProvider,
@@ -26,4 +28,4 @@ export async function getActiveProvider(): Promise<AiProvider> {
 
 export { PROVIDER_IDS, PROVIDER_LABELS };
 export type { AiProvider, ProviderId };
-export { openaiProvider };
+export { openaiProvider, canopywaveProvider };

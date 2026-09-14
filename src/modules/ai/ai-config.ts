@@ -1,6 +1,7 @@
 import type { ProviderId } from './providers/types';
 import { PROVIDER_IDS } from './providers/types';
 import { getAiSettings } from './ai-admin-config-service';
+import { resolveProviderForModel } from './provider-resolution';
 
 /**
  * AI provider configuration (provider-agnostic, multi-provider).
@@ -24,6 +25,12 @@ const PROVIDER_ENV_MAP: Record<
     fallbackModel: 'OPENAI_FALLBACK_MODEL',
     endpoint: 'OPENAI_ENDPOINT',
   },
+  canopywave: {
+    apiKey: 'CANOPYWAVE_API_KEY',
+    model: 'CANOPYWAVE_MODEL',
+    fallbackModel: 'CANOPYWAVE_FALLBACK_MODEL',
+    endpoint: 'CANOPYWAVE_ENDPOINT',
+  },
   anthropic: {
     apiKey: 'ANTHROPIC_API_KEY',
     model: 'ANTHROPIC_MODEL',
@@ -46,6 +53,7 @@ const PROVIDER_ENV_MAP: Record<
 
 const DEFAULT_MODELS: Record<ProviderId, { model: string; fallbackModel: string }> = {
   openai: { model: 'gpt-4o', fallbackModel: 'gpt-4o-mini' },
+  canopywave: { model: 'moonshotai/kimi-k2.6', fallbackModel: 'minimax/minimax-m3' },
   anthropic: { model: 'claude-sonnet-4-5', fallbackModel: 'claude-haiku-4-5' },
   gemini: { model: 'gemini-2.0-flash', fallbackModel: 'gemini-2.0-flash-lite' },
   local: { model: 'llama3.1', fallbackModel: 'llama3.1' },
@@ -136,12 +144,30 @@ export async function getActiveProviderConfig(): Promise<ProviderConfig> {
  * Used when the user selects a specific model in the chat UI.
  */
 export async function getProviderForModelId(modelId: string): Promise<ProviderId> {
-  // Check the model catalog first
   const { getModelById } = await import('./model-catalog');
-  const model = getModelById(modelId);
-  if (model) return model.provider;
-  // Fall back to the default provider
-  return getActiveProviderId();
+  const catalogProvider = getModelById(modelId)?.provider;
+  if (catalogProvider) return catalogProvider;
+  const [defaultProvider, configured, discovered] = await Promise.all([
+    getActiveProviderId(),
+    getConfiguredProviders(),
+    getDiscoveredModels(),
+  ]);
+  return resolveProviderForModel(modelId, { discovered, configured, defaultProvider });
+}
+
+/** Model ids each provider's key reported (saved by the admin "Probar y detectar modelos"). */
+export async function getDiscoveredModels(): Promise<Partial<Record<ProviderId, string[]>>> {
+  try {
+    const settings = await getAiSettings();
+    const out: Partial<Record<ProviderId, string[]>> = {};
+    for (const provider of PROVIDER_IDS) {
+      const models = settings.providerConfigs?.[provider]?.models;
+      if (Array.isArray(models) && models.length > 0) out[provider] = models;
+    }
+    return out;
+  } catch {
+    return {};
+  }
 }
 
 /** For the admin panel: status without exposing the key. Async (reads DB). */

@@ -11,12 +11,13 @@
  * (e.g. Anthropic) are responsible for adapting in their implementation.
  */
 
-export type ProviderId = 'openai' | 'anthropic' | 'gemini' | 'local';
+export type ProviderId = 'openai' | 'canopywave' | 'anthropic' | 'gemini' | 'local';
 
-export const PROVIDER_IDS: ProviderId[] = ['openai', 'anthropic', 'gemini', 'local'];
+export const PROVIDER_IDS: ProviderId[] = ['openai', 'canopywave', 'anthropic', 'gemini', 'local'];
 
 export const PROVIDER_LABELS: Record<ProviderId, string> = {
   openai: 'OpenAI (ChatGPT API)',
+  canopywave: 'Canopy Wave',
   anthropic: 'Anthropic (Claude)',
   gemini: 'Google (Gemini)',
   local: 'Local (Ollama / LM Studio)',

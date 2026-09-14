@@ -3,6 +3,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { Save, AlertCircle, CheckCircle2, Key, Cloud, Cpu, Check, X } from 'lucide-react';
 import { updateAiConfigAction, toggleAiEnabledAction } from '@/app/app/admin/assistant/actions';
+import { CANOPY_PLAN_MODELS, CanopyWaveSetup } from './CanopyWaveSetup';
 
 interface AiConfigData {
   id: string;
@@ -17,10 +18,20 @@ interface ProviderConfigEntry {
   apiKey: string;
   endpoint: string;
   enabled: boolean;
+  /** Read-only, from the API: a key is stored (the key itself is never sent back). */
+  hasApiKey?: boolean;
+  /** Model ids the key reported (written by "Probar y detectar modelos"). */
+  models?: string[];
 }
 
 const PROVIDER_OPTIONS = [
   { value: 'openai', label: 'OpenAI (ChatGPT API)', hint: 'GPT-4o, GPT-4o-mini, o1, etc.', implemented: true },
+  {
+    value: 'canopywave',
+    label: 'Canopy Wave',
+    hint: 'Kimi K2.6 y MiniMax M3 de tu plan Unlimited, y cualquier otro modelo de tu cuenta. API compatible con OpenAI.',
+    implemented: true,
+  },
   { value: 'anthropic', label: 'Anthropic (Claude)', hint: 'Claude Sonnet, Haiku, Opus (futuro)', implemented: false },
   { value: 'gemini', label: 'Google (Gemini)', hint: 'Gemini 2.0 Flash, etc. (futuro)', implemented: false },
   { value: 'local', label: 'Local (Ollama / LM Studio)', hint: 'Modelos locales en tu máquina (futuro)', implemented: false },
@@ -128,6 +139,25 @@ export function AssistantAdminConfig({ canManage }: { canManage: boolean }) {
     setSettings((prev) => ({ ...prev, [key]: value }));
   }
 
+  /** Kimi K2.6 as main model, MiniMax M3 for fallback/simple tasks/judge (all in the flat plan). */
+  function useCanopyWaveAsDefault() {
+    const [main, secondary] = CANOPY_PLAN_MODELS;
+    setSettings((prev) => {
+      const configs = (prev.providerConfigs as Record<string, ProviderConfigEntry>) ?? {};
+      const entry = configs.canopywave ?? { apiKey: '', endpoint: '', enabled: false };
+      return {
+        ...prev,
+        provider: 'canopywave',
+        deployment: main.id,
+        fallbackDeployment: secondary.id,
+        routingSimpleModel: secondary.id,
+        routingComplexModel: main.id,
+        qualityJudgeModel: secondary.id,
+        providerConfigs: { ...configs, canopywave: { ...entry, enabled: true } },
+      };
+    });
+  }
+
   function updateProviderConfig(provider: string, field: keyof ProviderConfigEntry, value: unknown) {
     const current = (settings.providerConfigs as Record<string, ProviderConfigEntry>) ?? {};
     const entry = current[provider] ?? { apiKey: '', endpoint: '', enabled: false };
@@ -204,7 +234,8 @@ export function AssistantAdminConfig({ canManage }: { canManage: boolean }) {
         <div className="provider-cards-grid">
           {PROVIDER_OPTIONS.map((opt) => {
             const entry = providerConfigs[opt.value] ?? { apiKey: '', endpoint: '', enabled: false };
-            const isConfigured = Boolean(entry.apiKey) || (opt.value === 'local' && Boolean(entry.endpoint));
+            const isConfigured =
+              Boolean(entry.apiKey) || Boolean(entry.hasApiKey) || (opt.value === 'local' && Boolean(entry.endpoint));
             return (
               <div key={opt.value} className={`provider-card ${entry.enabled ? 'provider-card-enabled' : ''}`}>
                 <div className="provider-card-header">
@@ -258,10 +289,22 @@ export function AssistantAdminConfig({ canManage }: { canManage: boolean }) {
                       value={entry.endpoint ?? ''}
                       onChange={(e) => updateProviderConfig(opt.value, 'endpoint', e.target.value)}
                       disabled={!canManage}
-                      placeholder="Vacío = endpoint default"
+                      placeholder={opt.value === 'canopywave' ? 'Vacío = https://inference.canopywave.io/v1' : 'Vacío = endpoint default'}
                     />
                   </div>
                 </div>
+                {opt.value === 'canopywave' && (
+                  <CanopyWaveSetup
+                    canManage={canManage}
+                    hasSavedKey={Boolean(entry.hasApiKey)}
+                    hasUnsavedKey={Boolean(entry.apiKey)}
+                    discoveredModels={entry.models ?? []}
+                    isDefault={currentProvider === 'canopywave'}
+                    onSave={handleSave}
+                    onReload={load}
+                    onUseAsDefault={useCanopyWaveAsDefault}
+                  />
+                )}
                 {!opt.implemented && (
                   <p className="provider-card-warning">
                     <AlertCircle size={12} /> Este proveedor aún no está implementado. La arquitectura está lista.

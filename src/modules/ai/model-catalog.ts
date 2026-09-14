@@ -201,6 +201,40 @@ export const MODEL_CATALOG: ModelInfo[] = [
   },
 
   // ============================================================
+  // Canopy Wave (OpenAI-compatible open models)
+  // Ids verified on canopywave.com model pages (2026-09-14); both are included in the
+  // Unlimited Token Plan, so the per-token cost is 0 (flat monthly fee).
+  // ============================================================
+  {
+    id: 'moonshotai/kimi-k2.6',
+    provider: 'canopywave',
+    label: 'Kimi K2.6',
+    power: 9,
+    bestFor: 'Agente con herramientas, análisis largo, visión',
+    contextWindow: 256_000,
+    maxOutput: 8_192,
+    speed: 'medium',
+    costPer1M: { input: 0, output: 0 },
+    capabilities: ['vision', 'tool_use', 'streaming', 'reasoning'],
+    description: 'Modelo abierto multimodal de Moonshot AI orientado a agentes. Contexto de 256K. Incluido en tu plan Unlimited de Canopy Wave.',
+    available: true,
+  },
+  {
+    id: 'minimax/minimax-m3',
+    provider: 'canopywave',
+    label: 'MiniMax M3',
+    power: 9,
+    bestFor: 'Tareas de varios pasos, documentos muy largos, visión',
+    contextWindow: 512_000,
+    maxOutput: 8_192,
+    speed: 'medium',
+    costPer1M: { input: 0, output: 0 },
+    capabilities: ['vision', 'tool_use', 'streaming', 'reasoning'],
+    description: 'Modelo abierto multimodal de MiniMax con llamada a herramientas y razonamiento multi-paso. Contexto de 512K. Incluido en tu plan Unlimited de Canopy Wave.',
+    available: true,
+  },
+
+  // ============================================================
   // Local (Ollama / LM Studio)
   // ============================================================
   {
@@ -250,6 +284,29 @@ export const MODEL_CATALOG: ModelInfo[] = [
 /** Returns models for a specific provider. */
 export function getModelsByProvider(provider: ProviderId): ModelInfo[] {
   return MODEL_CATALOG.filter((m) => m.provider === provider);
+}
+
+/**
+ * Entry for a model a provider's key reported (GET /models) that is not in the curated catalog.
+ * Conservative metadata: no vision (images are replaced by a notice), no cost claims.
+ */
+export function buildDiscoveredModel(id: string, provider: ProviderId): ModelInfo {
+  const tail = id.split('/').pop() ?? id;
+  const label = tail.replace(/[-_]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+  return {
+    id,
+    provider,
+    label,
+    power: 7,
+    bestFor: 'Modelo detectado en tu cuenta',
+    contextWindow: 128_000,
+    maxOutput: 8_192,
+    speed: 'medium',
+    costPer1M: { input: 0, output: 0 },
+    capabilities: ['tool_use', 'streaming'],
+    description: `Modelo "${id}" detectado con tu API key. Pruébalo antes de usarlo como principal.`,
+    available: true,
+  };
 }
 
 /** Finds a model by id. */

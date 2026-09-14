@@ -99,6 +99,21 @@ async function isSyncCoolingDown(entityType: string, now: Date = new Date()): Pr
   return now.getTime() - lastFailed.startedAt.getTime() < settings.failedRetryCooldownMs;
 }
 
+/**
+ * A full scan is due when no full ('sync') run completed within `intervalMs` (0 = never).
+ * Quick runs only read recent pages; the full scan refreshes everything else (a vendor's balances,
+ * an old credit that was applied, entities Zoho can't sort by modified time).
+ */
+async function isFullScanDue(entityType: string, intervalMs: number, now: Date = new Date()): Promise<boolean> {
+  if (!intervalMs || intervalMs <= 0) return false;
+  const lastFull = await prisma.integrationSyncRun.findFirst({
+    where: { source: 'zoho', entityType, mode: 'sync', status: SYNC_STATUS.COMPLETED },
+    orderBy: { completedAt: 'desc' },
+    select: { completedAt: true },
+  });
+  return !lastFull?.completedAt || now.getTime() - lastFull.completedAt.getTime() >= intervalMs;
+}
+
 async function runSchedulerCheck(adapter: ZohoEntityAdapter): Promise<void> {
   const state = getSchedulerState(adapter.entityType);
 
@@ -140,8 +155,16 @@ async function runSchedulerCheck(adapter: ZohoEntityAdapter): Promise<void> {
 
     log({ event: 'zoho.scheduler.sync_started', entityType: adapter.entityType });
 
+    const mode: SyncMode =
+      settings.schedulerMode === 'quick' && (await isFullScanDue(adapter.entityType, settings.fullScanIntervalMs))
+        ? 'sync'
+        : (settings.schedulerMode as SyncMode);
+    if (mode !== settings.schedulerMode) {
+      log({ event: 'zoho.scheduler.full_scan_due', entityType: adapter.entityType });
+    }
+
     const result = await runSync(adapter, {
-      mode: settings.schedulerMode as SyncMode,
+      mode,
       maxDetailFetches: settings.schedulerMaxDetailFetches,
     });
 

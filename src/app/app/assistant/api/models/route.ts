@@ -1,8 +1,14 @@
 import { NextResponse } from 'next/server';
 import { getCurrentSession, hasPermission } from '@/modules/auth/authorization';
-import { getConfiguredProviders, getActiveProviderId } from '@/modules/ai/ai-config';
-import { MODEL_CATALOG, getModelsByProvider, getDefaultModel } from '@/modules/ai/model-catalog';
-import { PROVIDER_LABELS } from '@/modules/ai/providers';
+import { getConfiguredProviders, getActiveProviderId, getDiscoveredModels } from '@/modules/ai/ai-config';
+import {
+  MODEL_CATALOG,
+  buildDiscoveredModel,
+  getDefaultModel,
+  getModelById,
+  getModelsByProvider,
+} from '@/modules/ai/model-catalog';
+import { PROVIDER_IDS, PROVIDER_LABELS } from '@/modules/ai/providers';
 import { getAiSettings } from '@/modules/ai/ai-admin-config-service';
 import type { ProviderId } from '@/modules/ai/providers/types';
 
@@ -15,7 +21,8 @@ export const dynamic = 'force-dynamic';
  * Returns the list of models available to the user, based on which
  * providers are configured (have API keys). Only models from configured
  * providers are returned, so the user can only select models that will
- * actually work.
+ * actually work. Models a provider's key reported (e.g. extra Canopy Wave
+ * models) are included after the curated ones.
  *
  * Response shape:
  *   {
@@ -33,22 +40,35 @@ export async function GET() {
     return NextResponse.json({ error: 'Sin permiso' }, { status: 403 });
   }
 
-  const [configuredProviders, defaultProvider, settings] = await Promise.all([getConfiguredProviders(), getActiveProviderId(), getAiSettings()]);
+  const [configuredProviders, defaultProvider, settings, discovered] = await Promise.all([
+    getConfiguredProviders(),
+    getActiveProviderId(),
+    getAiSettings(),
+    getDiscoveredModels(),
+  ]);
 
   // If no providers are configured, return all available models (env var fallback)
   const providersToList = configuredProviders.length > 0 ? configuredProviders : [defaultProvider];
 
-  // Collect models from all configured providers
-  const models = providersToList.flatMap((provider) =>
-    getModelsByProvider(provider).filter((m) => m.available)
-  );
+  // Curated models first, then models the provider's key reported that the catalog doesn't know.
+  const models = providersToList.flatMap((provider) => {
+    const curated = getModelsByProvider(provider).filter((m) => m.available);
+    const extra = (discovered[provider] ?? [])
+      .filter((id) => !getModelById(id))
+      .map((id) => buildDiscoveredModel(id, provider));
+    return [...curated, ...extra];
+  });
 
   // If no models found (shouldn't happen), fall back to all available
   const finalModels = models.length > 0 ? models : MODEL_CATALOG.filter((m) => m.available);
 
-  const defaultModel = getDefaultModel(defaultProvider);
+  const configuredDefault = settings.deployment?.trim();
+  const defaultModelId =
+    configuredDefault && finalModels.some((m) => m.id === configuredDefault)
+      ? configuredDefault
+      : getDefaultModel(defaultProvider).id;
 
-  const providers = (['openai', 'anthropic', 'gemini', 'local'] as ProviderId[]).map((id) => ({
+  const providers = PROVIDER_IDS.map((id) => ({
     id,
     label: PROVIDER_LABELS[id],
     configured: configuredProviders.includes(id),
@@ -70,7 +90,7 @@ export async function GET() {
       description: m.description,
       available: m.available,
     })),
-    defaultModel: defaultModel.id,
+    defaultModel: defaultModelId,
     routingEnabled: settings.routingEnabled,
     providers,
   });
