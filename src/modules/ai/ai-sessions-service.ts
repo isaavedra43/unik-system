@@ -141,6 +141,8 @@ function formatMsgWithToolCalls(
         storageObjectId: a.storageObjectId ?? undefined,
         mimeType: typeof meta.mimeType === 'string' ? meta.mimeType : undefined,
         quoteId: typeof meta.quoteId === 'string' ? meta.quoteId : undefined,
+        version: typeof meta.version === 'number' ? meta.version : undefined,
+        supersededBy: typeof meta.supersededBy === 'string' ? meta.supersededBy : undefined,
         createdAt: a.createdAt.toISOString(),
       };
     }),

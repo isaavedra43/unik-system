@@ -118,11 +118,12 @@ describe('applyColumnCustomization', () => {
     expect(cols.map((c) => c.key)).toContain('balance');
   });
 
-  it('keeps a money column the user named explicitly even with showTotals=false', () => {
-    const cust = normalizeCustomization({ showTotals: false, addColumns: ['saldo'] });
-    const cols = applyColumnCustomization(SALES_COLUMNS, cust);
-    expect(cols.map((c) => c.key)).toContain('balance');
-    expect(cols.map((c) => c.key)).not.toContain('total');
+  it('never lets a money column in while amounts are off (naming it turns showTotals on upstream)', () => {
+    const off = normalizeCustomization({ showTotals: false, addColumns: ['saldo'] });
+    expect(applyColumnCustomization(SALES_COLUMNS, off).map((c) => c.key)).not.toContain('balance');
+    const on = normalizeCustomization(resolveReportCustomization('agrega la columna saldo'));
+    expect(on.showTotals).toBe(true);
+    expect(applyColumnCustomization(SALES_COLUMNS, on).map((c) => c.key)).toContain('balance');
   });
 
   it('hides, reorders and renames', () => {
@@ -221,7 +222,8 @@ describe('wantsTotalsRow', () => {
   it('follows showTotals unless overridden', () => {
     expect(wantsTotalsRow({})).toBe(true);
     expect(wantsTotalsRow({ showTotals: false })).toBe(false);
-    expect(wantsTotalsRow({ showTotals: false, showTotalsRow: true })).toBe(true);
+    expect(wantsTotalsRow({ showTotals: false, showTotalsRow: true })).toBe(false);
+    expect(wantsTotalsRow({ showTotals: true, showTotalsRow: false })).toBe(false);
   });
 });
 
@@ -354,9 +356,40 @@ describe('resolveReportCustomization — who decides the amounts', () => {
     });
   });
 
-  it('what the user says still wins over the model for the rest', () => {
+  it('what the user says in this message wins over what the model passed', () => {
     const cust = resolveReportCustomization('ponlo en rojo', { brandColor: '#111111' });
-    expect(cust.brandColor).toBe('#111111');
-    expect(resolveReportCustomization('ponlo en rojo').brandColor).toBe('#dc2626');
+    expect(cust.brandColor).toBe('#dc2626');
+    expect(resolveReportCustomization('sin cambios de color', { brandColor: '#111111' }).brandColor).toBe('#111111');
+  });
+});
+
+describe('money is strictly opt-in (the user asks, never the model)', () => {
+  it('drops money cards, money columns and the totals row when the user did not ask for amounts', () => {
+    const cust = resolveReportCustomization('dame el reporte completo ordenado de la más vieja a hoy', {
+      showSummaryCards: true,
+      columns: ['number', 'customer', 'total', 'balance'],
+      addColumns: ['saldo'],
+      showTotalsRow: true,
+    });
+    expect(cust.showTotals).toBe(false);
+    expect(cust.columns).toEqual(['number', 'customer']);
+    expect(cust.addColumns).toEqual([]);
+    expect(wantsTotalsRow(cust)).toBe(false);
+    expect(applySummaryCardCustomization([{ label: 'Órdenes', value: '814' }, { label: 'Total', value: '$26,077,093.76' }, { label: 'Saldo pendiente', value: '$7,930,110.18' }], cust)).toEqual([
+      { label: 'Órdenes', value: '814' },
+    ]);
+    expect(applyColumnCustomization(SALES_COLUMNS, cust, SALES_COLUMNS.map((c) => c.key)).map((c) => c.key)).toEqual(['number', 'customer']);
+  });
+
+  it('turns money on with the user words and keeps it on across a revision that does not mention it', () => {
+    const first = resolveReportCustomization('el reporte con totales y saldo', null);
+    expect(first.showTotals).toBe(true);
+    expect(wantsTotalsRow(first)).toBe(true);
+    const revised = resolveReportCustomization('quita la columna vendedor', { hideColumns: ['salesperson'] }, first);
+    expect(revised.showTotals).toBe(true);
+    // the user's words ("vendedor") win; normalizeCustomization maps them to the real key later
+    expect(revised.hideColumns).toEqual(['vendedor']);
+    const off = resolveReportCustomization('ahora sin totales', null, first);
+    expect(off.showTotals).toBe(false);
   });
 });

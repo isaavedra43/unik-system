@@ -18,6 +18,8 @@ export interface TurnMeta {
   tools?: { calls?: number; cachedHits?: number; parallelBatches?: number; offered?: number; loadedMore?: number };
   judge?: { score?: number; issues?: string[]; summary?: string };
   planFirst?: boolean;
+  /** One-click follow-ups the assistant proposed at the end of the answer. */
+  followUps?: string[];
 }
 
 export interface MessageFeedbackData {

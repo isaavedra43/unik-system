@@ -353,23 +353,34 @@ export function generatePdfReport(
     }
     const metaWidth = 170;
     const titleWidth = cwHeader - (titleX - PAGE_MARGIN) - metaWidth - 12;
-    doc.fontSize(18)
-      .fillColor(TEXT_DARK)
-      .font('Helvetica-Bold')
-      .text(options.title, titleX, headerY + 2, { width: titleWidth, lineBreak: false, ellipsis: true });
+    // pdfkit wraps a title wider than `width` even with lineBreak:false, and the subtitle used
+    // to be drawn over the second line. Shrink the font first; if it still needs two lines,
+    // wrap it on purpose and push everything below by the measured height.
+    doc.font('Helvetica-Bold');
+    let titleSize = 18;
+    while (titleSize > 13 && doc.fontSize(titleSize).widthOfString(options.title) > titleWidth) titleSize -= 1;
+    doc.fontSize(titleSize);
+    const titleFits = doc.widthOfString(options.title) <= titleWidth;
+    const titleHeight = titleFits ? titleSize + 4 : Math.min(doc.heightOfString(options.title, { width: titleWidth }), (titleSize + 3) * 2 + 2);
+    doc.fillColor(TEXT_DARK).text(options.title, titleX, headerY + 2, {
+      width: titleWidth,
+      height: titleHeight + 2,
+      lineBreak: !titleFits,
+      ellipsis: true,
+    });
 
     doc.fontSize(7.5).fillColor(accent).font('Helvetica')
       .text(`${totalRows} ${totalRows === 1 ? 'registro' : 'registros'}`, doc.page.width - PAGE_MARGIN - metaWidth, headerY + 3, { width: metaWidth, align: 'right', lineBreak: false });
     doc.text(generatedAt, doc.page.width - PAGE_MARGIN - metaWidth, headerY + 14, { width: metaWidth, align: 'right', lineBreak: false });
 
-    let cursorY = headerY + 30;
+    let cursorY = headerY + Math.max(30, titleHeight + 8);
 
     if (options.subtitle) {
-      doc.fontSize(9)
-        .fillColor(accent)
-        .font('Helvetica')
-        .text(options.subtitle, titleX, cursorY, { width: titleWidth, lineBreak: false, ellipsis: true });
-      cursorY += 14;
+      doc.fontSize(9).fillColor(accent).font('Helvetica');
+      const subFits = doc.widthOfString(options.subtitle) <= titleWidth;
+      const subHeight = subFits ? 12 : Math.min(doc.heightOfString(options.subtitle, { width: titleWidth }), 26);
+      doc.text(options.subtitle, titleX, cursorY, { width: titleWidth, height: subHeight + 2, lineBreak: !subFits, ellipsis: true });
+      cursorY += subHeight + 2;
     }
 
     cursorY += 4;

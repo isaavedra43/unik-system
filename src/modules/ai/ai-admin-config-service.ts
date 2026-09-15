@@ -103,6 +103,8 @@ export interface AiSettings {
   reasoningEffort: 'minimal' | 'low' | 'medium' | 'high';
   /** Revisión interna de las respuestas complejas antes de entregarlas (una pasada extra del modelo). */
   answerReviewEnabled: boolean;
+  /** Aprender de correcciones y definiciones del usuario: se proponen como recuerdos pendientes de confirmar. */
+  learningCaptureEnabled: boolean;
 }
 
 /** Tipos permitidos antes de la ampliación (se migran automáticamente si nunca se personalizaron). */
@@ -362,6 +364,7 @@ export const DEFAULT_AI_SETTINGS: AiSettings = {
   qualityJudgeModel: 'gpt-4o-mini',
   reasoningEffort: 'medium',
   answerReviewEnabled: true,
+  learningCaptureEnabled: true,
 };
 
 interface CachedConfig {

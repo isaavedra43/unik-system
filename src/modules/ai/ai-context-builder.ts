@@ -139,8 +139,7 @@ El usuario toma decisiones con lo que dices. Por eso:
 6. Si te das cuenta de que una respuesta anterior tuya fue incorrecta, corrígela explícitamente ("Corrección: …") en vez de dar un número distinto sin explicación.
 
 ## Contexto actual
-- Fecha y hora: ${dateTime}
-- Zona horaria: America/Mexico_City
+- Zona horaria: America/Mexico_City (la fecha y hora exactas van al final del prompt)
 - Usuario: ${actor.name} (username: ${actor.username})
 - Rol: ${actor.isSuperAdmin ? 'Super Admin' : actor.roleKeys.join(', ') || 'Sin roles'}
 - Página actual: ${context?.page ?? 'No especificada'}
@@ -382,6 +381,8 @@ Cuando el usuario pida "junta los mismos productos", "agrupa por producto", "cu�
 - Estructura de un análisis: 2-4 líneas con los números clave → tabla resumen (conteos que suman el total) → detalle por grupo → discrepancias y casos dudosos (dilo cuando una lectura o un dato es incierto; nunca inventes) → prioridades accionables. Explica en una línea el criterio con el que agrupaste.
 - Cifras consistentes: si dices "17 órdenes" la tabla trae 17; los porcentajes suman 100; el total del sistema manda sobre lo anotado a mano.
 - Nunca escribas imágenes markdown ("![…](…)") ni enlaces a los archivos/tablas que generas: el sistema muestra la tarjeta solo. Tampoco repitas en texto una tabla que ya generaste con una tool.
+- **Te adelantas**: después de cualquier respuesta con datos o análisis, cierra con UNA línea "Sugerencias: [acción 1] · [acción 2] · [acción 3]" (2-3 acciones concretas que el usuario probablemente querrá después, escritas como él las pediría, ≤ 60 caracteres cada una: "Genera el PDF con todo", "Avisa al equipo de las 9 por cerrar", "Muéstrame las de Laura"). Esa línea va ANTES de la línea "Confianza:". En saludos o charla no la pongas.
+- **Aplica lo aprendido**: si la memoria del usuario define un término o una regla ("Recolección = …"), úsala tal cual al clasificar o interpretar, y dilo en una línea ("según tu definición…").
 
 ## ARCHIVOS ADJUNTOS DEL USUARIO — YA LOS TIENES
 - Cuando el usuario adjunta archivos, su contenido VIENE EN ESTE MISMO MENSAJE: las imágenes las ves directamente (visión) y los PDF/Word/Excel/CSV llegan como texto extraído bajo "[Contenido del PDF …]". 🚨 NUNCA digas "no puedo acceder a los archivos adjuntos", "no puedo ver imágenes" ni pidas que te transcriban: léelos y trabaja con ellos.
@@ -413,7 +414,7 @@ Cuando el usuario pida "junta los mismos productos", "agrupa por producto", "cu�
 - **generateTable**: tabla dentro del chat (no es un archivo ni una imagen), en caja con scroll — tu opción por default para listas de más de 8 filas (ver arriba).
 - 🚨 Distingue bien estas tres: "gráfica"/"chart" → generateChart · "imagen"/"foto del reporte" → generateReportImage · "PDF"/"Excel"/"reporte completo" → generatePdfReport/generateExcelReport. Si el usuario dice "imagen" y le das una gráfica de barras (o viceversa), es una respuesta incorrecta.
 - Si el usuario pide "genera un PDF de esa info" (el MISMO conjunto que acabas de consultar), NO re-llames la tool de datos: el sistema inyecta las filas de esa consulta aunque en medio hayas usado generateTable. Si pide un conjunto DISTINTO (otro filtro, otro periodo), consulta primero.
-- Si el usuario pide cambios a un PDF/imagen ("cambia el color", "agrega sección", "quita esa columna"), llama la misma tool NUEVAMENTE con los cambios — no vuelvas a consultar los datos si ya los tienes en contexto.
+- Si el usuario pide cambios a un PDF/imagen ("cambia el color", "agrega sección", "quita esa columna"), llama la misma tool NUEVAMENTE con los cambios — no vuelvas a consultar los datos si ya los tienes en contexto. El sistema te dirá qué archivo entregaste y con qué parámetros (sección "CAMBIOS SOBRE EL ÚLTIMO ARCHIVO"); el resultado es una nueva VERSIÓN del mismo documento, dilo así ("versión 2, con X cambiado").
 - Al entregar un archivo, di cuántas filas contiene (rowCount) y de qué periodo/filtros es; si rowCount no coincide con el total de la consulta, algo falló: repite la consulta y el reporte antes de entregarlo.
 - 🚨 **Completitud del archivo:** el resultado de cada reporte trae "dataCompleteness" (includedRows / expectedRows / complete). Los números que escribas al entregarlo (órdenes, total, saldo) deben describir LO QUE CONTIENE EL ARCHIVO. Si complete=false, dilo en la primera línea con ambos números ("el PDF trae 9 de 65 órdenes"). Si la tool responde con error "El reporte NO se generó", repite la consulta de datos y el reporte; nunca digas que lo generaste.
 
@@ -433,7 +434,10 @@ ${context?.voice ? `
 - Si necesitas un tool, úsalo en silencio y solo di el resultado
 ` : ''}`;
 
-  const personalized = `${base}${libraryBlock}${surfaceBlock}${personalization}${memoryBlock}${recentBlock}`;
+  // Volatile pieces last: everything before this line is identical between passes and turns,
+  // so the provider can serve the long prefix from its prompt cache (faster first token).
+  const turnContext = `\n\n## Fecha y hora de este turno\n- ${dateTime} (America/Mexico_City)`;
+  const personalized = `${base}${libraryBlock}${surfaceBlock}${personalization}${memoryBlock}${recentBlock}${turnContext}`;
   if (settings.systemPromptOverride && settings.systemPromptOverride.trim().length > 0) {
     return `${personalized}\n\n## Instrucciones adicionales del administrador\n${settings.systemPromptOverride}`;
   }

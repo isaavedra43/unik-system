@@ -509,19 +509,42 @@ export function mergeReportCustomization(
 }
 
 /**
- * The customization a report is actually generated with: the layout the user described in
- * THIS message, with whatever the model passed on top — except `showTotals`, which only the
- * user's own words can turn on. The model deciding by itself that a report wants amounts is
- * exactly how Total/Saldo kept appearing unrequested.
+ * The customization a report is actually generated with: the previous version's layout (when
+ * revising a delivered file), the model's parameters on top, and the user's own words of THIS
+ * message on top of everything — `showTotals` in particular can only be turned on by the user
+ * (or inherited from the version being revised). The model deciding by itself that a report
+ * wants amounts is exactly how Total/Saldo kept appearing unrequested.
  */
 export function resolveReportCustomization(
   message: string,
-  modelCustomization?: ReportCustomization | null
+  modelCustomization?: ReportCustomization | null,
+  /** Customization of the previous version when this is a revision of a delivered file. */
+  base?: ReportCustomization | null
 ): ReportCustomization {
   const detected = detectReportCustomization(message);
-  return mergeReportCustomization(detected, modelCustomization, {
-    showTotals: detected.showTotals === true,
-  });
+  // The user's words in THIS message decide; otherwise what the previous version had; never
+  // the model. Then every money surface (columns, cards, totals row) follows that one flag.
+  const showTotals = detected.showTotals ?? (base?.showTotals === true);
+  return enforceMoneyOptIn(mergeReportCustomization(base, modelCustomization, detected, { showTotals }));
+}
+
+const MONEY_COLUMN_NAMES = /^(total(?:es)?|balance|saldos?|importes?|montos?|por cobrar|adeudos?)$/i;
+
+/**
+ * With `showTotals` off, no money can enter through any other door: not as a column the
+ * model added, not as a KPI card, not as the totals row. Pure.
+ */
+export function enforceMoneyOptIn(cust: ReportCustomization): ReportCustomization {
+  if (cust.showTotals === true) return cust;
+  const strip = (list?: string[]) => list?.filter((c) => !OPTIONAL_MONEY_KEYS.has(c) && !MONEY_COLUMN_NAMES.test(c.trim()));
+  return {
+    ...cust,
+    showTotals: false,
+    showTotalsRow: false,
+    columns: strip(cust.columns),
+    addColumns: strip(cust.addColumns),
+    asColumn: strip(cust.asColumn),
+  };
 }
 
 /** Resolves every column name the caller used (Spanish labels included) to real row keys. */
@@ -587,11 +610,10 @@ export function applyColumnCustomization<T extends ReportColumn>(
   }
 
   const hidden = new Set((cust.hideColumns ?? []).map(keyOf));
-  // Money columns are opt-in: they only show when the user asked for amounts (or named
-  // them explicitly in `columns`/`addColumns`).
+  // Money columns are opt-in: only the user's words ("con totales", "saldo") turn them on.
+  // A model that lists "total" in `columns` on its own does not count.
   if (cust.showTotals === false) {
-    const explicit = new Set([...(cust.columns ?? []), ...(cust.addColumns ?? [])].map(keyOf));
-    for (const k of OPTIONAL_MONEY_KEYS) if (!explicit.has(k)) hidden.add(k);
+    for (const k of OPTIONAL_MONEY_KEYS) hidden.add(k);
   }
   if (hidden.size > 0) {
     const kept = result.filter((c) => !hidden.has(c.key));
@@ -648,7 +670,9 @@ export function applySummaryCardCustomization(
 ): Array<{ label: string; value: string }> | undefined {
   if (!cards || cards.length === 0) return undefined;
   if (cust.showSummaryCards === false) return undefined;
-  if (cust.showTotals === false && cust.showSummaryCards !== true) {
+  // Money cards need the user's explicit request; "showSummaryCards: true" alone (which the
+  // model can pass) keeps only the count cards.
+  if (cust.showTotals === false) {
     const kept = cards.filter((c) => !isMoneyCard(c));
     return kept.length > 0 ? kept : undefined;
   }
@@ -657,8 +681,9 @@ export function applySummaryCardCustomization(
 
 /** True when the bold TOTAL row under the table should be drawn. */
 export function wantsTotalsRow(cust: ReportCustomization): boolean {
-  if (cust.showTotalsRow !== undefined) return cust.showTotalsRow;
-  return cust.showTotals !== false;
+  // "showTotalsRow: true" from the model cannot override the user's "no amounts".
+  if (cust.showTotals === false) return false;
+  return cust.showTotalsRow !== false;
 }
 
 /* ------------------------------------------------------------------ */

@@ -3985,6 +3985,40 @@ textarea.input {
   letter-spacing: 0.02em;
 }
 
+.artifact-version-pill {
+  font-weight: var(--unik-weight-semibold);
+  color: var(--unik-accent, #2563eb);
+}
+
+.artifact-superseded-pill {
+  color: var(--unik-text-secondary);
+  font-style: italic;
+}
+
+.assistant-followups {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--unik-space-2);
+  margin: var(--unik-space-3) 0 var(--unik-space-1);
+}
+
+.assistant-followup-chip {
+  border: 1px solid color-mix(in srgb, var(--unik-accent, #2563eb) 35%, var(--unik-border));
+  background: color-mix(in srgb, var(--unik-accent, #2563eb) 8%, transparent);
+  color: var(--unik-text);
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: var(--unik-text-sm);
+  line-height: 1.2;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.assistant-followup-chip:hover {
+  background: color-mix(in srgb, var(--unik-accent, #2563eb) 16%, transparent);
+  border-color: var(--unik-accent, #2563eb);
+}
+
 .assistant-md-hr {
   border: 0;
   border-top: 1px solid var(--unik-border);

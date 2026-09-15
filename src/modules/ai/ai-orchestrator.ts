@@ -41,6 +41,10 @@ import { getModelById } from './model-catalog';
 import { isReasoningModel } from './providers/openai';
 import { buildTurnDirectives, looksUnfinished, stripMarkdownImages, wantsDocument } from './turn-directives';
 import { reviewComplexAnswer } from './ai-answer-review';
+import { checkAnswer, collectFolios } from './answer-checks';
+import { parseFollowUps } from './followups';
+import { captureLearnings } from './ai-learning';
+import { buildRevisionDirective, isRevisionRequest, mergeRevisionArgs, type RevisionContext } from './revisions';
 import { inferConfidence, parseConfidence } from './confidence';
 import { mergeMessageMeta } from './ai-sessions-service';
 import { attachmentKind } from './ai-attachments-service';
@@ -488,7 +492,9 @@ export async function* runAssistant(
     // Attachment turns are long already: fewer tools = smaller prompt on every pass.
     maxTools: Math.min(Math.max(8, Number(settings.maxToolsPerTurn) || 96), PROVIDER_MAX_TOOLS, attachmentsForContext.length > 0 ? 48 : PROVIDER_MAX_TOOLS),
   });
-  let offeredTools: ToolDefinition[] = selection.offered;
+  // Same set ⇒ same order: the serialized tools are the first part of every request and a
+  // stable prefix is what lets the provider cache the prompt between passes and turns.
+  let offeredTools: ToolDefinition[] = [...selection.offered].sort((a, b) => a.name.localeCompare(b.name));
   let toolSpecs: ToolSpec[] = toOpenAiTools(offeredTools);
   const availableByName = new Map(availableTools.map((t) => [t.name, t] as const));
   if (selection.dropped.length > 0) {
@@ -538,6 +544,35 @@ export async function* runAssistant(
     messages[0].content += `\n\n${directives}`;
   }
 
+  // 8.66. "Quita los totales", "ponlo en vertical": changes apply to the file just delivered.
+  // The model is told what it generated it with; the generator gets the previous arguments
+  // under the new ones; the result becomes the next version of the same document.
+  let revision: RevisionContext | null = null;
+  if (!isAutoTrigger && isRevisionRequest(input.message)) {
+    try {
+      const last = await prisma.aiArtifact.findFirst({
+        where: { conversationId: input.conversationId, type: { in: ['pdf', 'xlsx', 'docx', 'csv', 'image'] } },
+        orderBy: { createdAt: 'desc' },
+        select: { id: true, type: true, meta: true },
+      });
+      const meta = (last?.meta as Record<string, unknown> | null) ?? null;
+      const spec = meta?.spec as { generatedBy?: string; generatorArgs?: Record<string, unknown> } | undefined;
+      if (last && spec?.generatedBy && spec.generatorArgs && !meta?.supersededBy) {
+        revision = {
+          artifactId: last.id,
+          type: last.type,
+          title: typeof meta?.title === 'string' ? meta.title : 'Documento',
+          version: typeof meta?.version === 'number' ? meta.version : 1,
+          generatedBy: spec.generatedBy,
+          generatorArgs: spec.generatorArgs,
+        };
+        if (messages[0] && typeof messages[0].content === 'string') messages[0].content += `\n\n${buildRevisionDirective(revision)}`;
+      }
+    } catch (err) {
+      console.warn('[orchestrator] revision context skipped:', err instanceof Error ? err.message : err);
+    }
+  }
+
   // 8.7. Live data requested explicitly → bypass the short-TTL read cache this turn.
   const wantsFreshData = /\b(actualiza\w*|en tiempo real|refresca\w*|sin cach[eé]|datos de ahora|ahorita mismo|al momento)\b/i.test(input.message);
 
@@ -564,6 +599,8 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
     !isReasoningModel(effectiveModel);
   let nudges = 0;
   let reviews = 0;
+  // Every folio a tool returned this turn: an answer may only cite these.
+  const knownFolios = new Set<string>();
   const turnStats = { calls: 0, cachedHits: 0, parallelBatches: 0, dataToolsSucceeded: 0, failed: 0, loadedMore: 0 };
   const toolsUsedThisTurn: Array<{ name: string; success: boolean; cached?: boolean }> = [];
 
@@ -827,14 +864,25 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
       argsObj.conversationId = input.conversationId;
     }
 
+    // A revision of the last file: previous generator arguments under the new ones so
+    // nothing the user did not mention changes (title, columns, colors, orientation…).
+    const isRevisionOfLast = Boolean(revision && tc.name === revision.generatedBy);
+    if (revision && isRevisionOfLast) {
+      const merged = mergeRevisionArgs(revision.generatorArgs, argsObj);
+      for (const k of Object.keys(argsObj)) delete argsObj[k];
+      Object.assign(argsObj, merged);
+    }
+
     // Auto-inject rows and title for artifact tools
     if (ARTIFACT_TOOLS.has(tc.name)) {
       // How the report should LOOK comes from the user's own words ("sin totales", "quita la
       // columna vendedor", "ordénalo por cliente", "en rojo"), with whatever the model passed
-      // on top — except the amounts, which only the user can turn on.
+      // on top — except the amounts, which only the user can turn on (or already had in the
+      // version being revised).
       argsObj.customization = resolveReportCustomization(
         input.message,
-        argsObj.customization as ReportCustomization | undefined
+        argsObj.customization as ReportCustomization | undefined,
+        isRevisionOfLast ? ((revision?.generatorArgs.customization as ReportCustomization | undefined) ?? null) : null
       );
       const modelRows = Array.isArray(argsObj.rows) ? (argsObj.rows as Record<string, unknown>[]) : null;
       const subsetOnly = argsObj.subsetOnly === true;
@@ -1064,6 +1112,8 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
       };
     }
 
+    if (result.success && result.result) collectFolios(result.result, knownFolios);
+
     // Track the last DATA tool result for auto-injection into artifact tools
     if (
       result.success &&
@@ -1104,6 +1154,7 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
         const generatorArgs = { ...((parsedArgs as Record<string, unknown>) ?? {}) };
         delete generatorArgs.rows;
         delete generatorArgs.sections;
+        if (generatorArgs.blocks && JSON.stringify(generatorArgs.blocks).length > 200_000) delete generatorArgs.blocks;
         const spec = {
           generatedBy: tc.name,
           generatorArgs,
@@ -1114,6 +1165,31 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
         for (const a of artifactList) {
           if (typeof a.artifactId !== 'string') continue;
           await linkArtifactToMessage(a.artifactId, assistantMessageId, spec);
+        }
+        // Same document, next version: the new file carries the version number and the old
+        // card says it was replaced. The model is told so it presents it as a revision.
+        if (revision && tc.name === revision.generatedBy && artifactList.length > 0) {
+          const nextVersion = revision.version + 1;
+          try {
+            for (const a of artifactList) {
+              if (typeof a.artifactId !== 'string') continue;
+              const row = await prisma.aiArtifact.findUnique({ where: { id: a.artifactId }, select: { meta: true } });
+              const meta = { ...((row?.meta as Record<string, unknown> | null) ?? {}), version: nextVersion, revisionOf: revision.artifactId };
+              await prisma.aiArtifact.update({ where: { id: a.artifactId }, data: { meta: meta as Prisma.InputJsonValue } });
+              a.version = nextVersion;
+            }
+            const prev = await prisma.aiArtifact.findUnique({ where: { id: revision.artifactId }, select: { meta: true } });
+            const prevMeta = { ...((prev?.meta as Record<string, unknown> | null) ?? {}), supersededBy: String(artifactList[0].artifactId) };
+            await prisma.aiArtifact.update({ where: { id: revision.artifactId }, data: { meta: prevMeta as Prisma.InputJsonValue } });
+            // `toolResult` is the same object the tool message is built from below.
+            toolResult.revision = {
+              version: nextVersion,
+              replaces: revision.artifactId,
+              note: `Es la versión ${nextVersion} de "${revision.title}" con los cambios pedidos; preséntala así (qué cambió), no como un archivo nuevo.`,
+            };
+          } catch (err) {
+            console.warn('[orchestrator] revision versioning failed:', err instanceof Error ? err.message : err);
+          }
         }
       }
       for (const a of artifactList) {
@@ -1133,6 +1209,7 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
             storageObjectId: typeof a.storageObjectId === 'string' ? a.storageObjectId : undefined,
             mimeType: typeof a.mimeType === 'string' ? a.mimeType : undefined,
             quoteId: typeof a.quoteId === 'string' ? a.quoteId : undefined,
+            version: typeof a.version === 'number' ? a.version : undefined,
           },
         };
       }
@@ -1311,6 +1388,26 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
         continue;
       }
 
+      // Deterministic verification (every model): folios that no tool returned, group
+      // headings whose count does not match their table. One corrective pass, max.
+      if (nudges < 2 && iteration < settings.maxToolIterations && classification.tier !== 'simple') {
+        const check = checkAnswer(iterationContent, knownFolios);
+        if (check.issues.length > 0) {
+          nudges += 1;
+          console.log(JSON.stringify({ event: 'ai.answer.checks', conversationId: input.conversationId, issues: check.issues }));
+          yield { type: 'tool_call_start', data: { name: 'reviewAnswer', args: '{}' } };
+          yield { type: 'tool_call_end', data: { name: 'reviewAnswer', success: true, needsApproval: false, errorCode: null, error: null, durationMs: 0, cached: false } };
+          messages.push({ role: 'assistant', content: iterationContent });
+          messages.push({
+            role: 'system',
+            content:
+              'Verificación automática de tu borrador (el usuario NO lo vio). Corrige y entrega la respuesta final completa:\n' +
+              check.issues.map((i, n) => `${n + 1}. ${i}`).join('\n'),
+          });
+          continue;
+        }
+      }
+
       // Internal review of complex answers: a second pass looks for missing parts, numbers
       // that do not add up and cut tables; the model rewrites once with the critique.
       if (bufferAnswer && reviews < 1 && iteration < settings.maxToolIterations && iterationContent.trim().length >= 80) {
@@ -1366,6 +1463,8 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
 
       // Confidence label (the model writes it; if it forgot, derive it from what happened).
       const parsedConfidence = parseConfidence(iterationContent);
+      // One-click follow-ups ("Sugerencias: [..] · [..]") written by the model, shown as chips.
+      const followUps = parseFollowUps(parsedConfidence.content).followUps;
       const confidence = inferConfidence({
         parsed: parsedConfidence.level,
         dataToolsSucceeded: turnStats.dataToolsSucceeded,
@@ -1380,8 +1479,20 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
         confidenceLabeled: parsedConfidence.level !== null,
         tools: { ...turnStats, offered: offeredTools.length, used: toolsUsedThisTurn.map((t) => t.name) },
         planFirst: Boolean(input.planFirst),
+        followUps,
       };
       await mergeMessageMeta(finalMessage.id, meta);
+
+      // Controlled learning: a correction or a business definition in the user's message
+      // becomes a PENDING memory the user confirms (never blocks the answer).
+      if (settings.learningCaptureEnabled !== false && !isAutoTrigger && !input.context?.voice) {
+        void captureLearnings(settings, {
+          userId: input.actor.id,
+          userMessage: input.message,
+          lastAssistantContent,
+          answer: iterationContent,
+        }).catch((err) => console.warn('[ai-orchestrator] learning capture failed:', err instanceof Error ? err.message : err));
+      }
 
       // Shared context: refresh this thread's rolling summary (never blocks the answer).
       void maybeSummarizeConversation(input.conversationId, input.actor.id);

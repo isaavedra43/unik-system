@@ -7,6 +7,7 @@ import { ArtifactRenderer, type ArtifactData } from './ArtifactRenderer';
 import { AUTO_EVENT_LABELS, autoKind, extractFailureReason, extractResultAction, parsePlan, performUiAction, toolLabel, type MessageFeedbackData, type TurnMeta } from '@/components/copilot/copilot-types';
 import { ExternalLink, Phone } from 'lucide-react';
 import { ConfidenceBadge } from '@/components/copilot/ConfidenceBadge';
+import { parseFollowUps } from '@/modules/ai/followups';
 import { MessageFeedback } from '@/components/copilot/MessageFeedback';
 import { PlanCard } from '@/components/copilot/PlanCard';
 import { parseConfidence } from '@/modules/ai/confidence';
@@ -170,7 +171,9 @@ export function AssistantMessage({ message, onSendText, isLatest = false }: Assi
   const planRecord = !isUser ? records.find((r) => r.toolName === 'proposePlan' && r.success) : undefined;
   const plan = planRecord ? parsePlan(planRecord.args) : null;
   const parsed = !isUser ? parseConfidence(message.content) : null;
-  const content = parsed ? parsed.content : message.content;
+  const followParsed = parsed ? parseFollowUps(parsed.content) : null;
+  const content = followParsed ? followParsed.content : parsed ? parsed.content : message.content;
+  const followUps = !isUser ? (message.meta?.followUps && message.meta.followUps.length > 0 ? message.meta.followUps : followParsed?.followUps ?? []) : [];
   const confidence = message.meta?.confidence ?? parsed?.level ?? null;
   const confidenceNote = message.meta?.confidenceNote ?? parsed?.note ?? null;
 
@@ -211,6 +214,15 @@ export function AssistantMessage({ message, onSendText, isLatest = false }: Assi
               <span key={tc.id} className="assistant-step is-running">
                 {toolLabel(tc.name, 'running')}
               </span>
+            ))}
+          </div>
+        )}
+        {!isUser && isLatest && onSendText && followUps.length > 0 && (
+          <div className="assistant-followups" aria-label="Sugerencias de siguiente paso">
+            {followUps.map((f) => (
+              <button key={f} type="button" className="assistant-followup-chip" onClick={() => onSendText(f)}>
+                {f}
+              </button>
             ))}
           </div>
         )}

@@ -77,6 +77,7 @@ const SETTING_FIELDS: Array<{ key: string; label: string; type: 'number' | 'stri
   { key: 'qualityJudgeEnabled', label: 'Juez de calidad automático', type: 'boolean', hint: 'Califica cada respuesta (1-5) con un modelo barato después de entregarla' },
   { key: 'reasoningEffort', label: 'Razonamiento en tareas complejas', type: 'string', hint: 'low | medium | high — solo aplica a modelos que piensan (GPT-5, o-series)' },
   { key: 'answerReviewEnabled', label: 'Revisión interna de respuestas complejas', type: 'boolean', hint: 'Solo con modelos que no razonan (GPT-4o, Kimi): un revisor detecta faltantes o cifras que no cuadran y el modelo corrige una vez. GPT-5 ya revisa mientras piensa' },
+  { key: 'learningCaptureEnabled', label: 'Aprender de correcciones', type: 'boolean', hint: 'Cuando el usuario corrige a la IA o define un término ("Recolección significa…"), se propone como recuerdo pendiente que él confirma en Preferencias y memoria' },
 ];
 
 export function AssistantAdminConfig({ canManage }: { canManage: boolean }) {

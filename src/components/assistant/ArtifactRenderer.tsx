@@ -36,6 +36,10 @@ export interface ArtifactData {
   mimeType?: string;
   /** Zoho quote this PDF belongs to (official estimate PDF). */
   quoteId?: string;
+  /** Revision number when the file was regenerated with changes (v2, v3…). */
+  version?: number;
+  /** Id of the newer version that replaced this file. */
+  supersededBy?: string;
   createdAt?: string;
 }
 
@@ -294,6 +298,8 @@ export function ArtifactRenderer({ artifact, compact = false, onAttach }: { arti
             {artifact.pageCount !== undefined && <span>{artifact.pageCount} págs</span>}
             {artifact.sizeBytes !== undefined && <span>{formatBytes(artifact.sizeBytes)}</span>}
             {artifact.shared && <span className="artifact-shared-pill"><Link2 size={11} /> compartido</span>}
+            {artifact.version !== undefined && artifact.version > 1 && <span className="artifact-version-pill">v{artifact.version}</span>}
+            {artifact.supersededBy && <span className="artifact-superseded-pill">sustituido por una versión nueva</span>}
           </div>
         </div>
         <div className="artifact-file-actions">
