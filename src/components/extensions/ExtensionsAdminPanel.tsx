@@ -2,7 +2,8 @@
 
 import React, { useCallback, useEffect, useState } from 'react';
 import { AlertCircle, CheckCircle2, Plug, RefreshCw, ShieldOff, Upload } from 'lucide-react';
-import { AssistantAdminStatCard } from '@/components/assistant/admin/AssistantAdminStatCard';
+import { KpiGrid } from '@/components/patterns/dashboard/KpiGrid';
+import { StatCard } from '@/components/patterns/dashboard/StatCard';
 import { CatalogGrid } from './CatalogGrid';
 import { MonitoringTab } from './MonitoringTab';
 import type { CuratedEntry } from '@/modules/extensions/curated-catalog';
@@ -884,11 +885,11 @@ export function ExtensionsAdminPanel({
                   {detail.allowedRoleKeys.join(', ') || 'solo super_admin'}
                   {detail.suspendedReason ? ` · motivo: ${detail.suspendedReason}` : ''}
                 </p>
-                <div className="assistant-admin-stat-grid">
+                <KpiGrid columns={3} className="mb-6">
                   {Object.entries(detail.executions30d).map(([k, v]) => (
-                    <AssistantAdminStatCard key={k} label={`Ejecuciones ${k} (30d)`} value={v} />
+                    <StatCard key={k} label={`Ejecuciones ${k} (30d)`} value={v} />
                   ))}
-                </div>
+                </KpiGrid>
                 {canManage && (
                   <div className="assistant-admin-filters">
                     {(STATUS_ACTIONS[detail.status] ?? []).map((a) => (

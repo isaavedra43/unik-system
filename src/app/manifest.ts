@@ -42,6 +42,13 @@ export default function manifest(): MetadataRoute.Manifest {
     ],
     shortcuts: [
       {
+        name: 'Mi siguiente acción',
+        short_name: 'Mi trabajo',
+        description: 'Tus pendientes, aprobaciones y la IA de Mi trabajo',
+        url: '/app/mywork',
+        icons: [{ src: '/icon-192.png', sizes: '192x192' }],
+      },
+      {
         name: 'Asistente IA',
         short_name: 'Asistente',
         description: 'Conversa con el asistente IA',

@@ -4,6 +4,11 @@ import { recordAuditEvent } from '@/modules/auth/audit-service';
 import { ZohoApiError } from '@/modules/integrations/zoho/client';
 import { isZohoBooksMockEnabled } from '@/modules/integrations/zoho/config';
 import {
+  claimWriteRequest as claimLedgerWriteRequest,
+  ledgerErrorMessage,
+  markWriteRequestFailed,
+} from '@/modules/integrations/zoho/write-request-ledger';
+import {
   createEstimate,
   updateEstimate,
   getEstimate,
@@ -287,24 +292,21 @@ async function mockEstimateResponse(
 // Idempotency ledger
 // ---------------------------------------------------------------------------
 
+// The generic claim/replay/retry rules live in integrations/zoho/write-request-ledger.ts
+// (shared with the sales order writes); this service keeps its own QuoteWriteRequest calls.
+
 async function claimWriteRequest(requestKey: string, operation: string, userId: string): Promise<{ replayQuoteId: string | null }> {
-  try {
-    await prisma.quoteWriteRequest.create({ data: { requestKey, operation, userId, status: 'pending' } });
-    return { replayQuoteId: null };
-  } catch (error) {
-    if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== 'P2002') throw error;
-  }
-  const existing = await prisma.quoteWriteRequest.findUnique({ where: { requestKey } });
-  if (!existing) throw new QuoteWriteError('No se pudo registrar la solicitud.', 'REQUEST_RACE', 500);
-  if (existing.status === 'completed' && existing.quoteId) return { replayQuoteId: existing.quoteId };
-  if (existing.status === 'pending') {
-    if (Date.now() - existing.createdAt.getTime() < PENDING_REQUEST_TTL_MS) {
-      throw new QuoteWriteError('Esta cotización ya se está enviando a Zoho. Espera unos segundos y revisa la lista antes de reintentar.', 'REQUEST_IN_PROGRESS', 409);
-    }
-  }
-  // failed or stale pending → allow retry under the same key
-  await prisma.quoteWriteRequest.update({ where: { requestKey }, data: { status: 'pending', errorMessage: null, createdAt: new Date(), completedAt: null } });
-  return { replayQuoteId: null };
+  const claim = await claimLedgerWriteRequest({
+    insert: () => prisma.quoteWriteRequest.create({ data: { requestKey, operation, userId, status: 'pending' } }),
+    find: () => prisma.quoteWriteRequest.findUnique({ where: { requestKey } }),
+    // failed or stale pending → allow retry under the same key
+    reopen: () => prisma.quoteWriteRequest.update({ where: { requestKey }, data: { status: 'pending', errorMessage: null, createdAt: new Date(), completedAt: null } }),
+    isReplayable: (row) => row.status === 'completed' && Boolean(row.quoteId),
+    pendingTtlMs: PENDING_REQUEST_TTL_MS,
+    inProgressError: () => new QuoteWriteError('Esta cotización ya se está enviando a Zoho. Espera unos segundos y revisa la lista antes de reintentar.', 'REQUEST_IN_PROGRESS', 409),
+    missingError: () => new QuoteWriteError('No se pudo registrar la solicitud.', 'REQUEST_RACE', 500),
+  });
+  return { replayQuoteId: claim.kind === 'replay' ? claim.row.quoteId : null };
 }
 
 async function completeWriteRequest(requestKey: string, quoteId: string, zohoEstimateId: string): Promise<void> {
@@ -312,9 +314,7 @@ async function completeWriteRequest(requestKey: string, quoteId: string, zohoEst
 }
 
 async function failWriteRequest(requestKey: string, message: string): Promise<void> {
-  try {
-    await prisma.quoteWriteRequest.update({ where: { requestKey }, data: { status: 'failed', errorMessage: message.slice(0, 500), completedAt: new Date() } });
-  } catch { /* ledger is best-effort on failure */ }
+  await markWriteRequestFailed(() => prisma.quoteWriteRequest.update({ where: { requestKey }, data: { status: 'failed', errorMessage: ledgerErrorMessage(message), completedAt: new Date() } }));
 }
 
 // ---------------------------------------------------------------------------

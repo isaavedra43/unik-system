@@ -16,7 +16,9 @@ import { getProviderConfig } from '../ai-config';
  * (Ollama and LM Studio both expose one) by pointing the OpenAI provider
  * at localhost. Many local runtimes already accept the OpenAI Chat
  * Completions format, so the implementation may reuse openaiProvider
- * with a custom baseURL.
+ * with a custom baseURL. It then maps opts.toolChoice like any OpenAI-compatible host, with
+ * `toOpenAiToolChoice` (tool-choice.ts): 'required' → tool_choice "required". While this is a stub
+ * every call throws before building a request, so toolChoice is ignored safely.
  *
  * Data privacy: 100% local — no data ever leaves your machine.
  *

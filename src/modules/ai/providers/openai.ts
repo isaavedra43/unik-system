@@ -10,6 +10,7 @@ import type {
   ToolSpec,
 } from './types';
 import { AiApiError } from './types';
+import { toOpenAiToolChoice, toolNamesOf } from './tool-choice';
 import { recordAiApiCall } from '../ai-audit';
 import { getProviderConfig } from '../ai-config';
 
@@ -131,10 +132,13 @@ export const openaiProvider: AiProvider = {
     const start = Date.now();
 
     try {
+      const tools = toOpenAITools(opts.tools);
+      const toolChoice = toOpenAiToolChoice(opts.toolChoice, toolNamesOf(tools));
       const response = await c.chat.completions.create({
         model,
         messages: toOpenAIMessages(opts.messages),
-        tools: toOpenAITools(opts.tools),
+        tools,
+        ...(toolChoice ? { tool_choice: toolChoice } : {}),
         ...buildGenerationParams(model, opts),
       } as OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming);
 
@@ -195,13 +199,12 @@ export const openaiProvider: AiProvider = {
 
     try {
       const tools = toOpenAITools(opts.tools);
-      const choice = opts.toolChoice && opts.toolChoice !== 'auto' ? opts.toolChoice : null;
-      const forced = choice && tools?.some((t) => t.type === 'function' && t.function.name === choice.function.name) ? choice : null;
+      const toolChoice = toOpenAiToolChoice(opts.toolChoice, toolNamesOf(tools));
       const stream = await c.chat.completions.create({
         model,
         messages: toOpenAIMessages(opts.messages),
         tools,
-        ...(forced ? { tool_choice: forced } : {}),
+        ...(toolChoice ? { tool_choice: toolChoice } : {}),
         ...buildGenerationParams(model, opts),
         stream: true,
         stream_options: { include_usage: true },

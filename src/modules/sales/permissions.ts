@@ -29,6 +29,13 @@ export const SALES_ORDERS_PERMISSIONS: PermissionDefinition[] = [
     description: 'Permite marcar órdenes para recibir notificaciones cuando cambien',
   },
   {
+    key: 'sales_orders.close_tickets',
+    group: 'Órdenes de venta',
+    label: 'Cerrar tickets en Zoho',
+    description:
+      'Permite cerrar órdenes seleccionadas en Zoho: factura, empaca, envía, marca entregado y comenta',
+  },
+  {
     key: 'sales_orders.share_views',
     group: 'Órdenes de venta',
     label: 'Compartir vistas de órdenes',

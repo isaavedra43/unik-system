@@ -43,6 +43,24 @@ export * from './comms-contacts-service';
  */
 
 export const COMMS_PROCESS_INBOUND_JOB = 'comms.process_inbound';
+/** Per-message fan-out to other modules (CRM touch, RFQ replies); handler in comms-jobs.ts. */
+export const COMMS_MESSAGE_FANOUT_JOB = 'comms.message_fanout';
+export const messageFanoutDedupeKey = (messageId: string) => `fanout:${messageId}`;
+
+/** Enqueues the fan-out of a stored message. Never throws (messaging must not depend on it). */
+async function enqueueMessageFanout(messageId: string, priority: number): Promise<void> {
+  try {
+    await enqueueJob({
+      type: COMMS_MESSAGE_FANOUT_JOB,
+      payload: { messageId },
+      priority,
+      dedupeKey: messageFanoutDedupeKey(messageId),
+    });
+  } catch {
+    // The CRM touch / RFQ interpretation can be re-run later; the message is already stored or sent.
+  }
+}
+
 export const CONVERSATION_STATUSES = ['open', 'pending', 'snoozed', 'resolved'] as const;
 export const CONVERSATION_PRIORITIES = ['normal', 'high', 'urgent'] as const;
 const INBOUND_WINDOW_MS = 24 * 60 * 60 * 1000;
@@ -595,6 +613,10 @@ export async function sendOutboundMessage(input: SendOutboundInput): Promise<Com
     where: { id: conversation.id },
     data: { lastMessageAt: now },
   });
+  await enqueueMessageFanout(
+    updated.id,
+    input.campaignId ? JOB_PRIORITY.bulk : JOB_PRIORITY.normal
+  );
   await publishToTeams(
     conversation.account,
     conversation,
@@ -806,6 +828,7 @@ export async function recordInboundMessage(
       groupKey: `comm_account:${account.id}`,
     }).catch(() => undefined);
   }
+  await enqueueMessageFanout(message.id, JOB_PRIORITY.normal);
 
   await publishToTeams(account, conversation, 'message', {
     messageId: message.id,

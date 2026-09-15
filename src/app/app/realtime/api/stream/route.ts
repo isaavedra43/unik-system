@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentSession, hasPermission, type CurrentUser } from '@/modules/auth/authorization';
 import { prisma } from '@/lib/prisma';
+import { isActiveDriverOf } from '@/modules/logistics/logistics-helpers';
+import { authorizeOperationsChannel } from '@/modules/operations/events-service';
 import {
   latestRealtimeId,
   readRealtimeSince,
@@ -51,6 +53,33 @@ async function authorizeChannel(user: CurrentUser, channel: string): Promise<boo
       return hasPermission(user, 'calls.use') || hasPermission(user, 'calls.supervise');
     case 'campaign':
       return hasPermission(user, 'campaigns.view');
+    case 'area':
+      return authorizeOperationsChannel(user, 'area', id);
+    case 'case':
+      return authorizeOperationsChannel(user, 'case', id);
+    case 'logistics':
+      // Dispatch board: `logistics:dispatch`.
+      return id === 'dispatch' && hasPermission(user, 'logistics.dispatch');
+    case 'purchases':
+      // Purchases board: `purchases:board`.
+      return id === 'board' && hasPermission(user, 'purchases.view');
+    case 'manufacturing':
+      // Production floor: `manufacturing:floor`.
+      return id === 'floor' && hasPermission(user, 'manufacturing.view');
+    case 'finance':
+      // Internal accounting board: `finance:board`.
+      return id === 'board' && hasPermission(user, 'finance.view');
+    case 'crm':
+      // Closing radar: `crm:radar`.
+      return id === 'radar' && (hasPermission(user, 'crm.radar') || hasPermission(user, 'crm.manage'));
+    case 'trip': {
+      if (hasPermission(user, 'logistics.view') || hasPermission(user, 'logistics.dispatch')) {
+        return true;
+      }
+      // The driver of the trip follows it from the driver PWA (same rule as its commands).
+      const trip = await prisma.trip.findUnique({ where: { id }, select: { driverId: true } });
+      return isActiveDriverOf(prisma, user, trip?.driverId);
+    }
     default:
       return false;
   }

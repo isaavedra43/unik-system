@@ -48,6 +48,15 @@ interface EnqueueInput<P> {
   dedupeKey?: string;
   groupKey?: string;
   createdBy?: string;
+  /**
+   * Optional transaction client: the job row is created atomically with the
+   * caller's writes and only becomes visible to the worker after the commit.
+   * With a dedupeKey the insert uses ON CONFLICT DO NOTHING, so a concurrent
+   * producer of the same key never aborts the caller's transaction. The worker
+   * is not woken from inside the transaction: call `wakeJobWorker()` after the
+   * commit, or the job waits for the next poll (1.5 s by default).
+   */
+  tx?: Prisma.TransactionClient;
 }
 
 const handlers = new Map<string, HandlerEntry>();
@@ -82,11 +91,75 @@ function toJson(value: unknown): Prisma.InputJsonValue {
   return (value === undefined ? {} : JSON.parse(JSON.stringify(value))) as Prisma.InputJsonValue;
 }
 
-export async function enqueueJob<P>(
-  input: EnqueueInput<P>
-): Promise<{ id: string; status: JobStatus; deduplicated: boolean }> {
+/** True when a Prisma error is the unique violation of `BackgroundJob.dedupeKey`. */
+function isDedupeKeyConflict(err: unknown): boolean {
+  if (!(err instanceof Prisma.PrismaClientKnownRequestError) || err.code !== 'P2002') return false;
+  const target = (err.meta as { target?: unknown } | undefined)?.target;
+  // Without target metadata the only unique besides the generated id is dedupeKey.
+  if (target === undefined || target === null) return true;
+  const fields = Array.isArray(target) ? target.map(String) : [String(target)];
+  return fields.some((field) => field.includes('dedupeKey'));
+}
+
+type EnqueueResult = { id: string; status: JobStatus; deduplicated: boolean };
+
+/** Inside a transaction the dedupe key kept conflicting; the caller should retry its command. */
+export class JobDedupeConflictError extends Error {
+  readonly dedupeKey: string;
+
+  constructor(dedupeKey: string) {
+    super(`Could not enqueue job: dedupe key "${dedupeKey}" is still in conflict`);
+    this.name = 'JobDedupeConflictError';
+    this.dedupeKey = dedupeKey;
+  }
+}
+
+const TX_DEDUPE_ATTEMPTS = 2;
+
+/**
+ * Insert with a dedupe key inside the caller's transaction, without ever
+ * raising a unique violation. In PostgreSQL a failed statement aborts the
+ * whole transaction (every later statement fails with 25P02 and the commit
+ * rolls everything back), so a P2002 cannot be caught and recovered from
+ * inside `tx`. `createManyAndReturn({ skipDuplicates })` is
+ * `INSERT … ON CONFLICT DO NOTHING RETURNING`: if another transaction holds an
+ * uncommitted row with the same key, PostgreSQL waits for it to commit or roll
+ * back and then inserts or skips. After a skip the winner is already committed
+ * and, under READ COMMITTED (Prisma's default), visible to the next statement.
+ */
+async function insertDedupedInTransaction(
+  tx: Prisma.TransactionClient,
+  data: Prisma.BackgroundJobCreateManyInput,
+  dedupeKey: string
+): Promise<EnqueueResult> {
+  for (let attempt = 0; attempt < TX_DEDUPE_ATTEMPTS; attempt++) {
+    const [created] = await tx.backgroundJob.createManyAndReturn({
+      data: [data],
+      skipDuplicates: true,
+      select: { id: true },
+    });
+    if (created) return { id: created.id, status: 'pending', deduplicated: false };
+    const winner = await tx.backgroundJob.findUnique({ where: { dedupeKey } });
+    if (winner) return { id: winner.id, status: winner.status as JobStatus, deduplicated: true };
+    // The winner finished and released its key between both statements: insert again.
+  }
+  throw new JobDedupeConflictError(dedupeKey);
+}
+
+export async function enqueueJob<P>(input: EnqueueInput<P>): Promise<EnqueueResult> {
+  const db = input.tx ?? prisma;
+  const data: Prisma.BackgroundJobCreateManyInput = {
+    type: input.type,
+    payload: toJson(input.payload),
+    priority: input.priority ?? JOB_PRIORITY.normal,
+    runAt: input.runAt ?? new Date(),
+    maxAttempts: input.maxAttempts ?? 3,
+    dedupeKey: input.dedupeKey ?? null,
+    groupKey: input.groupKey ?? null,
+    createdBy: input.createdBy ?? null,
+  };
   if (input.dedupeKey) {
-    const existing = await prisma.backgroundJob.findUnique({
+    const existing = await db.backgroundJob.findUnique({
       where: { dedupeKey: input.dedupeKey },
     });
     if (existing && (existing.status === 'pending' || existing.status === 'running')) {
@@ -94,22 +167,35 @@ export async function enqueueJob<P>(
     }
     if (existing) {
       // Free the key so a new run can be scheduled.
-      await prisma.backgroundJob.update({ where: { id: existing.id }, data: { dedupeKey: null } });
+      await db.backgroundJob.update({ where: { id: existing.id }, data: { dedupeKey: null } });
     }
   }
-  const job = await prisma.backgroundJob.create({
-    data: {
-      type: input.type,
-      payload: toJson(input.payload),
-      priority: input.priority ?? JOB_PRIORITY.normal,
-      runAt: input.runAt ?? new Date(),
-      maxAttempts: input.maxAttempts ?? 3,
-      dedupeKey: input.dedupeKey ?? null,
-      groupKey: input.groupKey ?? null,
-      createdBy: input.createdBy ?? null,
-    },
-  });
-  wakeWorker();
+
+  if (input.tx) {
+    // The worker cannot see the row before the caller commits, so it is not woken
+    // here: the caller runs wakeJobWorker() after the commit.
+    if (!input.dedupeKey) {
+      const job = await input.tx.backgroundJob.create({ data });
+      return { id: job.id, status: 'pending', deduplicated: false };
+    }
+    return insertDedupedInTransaction(input.tx, data, input.dedupeKey);
+  }
+
+  let job: { id: string };
+  try {
+    job = await prisma.backgroundJob.create({ data });
+  } catch (err) {
+    if (!input.dedupeKey || !isDedupeKeyConflict(err)) throw err;
+    // Outside a transaction the failed INSERT aborts nothing: a concurrent
+    // producer committed the same key between the lookup and the insert, so its
+    // job is returned.
+    const winner = await prisma.backgroundJob.findUnique({
+      where: { dedupeKey: input.dedupeKey },
+    });
+    if (!winner) throw err;
+    return { id: winner.id, status: winner.status as JobStatus, deduplicated: true };
+  }
+  wakeJobWorker();
   return { id: job.id, status: 'pending', deduplicated: false };
 }
 
@@ -180,7 +266,13 @@ function getWorkerState(): WorkerState {
 const runningControllers = new Map<string, AbortController>();
 const runningGroups = new Map<string, string>();
 
-function wakeWorker(): void {
+/**
+ * Wakes this process's worker if it is waiting for work. `enqueueJob` calls it
+ * by itself outside a transaction; a producer that passed `tx` calls it after
+ * the commit (before that the worker cannot see the row). Without the call the
+ * job still runs on the next poll.
+ */
+export function wakeJobWorker(): void {
   const state = getWorkerState();
   state.wake?.();
 }
@@ -347,7 +439,7 @@ export function startJobWorker(options: JobWorkerOptions = {}): void {
           state.active++;
           void runJob(job, entry).finally(() => {
             state.active--;
-            wakeWorker();
+            wakeJobWorker();
           });
         }
         if (!claimed) {

@@ -227,6 +227,10 @@ async function getSalesOrderSnapshot(
  * Wrapper that the normalizer calls. It receives the BEFORE state (captured
  * before the upsert) and the AFTER state (after the upsert), computes the diff,
  * and records the change event + notifications inside the transaction.
+ *
+ * Returns the id of the `EntityChangeEvent` it created, or `null` when no
+ * event was recorded (first import, no meaningful changes, or a snapshot that
+ * was already processed).
  */
 export async function recordSalesOrderChange(
   tx: Prisma.TransactionClient,
@@ -238,22 +242,22 @@ export async function recordSalesOrderChange(
   beforeItems: ItemSnapshot[],
   afterOrder: SalesOrderSnapshot,
   afterItems: ItemSnapshot[]
-): Promise<void> {
+): Promise<string | null> {
   // First import: no previous version → no change event.
-  if (beforeOrder === null) return;
+  if (beforeOrder === null) return null;
 
   // Idempotency: skip if event already exists for this snapshot.
   const existing = await tx.entityChangeEvent.findUnique({
     where: { sourceSnapshotId },
     select: { id: true },
   });
-  if (existing) return;
+  if (existing) return null;
 
   const fieldChanges = diffFields(beforeOrder, afterOrder);
   const itemChanges = diffItems(beforeItems, afterItems);
 
   const hasChanges = Object.keys(fieldChanges).length > 0 || itemChanges !== null;
-  if (!hasChanges) return;
+  if (!hasChanges) return null;
 
   const changes: Record<string, unknown> = {};
   if (Object.keys(fieldChanges).length > 0) changes.fields = fieldChanges;
@@ -275,7 +279,7 @@ export async function recordSalesOrderChange(
     select: { userId: true },
   });
 
-  if (watchers.length === 0) return;
+  if (watchers.length === 0) return event.id;
 
   const title = `OV-${salesOrderNumber ?? salesOrderId.slice(-6)} tiene cambios`;
   const body = Object.keys(fieldChanges)
@@ -300,6 +304,8 @@ export async function recordSalesOrderChange(
       push: { tag: `entity:${SALES_ORDER_ENTITY_TYPE}:${salesOrderId}` },
     });
   }
+
+  return event.id;
 }
 
 export { getActiveWatchers };

@@ -1,3 +1,4 @@
+import type { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import type { CurrentUser } from '@/modules/auth/authorization';
@@ -56,9 +57,7 @@ export async function listResponsibles(
 ): Promise<ResponsibleDTO[]> {
   const canRead =
     actor.isSuperAdmin ||
-    ['inbox.use', 'inbox.admin'].some((key) =>
-      actor.permissionKeys.includes(key as never)
-    );
+    ['inbox.use', 'inbox.admin'].some((key) => actor.permissionKeys.includes(key as never));
   if (!canRead) throw new CommsError('Sin permiso', 403);
   const rows = await prisma.responsible.findMany({
     where: options.includeInactive ? {} : { active: true },
@@ -164,20 +163,27 @@ export interface ResolvedResponsible {
   backupUserName: string | null;
 }
 
-/** Who handles an area right now: the primary if active, otherwise the backup. */
-export async function resolveResponsible(area: string): Promise<ResolvedResponsible | null> {
+/**
+ * Who handles an area right now: the primary if active, otherwise the backup.
+ * Pass `db` (a transaction client) when calling from inside a transaction, so
+ * the lookup reuses its connection instead of waiting for another one.
+ */
+export async function resolveResponsible(
+  area: string,
+  db: Prisma.TransactionClient = prisma
+): Promise<ResolvedResponsible | null> {
   const slug = areaSlug(area);
   if (!slug) return null;
   const row =
-    (await prisma.responsible.findUnique({ where: { area: slug } })) ??
-    (await prisma.responsible.findFirst({
+    (await db.responsible.findUnique({ where: { area: slug } })) ??
+    (await db.responsible.findFirst({
       where: {
         active: true,
         OR: [{ area: { contains: slug } }, { label: { contains: area, mode: 'insensitive' } }],
       },
     }));
   if (!row || !row.active) return null;
-  const users = await prisma.user.findMany({
+  const users = await db.user.findMany({
     where: { id: { in: [row.userId, row.backupUserId].filter((x): x is string => Boolean(x)) } },
     select: { id: true, name: true, isActive: true },
   });

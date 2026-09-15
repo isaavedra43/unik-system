@@ -1,5 +1,6 @@
 import { prisma } from '@/lib/prisma';
 import { notifyUser } from '@/modules/notifications/notification-service';
+import { isBotTemplateMeta } from './chat-events';
 
 /**
  * Push/in-app notifications for internal chat messages.
@@ -7,7 +8,10 @@ import { notifyUser } from '@/modules/notifications/notification-service';
  * Honors, per member: the channel preference (`all` | `mentions` | `none`) and
  * temporary mutes (`mutedUntil`). Mentions and urgent messages get through a
  * `mentions` preference and a mute; `none` silences everything. The sender is
- * never notified. Errors never surface to the sender (fire-and-forget).
+ * never notified, bot members are never notified, and rule-based (template)
+ * posts of bot users notify nobody: the agents dispatcher already notifies the
+ * responsible person directly. Errors never surface to the sender
+ * (fire-and-forget).
  */
 
 export interface ChatMessageNotificationInput {
@@ -19,6 +23,10 @@ export interface ChatMessageNotificationInput {
   priority?: 'normal' | 'urgent' | string | null;
   mentionedUserIds?: Iterable<string>;
   kind?: 'text' | 'attachment' | 'location' | 'poll' | 'event';
+  /** The sender is an AI (bot) user. */
+  senderIsBot?: boolean;
+  /** Message metadata (bot posts); template kinds are not notified. */
+  meta?: unknown;
 }
 
 function preview(input: ChatMessageNotificationInput): string {
@@ -39,13 +47,20 @@ function preview(input: ChatMessageNotificationInput): string {
 }
 
 export async function notifyChatMessage(input: ChatMessageNotificationInput): Promise<void> {
+  if (input.senderIsBot && isBotTemplateMeta(input.meta)) return;
+
   const [channel, members, prefs] = await Promise.all([
     prisma.internalChatChannel.findUnique({
       where: { id: input.channelId },
       select: { type: true, name: true },
     }),
     prisma.internalChatMember.findMany({
-      where: { channelId: input.channelId, leftAt: null, userId: { not: input.senderId } },
+      where: {
+        channelId: input.channelId,
+        leftAt: null,
+        userId: { not: input.senderId },
+        user: { isBot: false },
+      },
       select: { userId: true, mutedUntil: true },
     }),
     prisma.internalChatNotificationPreference.findMany({

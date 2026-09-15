@@ -1,5 +1,6 @@
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
+import type { Role, RolePermission, User } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { SESSION_COOKIE_NAME, SUPER_ADMIN_ROLE_KEY } from '@/modules/auth/constants';
 import {
@@ -28,6 +29,11 @@ export interface CurrentUser {
   roleKeys: string[];
   permissionKeys: PermissionKey[];
   isSuperAdmin: boolean;
+  /**
+   * True only for an AI identity (`User.isBot`). Bot scope is never inferred from role keys:
+   * a person given an `agent_*` role is still a person. Absent = a person.
+   */
+  isBot?: boolean;
 }
 
 export interface CurrentSession {
@@ -40,6 +46,59 @@ export class AuthorizationError extends Error {
     super(message);
     this.name = 'AuthorizationError';
   }
+}
+
+/** A user row loaded with `roles → role → permissions`, as the projection needs it. */
+export type UserWithRoles = Pick<
+  User,
+  'id' | 'username' | 'name' | 'email' | 'mustChangePassword'
+> &
+  Partial<Pick<User, 'isBot'>> & {
+  roles: {
+    role: Pick<Role, 'key' | 'isActive'> & {
+      permissions: Pick<RolePermission, 'permissionKey'>[];
+    };
+  }[];
+};
+
+/**
+ * Projects a user with their roles into the authorization shape: only active
+ * roles count, permission keys are de-duplicated and restricted to the
+ * code-first registry, and `isSuperAdmin` comes from an active super_admin role.
+ * Pure: it does not check `isActive` of the user nor any session state.
+ */
+export function toCurrentUser(user: UserWithRoles): CurrentUser {
+  const activeRoles = user.roles.map((ur) => ur.role).filter((role) => role.isActive);
+  const roleKeys = activeRoles.map((role) => role.key);
+  const permissionKeys = [
+    ...new Set(activeRoles.flatMap((role) => role.permissions.map((p) => p.permissionKey))),
+  ].filter((key): key is PermissionKey => isKnownPermission(key));
+
+  return {
+    id: user.id,
+    username: user.username,
+    name: user.name,
+    email: user.email,
+    mustChangePassword: user.mustChangePassword,
+    roleKeys,
+    permissionKeys,
+    isSuperAdmin: roleKeys.includes(SUPER_ADMIN_ROLE_KEY),
+    ...(user.isBot === true ? { isBot: true } : {}),
+  };
+}
+
+/**
+ * Loads an active user with their roles as a `CurrentUser`, for background work
+ * done on behalf of the person who requested it (e.g. a queued manual start).
+ * Missing or inactive users → null. Roles come from PostgreSQL, never a cache.
+ */
+export async function loadActiveCurrentUser(userId: string): Promise<CurrentUser | null> {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    include: { roles: { include: { role: { include: { permissions: true } } } } },
+  });
+  if (!user || !user.isActive) return null;
+  return toCurrentUser(user);
 }
 
 /**
@@ -71,28 +130,14 @@ export async function getCurrentSession(): Promise<CurrentSession | null> {
   if (!session || session.revokedAt !== null || session.expiresAt.getTime() <= Date.now()) {
     return null;
   }
-  if (!session.user.isActive) {
+  // Bot users (agents layer) never hold a session: login already refuses them; defense in depth.
+  if (!session.user.isActive || session.user.isBot) {
     return null;
   }
 
-  const activeRoles = session.user.roles.map((ur) => ur.role).filter((role) => role.isActive);
-  const roleKeys = activeRoles.map((role) => role.key);
-  const permissionKeys = [
-    ...new Set(activeRoles.flatMap((role) => role.permissions.map((p) => p.permissionKey))),
-  ].filter((key): key is PermissionKey => isKnownPermission(key));
-
   return {
     sessionId: session.id,
-    user: {
-      id: session.user.id,
-      username: session.user.username,
-      name: session.user.name,
-      email: session.user.email,
-      mustChangePassword: session.user.mustChangePassword,
-      roleKeys,
-      permissionKeys,
-      isSuperAdmin: roleKeys.includes(SUPER_ADMIN_ROLE_KEY),
-    },
+    user: toCurrentUser(session.user),
   };
 }
 

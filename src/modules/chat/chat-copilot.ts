@@ -37,12 +37,31 @@ export async function chatAutoAnchor(channelId: string, actorId: string): Promis
 
 export function channelDisplayName(channel: ChatChannelDTO, actorId: string): string {
   if (channel.type === 'group') return channel.name ?? 'Grupo';
+  if (channel.type === 'area') return channel.name ?? 'Canal de área';
+  if (channel.type === 'case') return channel.name ?? 'Sala de venta';
   const other = channel.members.find((m) => m.userId !== actorId);
   return other?.name ?? 'Chat';
 }
 
+function channelKindLine(channel: ChatChannelDTO, name: string): string {
+  const count = `${channel.members.length} miembros`;
+  if (channel.type === 'group') return `grupo "${name}" (${count})`;
+  if (channel.type === 'area') {
+    return `canal del área "${name}" (${count}, incluye a la IA del área)${channel.areaKey ? ` · areaKey: ${channel.areaKey}` : ''}`;
+  }
+  if (channel.type === 'case') {
+    return `sala de venta "${name}" (${count}, responsables de las áreas y sus IA)${channel.caseId ? ` · caseId: ${channel.caseId}` : ''}`;
+  }
+  return `chat directo con ${name}`;
+}
+
 function messageLine(m: ChatMessageDTO, actorId: string): string {
-  const who = m.senderId === actorId ? `${m.senderName} (usuario actual)` : m.senderName;
+  const who =
+    m.senderId === actorId
+      ? `${m.senderName} (usuario actual)`
+      : m.senderIsBot
+        ? `${m.senderName} (IA)`
+        : m.senderName;
   const parts: string[] = [];
   if (m.content) parts.push(m.content.replace(/\s+/g, ' ').slice(0, 600));
   if (m.attachments.length) parts.push(`[${m.attachments.length} adjunto(s): ${m.attachments.map((a) => a.fileName).join(', ')}]`);
@@ -50,6 +69,12 @@ function messageLine(m: ChatMessageDTO, actorId: string): string {
   if (m.event) parts.push(`[evento: ${m.event.title} · ${m.event.startsAt}]`);
   if (m.location) parts.push('[ubicación compartida]');
   if (m.priority === 'urgent') parts.push('(URGENTE)');
+  if (m.senderIsBot && m.meta?.kind === 'agent_request' && typeof m.meta.requestId === 'string') {
+    parts.push(`[solicitud entre áreas ${m.meta.requestId}]`);
+  }
+  if (m.senderIsBot && m.meta?.kind === 'agent_proposal' && typeof m.meta.proposalId === 'string') {
+    parts.push(`[propuesta de IA ${m.meta.proposalId}]`);
+  }
   const time = m.createdAt.slice(0, 16).replace('T', ' ');
   return `- [${time}] ${who}: ${parts.join(' ') || '(sin texto)'}${m.id ? `  {id ${m.id}}` : ''}`;
 }
@@ -72,7 +97,7 @@ export async function buildChatCopilotPrompt(actor: CurrentUser, channelId: stri
   const ordered = [...messages].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   const name = channelDisplayName(channel, actor.id);
   const members = channel.members
-    .map((m) => `${m.name}${m.userId === actor.id ? ' (usuario actual)' : ''} → ${m.userId} · ${m.status === 'online' ? 'en línea' : m.status === 'away' ? 'ausente' : 'desconectado'}${m.role === 'admin' ? ' · admin' : ''}`)
+    .map((m) => `${m.name}${m.userId === actor.id ? ' (usuario actual)' : ''} → ${m.userId} · ${m.isBot ? 'IA' : m.status === 'online' ? 'en línea' : m.status === 'away' ? 'ausente' : 'desconectado'}${m.role === 'admin' ? ' · admin' : ''}`)
     .join('\n- ');
 
   const lines: string[] = [];
@@ -85,7 +110,7 @@ export async function buildChatCopilotPrompt(actor: CurrentUser, channelId: stri
   lines.push('');
   lines.push('### Canal actual');
   lines.push(`- chatChannelId: ${channel.id}  ← usa ESTE id en las tools de chat (getChatChannelMessages, proposeChatDraft, sendInternalChatMessage, summarizeChatChannel, pinChatMessage); no el id de este hilo`);
-  lines.push(`- Tipo: ${channel.type === 'group' ? `grupo "${name}" (${channel.members.length} miembros)` : `chat directo con ${name}`}`);
+  lines.push(`- Tipo: ${channelKindLine(channel, name)}`);
   lines.push(`- Miembros (nombre → userId):\n- ${members}`);
   lines.push(`- Última actividad: ${relativeTime(channel.lastMessageAt)} · Sin leer para el usuario: ${channel.unreadCount}`);
   lines.push('');

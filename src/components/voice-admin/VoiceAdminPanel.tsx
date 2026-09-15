@@ -11,7 +11,8 @@ import {
   Save,
   ShieldCheck,
 } from 'lucide-react';
-import { AssistantAdminStatCard } from '@/components/assistant/admin/AssistantAdminStatCard';
+import { KpiGrid } from '@/components/patterns/dashboard/KpiGrid';
+import { StatCard } from '@/components/patterns/dashboard/StatCard';
 import type { VoiceSettings } from '@/modules/voice/voice-settings';
 import { VoiceAgentSettingsPanel } from './VoiceAgentSettingsPanel';
 
@@ -140,15 +141,15 @@ export function VoiceAdminPanel() {
       <div className="assistant-admin-tab-content">
         {tab === 'status' && (
           <div className="assistant-admin-overview">
-            <div className="assistant-admin-stat-grid">
-              <AssistantAdminStatCard
+            <KpiGrid columns={3} className="mb-6">
+              <StatCard
                 label="LiveKit"
                 value={lk.mock ? 'Simulado' : 'Configurado'}
                 hint={lk.mock ? `Faltan: ${lk.missingVars.join(', ')}` : 'Salas, tokens y egress'}
                 icon={<Radio size={20} />}
                 tone={lk.mock ? 'warning' : 'success'}
               />
-              <AssistantAdminStatCard
+              <StatCard
                 label="SIP (Twilio ↔ LiveKit)"
                 value={lk.sipConfigured ? 'Trunk configurado' : 'Sin trunk'}
                 hint={
@@ -159,14 +160,14 @@ export function VoiceAdminPanel() {
                 icon={<Phone size={20} />}
                 tone={lk.sipConfigured ? 'success' : 'warning'}
               />
-              <AssistantAdminStatCard
+              <StatCard
                 label="Webhook Twilio"
                 value={data.status.twilioWebhookConfigured ? 'Firma validada' : 'No configurado'}
                 hint="TWILIO_AUTH_TOKEN + TWILIO_WEBHOOK_BASE_URL"
                 icon={<ShieldCheck size={20} />}
                 tone={data.status.twilioWebhookConfigured ? 'success' : 'warning'}
               />
-              <AssistantAdminStatCard
+              <StatCard
                 label="Agente de voz"
                 value={
                   data.status.voiceAgent?.lastSeenAt
@@ -183,7 +184,7 @@ export function VoiceAdminPanel() {
                 icon={<Bot size={20} />}
                 tone={data.status.voiceAgent?.lastSeenAt ? 'success' : 'warning'}
               />
-              <AssistantAdminStatCard
+              <StatCard
                 label="Egress → R2"
                 value={lk.egressUsesDedicatedToken ? 'Token dedicado' : 'Token de almacenamiento'}
                 hint={
@@ -194,7 +195,7 @@ export function VoiceAdminPanel() {
                 icon={<Clock size={20} />}
                 tone={lk.egressUsesDedicatedToken ? 'success' : 'default'}
               />
-            </div>
+            </KpiGrid>
             <div className="assistant-admin-section">
               <h3 className="assistant-admin-section-title">Límites conocidos</h3>
               <ul className="assistant-admin-muted">

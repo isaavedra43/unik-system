@@ -105,5 +105,26 @@ import './documents-tools';
 // Notifications (avisar a otros usuarios, configuración de notificaciones)
 import './notifications-tools';
 
+// Operations — coordinated AI identities (expedientes, solicitudes entre áreas, incidencias, reservas, pagos)
+import './agents-tools';
+
+// Operations — "Mi trabajo" (siguientes acciones, iniciar trabajo, conteos en lenguaje natural)
+import './mywork-tools';
+
+// Operations — Control Tower (pulso, expedientes atorados, quién bloquea, simulación de retrasos)
+import './control-tower-tools';
+
+// Compras y Sourcing (requisiciones, proveedores, RFQ, órdenes de compra, recepciones)
+import './procurement-tools';
+
+// Manufactura (órdenes de producción, tablero de piso, producción y merma)
+import './manufacturing-tools';
+
+// Contabilidad interna (gastos, flujo de efectivo, presupuesto, cobros, libro de caja)
+import './finance-internal-tools';
+
+// Ventas / CRM (oportunidades, radar de cierre, orden de venta desde cotización)
+import './crm-tools';
+
 // Export the registry API for consumers
 export * from './registry';

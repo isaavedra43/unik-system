@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentSession, hasPermission } from '@/modules/auth/authorization';
 import {
   getPreferences,
-  preferencesSchema,
+  preferencesPatchSchema,
   updatePreferences,
 } from '@/modules/copilot/preferences-service';
 
@@ -14,7 +14,16 @@ export async function GET() {
   if (!session) return NextResponse.json({ error: 'No autenticado' }, { status: 401 });
   if (!hasPermission(session.user, 'assistant.use'))
     return NextResponse.json({ error: 'Sin permiso' }, { status: 403 });
-  return NextResponse.json({ preferences: await getPreferences(session.user.id) });
+  return NextResponse.json({
+    preferences: await getPreferences(session.user.id),
+    // Operations surfaces this person can actually open (the panel only shows those).
+    surfaces: {
+      mywork: true,
+      case: true,
+      controlTower: hasPermission(session.user, 'operations.admin'),
+      area: false,
+    },
+  });
 }
 
 export async function PATCH(request: NextRequest) {
@@ -28,7 +37,8 @@ export async function PATCH(request: NextRequest) {
   } catch {
     return NextResponse.json({ error: 'JSON inválido' }, { status: 400 });
   }
-  const parsed = preferencesSchema.partial().safeParse(body);
+  // Partial update; `surfaceModes: {[kind]: mode}` changes only the surfaces it names.
+  const parsed = preferencesPatchSchema.safeParse(body);
   if (!parsed.success)
     return NextResponse.json(
       { error: 'Datos inválidos', details: parsed.error.issues },

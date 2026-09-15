@@ -4,9 +4,31 @@ import { prisma } from '@/lib/prisma';
  * Consumption meters per dimension (storage, operation, user, team, provider,
  * extension, job) aggregated per day. Cheap upserts; read by the admin
  * "Consumo" tab and by capacity planning.
+ *
+ * AI layer dimensions (plan 5.6), written by `src/modules/agents/budget.ts`:
+ * - `ai_area`  key = areaKey  — every AI turn on an area (agent or human surface);
+ * - `ai_agent` key = AgentIdentity.key ('area:compras' | 'admin') — agent turns, plus
+ *   unit `skipped` for dispatches the guards skipped;
+ * - `ai_case`  key = caseId   — AI turns about one operational case.
+ * Units: `tokens` (prompt + completion), `usd` (paid cost; 0 on flat-rate models) and
+ * `flat_tokens` (tokens served by a flat-rate provider, for amortized reporting).
+ * `ops.supervisor` holds the deterministic supervisor counters.
  */
 export type UsageDimension =
-  'extension' | 'provider' | 'user' | 'team' | 'storage' | 'job' | 'campaign' | 'calls';
+  | 'extension'
+  | 'provider'
+  | 'user'
+  | 'team'
+  | 'storage'
+  | 'job'
+  | 'campaign'
+  | 'calls'
+  | 'ai_area'
+  | 'ai_agent'
+  | 'ai_case'
+  | 'ops.supervisor';
+
+export const AI_USAGE_DIMENSIONS = ['ai_area', 'ai_agent', 'ai_case'] as const satisfies readonly UsageDimension[];
 
 function today(): string {
   return new Date().toISOString().slice(0, 10);

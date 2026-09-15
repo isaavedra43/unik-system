@@ -142,6 +142,27 @@ describe('executeTool — built-in', () => {
     expect(unknown.errorCode).toBe('unknown_tool');
   });
 
+  it('allowActor admits extra actors besides the permission holders, when listing and executing', async () => {
+    registerTool({
+      name: 'testAllowActor',
+      description: 'company reading',
+      category: 'operations',
+      enabledByDefault: true,
+      parameters: z.object({}),
+      requiredPermission: 'operations.admin',
+      allowActor: (actor) => actor.roleKeys.includes('agent_admin'),
+      execute: async () => ({ ok: true }),
+    });
+    const adminBot = user({ id: 'bot-admin', roleKeys: ['agent_admin'], permissionKeys: ['operations.view'] as never });
+    const person = user({ permissionKeys: ['operations.view'] as never });
+    expect(getAvailableTools(adminBot, ['testAllowActor']).map((t) => t.name)).toEqual(['testAllowActor']);
+    expect(getAvailableTools(person, ['testAllowActor'])).toEqual([]);
+    expect((await executeTool('testAllowActor', adminBot, {})).success).toBe(true);
+    expect((await executeTool('testAllowActor', person, {})).errorCode).toBe('forbidden');
+    const holder = user({ permissionKeys: ['operations.admin'] as never });
+    expect((await executeTool('testAllowActor', holder, {})).success).toBe(true);
+  });
+
   it('enforces the timeout', async () => {
     const res = await executeTool('testSlow', user(), {});
     expect(res.success).toBe(false);

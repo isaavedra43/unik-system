@@ -94,47 +94,33 @@ export const DATE_SHORTCUTS = [
 
 export type DateShortcut = (typeof DATE_SHORTCUTS)[number];
 
-const textFilterSchema = z.object({
+/**
+ * A single filter rule. One flat schema (instead of a union per type) so no
+ * key is silently stripped: with a union, a date rule `{operator:'equals',
+ * shortcut:'today'}` matched the text branch first and lost its shortcut.
+ * Operator ↔ column-type compatibility is enforced in the service layer.
+ */
+const ALL_FILTER_OPERATORS = [
+  ...new Set([
+    ...TEXT_OPERATORS,
+    ...SELECT_OPERATORS,
+    ...NUMBER_OPERATORS,
+    ...DATE_OPERATORS,
+    ...BOOLEAN_OPERATORS,
+  ]),
+] as [FilterOperator, ...FilterOperator[]];
+
+const salesOrderFilterRuleSchema = z.object({
   field: z.string().refine((f) => SALES_ORDER_FILTERABLE_FIELDS.has(f)),
-  operator: z.enum(TEXT_OPERATORS),
-  value: z.string().optional(),
+  operator: z.enum(ALL_FILTER_OPERATORS),
+  value: z
+    .union([z.string(), z.number(), z.boolean(), z.array(z.string()), z.null()])
+    .optional(),
+  valueTo: z.union([z.string(), z.number(), z.null()]).optional(),
+  shortcut: z.union([z.enum(DATE_SHORTCUTS), z.literal('')]).optional(),
 });
 
-const selectFilterSchema = z.object({
-  field: z.string().refine((f) => SALES_ORDER_FILTERABLE_FIELDS.has(f)),
-  operator: z.enum(SELECT_OPERATORS),
-  value: z.union([z.string(), z.array(z.string())]).optional(),
-});
-
-const numberFilterSchema = z.object({
-  field: z.string().refine((f) => SALES_ORDER_FILTERABLE_FIELDS.has(f)),
-  operator: z.enum(NUMBER_OPERATORS),
-  value: z.union([z.number(), z.string()]).optional(),
-  valueTo: z.union([z.number(), z.string()]).optional(),
-});
-
-const dateFilterSchema = z.object({
-  field: z.string().refine((f) => SALES_ORDER_FILTERABLE_FIELDS.has(f)),
-  operator: z.enum(DATE_OPERATORS),
-  value: z.union([z.string(), z.date()]).optional(),
-  valueTo: z.union([z.string(), z.date()]).optional(),
-  shortcut: z.enum(DATE_SHORTCUTS).optional(),
-});
-
-const booleanFilterSchema = z.object({
-  field: z.string().refine((f) => SALES_ORDER_FILTERABLE_FIELDS.has(f)),
-  operator: z.enum(BOOLEAN_OPERATORS),
-  value: z.boolean().optional(),
-});
-
-const salesOrderFilterRuleSchema = z.union([
-  textFilterSchema,
-  selectFilterSchema,
-  numberFilterSchema,
-  dateFilterSchema,
-  booleanFilterSchema,
-]);
-
+export type SalesOrderFilterRule = z.infer<typeof salesOrderFilterRuleSchema>;
 
 export const salesOrderFilterGroupSchema = z.object({
   logic: z.enum(['AND', 'OR']).default('AND'),

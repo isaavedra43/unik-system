@@ -3,6 +3,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Check, Lock, PlayCircle, Send, ShieldCheck, Snowflake, Unlock, Users } from 'lucide-react';
 import { Modal } from '@/components/ui/composite';
+import { KpiGrid } from '@/components/patterns/dashboard/KpiGrid';
+import { StatCard } from '@/components/patterns/dashboard/StatCard';
 import {
   api,
   CHANNEL_LABEL,
@@ -474,33 +476,21 @@ export function CampaignWizard({
             </button>
           </div>
           {preview ? (
-            <div className="assistant-admin-stat-grid">
-              <div className="assistant-admin-stat-card">
-                <div className="assistant-admin-stat-label">Elegibles</div>
-                <div className="assistant-admin-stat-value">
-                  {preview.count}
-                  {preview.truncated ? '+' : ''}
-                </div>
-              </div>
-              <div className="assistant-admin-stat-card">
-                <div className="assistant-admin-stat-label">Sin consentimiento</div>
-                <div className="assistant-admin-stat-value">{preview.excluded.noConsent}</div>
-              </div>
-              <div className="assistant-admin-stat-card">
-                <div className="assistant-admin-stat-label">Con baja</div>
-                <div className="assistant-admin-stat-value">{preview.excluded.optedOut}</div>
-              </div>
-              <div className="assistant-admin-stat-card">
-                <div className="assistant-admin-stat-label">Sin identificador válido</div>
-                <div className="assistant-admin-stat-value">{preview.excluded.noIdentifier}</div>
-              </div>
+            <KpiGrid columns={3} className="mb-6">
+              <StatCard
+                label="Elegibles"
+                value={`${preview.count}${preview.truncated ? '+' : ''}`}
+              />
+              <StatCard label="Sin consentimiento" value={preview.excluded.noConsent} />
+              <StatCard label="Con baja" value={preview.excluded.optedOut} />
+              <StatCard label="Sin identificador válido" value={preview.excluded.noIdentifier} />
               {preview.sample.length ? (
                 <div className="assistant-admin-muted" style={{ gridColumn: '1 / -1' }}>
                   Muestra:{' '}
                   {preview.sample.map((s) => `${s.displayName} (${s.identifier})`).join(', ')}
                 </div>
               ) : null}
-            </div>
+            </KpiGrid>
           ) : null}
           {campaign?.audience?.frozenAt ? (
             <div className="alert alert-info">
@@ -622,26 +612,21 @@ export function CampaignWizard({
             </>
           ) : (
             <>
-              <div className="assistant-admin-stat-grid">
-                <div className="assistant-admin-stat-card">
-                  <div className="assistant-admin-stat-label">Destinatarios congelados</div>
-                  <div className="assistant-admin-stat-value">{campaign.audience?.count ?? 0}</div>
-                </div>
-                <div className="assistant-admin-stat-card">
-                  <div className="assistant-admin-stat-label">Lotes de {campaign.batchSize}</div>
-                  <div className="assistant-admin-stat-value">
-                    {Math.ceil((campaign.audience?.count ?? 0) / campaign.batchSize)}
-                  </div>
-                </div>
-                <div className="assistant-admin-stat-card">
-                  <div className="assistant-admin-stat-label">Último ensayo</div>
-                  <div className="assistant-admin-stat-value">
-                    {campaign.stats.rehearsal
+              <KpiGrid columns={3} className="mb-6">
+                <StatCard label="Destinatarios congelados" value={campaign.audience?.count ?? 0} />
+                <StatCard
+                  label={`Lotes de ${campaign.batchSize}`}
+                  value={Math.ceil((campaign.audience?.count ?? 0) / campaign.batchSize)}
+                />
+                <StatCard
+                  label="Último ensayo"
+                  value={
+                    campaign.stats.rehearsal
                       ? `${campaign.stats.rehearsal.sampleSize} muestras`
-                      : '—'}
-                  </div>
-                </div>
-              </div>
+                      : '—'
+                  }
+                />
+              </KpiGrid>
               <div
                 style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}
               >

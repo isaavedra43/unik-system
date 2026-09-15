@@ -68,8 +68,14 @@ Toda vista de datos debe considerar:
 ## Empty / Error / Loading
 
 ```tsx
-import { EmptyState, ErrorState, LoadingState } from '@/components/patterns';
+import { EmptyState } from '@/components/ui/composite';
+import { ErrorState } from '@/components/patterns/ErrorState';
+import { LoadingState } from '@/components/patterns/LoadingState';
 ```
+
+Importa por ruta directa, sobre todo en Client Components. El barrel `@/components/patterns` no re-exporta
+gráficas; `TrendChart`, `BarBreakdown` y `useChartTheme` (dependen de `recharts`) están en
+`@/components/patterns/dashboard/charts` y sólo deben importarse en las páginas que las muestran.
 
 ## Feedback
 

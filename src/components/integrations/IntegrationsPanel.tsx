@@ -16,6 +16,9 @@ import {
 } from 'lucide-react';
 import { Alert, Badge, Button, FormField, Input, Select } from '@/components/ui/primitives';
 import { Drawer, EmptyState, Modal, Toast } from '@/components/ui/composite';
+import { KpiGrid } from '@/components/patterns/dashboard/KpiGrid';
+import { StatCard } from '@/components/patterns/dashboard/StatCard';
+import { successRateTone } from '@/components/patterns/dashboard/dashboard-utils';
 
 /* ------------------------------------------------------------------ */
 /* Types                                                               */
@@ -599,42 +602,41 @@ function OverviewTab({
   }
 
   const { stats: s, active_run: activeRun, latest_run: latestRun } = stats;
-  const successRate =
-    s.totalCalls > 0 ? ((s.successCount / s.totalCalls) * 100).toFixed(1) : '—';
+  const successRate = s.totalCalls > 0 ? (s.successCount / s.totalCalls) * 100 : null;
 
   return (
     <div className="integrations-overview">
       {error ? <Alert variant="warning">{error}</Alert> : null}
 
       {/* Stat cards */}
-      <div className="integrations-stat-grid">
+      <KpiGrid columns={4}>
         <StatCard
           icon={<Activity size={20} />}
           label="Total llamadas"
           value={s.totalCalls.toLocaleString('es-MX')}
-          sub={`${s.last24hCount.toLocaleString('es-MX')} en 24h`}
+          hint={`${s.last24hCount.toLocaleString('es-MX')} en 24h`}
         />
         <StatCard
           icon={<CheckCircle2 size={20} />}
           label="Tasa de éxito"
-          value={`${successRate}%`}
-          sub={`${s.successCount.toLocaleString('es-MX')} ok`}
-          tone="success"
+          value={successRate === null ? '—' : `${successRate.toFixed(1)}%`}
+          hint={`${s.successCount.toLocaleString('es-MX')} ok`}
+          tone={successRateTone(successRate)}
         />
         <StatCard
           icon={<XCircle size={20} />}
           label="Errores"
           value={s.errorCount.toLocaleString('es-MX')}
-          sub={`${s.last24hErrorCount.toLocaleString('es-MX')} en 24h`}
-          tone={s.errorCount > 0 ? 'danger' : undefined}
+          hint={`${s.last24hErrorCount.toLocaleString('es-MX')} en 24h`}
+          tone={s.errorCount > 0 ? 'danger' : 'default'}
         />
         <StatCard
           icon={<Clock size={20} />}
           label="Duración prom."
           value={formatDuration(s.avgDurationMs)}
-          sub="por llamada"
+          hint="por llamada"
         />
-      </div>
+      </KpiGrid>
 
       {/* Active + latest run */}
       <div className="integrations-run-grid">
@@ -734,32 +736,6 @@ function OverviewTab({
           </p>
         </div>
       ) : null}
-    </div>
-  );
-}
-
-function StatCard({
-  icon,
-  label,
-  value,
-  sub,
-  tone,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  value: string;
-  sub?: string;
-  tone?: 'success' | 'danger';
-}) {
-  const cls = `integrations-stat-card ${tone ? `integrations-stat-${tone}` : ''}`;
-  return (
-    <div className={cls}>
-      <div className="integrations-stat-icon">{icon}</div>
-      <div className="integrations-stat-body">
-        <div className="integrations-stat-value">{value}</div>
-        <div className="integrations-stat-label">{label}</div>
-        {sub ? <div className="integrations-stat-sub">{sub}</div> : null}
-      </div>
     </div>
   );
 }

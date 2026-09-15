@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { AnimatePresence, motion } from 'framer-motion';
+import { AnimatePresence, motion } from 'motion/react';
 import {
   ArrowLeft,
   ArrowUpRight,
@@ -61,6 +61,9 @@ import {
   type DraftData,
   type LiveStep,
   type SuggestedActionsData,
+  preferencePatchFor,
+  isNewerActivity,
+  type CopilotPreferenceKey,
 } from './copilot-types';
 
 /**
@@ -71,8 +74,15 @@ import {
  */
 export interface CopilotSurfaceConfig {
   surfaceId: string;
-  /** Unified preference that stores this surface's proactivity (one config for every surface). */
-  preferenceKey: 'inboxCopilotMode' | 'chatCopilotMode';
+  /** Unified preference that stores this surface's proactivity: a literal column (inbox/chat) or `surfaceModes.<kind>`. */
+  preferenceKey: CopilotPreferenceKey;
+  /**
+   * Host context evaluated on EVERY turn (e.g. the visible rows of a work table) and sent in the
+   * POST body as `context`; the route forwards it to the AI as data, never as instructions.
+   */
+  context?: () => Record<string, unknown>;
+  /** Minimum time between automatic analyses (open/inbound). 0 (default) = no throttling. */
+  minAutoIntervalMs?: number;
   endpoints: {
     thread: string;
     proposal: (proposalId: string) => string;
@@ -101,6 +111,10 @@ export interface CopilotPanelProps {
   onSendDraft?: (text: string) => Promise<void>;
   onAfterTurn?: () => void;
   onBack?: () => void;
+  /** Same as `surface.context` (this prop wins when both are given). */
+  context?: () => Record<string, unknown>;
+  /** Same as `surface.minAutoIntervalMs` (this prop wins when both are given). */
+  minAutoIntervalMs?: number;
 }
 
 type TurnPayload = { message: string } | { trigger: 'open' | 'inbound' } | { trigger: 'action_failed'; detail: { tool: string; error: string } };
@@ -113,6 +127,17 @@ async function apiJson<T>(input: string, init?: RequestInit): Promise<T> {
   const data = (await res.json().catch(() => ({}))) as T & { error?: string };
   if (!res.ok) throw new Error(data.error ?? `Error ${res.status}`);
   return data;
+}
+
+/** Evaluates the host context for this turn; a failing or non-object context is simply not sent. */
+function readTurnContext(fn: (() => Record<string, unknown>) | undefined): Record<string, unknown> | undefined {
+  if (!fn) return undefined;
+  try {
+    const value = fn();
+    return value && typeof value === 'object' && !Array.isArray(value) ? value : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 const KIND_ICON: Record<ActionKind, React.ReactNode> = {
@@ -350,7 +375,7 @@ function parseSystemEvent(text: string): { kind: 'approved' | 'rejected' | 'othe
 /* Panel                                                               */
 /* ------------------------------------------------------------------ */
 
-export function CopilotPanel({ surface, user, onInsertDraft, onInsertAttachment, onSendDraft, onAfterTurn, onBack }: CopilotPanelProps) {
+export function CopilotPanel({ surface, user, onInsertDraft, onInsertAttachment, onSendDraft, onAfterTurn, onBack, context, minAutoIntervalMs }: CopilotPanelProps) {
   const [mode, setMode] = useState<CopilotMode>('active');
   const [loading, setLoading] = useState(true);
   const [messages, setMessages] = useState<CopilotMessage[]>([]);
@@ -376,6 +401,16 @@ export function CopilotPanel({ surface, user, onInsertDraft, onInsertAttachment,
   const threadIdRef = useRef<string | null>(null);
   const onAfterTurnRef = useRef(onAfterTurn);
   onAfterTurnRef.current = onAfterTurn;
+  const contextRef = useRef(context ?? surface.context);
+  contextRef.current = context ?? surface.context;
+  const minAutoIntervalRef = useRef(0);
+  minAutoIntervalRef.current = Math.max(0, Number(minAutoIntervalMs ?? surface.minAutoIntervalMs ?? 0) || 0);
+  /** When the last automatic analysis (open/inbound) started. */
+  const lastAutoAtRef = useRef(0);
+  /** Automatic analysis postponed by a hidden tab or the throttle window. */
+  const deferredAutoRef = useRef<'open' | 'inbound' | null>(null);
+  const autoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const requestAutoTurnRef = useRef<(trigger: 'open' | 'inbound') => void>(() => undefined);
 
   const loadThread = useCallback(async () => {
     const data = await apiJson<{ conversationId: string; mode: CopilotMode; messages: CopilotMessage[]; proposals: CopilotProposal[] }>(threadIdRef.current ? `${threadUrl}?thread=${encodeURIComponent(threadIdRef.current)}` : threadUrl);
@@ -397,6 +432,7 @@ export function CopilotPanel({ surface, user, onInsertDraft, onInsertAttachment,
         setMessages((prev) => [...prev, { id: `temp-${Date.now()}`, role: 'user', content: payload.message, createdAt: new Date().toISOString() }]);
       }
       streamingRef.current = true;
+      if ('trigger' in payload && payload.trigger !== 'action_failed') lastAutoAtRef.current = Date.now();
       setStreaming(true);
       setStreamText('');
       setLiveSteps([]);
@@ -406,7 +442,13 @@ export function CopilotPanel({ surface, user, onInsertDraft, onInsertAttachment,
       const controller = new AbortController();
       abortRef.current = controller;
       try {
-        const res = await fetch(threadUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...payload, threadId: threadIdRef.current ?? undefined }), signal: controller.signal });
+        const turnContext = readTurnContext(contextRef.current);
+        const res = await fetch(threadUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...payload, threadId: threadIdRef.current ?? undefined, ...(turnContext ? { context: turnContext } : {}) }),
+          signal: controller.signal,
+        });
         const type = res.headers.get('content-type') ?? '';
         if (!res.ok) {
           const data = (await res.json().catch(() => ({}))) as { error?: string; code?: string };
@@ -501,7 +543,7 @@ export function CopilotPanel({ surface, user, onInsertDraft, onInsertAttachment,
         abortRef.current = null;
         const queued = pendingTrigger.current;
         pendingTrigger.current = null;
-        if (queued && modeRef.current === 'active') void runTurn({ trigger: queued });
+        if (queued && modeRef.current === 'active') requestAutoTurnRef.current(queued);
       }
     },
     [threadUrl, draftTool, loadThread, onInsertDraft, onInsertAttachment, surface.autoInsertDrafts]
@@ -512,6 +554,37 @@ export function CopilotPanel({ surface, user, onInsertDraft, onInsertAttachment,
   const loadThreadRef = useRef(loadThread);
   loadThreadRef.current = loadThread;
 
+  /**
+   * Automatic analyses (open/inbound) never start in a hidden tab and respect
+   * `minAutoIntervalMs`: a postponed trigger runs when the tab is visible again
+   * or when the throttle window ends ('open' wins over 'inbound'). With the
+   * default interval (0) and a visible tab they run immediately, as always.
+   */
+  const requestAutoTurn = useCallback((trigger: 'open' | 'inbound') => {
+    const merged: 'open' | 'inbound' = deferredAutoRef.current === 'open' || trigger === 'open' ? 'open' : 'inbound';
+    if (typeof document !== 'undefined' && document.hidden) {
+      deferredAutoRef.current = merged;
+      return;
+    }
+    const interval = minAutoIntervalRef.current;
+    const wait = interval > 0 ? lastAutoAtRef.current + interval - Date.now() : 0;
+    if (wait > 0) {
+      deferredAutoRef.current = merged;
+      if (!autoTimerRef.current) {
+        autoTimerRef.current = setTimeout(() => {
+          autoTimerRef.current = null;
+          const next = deferredAutoRef.current;
+          deferredAutoRef.current = null;
+          if (next && modeRef.current === 'active') requestAutoTurnRef.current(next);
+        }, wait);
+      }
+      return;
+    }
+    deferredAutoRef.current = null;
+    void runTurnRef.current({ trigger: merged });
+  }, []);
+  requestAutoTurnRef.current = requestAutoTurn;
+
   useEffect(() => {
     let alive = true;
     setLoading(true);
@@ -519,26 +592,37 @@ export function CopilotPanel({ surface, user, onInsertDraft, onInsertAttachment,
     setMessages([]);
     setProposals([]);
     threadIdRef.current = null;
+    lastAutoAtRef.current = 0;
+    deferredAutoRef.current = null;
     loadThreadRef
       .current()
       .then((data) => {
         if (!alive) return;
-        if (data.mode === 'active') void runTurnRef.current({ trigger: 'open' });
+        if (data.mode === 'active') requestAutoTurnRef.current('open');
       })
       .catch((err) => alive && setError(err instanceof Error ? err.message : 'No se pudo cargar el copiloto'))
       .finally(() => alive && setLoading(false));
     return () => {
       alive = false;
       abortRef.current?.abort();
+      if (autoTimerRef.current) {
+        clearTimeout(autoTimerRef.current);
+        autoTimerRef.current = null;
+      }
+      deferredAutoRef.current = null;
     };
   }, [surface.surfaceId]);
 
   const activityAt = surface.activityAt;
   const seenActivity = useRef(activityAt);
   useEffect(() => {
-    if (seenActivity.current === activityAt) return;
+    const previous = seenActivity.current;
+    if (previous === activityAt) return;
     seenActivity.current = activityAt;
-    if (activityAt && modeRef.current === 'active') void runTurnRef.current({ trigger: 'inbound' });
+    // Only NEWER activity re-analyzes: a value that goes back (e.g. the latest item left the list)
+    // or disappears is not something new to look at.
+    if (!activityAt || !isNewerActivity(previous, activityAt)) return;
+    if (modeRef.current === 'active') requestAutoTurnRef.current('inbound');
   }, [activityAt]);
 
   useEffect(() => {
@@ -661,7 +745,7 @@ export function CopilotPanel({ surface, user, onInsertDraft, onInsertAttachment,
     async (next: CopilotMode) => {
       setModeBusy(true);
       try {
-        await apiJson('/app/assistant/api/preferences', { method: 'PATCH', body: JSON.stringify({ [surface.preferenceKey]: next }) });
+        await apiJson('/app/assistant/api/preferences', { method: 'PATCH', body: JSON.stringify(preferencePatchFor(surface.preferenceKey, next)) });
         setMode(next);
         toast.success(`Copiloto: ${MODE_META[next].label}`);
         if (next === 'active') void runTurnRef.current({ trigger: 'open' });
@@ -677,7 +761,20 @@ export function CopilotPanel({ surface, user, onInsertDraft, onInsertAttachment,
   // Preferences can change in another tab/screen: refresh the mode when the user comes back.
   useEffect(() => {
     const onVisible = () => {
-      if (document.visibilityState === 'visible' && !streamingRef.current) void loadThreadRef.current().catch(() => undefined);
+      if (document.visibilityState !== 'visible' || streamingRef.current) return;
+      void loadThreadRef
+        .current()
+        .then(
+          (data) => data.mode,
+          () => modeRef.current
+        )
+        .then((currentMode) => {
+          // An automatic analysis postponed while the tab was hidden runs now (unless a throttle timer owns it).
+          const deferred = deferredAutoRef.current;
+          if (!deferred || autoTimerRef.current) return;
+          deferredAutoRef.current = null;
+          if (currentMode === 'active') requestAutoTurnRef.current(deferred);
+        });
     };
     document.addEventListener('visibilitychange', onVisible);
     window.addEventListener('focus', onVisible);

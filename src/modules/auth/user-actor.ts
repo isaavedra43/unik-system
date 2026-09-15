@@ -10,7 +10,9 @@ import type { CurrentUser } from '@/modules/auth/authorization';
  */
 export async function loadUserActor(where: { id?: string; username?: string }): Promise<CurrentUser | null> {
   const user = await prisma.user.findFirst({
-    where: { ...(where.id ? { id: where.id } : {}), ...(where.username ? { username: where.username } : {}), isActive: true },
+    // AI identities never act through MCP or jobs with their raw role permissions: bots only run
+    // through buildBotActor (allowlisted permissions, never super_admin).
+    where: { ...(where.id ? { id: where.id } : {}), ...(where.username ? { username: where.username } : {}), isActive: true, isBot: false },
     include: { roles: { include: { role: { include: { permissions: true } } } } },
   });
   if (!user) return null;

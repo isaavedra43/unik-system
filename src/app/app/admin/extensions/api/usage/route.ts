@@ -14,6 +14,11 @@ const DIMENSIONS: UsageDimension[] = [
   'job',
   'campaign',
   'calls',
+  // Coordinated AI layer (agents/budget.ts) and the deterministic supervisor.
+  'ai_area',
+  'ai_agent',
+  'ai_case',
+  'ops.supervisor',
 ];
 
 export async function GET(request: NextRequest) {

@@ -9,6 +9,7 @@ import { AssistantAdminApiCalls } from './AssistantAdminApiCalls';
 import { AssistantAdminConfig } from './AssistantAdminConfig';
 import { AssistantAdminUsers } from './AssistantAdminUsers';
 import { AssistantAdminHealth } from './AssistantAdminHealth';
+import { AssistantAdminAgents } from './AssistantAdminAgents';
 
 export interface AssistantAdminPanelProps {
   canManage: boolean;
@@ -21,6 +22,7 @@ type TabId =
   | 'tool-calls'
   | 'api-calls'
   | 'users'
+  | 'agents'
   | 'config'
   | 'health';
 
@@ -31,6 +33,7 @@ const TABS: Array<{ id: TabId; label: string }> = [
   { id: 'tool-calls', label: 'Tools' },
   { id: 'api-calls', label: 'Llamadas API' },
   { id: 'users', label: 'Usuarios' },
+  { id: 'agents', label: 'Agentes y presupuestos' },
   { id: 'config', label: 'Configuración' },
   { id: 'health', label: 'Salud' },
 ];
@@ -61,6 +64,7 @@ export function AssistantAdminPanel({ canManage }: AssistantAdminPanelProps) {
         {activeTab === 'tool-calls' && <AssistantAdminToolCalls />}
         {activeTab === 'api-calls' && <AssistantAdminApiCalls />}
         {activeTab === 'users' && <AssistantAdminUsers />}
+        {activeTab === 'agents' && <AssistantAdminAgents canManage={canManage} />}
         {activeTab === 'config' && <AssistantAdminConfig canManage={canManage} />}
         {activeTab === 'health' && <AssistantAdminHealth canManage={canManage} />}
       </div>

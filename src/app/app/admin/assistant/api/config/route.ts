@@ -35,6 +35,8 @@ function sanitizeSettings(settings: Record<string, unknown>): Record<string, unk
       enabled: Boolean(entry.enabled),
       hasApiKey: providerHasKey,
       models: Array.isArray(entry.models) ? entry.models : [],
+      // Flat monthly fee of a flat-rate provider (Canopy Wave): amortized cost in the admin panels.
+      ...(typeof entry.monthlyFeeUsd === 'number' ? { monthlyFeeUsd: entry.monthlyFeeUsd } : {}),
     };
   }
   safe.providerConfigs = safeProviderConfigs;
@@ -64,6 +66,14 @@ function mergeProviderConfigs(
       enabled: Boolean(inc.enabled ?? ex.enabled ?? false),
       // Detected models are written by the provider test route; keep them across saves.
       models: Array.isArray(inc.models) ? inc.models : Array.isArray(ex.models) ? ex.models : [],
+      // null clears the flat monthly fee; an absent value keeps the stored one (positive only, see ai-admin-config-service).
+      ...(inc.monthlyFeeUsd === null
+        ? {}
+        : typeof inc.monthlyFeeUsd === 'number'
+          ? { monthlyFeeUsd: inc.monthlyFeeUsd }
+          : typeof ex.monthlyFeeUsd === 'number'
+            ? { monthlyFeeUsd: ex.monthlyFeeUsd }
+            : {}),
     };
   }
   return merged;

@@ -24,13 +24,40 @@ function kindLabel(context: unknown): string {
   const kind = (context as { kind?: string } | null)?.kind;
   if (kind === COPILOT_KIND_BY_SURFACE.inbox) return 'Copiloto en bandeja externa';
   if (kind === COPILOT_KIND_BY_SURFACE.chat) return 'Copiloto en chat interno';
+  if (kind === COPILOT_KIND_BY_SURFACE.area) return 'Copiloto de área';
+  if (kind === COPILOT_KIND_BY_SURFACE.case) return 'Copiloto de expediente';
+  if (kind === COPILOT_KIND_BY_SURFACE.mywork) return 'Copiloto de Mi trabajo';
+  if (kind === COPILOT_KIND_BY_SURFACE.control_tower) return 'Copiloto de Control Tower';
   return 'Asistente IA';
 }
 
+// Area/case copilot kinds (copilot-surfaces.ts); literal fallback while that map is being extended.
+const SURFACE_KINDS = COPILOT_KIND_BY_SURFACE as Record<string, string | undefined>;
+const AREA_COPILOT_KIND = SURFACE_KINDS.area ?? 'area_copilot';
+const CASE_COPILOT_KIND = SURFACE_KINDS.case ?? 'case_copilot';
+
 async function surfaceLabel(context: unknown): Promise<string | null> {
-  const ctx = context as { kind?: string; commConversationId?: string; chatChannelId?: string } | null;
+  const ctx = context as {
+    kind?: string;
+    commConversationId?: string;
+    chatChannelId?: string;
+    areaKey?: string;
+    caseId?: string;
+  } | null;
   if (!ctx) return null;
   try {
+    if (ctx.kind === AREA_COPILOT_KIND && ctx.areaKey) {
+      const area = await prisma.area.findUnique({ where: { key: ctx.areaKey }, select: { label: true } });
+      return area ? `del área ${area.label}` : null;
+    }
+    if (ctx.kind === CASE_COPILOT_KIND && ctx.caseId) {
+      const operationalCase = await prisma.operationalCase.findUnique({
+        where: { id: ctx.caseId },
+        select: { caseNumber: true, customerName: true },
+      });
+      if (!operationalCase) return null;
+      return `del expediente ${operationalCase.caseNumber}${operationalCase.customerName ? ` (${operationalCase.customerName})` : ''}`;
+    }
     if (ctx.kind === COPILOT_KIND_BY_SURFACE.inbox && ctx.commConversationId) {
       const conv = await prisma.commConversation.findUnique({
         where: { id: ctx.commConversationId },
@@ -45,6 +72,8 @@ async function surfaceLabel(context: unknown): Promise<string | null> {
       });
       if (!channel) return null;
       if (channel.type === 'group') return `grupo "${channel.name ?? 'sin nombre'}"`;
+      if (channel.type === 'area') return `canal de área "${channel.name ?? 'sin nombre'}"`;
+      if (channel.type === 'case') return `sala de venta "${channel.name ?? 'sin nombre'}"`;
       return `chat con ${channel.members.map((m) => m.user.name).join(', ')}`;
     }
   } catch {

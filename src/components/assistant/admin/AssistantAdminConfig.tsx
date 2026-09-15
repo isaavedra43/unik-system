@@ -3,6 +3,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { Save, AlertCircle, CheckCircle2, Key, Cloud, Cpu, Check, X } from 'lucide-react';
 import { updateAiConfigAction, toggleAiEnabledAction } from '@/app/app/admin/assistant/actions';
+import { AgentsSettingsConfig } from './AgentsSettingsConfig';
 import { CANOPY_PLAN_MODELS, CanopyWaveSetup } from './CanopyWaveSetup';
 import { ModelPolicyConfig } from './ModelPolicyConfig';
 
@@ -55,7 +56,6 @@ const SETTING_FIELDS: Array<{ key: string; label: string; type: 'number' | 'stri
   { key: 'ttsVoice', label: 'Voz TTS', type: 'string' },
   { key: 'inputMaxLength', label: 'Longitud máx input', type: 'number' },
   { key: 'promptInjectionDetection', label: 'Detección prompt injection', type: 'boolean' },
-  { key: 'autonomousModeEnabled', label: 'Modo autónomo', type: 'boolean' },
   { key: 'dailyReportHour', label: 'Hora reporte diario (0-23)', type: 'number' },
   { key: 'anomalyThreshold', label: 'Umbral anomalía', type: 'number' },
   // Perfil de la empresa (lo usa la IA para ubicación de recogida, firmas y mensajes)
@@ -322,6 +322,13 @@ export function AssistantAdminConfig({ canManage }: { canManage: boolean }) {
         canManage={canManage}
         canopyConfigured={Boolean(providerConfigs.canopywave?.hasApiKey || providerConfigs.canopywave?.apiKey)}
         openaiConfigured={Boolean(providerConfigs.openai?.hasApiKey || providerConfigs.openai?.apiKey || settings.hasApiKey)}
+        onChange={(patch) => setSettings((prev) => ({ ...prev, ...patch }))}
+      />
+
+      {/* ===== Sección: IA coordinada por áreas (horario, topes, presupuestos y disparos) ===== */}
+      <AgentsSettingsConfig
+        settings={settings}
+        canManage={canManage}
         onChange={(patch) => setSettings((prev) => ({ ...prev, ...patch }))}
       />
 

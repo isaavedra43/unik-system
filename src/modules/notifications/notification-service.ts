@@ -131,7 +131,10 @@ async function publishToTabs(row: NotificationRecord): Promise<void> {
     const { publishRealtime, REALTIME_CHANNELS } = await realtime();
     await publishRealtime(REALTIME_CHANNELS.user(row.userId), 'notification', formatRow(row));
   } catch (err) {
-    log('realtime_failed', { id: row.id, message: err instanceof Error ? err.message : String(err) });
+    log('realtime_failed', {
+      id: row.id,
+      message: err instanceof Error ? err.message : String(err),
+    });
   }
 }
 
@@ -172,7 +175,8 @@ export async function notifyUser(input: NotifyInput): Promise<NotifyResult> {
     return { id: null, inApp: false, push: false, suppressed: true, reason: 'self' };
   }
 
-  const settings = await getNotificationSettings(input.userId);
+  // Inside a transaction the preferences are read with it (no second pool connection).
+  const settings = await getNotificationSettings(input.userId, input.tx);
   const decision = decideDelivery(settings, input.category);
   if (!decision.inApp && !decision.push) {
     return { id: null, inApp: false, push: false, suppressed: true, reason: decision.pushReason };
@@ -184,7 +188,8 @@ export async function notifyUser(input: NotifyInput): Promise<NotifyResult> {
       where: { dedupeKey: input.dedupeKey },
       select: { id: true },
     });
-    if (dup) return { id: dup.id, inApp: false, push: false, suppressed: true, reason: 'duplicate' };
+    if (dup)
+      return { id: dup.id, inApp: false, push: false, suppressed: true, reason: 'duplicate' };
   }
 
   const client = input.tx ?? prisma;
@@ -254,7 +259,11 @@ export async function notifyUsers(
         })
       );
     } catch (err) {
-      log('notify_failed', { userId, category: input.category, message: err instanceof Error ? err.message : String(err) });
+      log('notify_failed', {
+        userId,
+        category: input.category,
+        message: err instanceof Error ? err.message : String(err),
+      });
     }
   }
   return results;
@@ -265,7 +274,9 @@ export async function notifyUsers(
  * a crashed instance). Safe to run from several instances: rows are claimed
  * with an atomic status flip.
  */
-export async function dispatchPendingNotifications(limit = 100): Promise<{ delivered: number; pushed: number }> {
+export async function dispatchPendingNotifications(
+  limit = 100
+): Promise<{ delivered: number; pushed: number }> {
   const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
   const staleClaim = new Date(Date.now() - 2 * 60 * 1000);
   const candidates = await prisma.notification.findMany({
@@ -304,7 +315,10 @@ export async function getUnreadNotificationCount(userId: string): Promise<number
   return prisma.notification.count({ where: { userId, readAt: null } });
 }
 
-export async function getRecentNotifications(userId: string, limit = 10): Promise<NotificationRow[]> {
+export async function getRecentNotifications(
+  userId: string,
+  limit = 10
+): Promise<NotificationRow[]> {
   const rows = await prisma.notification.findMany({
     where: { userId },
     orderBy: { createdAt: 'desc' },

@@ -11,17 +11,24 @@ import type {
   ChatInboxItem,
   ChatPollDTO,
   ChatEventDTO,
+  ChatMessageMeta,
 } from './chat-events';
+import { isOperationsChannelType } from './chat-events';
 import { getPresence } from './chat-presence-service';
 import { detectChatAlerts } from './chat-admin-service';
 import { notifyChatMessage } from './chat-notifications';
 
-class ChatError extends Error {
+export class ChatError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'ChatError';
   }
 }
+
+const BOT_MEMBERSHIP_ERROR =
+  'Los asistentes de IA solo participan en los canales de área y en las salas de venta; menciónalos ahí con @';
+const OPERATIONS_MEMBERSHIP_ERROR =
+  'Los miembros de los canales de área y de las salas de venta se administran automáticamente';
 
 // =====================================================
 // DTO mappers
@@ -59,6 +66,11 @@ function toReactionDTO(
   return Array.from(grouped.values());
 }
 
+function toMetaDTO(meta: Prisma.JsonValue | null | undefined): ChatMessageMeta | null {
+  if (!meta || typeof meta !== 'object' || Array.isArray(meta)) return null;
+  return meta as ChatMessageMeta;
+}
+
 async function toMessageDTO(
   msg: {
     id: string;
@@ -73,7 +85,8 @@ async function toMessageDTO(
     priority: string;
     threadId: string | null;
     createdAt: Date;
-    sender: { name: string };
+    meta?: Prisma.JsonValue | null;
+    sender: { name: string; isBot?: boolean };
     replyTo: { content: string | null; sender: { name: string } } | null;
     attachments: {
       id: string;
@@ -171,6 +184,8 @@ async function toMessageDTO(
     channelId: msg.channelId,
     senderId: msg.senderId,
     senderName: msg.sender.name,
+    senderIsBot: msg.sender.isBot === true,
+    meta: toMetaDTO(msg.meta),
     content: msg.content,
     replyToId: msg.replyToId,
     replyToPreview: msg.replyTo?.content ?? null,
@@ -205,6 +220,82 @@ async function toMessageDTO(
 // Channel operations
 // =====================================================
 
+function toMemberDTO(
+  mem: {
+    userId: string;
+    role: string;
+    joinedAt: Date;
+    user: { name: string; username: string; isBot?: boolean };
+  },
+  presenceMap: ReadonlyMap<string, string>
+): ChatChannelMemberDTO {
+  return {
+    userId: mem.userId,
+    name: mem.user.name,
+    username: mem.user.username,
+    role: mem.role,
+    status: presenceMap.get(mem.userId) ?? 'offline',
+    lastSeenAt: mem.joinedAt.toISOString(),
+    isBot: mem.user.isBot === true,
+  };
+}
+
+/**
+ * Unread messages for one member. When nothing was posted after the member's
+ * last read (every message path bumps `lastMessageAt`), there is nothing to
+ * count and the query is skipped — members of many sales rooms poll the inbox.
+ */
+async function countUnread(
+  channelId: string,
+  userId: string,
+  lastReadAt: Date,
+  lastMessageAt: Date
+): Promise<number> {
+  if (lastMessageAt.getTime() <= lastReadAt.getTime()) return 0;
+  return prisma.internalChatMessage.count({
+    where: {
+      channelId,
+      createdAt: { gt: lastReadAt },
+      senderId: { not: userId },
+      deletedAt: null,
+    },
+  });
+}
+
+type OperationsChannelLink = { areaKey: string | null; caseId: string | null };
+
+/** Area key / case id behind `area` and `case` channels (Area/OperationalCase.chatChannelId). */
+async function resolveOperationsChannelLinks(
+  channels: { id: string; type: string }[]
+): Promise<Map<string, OperationsChannelLink>> {
+  const links = new Map<string, OperationsChannelLink>();
+  const areaChannelIds = channels.filter((c) => c.type === 'area').map((c) => c.id);
+  const caseChannelIds = channels.filter((c) => c.type === 'case').map((c) => c.id);
+  const [areas, cases] = await Promise.all([
+    areaChannelIds.length > 0
+      ? prisma.area.findMany({
+          where: { chatChannelId: { in: areaChannelIds } },
+          select: { key: true, chatChannelId: true },
+        })
+      : Promise.resolve([]),
+    caseChannelIds.length > 0
+      ? prisma.operationalCase.findMany({
+          where: { chatChannelId: { in: caseChannelIds } },
+          select: { id: true, chatChannelId: true },
+        })
+      : Promise.resolve([]),
+  ]);
+  for (const area of areas) {
+    if (area.chatChannelId) links.set(area.chatChannelId, { areaKey: area.key, caseId: null });
+  }
+  for (const operationalCase of cases) {
+    if (operationalCase.chatChannelId) {
+      links.set(operationalCase.chatChannelId, { areaKey: null, caseId: operationalCase.id });
+    }
+  }
+  return links;
+}
+
 export async function createDmChannel(
   actor: CurrentUser,
   otherUserId: string
@@ -218,6 +309,9 @@ export async function createDmChannel(
   });
   if (!otherUser) {
     throw new ChatError('Usuario no encontrado o inactivo');
+  }
+  if (otherUser.isBot) {
+    throw new ChatError(BOT_MEMBERSHIP_ERROR);
   }
 
   // Try to find an existing DM with both users
@@ -272,10 +366,13 @@ export async function createGroupChannel(
   // Verify all members exist and are active
   const users = await prisma.user.findMany({
     where: { id: { in: memberIds }, isActive: true },
-    select: { id: true },
+    select: { id: true, isBot: true },
   });
   if (users.length !== memberIds.length) {
     throw new ChatError('Alguno de los usuarios seleccionados no existe o está inactivo');
+  }
+  if (users.some((u) => u.isBot)) {
+    throw new ChatError(BOT_MEMBERSHIP_ERROR);
   }
 
   const allMemberIds = Array.from(new Set([actor.id, ...memberIds]));
@@ -332,29 +429,18 @@ export async function listUserChannels(userId: string): Promise<ChatChannelDTO[]
       userIds.add(mem.userId);
     }
   }
-  const presenceMap = await getPresence(Array.from(userIds));
+  const [presenceMap, links] = await Promise.all([
+    getPresence(Array.from(userIds)),
+    resolveOperationsChannelLinks(memberships.map((m) => m.channel)),
+  ]);
 
   const result: ChatChannelDTO[] = [];
   for (const m of memberships) {
     const channel = m.channel;
     const lastMsg = channel.messages[0];
-    const unreadCount = await prisma.internalChatMessage.count({
-      where: {
-        channelId: channel.id,
-        createdAt: { gt: m.lastReadAt },
-        senderId: { not: userId },
-        deletedAt: null,
-      },
-    });
-
-    const members: ChatChannelMemberDTO[] = channel.members.map((mem) => ({
-      userId: mem.userId,
-      name: mem.user.name,
-      username: mem.user.username,
-      role: mem.role,
-      status: presenceMap.get(mem.userId) ?? 'offline',
-      lastSeenAt: mem.joinedAt.toISOString(),
-    }));
+    const unreadCount = await countUnread(channel.id, userId, m.lastReadAt, channel.lastMessageAt);
+    const members = channel.members.map((mem) => toMemberDTO(mem, presenceMap));
+    const link = links.get(channel.id);
 
     result.push({
       id: channel.id,
@@ -368,6 +454,8 @@ export async function listUserChannels(userId: string): Promise<ChatChannelDTO[]
       lastMessagePreview: lastMsg?.content ?? (lastMsg ? '[Archivo]' : null),
       lastMessageSenderName: lastMsg?.sender.name ?? null,
       members,
+      areaKey: link?.areaKey ?? null,
+      caseId: link?.caseId ?? null,
     });
   }
 
@@ -396,16 +484,13 @@ export async function getChannel(
 
   const channel = membership.channel;
   const userIds = channel.members.map((m) => m.userId);
-  const presenceMap = await getPresence(userIds);
+  const [presenceMap, links] = await Promise.all([
+    getPresence(userIds),
+    resolveOperationsChannelLinks([channel]),
+  ]);
 
-  const members: ChatChannelMemberDTO[] = channel.members.map((mem) => ({
-    userId: mem.userId,
-    name: mem.user.name,
-    username: mem.user.username,
-    role: mem.role,
-    status: presenceMap.get(mem.userId) ?? 'offline',
-    lastSeenAt: mem.joinedAt.toISOString(),
-  }));
+  const members = channel.members.map((mem) => toMemberDTO(mem, presenceMap));
+  const link = links.get(channel.id);
 
   return {
     id: channel.id,
@@ -419,6 +504,8 @@ export async function getChannel(
     lastMessagePreview: null,
     lastMessageSenderName: null,
     members,
+    areaKey: link?.areaKey ?? null,
+    caseId: link?.caseId ?? null,
   };
 }
 
@@ -669,15 +756,24 @@ export async function sendMessage(
   }
 
   const mentionUserIds = new Set<string>();
+  const mentionedBots: BotMentionTarget[] = [];
   if (mentionedUsernames.length > 0) {
     const channelMembers = await prisma.internalChatMember.findMany({
       where: { channelId: input.channelId, leftAt: null },
-      include: { user: { select: { username: true } } },
+      include: { user: { select: { username: true, name: true, isBot: true } } },
     });
-    const memberUsernames = new Map(channelMembers.map((m) => [m.user.username, m.userId]));
+    const memberByUsername = new Map(channelMembers.map((m) => [m.user.username, m]));
     for (const username of mentionedUsernames) {
-      const userId = memberUsernames.get(username);
-      if (userId) mentionUserIds.add(userId);
+      const member = memberByUsername.get(username);
+      if (!member || mentionUserIds.has(member.userId)) continue;
+      mentionUserIds.add(member.userId);
+      if (member.user.isBot && member.userId !== actor.id) {
+        mentionedBots.push({
+          userId: member.userId,
+          username: member.user.username,
+          name: member.user.name,
+        });
+      }
     }
     if (mentionUserIds.size > 0) {
       await prisma.internalChatMention.createMany({
@@ -736,6 +832,27 @@ export async function sendMessage(
   }).catch(() => {
     // silent — notification failures never block message sending
   });
+
+  // Extension point: the agents layer reacts to @mentions of its bot users.
+  // Bots never trigger it (no bot-to-bot loops); the message is already stored.
+  if (mentionedBots.length > 0 && !fullMessage.sender.isBot) {
+    const channel = await prisma.internalChatChannel.findUnique({
+      where: { id: input.channelId },
+      select: { type: true },
+    });
+    await emitBotMentioned({
+      messageId: message.id,
+      channelId: input.channelId,
+      channelType: channel?.type ?? 'group',
+      senderId: actor.id,
+      senderName: actor.name,
+      content,
+      threadId: fullMessage.threadId ?? null,
+      replyToId: input.replyToId ?? null,
+      createdAt: message.createdAt.toISOString(),
+      bots: mentionedBots,
+    });
+  }
 
   return toMessageDTO(fullMessage, actor.id);
 }
@@ -1066,10 +1183,13 @@ export async function addMembers(
 
   const users = await prisma.user.findMany({
     where: { id: { in: userIds }, isActive: true },
-    select: { id: true },
+    select: { id: true, isBot: true },
   });
   if (users.length !== userIds.length) {
     throw new ChatError('Alguno de los usuarios no existe o está inactivo');
+  }
+  if (users.some((u) => u.isBot)) {
+    throw new ChatError(BOT_MEMBERSHIP_ERROR);
   }
 
   // Upsert memberships (re-join if previously left)
@@ -1089,6 +1209,11 @@ export async function removeMember(
 ): Promise<void> {
   const channel = await prisma.internalChatChannel.findUnique({ where: { id: channelId } });
   if (!channel) throw new ChatError('Canal no encontrado');
+  // Area channels and sales rooms follow permissions/responsibles (syncChannelMembers):
+  // leaving would be undone at the next sync, so nobody leaves or removes by hand.
+  if (isOperationsChannelType(channel.type)) {
+    throw new ChatError(OPERATIONS_MEMBERSHIP_ERROR);
+  }
 
   // Self-leave is always allowed
   if (actor.id === userId) {
@@ -1141,7 +1266,9 @@ export async function deleteGroup(actor: CurrentUser, channelId: string): Promis
 export async function searchUsers(
   actor: CurrentUser,
   query: string
-): Promise<{ id: string; name: string; username: string; email: string | null; status: string }[]> {
+): Promise<
+  { id: string; name: string; username: string; email: string | null; status: string; isBot: boolean }[]
+> {
   const q = query.trim();
   if (q.length < 1) return [];
 
@@ -1156,17 +1283,19 @@ export async function searchUsers(
     },
     take: 20,
     orderBy: { name: 'asc' },
-    select: { id: true, name: true, username: true, email: true, chatPresence: true },
+    select: { id: true, name: true, username: true, email: true, chatPresence: true, isBot: true },
   });
 
   const presenceMap = await getPresence(users.map((u) => u.id));
 
+  // Bots are listed (marked) so people find them, but they cannot be DM'd or added to groups.
   return users.map((u) => ({
     id: u.id,
     name: u.name,
     username: u.username,
     email: u.email,
     status: presenceMap.get(u.id) ?? 'offline',
+    isBot: u.isBot,
   }));
 }
 
@@ -1207,14 +1336,7 @@ export async function getInbox(userId: string): Promise<ChatInboxItem[]> {
   for (const m of memberships) {
     const channel = m.channel;
     const lastMsg = channel.messages[0];
-    const unreadCount = await prisma.internalChatMessage.count({
-      where: {
-        channelId: channel.id,
-        createdAt: { gt: m.lastReadAt },
-        senderId: { not: userId },
-        deletedAt: null,
-      },
-    });
+    const unreadCount = await countUnread(channel.id, userId, m.lastReadAt, channel.lastMessageAt);
 
     const otherMember = channel.members[0];
     result.push({
@@ -1996,4 +2118,532 @@ export async function getMessageReaders(
     name: r.user.name,
     readAt: r.readAt.toISOString(),
   }));
+}
+
+// =====================================================
+// Operations channels: one channel per area, one sales room per case
+// =====================================================
+
+export interface OperationsChannelInput {
+  /** Visible name (1–100 characters); an existing channel is renamed when it changes. */
+  name: string;
+  /** Desired members. Unknown or inactive users are skipped; the creator is always kept. */
+  memberUserIds: string[];
+  /** Active user that owns the channel (the admin bot for the agents layer). */
+  createdBy: string;
+}
+
+export interface ChannelMembersSyncResult {
+  added: string[];
+  reactivated: string[];
+  removed: string[];
+}
+
+export interface OperationsChannelResult {
+  id: string;
+  /** false when the area/case already had its channel (name and members were synced instead). */
+  isNew: boolean;
+  members: ChannelMembersSyncResult;
+}
+
+type LinkWriter = Pick<Prisma.TransactionClient, 'area' | 'operationalCase'>;
+
+interface OperationsChannelTarget {
+  type: 'area' | 'case';
+  auditAction: string;
+  auditMetadata: Record<string, unknown>;
+  /** Current Area/OperationalCase.chatChannelId. */
+  readLink: () => Promise<string | null>;
+  /** Sets the link only while it still equals `expected` (compare-and-set); returns rows written. */
+  writeLink: (db: LinkWriter, channelId: string | null, expected: string | null) => Promise<number>;
+}
+
+function validateOperationsChannelName(name: string): string {
+  const trimmed = (name ?? '').trim();
+  if (trimmed.length < 1 || trimmed.length > 100) {
+    throw new ChatError('El nombre del canal debe tener entre 1 y 100 caracteres');
+  }
+  return trimmed;
+}
+
+/** Unique ids of active users among `userIds` plus the creator, creator first. */
+async function resolveActiveMemberIds(userIds: string[], creatorId: string): Promise<string[]> {
+  const requested = [
+    ...new Set([creatorId, ...userIds.filter((id) => typeof id === 'string' && id.length > 0)]),
+  ];
+  const active = await prisma.user.findMany({
+    where: { id: { in: requested }, isActive: true },
+    select: { id: true },
+  });
+  const activeIds = new Set(active.map((u) => u.id));
+  return requested.filter((id) => activeIds.has(id));
+}
+
+async function adoptOperationsChannel(
+  channel: { id: string; name: string | null },
+  name: string,
+  memberUserIds: string[]
+): Promise<OperationsChannelResult> {
+  if (channel.name !== name) {
+    await prisma.internalChatChannel.update({ where: { id: channel.id }, data: { name } });
+  }
+  const members = await syncChannelMembers(channel.id, memberUserIds);
+  return { id: channel.id, isNew: false, members };
+}
+
+async function ensureOperationsChannel(
+  target: OperationsChannelTarget,
+  input: OperationsChannelInput
+): Promise<OperationsChannelResult> {
+  const name = validateOperationsChannelName(input.name);
+  const creator = await prisma.user.findUnique({
+    where: { id: input.createdBy },
+    select: { id: true, isActive: true },
+  });
+  if (!creator || !creator.isActive) {
+    throw new ChatError('El creador del canal no existe o está inactivo');
+  }
+
+  const linkedId = await target.readLink();
+  if (linkedId) {
+    const linked = await prisma.internalChatChannel.findUnique({
+      where: { id: linkedId },
+      select: { id: true, type: true, name: true },
+    });
+    if (linked) {
+      if (linked.type !== target.type) {
+        throw new ChatError('El canal vinculado no corresponde a este tipo de canal');
+      }
+      return adoptOperationsChannel(linked, name, input.memberUserIds);
+    }
+    // Dangling link (the channel was deleted): release it unless someone relinked meanwhile.
+    await target.writeLink(prisma, null, linkedId);
+  }
+
+  const memberIds = await resolveActiveMemberIds(input.memberUserIds, creator.id);
+  const createdId = await prisma.$transaction(async (tx) => {
+    const channel = await tx.internalChatChannel.create({
+      data: { type: target.type, name, createdBy: creator.id },
+    });
+    await tx.internalChatMember.createMany({
+      data: memberIds.map((userId) => ({
+        channelId: channel.id,
+        userId,
+        role: userId === creator.id ? 'owner' : 'member',
+      })),
+      skipDuplicates: true,
+    });
+    const written = await target.writeLink(tx, channel.id, null);
+    if (written === 0) {
+      // Another process linked its own channel first: discard ours.
+      await tx.internalChatMember.deleteMany({ where: { channelId: channel.id } });
+      await tx.internalChatChannel.delete({ where: { id: channel.id } });
+      return null;
+    }
+    return channel.id;
+  });
+
+  if (!createdId) {
+    const winnerId = await target.readLink();
+    const winner = winnerId
+      ? await prisma.internalChatChannel.findUnique({
+          where: { id: winnerId },
+          select: { id: true, type: true, name: true },
+        })
+      : null;
+    if (!winner || winner.type !== target.type) {
+      throw new ChatError('No se pudo vincular el canal; vuelve a intentarlo');
+    }
+    return adoptOperationsChannel(winner, name, input.memberUserIds);
+  }
+
+  await recordAuditEvent({
+    actorUserId: creator.id,
+    action: target.auditAction,
+    targetType: 'chat_channel',
+    targetId: createdId,
+    metadata: { ...target.auditMetadata, memberCount: memberIds.length },
+  });
+
+  return { id: createdId, isNew: true, members: { added: memberIds, reactivated: [], removed: [] } };
+}
+
+/**
+ * Idempotent: returns the area's channel (`type: 'area'`), creating it and
+ * linking `Area.chatChannelId` the first time. Later calls rename it if needed
+ * and sync its members. Only the operations layer calls this; people cannot
+ * create `area` channels from the chat API.
+ */
+export async function createAreaChannel(
+  areaKey: string,
+  input: OperationsChannelInput
+): Promise<OperationsChannelResult> {
+  const area = await prisma.area.findUnique({ where: { key: areaKey }, select: { id: true, key: true } });
+  if (!area) throw new ChatError(`Área no encontrada: ${areaKey}`);
+  return ensureOperationsChannel(
+    {
+      type: 'area',
+      auditAction: 'chat.area_channel_created',
+      auditMetadata: { areaKey: area.key },
+      readLink: async () =>
+        (await prisma.area.findUnique({ where: { id: area.id }, select: { chatChannelId: true } }))
+          ?.chatChannelId ?? null,
+      writeLink: async (db, channelId, expected) =>
+        (
+          await db.area.updateMany({
+            where: { id: area.id, chatChannelId: expected },
+            data: { chatChannelId: channelId },
+          })
+        ).count,
+    },
+    input
+  );
+}
+
+/**
+ * Idempotent: returns the sales room of an operational case (`type: 'case'`),
+ * creating it and linking `OperationalCase.chatChannelId` the first time.
+ */
+export async function createCaseRoom(
+  caseId: string,
+  input: OperationsChannelInput
+): Promise<OperationsChannelResult> {
+  const operationalCase = await prisma.operationalCase.findUnique({
+    where: { id: caseId },
+    select: { id: true, caseNumber: true },
+  });
+  if (!operationalCase) throw new ChatError(`Expediente no encontrado: ${caseId}`);
+  return ensureOperationsChannel(
+    {
+      type: 'case',
+      auditAction: 'chat.case_room_created',
+      auditMetadata: { caseId: operationalCase.id, caseNumber: operationalCase.caseNumber },
+      readLink: async () =>
+        (
+          await prisma.operationalCase.findUnique({
+            where: { id: operationalCase.id },
+            select: { chatChannelId: true },
+          })
+        )?.chatChannelId ?? null,
+      writeLink: async (db, channelId, expected) =>
+        (
+          await db.operationalCase.updateMany({
+            where: { id: operationalCase.id, chatChannelId: expected },
+            data: { chatChannelId: channelId },
+          })
+        ).count,
+    },
+    input
+  );
+}
+
+/**
+ * Makes the active members of an `area`/`case` channel exactly `userIds`
+ * (active users only) plus its creator. Idempotent: a second call with the
+ * same list changes nothing. Removed members keep their history (`leftAt`);
+ * re-added members come back without a backlog of unread messages.
+ */
+export async function syncChannelMembers(
+  channelId: string,
+  userIds: string[]
+): Promise<ChannelMembersSyncResult> {
+  const channel = await prisma.internalChatChannel.findUnique({
+    where: { id: channelId },
+    select: { id: true, type: true, createdBy: true },
+  });
+  if (!channel) throw new ChatError('Canal no encontrado');
+  if (!isOperationsChannelType(channel.type)) {
+    throw new ChatError('Solo los canales de área y las salas de venta sincronizan sus miembros');
+  }
+
+  const desired = await resolveActiveMemberIds(userIds, channel.createdBy);
+  const desiredSet = new Set(desired);
+  const current = await prisma.internalChatMember.findMany({
+    where: { channelId },
+    select: { userId: true, leftAt: true },
+  });
+  const currentByUser = new Map(current.map((m) => [m.userId, m]));
+
+  const added = desired.filter((id) => !currentByUser.has(id));
+  const reactivated = desired.filter((id) => Boolean(currentByUser.get(id)?.leftAt));
+  const removed = current
+    .filter((m) => m.leftAt === null && !desiredSet.has(m.userId))
+    .map((m) => m.userId);
+
+  if (added.length === 0 && reactivated.length === 0 && removed.length === 0) {
+    return { added, reactivated, removed };
+  }
+
+  const now = new Date();
+  await prisma.$transaction(async (tx) => {
+    if (added.length > 0) {
+      await tx.internalChatMember.createMany({
+        data: added.map((userId) => ({
+          channelId,
+          userId,
+          role: userId === channel.createdBy ? 'owner' : 'member',
+        })),
+        skipDuplicates: true,
+      });
+    }
+    if (reactivated.length > 0) {
+      await tx.internalChatMember.updateMany({
+        where: { channelId, userId: { in: reactivated }, leftAt: { not: null } },
+        data: { leftAt: null, lastReadAt: now },
+      });
+    }
+    if (removed.length > 0) {
+      await tx.internalChatMember.updateMany({
+        where: { channelId, userId: { in: removed }, leftAt: null },
+        data: { leftAt: now },
+      });
+    }
+  });
+
+  return { added, reactivated, removed };
+}
+
+// =====================================================
+// Messages posted by AI (bot) users
+// =====================================================
+
+export interface SystemMessageInput {
+  content: string;
+  /** Structured metadata (e.g. {kind:'agent_request', requestId, caseId, quickActions}). */
+  meta?: ChatMessageMeta | null;
+  /** Reply to a message of the same channel (joins or opens its thread). */
+  replyToId?: string | null;
+  priority?: 'normal' | 'urgent';
+}
+
+const SYSTEM_META_MAX_BYTES = 16_000;
+
+function normalizeSystemMeta(meta: ChatMessageMeta | null | undefined): Prisma.InputJsonObject | null {
+  if (meta === null || meta === undefined) return null;
+  if (typeof meta !== 'object' || Array.isArray(meta)) {
+    throw new ChatError('Los metadatos del mensaje deben ser un objeto');
+  }
+  if (
+    meta.kind !== undefined &&
+    (typeof meta.kind !== 'string' || meta.kind.length < 1 || meta.kind.length > 64)
+  ) {
+    throw new ChatError('Tipo de metadatos inválido');
+  }
+  let serialized: string;
+  try {
+    serialized = JSON.stringify(meta);
+  } catch {
+    throw new ChatError('Los metadatos del mensaje no se pueden guardar');
+  }
+  if (Buffer.byteLength(serialized, 'utf8') > SYSTEM_META_MAX_BYTES) {
+    throw new ChatError('Los metadatos del mensaje son demasiado grandes');
+  }
+  return JSON.parse(serialized) as Prisma.InputJsonObject;
+}
+
+/** Thread whose root is `rootMessageId`, created when missing (tolerates a concurrent creation). */
+async function ensureReplyThread(channelId: string, rootMessageId: string): Promise<string> {
+  const existing = await prisma.internalChatThread.findUnique({
+    where: { rootMessageId },
+    select: { id: true },
+  });
+  if (existing) return existing.id;
+  try {
+    const created = await prisma.internalChatThread.create({ data: { channelId, rootMessageId } });
+    return created.id;
+  } catch (err) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+      const winner = await prisma.internalChatThread.findUnique({
+        where: { rootMessageId },
+        select: { id: true },
+      });
+      if (winner) return winner.id;
+    }
+    throw err;
+  }
+}
+
+/**
+ * Posts a message as an AI (bot) user of the agents layer. Unlike
+ * `sendMessage` there is no chat-suspension check, but the sender must be an
+ * active bot (`User.isBot`) and a member of the channel. `meta` is persisted
+ * and returned in the DTO; template kinds do not fan out chat notifications
+ * (see `isBotTemplateMeta`). @mentions only resolve human members, so a bot
+ * post never triggers `onBotMentioned`.
+ */
+export async function sendSystemMessage(
+  botUser: { id: string },
+  channelId: string,
+  input: SystemMessageInput
+): Promise<ChatMessageDTO> {
+  const sender = await prisma.user.findUnique({
+    where: { id: botUser.id },
+    select: { id: true, name: true, isBot: true, isActive: true },
+  });
+  if (!sender || !sender.isBot) {
+    throw new AuthorizationError('Solo un usuario de IA puede publicar mensajes del sistema');
+  }
+  if (!sender.isActive) {
+    throw new ChatError('El usuario de IA está inactivo');
+  }
+  await assertChannelMember(channelId, sender.id);
+
+  const content = (input.content ?? '').trim();
+  if (!content) throw new ChatError('El mensaje debe tener contenido');
+  if (content.length > 10_000) {
+    throw new ChatError('El mensaje es demasiado largo (máx 10,000 caracteres)');
+  }
+  const meta = normalizeSystemMeta(input.meta);
+  const priority = input.priority ?? 'normal';
+
+  const replyToId = input.replyToId ?? null;
+  let existingThreadId: string | null = null;
+  if (replyToId) {
+    const parent = await prisma.internalChatMessage.findUnique({
+      where: { id: replyToId },
+      select: { channelId: true },
+    });
+    if (!parent || parent.channelId !== channelId) {
+      throw new ChatError('El mensaje al que respondes no pertenece a este canal');
+    }
+    const thread = await prisma.internalChatThread.findUnique({
+      where: { rootMessageId: replyToId },
+      select: { id: true },
+    });
+    existingThreadId = thread?.id ?? null;
+  }
+
+  const message = await prisma.internalChatMessage.create({
+    data: {
+      channelId,
+      senderId: sender.id,
+      content,
+      replyToId,
+      priority,
+      threadId: existingThreadId,
+      ...(meta ? { meta } : {}),
+    },
+  });
+
+  if (replyToId && !existingThreadId) {
+    const threadId = await ensureReplyThread(channelId, replyToId);
+    await prisma.internalChatMessage.update({ where: { id: message.id }, data: { threadId } });
+  }
+
+  const mentionedUsernames = [...content.matchAll(/@(\w+)/g)].map((match) => match[1]);
+  const mentionUserIds: string[] = [];
+  if (mentionedUsernames.length > 0) {
+    const humans = await prisma.internalChatMember.findMany({
+      where: {
+        channelId,
+        leftAt: null,
+        user: { username: { in: mentionedUsernames }, isBot: false },
+      },
+      select: { userId: true },
+    });
+    mentionUserIds.push(...new Set(humans.map((m) => m.userId)));
+    if (mentionUserIds.length > 0) {
+      await prisma.internalChatMention.createMany({
+        data: mentionUserIds.map((userId) => ({ messageId: message.id, userId })),
+        skipDuplicates: true,
+      });
+    }
+  }
+
+  await prisma.internalChatChannel.update({
+    where: { id: channelId },
+    data: { lastMessageAt: message.createdAt },
+  });
+
+  const fullMessage = await prisma.internalChatMessage.findUnique({
+    where: { id: message.id },
+    include: MESSAGE_INCLUDE,
+  });
+  if (!fullMessage) throw new ChatError('Error al crear el mensaje');
+
+  notifyChatMessage({
+    messageId: message.id,
+    channelId,
+    senderId: sender.id,
+    senderName: sender.name,
+    content,
+    priority,
+    mentionedUserIds: mentionUserIds,
+    kind: 'text',
+    senderIsBot: true,
+    meta,
+  }).catch(() => {
+    // silent — notification failures never block the post
+  });
+
+  return toMessageDTO(fullMessage, sender.id);
+}
+
+// =====================================================
+// @mention of a bot → extension point for the agents layer
+// =====================================================
+
+export interface BotMentionTarget {
+  userId: string;
+  username: string;
+  name: string;
+}
+
+export interface BotMentionEvent {
+  messageId: string;
+  channelId: string;
+  /** `area` | `case` for operations channels (bots are only members there). */
+  channelType: string;
+  senderId: string;
+  senderName: string;
+  /** Human free text: treat it as untrusted (wrapUntrusted) before giving it to a model. */
+  content: string | null;
+  threadId: string | null;
+  replyToId: string | null;
+  createdAt: string;
+  bots: BotMentionTarget[];
+}
+
+export type BotMentionListener = (event: BotMentionEvent) => void | Promise<void>;
+
+type GlobalWithBotMentionListeners = typeof globalThis & {
+  __unikChatBotMentionListeners?: Set<BotMentionListener>;
+};
+
+// Stored on globalThis so instrumentation and route bundles share the same registry.
+function botMentionListeners(): Set<BotMentionListener> {
+  const scope = globalThis as GlobalWithBotMentionListeners;
+  if (!scope.__unikChatBotMentionListeners) scope.__unikChatBotMentionListeners = new Set();
+  return scope.__unikChatBotMentionListeners;
+}
+
+/**
+ * Registers a listener called after a person's message that @mentions one or
+ * more bot members is stored. Listeners run in registration order and are
+ * awaited (keep them short, e.g. enqueue a job); a failing listener is logged
+ * and never affects the sender or the other listeners. Returns the unsubscribe.
+ */
+export function onBotMentioned(listener: BotMentionListener): () => void {
+  botMentionListeners().add(listener);
+  return () => {
+    botMentionListeners().delete(listener);
+  };
+}
+
+async function emitBotMentioned(event: BotMentionEvent): Promise<void> {
+  for (const listener of [...botMentionListeners()]) {
+    try {
+      await listener(event);
+    } catch (error) {
+      console.warn(
+        JSON.stringify({
+          component: 'chat',
+          event: 'chat.bot_mention_listener_failed',
+          messageId: event.messageId,
+          channelId: event.channelId,
+          message: error instanceof Error ? error.message : 'unknown',
+        })
+      );
+    }
+  }
 }

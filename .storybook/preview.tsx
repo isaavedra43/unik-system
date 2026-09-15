@@ -1,4 +1,7 @@
 import type { Preview } from '@storybook/nextjs-vite';
+// Same order as src/app/layout.tsx: Tailwind + shadcn base first, then UNIK tokens and component CSS.
+import '../src/styles/shadcn.css';
+import '../src/app/globals.css';
 
 const preview: Preview = {
   parameters: {

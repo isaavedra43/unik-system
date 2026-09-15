@@ -1,78 +1,34 @@
 'use client';
 
-import React, { ReactNode, useState, useEffect } from 'react';
+import React, { ReactNode, useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { CurrentUser } from '@/modules/auth/authorization';
+import type { CurrentUser } from '@/modules/auth/authorization';
 import { logoutAction } from '@/app/app/actions';
 import { Avatar } from '@/components/ui/primitives';
 import { DropdownMenu } from '@/components/ui/composite';
-import { ChevronDown, Home, LogOut, Menu, Shield, Users } from '@/components/ui/icons';
-import {
-  Bell,
-  Bot,
-  ShoppingCart,
-  Plug,
-  MessageCircle,
-  MessageSquare,
-  X,
-  ChevronRight,
-  Database,
-  FileText,
-  FileSignature,
-  Boxes,
-  Users as UsersIcon,
-  UserCog,
-  Truck,
-  CreditCard,
-  Receipt,
-  Wallet,
-  HardDrive,
-  Inbox,
-  Megaphone,
-  Phone,
-  PhoneCall,
-  BookOpen,
-  Radio,
-  SlidersHorizontal,
-} from 'lucide-react';
+import { ChevronDown, LogOut, Menu, Shield } from '@/components/ui/icons';
+import { Bell, X, ChevronRight } from 'lucide-react';
 import { AssistantWidget } from '@/components/assistant/AssistantWidget';
 import { CallDockProvider } from '@/components/calls/CallDockProvider';
 import { ThemeToggle } from '@/components/layout/ThemeToggle';
+import {
+  buildBreadcrumbs,
+  buildNavSections,
+  can,
+  isFlushRoute,
+  visibleNavItems as visibleItems,
+  type Breadcrumb,
+  type NavEntry,
+  type NavGroup,
+  type NavSection,
+} from '@/components/layout/nav-config';
 import { useNotificationStream } from '@/components/notifications/useNotificationStream';
 import { SeedDemoDataButton } from '@/components/dev/SeedDemoDataButton';
 
 interface AppShellProps {
   user: CurrentUser;
   children: ReactNode;
-}
-
-interface NavItem {
-  href: string;
-  label: string;
-  icon: React.ReactNode;
-  visible?: boolean;
-}
-
-interface NavSection {
-  kind?: 'section';
-  title: string;
-  items: NavItem[];
-}
-
-/** Collapsible group of sections (e.g. everything synced from Zoho). */
-interface NavGroup {
-  kind: 'group';
-  key: string;
-  title: string;
-  icon: React.ReactNode;
-  sections: NavSection[];
-}
-
-type NavEntry = NavSection | NavGroup;
-
-function visibleItems(section: NavSection): NavItem[] {
-  return section.items.filter((item) => item.visible !== false);
 }
 
 function SidebarSection({
@@ -97,7 +53,7 @@ function SidebarSection({
             className={`sidebar-link ${isActive(item.href) ? 'active' : ''}`}
             onClick={onClose}
           >
-            {item.icon}
+            <item.icon size={18} />
             {item.label}
           </Link>
         ))}
@@ -156,7 +112,9 @@ function SidebarGroup({
         aria-expanded={open}
         aria-controls={bodyId}
       >
-        <span className="sidebar-group-icon">{group.icon}</span>
+        <span className="sidebar-group-icon">
+          <group.icon size={18} />
+        </span>
         <span className="sidebar-group-label">{group.title}</span>
         <ChevronRight size={16} className="sidebar-group-chevron" aria-hidden="true" />
       </button>
@@ -398,7 +356,7 @@ function Topbar({ user, onToggleSidebar }: { user: CurrentUser; onToggleSidebar:
   );
 }
 
-function Breadcrumbs({ items }: { items: { label: string; href?: string }[] }) {
+function Breadcrumbs({ items }: { items: Breadcrumb[] }) {
   if (items.length === 0) return null;
   return (
     <nav aria-label="Breadcrumb" className="topbar-breadcrumbs">
@@ -418,176 +376,6 @@ function Breadcrumbs({ items }: { items: { label: string; href?: string }[] }) {
       ))}
     </nav>
   );
-}
-
-function buildBreadcrumbs(pathname: string): { label: string; href?: string }[] {
-  if (pathname === '/app') return [];
-  if (pathname.startsWith('/app/admin/access')) {
-    return [
-      { label: 'Administración', href: '/app/admin/access' },
-      { label: 'Usuarios y permisos' },
-    ];
-  }
-  if (pathname.startsWith('/app/admin/integrations')) {
-    return [
-      { label: 'Administración', href: '/app/admin/integrations' },
-      { label: 'Integraciones' },
-    ];
-  }
-  if (pathname.startsWith('/app/admin/assistant')) {
-    return [{ label: 'Administración', href: '/app/admin/assistant' }, { label: 'Asistente IA' }];
-  }
-  if (pathname.startsWith('/app/admin/chat')) {
-    return [{ label: 'Administración', href: '/app/admin/chat' }, { label: 'Chat' }];
-  }
-  if (pathname.startsWith('/app/admin/files')) {
-    return [{ label: 'Administración', href: '/app/admin/files' }, { label: 'Archivos' }];
-  }
-  if (pathname.startsWith('/app/admin/extensions')) {
-    return [{ label: 'Administración', href: '/app/admin/extensions' }, { label: 'Extensiones' }];
-  }
-  const simple: Array<[string, string[]]> = [
-    ['/app/admin/knowledge', ['Administración', 'Biblioteca aprobada']],
-    ['/app/admin/comms', ['Administración', 'Canales y responsables']],
-    ['/app/admin/voice', ['Administración', 'Telefonía']],
-    ['/app/inbox', ['Comunicaciones', 'Bandeja externa']],
-    ['/app/campaigns', ['Comunicaciones', 'Campañas']],
-    ['/app/calls', ['Comunicaciones', 'Llamadas']],
-  ];
-  for (const [prefix, labels] of simple) {
-    if (pathname.startsWith(prefix)) {
-      return labels.map((label, i) =>
-        i < labels.length - 1 ? { label, href: prefix } : { label }
-      );
-    }
-  }
-  if (pathname.startsWith('/app/assistant/extensions')) {
-    return [{ label: 'Asistente IA', href: '/app/assistant' }, { label: 'Extensiones y skills' }];
-  }
-  if (pathname.startsWith('/app/assistant')) {
-    return [{ label: 'Asistente IA' }];
-  }
-  if (pathname.startsWith('/app/chat')) {
-    return [{ label: 'Chat' }];
-  }
-  if (pathname.startsWith('/app/account/security')) {
-    return [{ label: 'Cuenta' }, { label: 'Seguridad' }];
-  }
-  if (pathname.startsWith('/app/account/notifications')) {
-    return [{ label: 'Cuenta' }, { label: 'Mis notificaciones' }];
-  }
-  if (pathname === '/app/sales/orders') {
-    return [{ label: 'Ventas' }, { label: 'Órdenes de venta' }];
-  }
-  if (pathname.startsWith('/app/sales/orders/')) {
-    return [
-      { label: 'Ventas' },
-      { label: 'Órdenes de venta', href: '/app/sales/orders' },
-      { label: 'Detalle' },
-    ];
-  }
-  if (pathname === '/app/contacts/customers') {
-    return [{ label: 'Ventas' }, { label: 'Clientes' }];
-  }
-  if (pathname.startsWith('/app/contacts/customers/')) {
-    return [
-      { label: 'Ventas' },
-      { label: 'Clientes', href: '/app/contacts/customers' },
-      { label: 'Detalle' },
-    ];
-  }
-  if (pathname === '/app/contacts/vendors') {
-    return [{ label: 'Compras' }, { label: 'Proveedores' }];
-  }
-  if (pathname.startsWith('/app/contacts/vendors/')) {
-    return [
-      { label: 'Compras' },
-      { label: 'Proveedores', href: '/app/contacts/vendors' },
-      { label: 'Detalle' },
-    ];
-  }
-  if (pathname === '/app/products') {
-    return [{ label: 'Inventario' }, { label: 'Productos' }];
-  }
-  if (pathname.startsWith('/app/products/')) {
-    return [
-      { label: 'Inventario' },
-      { label: 'Productos', href: '/app/products' },
-      { label: 'Detalle' },
-    ];
-  }
-  if (pathname === '/app/packages') {
-    return [{ label: 'Inventario' }, { label: 'Paquetes' }];
-  }
-  if (pathname.startsWith('/app/packages/')) {
-    return [
-      { label: 'Inventario' },
-      { label: 'Paquetes', href: '/app/packages' },
-      { label: 'Detalle' },
-    ];
-  }
-  if (pathname === '/app/quotes') {
-    return [{ label: 'Ventas' }, { label: 'Cotizaciones' }];
-  }
-  if (pathname === '/app/quotes/new') {
-    return [{ label: 'Ventas' }, { label: 'Cotizaciones', href: '/app/quotes' }, { label: 'Nueva' }];
-  }
-  if (pathname.startsWith('/app/quotes/') && pathname.endsWith('/edit')) {
-    return [{ label: 'Ventas' }, { label: 'Cotizaciones', href: '/app/quotes' }, { label: 'Editar' }];
-  }
-  if (pathname.startsWith('/app/quotes/')) {
-    return [{ label: 'Ventas' }, { label: 'Cotizaciones', href: '/app/quotes' }, { label: 'Detalle' }];
-  }
-  if (pathname === '/app/invoices') {
-    return [{ label: 'Ventas' }, { label: 'Facturas' }];
-  }
-  if (pathname.startsWith('/app/invoices/')) {
-    return [
-      { label: 'Ventas' },
-      { label: 'Facturas', href: '/app/invoices' },
-      { label: 'Detalle' },
-    ];
-  }
-  if (pathname === '/app/payments') {
-    return [{ label: 'Ventas' }, { label: 'Pagos' }];
-  }
-  if (pathname.startsWith('/app/payments/')) {
-    return [{ label: 'Ventas' }, { label: 'Pagos', href: '/app/payments' }, { label: 'Detalle' }];
-  }
-  if (pathname === '/app/purchase-orders') {
-    return [{ label: 'Compras' }, { label: 'Órdenes de compra' }];
-  }
-  if (pathname.startsWith('/app/purchase-orders/')) {
-    return [
-      { label: 'Compras' },
-      { label: 'Órdenes de compra', href: '/app/purchase-orders' },
-      { label: 'Detalle' },
-    ];
-  }
-  if (pathname === '/app/bills') {
-    return [{ label: 'Compras' }, { label: 'Facturas de compra' }];
-  }
-  if (pathname.startsWith('/app/bills/')) {
-    return [
-      { label: 'Compras' },
-      { label: 'Facturas de compra', href: '/app/bills' },
-      { label: 'Detalle' },
-    ];
-  }
-  if (pathname === '/app/vendor-credits') {
-    return [{ label: 'Compras' }, { label: 'Créditos de proveedor' }];
-  }
-  if (pathname.startsWith('/app/vendor-credits/')) {
-    return [
-      { label: 'Compras' },
-      { label: 'Créditos de proveedor', href: '/app/vendor-credits' },
-      { label: 'Detalle' },
-    ];
-  }
-  if (pathname === '/app/notifications') {
-    return [{ label: 'Notificaciones' }];
-  }
-  return [];
 }
 
 export default function AppShell({ user, children }: AppShellProps) {
@@ -622,251 +410,12 @@ export default function AppShell({ user, children }: AppShellProps) {
     }
   };
 
-  const sections: NavEntry[] = [
-    {
-      title: 'General',
-      items: [
-        { href: '/app', label: 'Inicio', icon: <Home size={18} />, visible: true },
-        {
-          href: '/app/assistant',
-          label: 'Asistente IA',
-          icon: <Bot size={18} />,
-          visible: user.permissionKeys.includes('assistant.use') || user.isSuperAdmin,
-        },
-      ],
-    },
-    {
-      title: 'Comunicaciones',
-      items: [
-        {
-          href: '/app/chat',
-          label: 'Chat',
-          icon: <MessageCircle size={18} />,
-          visible: user.permissionKeys.includes('chat.use') || user.isSuperAdmin,
-        },
-        {
-          href: '/app/inbox',
-          label: 'Bandeja externa',
-          icon: <Inbox size={18} />,
-          visible: user.permissionKeys.includes('inbox.use') || user.isSuperAdmin,
-        },
-        {
-          href: '/app/campaigns',
-          label: 'Campañas',
-          icon: <Megaphone size={18} />,
-          visible:
-            user.permissionKeys.includes('campaigns.view') ||
-            user.permissionKeys.includes('campaigns.manage') ||
-            user.isSuperAdmin,
-        },
-        {
-          href: '/app/calls',
-          label: 'Llamadas',
-          icon: <Phone size={18} />,
-          visible:
-            user.permissionKeys.includes('calls.use') ||
-            user.permissionKeys.includes('calls.supervise') ||
-            user.isSuperAdmin,
-        },
-      ],
-    },
-    {
-      kind: 'group',
-      key: 'zoho',
-      title: 'Zoho',
-      icon: <Database size={18} />,
-      sections: [
-        {
-          title: 'Ventas',
-          items: [
-            {
-              href: '/app/sales/orders',
-              label: 'Órdenes de venta',
-              icon: <ShoppingCart size={18} />,
-              visible: user.permissionKeys.includes('sales_orders.view') || user.isSuperAdmin,
-            },
-            {
-              href: '/app/contacts/customers',
-              label: 'Clientes',
-              icon: <UsersIcon size={18} />,
-              visible: user.permissionKeys.includes('customers.view') || user.isSuperAdmin,
-            },
-            {
-              href: '/app/quotes',
-              label: 'Cotizaciones',
-              icon: <FileSignature size={18} />,
-              visible: user.permissionKeys.includes('quotes.view') || user.isSuperAdmin,
-            },
-            {
-              href: '/app/invoices',
-              label: 'Facturas',
-              icon: <FileText size={18} />,
-              visible: user.permissionKeys.includes('invoices.view') || user.isSuperAdmin,
-            },
-            {
-              href: '/app/payments',
-              label: 'Pagos',
-              icon: <CreditCard size={18} />,
-              visible: user.permissionKeys.includes('payments.view') || user.isSuperAdmin,
-            },
-          ],
-        },
-        {
-          title: 'Inventario',
-          items: [
-            {
-              href: '/app/products',
-              label: 'Productos',
-              icon: <Boxes size={18} />,
-              visible: user.permissionKeys.includes('products.view') || user.isSuperAdmin,
-            },
-            {
-              href: '/app/packages',
-              label: 'Paquetes',
-              icon: <Truck size={18} />,
-              visible: user.permissionKeys.includes('packages.view') || user.isSuperAdmin,
-            },
-          ],
-        },
-        {
-          title: 'Compras',
-          items: [
-            {
-              href: '/app/contacts/vendors',
-              label: 'Proveedores',
-              icon: <UserCog size={18} />,
-              visible: user.permissionKeys.includes('vendors.view') || user.isSuperAdmin,
-            },
-            {
-              href: '/app/purchase-orders',
-              label: 'Órdenes de compra',
-              icon: <ShoppingCart size={18} />,
-              visible: user.permissionKeys.includes('purchase_orders.view') || user.isSuperAdmin,
-            },
-            {
-              href: '/app/bills',
-              label: 'Facturas de compra',
-              icon: <Receipt size={18} />,
-              visible: user.permissionKeys.includes('bills.view') || user.isSuperAdmin,
-            },
-            {
-              href: '/app/vendor-credits',
-              label: 'Créditos de proveedor',
-              icon: <Wallet size={18} />,
-              visible: user.permissionKeys.includes('vendor_credits.view') || user.isSuperAdmin,
-            },
-          ],
-        },
-      ],
-    },
-    {
-      title: 'Administración',
-      items: [
-        {
-          href: '/app/admin/access',
-          label: 'Usuarios y permisos',
-          icon: <Users size={18} />,
-          visible:
-            user.permissionKeys.includes('users.view') ||
-            user.permissionKeys.includes('roles.view') ||
-            user.isSuperAdmin,
-        },
-        {
-          href: '/app/admin/integrations',
-          label: 'Integraciones',
-          icon: <Plug size={18} />,
-          visible: user.permissionKeys.includes('integrations.view') || user.isSuperAdmin,
-        },
-        {
-          href: '/app/admin/assistant',
-          label: 'Asistente IA',
-          icon: <Bot size={18} />,
-          visible: user.permissionKeys.includes('assistant.admin') || user.isSuperAdmin,
-        },
-        {
-          href: '/app/admin/chat',
-          label: 'Chat',
-          icon: <MessageSquare size={18} />,
-          visible: user.permissionKeys.includes('chat.admin') || user.isSuperAdmin,
-        },
-        {
-          href: '/app/admin/files',
-          label: 'Archivos',
-          icon: <HardDrive size={18} />,
-          visible: user.permissionKeys.includes('files.admin') || user.isSuperAdmin,
-        },
-        {
-          href: '/app/admin/extensions',
-          label: 'Extensiones',
-          icon: <Plug size={18} />,
-          visible:
-            user.permissionKeys.includes('extensions.view') ||
-            user.permissionKeys.includes('extensions.manage') ||
-            user.isSuperAdmin,
-        },
-        {
-          href: '/app/admin/knowledge',
-          label: 'Biblioteca aprobada',
-          icon: <BookOpen size={18} />,
-          visible: user.permissionKeys.includes('knowledge.manage') || user.isSuperAdmin,
-        },
-        {
-          href: '/app/admin/comms',
-          label: 'Canales y responsables',
-          icon: <Radio size={18} />,
-          visible: user.permissionKeys.includes('inbox.admin') || user.isSuperAdmin,
-        },
-        {
-          href: '/app/admin/voice',
-          label: 'Telefonía',
-          icon: <PhoneCall size={18} />,
-          visible: user.permissionKeys.includes('calls.admin') || user.isSuperAdmin,
-        },
-      ],
-    },
-    {
-      title: 'Cuenta',
-      items: [
-        {
-          href: '/app/account/security',
-          label: 'Seguridad',
-          icon: <Shield size={18} />,
-          visible: true,
-        },
-        {
-          href: '/app/notifications',
-          label: 'Notificaciones',
-          icon: <Bell size={18} />,
-          visible: true,
-        },
-        {
-          href: '/app/account/notifications',
-          label: 'Configurar avisos',
-          icon: <SlidersHorizontal size={18} />,
-          visible: true,
-        },
-      ],
-    },
-  ];
+  const sections: NavEntry[] = useMemo(() => buildNavSections(user), [user]);
 
   const pathname = usePathname();
-  const isWorkspace =
-    (pathname.startsWith('/app/sales/orders') ||
-      pathname.startsWith('/app/contacts/customers') ||
-      pathname.startsWith('/app/contacts/vendors') ||
-      pathname.startsWith('/app/products') ||
-      pathname.startsWith('/app/packages') ||
-      pathname.startsWith('/app/invoices') ||
-      pathname.startsWith('/app/payments') ||
-      pathname.startsWith('/app/purchase-orders') ||
-      pathname.startsWith('/app/bills') ||
-      pathname.startsWith('/app/vendor-credits')) &&
-    !pathname.includes('/api');
   const isAssistantPage = pathname.startsWith('/app/assistant');
-  const isChatPage = pathname.startsWith('/app/chat');
-  const isInboxPage = pathname.startsWith('/app/inbox');
-  const isFlush = isWorkspace || isAssistantPage || isChatPage || isInboxPage;
-  const canUseAssistant = user.permissionKeys.includes('assistant.use') || user.isSuperAdmin;
+  const isFlush = isFlushRoute(pathname);
+  const canUseAssistant = can(user, 'assistant.use');
   const showWidget = canUseAssistant && !isAssistantPage;
 
   return (

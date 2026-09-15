@@ -115,6 +115,13 @@ import { PAYMENTS_PERMISSIONS } from '@/modules/payments/permissions';
 import { PURCHASE_ORDERS_PERMISSIONS } from '@/modules/purchase-orders/permissions';
 import { BILLS_PERMISSIONS } from '@/modules/bills/permissions';
 import { VENDOR_CREDITS_PERMISSIONS } from '@/modules/vendor-credits/permissions';
+import { OPERATIONS_PERMISSIONS } from '@/modules/operations/permissions';
+import { LOGISTICS_PERMISSIONS } from '@/modules/logistics/permissions';
+import { INVENTORY_PERMISSIONS } from '@/modules/inventory/permissions';
+import { PURCHASES_PERMISSIONS } from '@/modules/purchases/permissions';
+import { MANUFACTURING_PERMISSIONS } from '@/modules/manufacturing/permissions';
+import { FINANCE_PERMISSIONS } from '@/modules/finance/permissions';
+import { CRM_PERMISSIONS } from '@/modules/crm/permissions';
 
 /** Every known permission. Future modules spread their definitions here. */
 export const PERMISSION_REGISTRY: PermissionDefinition[] = [
@@ -139,6 +146,13 @@ export const PERMISSION_REGISTRY: PermissionDefinition[] = [
   ...COMMS_PERMISSIONS,
   ...CAMPAIGNS_PERMISSIONS,
   ...VOICE_PERMISSIONS,
+  ...OPERATIONS_PERMISSIONS,
+  ...LOGISTICS_PERMISSIONS,
+  ...INVENTORY_PERMISSIONS,
+  ...PURCHASES_PERMISSIONS,
+  ...MANUFACTURING_PERMISSIONS,
+  ...FINANCE_PERMISSIONS,
+  ...CRM_PERMISSIONS,
 ];
 
 const REGISTRY_KEYS = new Set(PERMISSION_REGISTRY.map((p) => p.key));

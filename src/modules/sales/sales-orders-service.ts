@@ -3,16 +3,22 @@ import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { SALES_ORDER_COLUMNS, SALES_ORDER_COLUMN_MAP } from './sales-orders-columns';
 import {
-  salesOrderFilterGroupSchema,
   salesOrderQueryStateSchema,
+  FILTER_OPERATORS_BY_TYPE,
   SalesOrderFilterGroup,
+  SalesOrderFilterRule,
   SalesOrderQueryState,
   SalesOrderSort,
   DATE_SHORTCUTS,
 } from './sales-orders-filters';
 import { toSalesOrderListRow, toSalesOrderDetail } from './sales-orders-contract';
 import type { SalesOrderListRow, SalesOrderDetail } from './sales-orders-contract';
-import { formatCurrency, formatDateOnly, getSalesOrderStatusConfig } from './sales-orders-helpers';
+import {
+  formatCurrency,
+  formatDateOnly,
+  getSalesOrderStatusConfig,
+  getTicketStatus,
+} from './sales-orders-helpers';
 
 const MIN_PAGE = 1;
 const DEFAULT_PAGE_SIZE = 50;
@@ -76,191 +82,282 @@ const LIST_SELECT = {
 // Filter → Prisma where
 // ---------------------------------------------------------------------------
 
-function resolveDateShortcut(shortcut: string): { from: Date; to: Date } | null {
-  const now = new Date();
-  const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const endOfDay = new Date(startOfDay);
-  endOfDay.setDate(endOfDay.getDate() + 1);
-  endOfDay.setMilliseconds(-1);
+type W = Prisma.SalesOrderWhereInput;
 
+/** Matches nothing — used when a filter has a value but no row can satisfy it. */
+const MATCH_NONE: W = { id: { in: [] } };
+
+const BUSINESS_TIME_ZONE = 'America/Mexico_City';
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+const STATUS_FIELDS = ['status', 'subStatus', 'paidStatus', 'invoicedStatus', 'shippedStatus'] as const;
+type StatusField = (typeof STATUS_FIELDS)[number];
+type StatusCombo = Record<StatusField, string | null> & { count: number };
+
+/**
+ * Distinct status combinations present in the DB. Status values come from
+ * Zoho in inconsistent spellings ("open", "Open", "onhold", "on_hold"), and
+ * the ticket status is computed (not a column), so filters are resolved
+ * against the real values instead of trusting the literal the UI sends.
+ */
+async function loadStatusCombos(): Promise<StatusCombo[]> {
+  const groups = await prisma.salesOrder.groupBy({
+    by: [...STATUS_FIELDS],
+    _count: { _all: true },
+  });
+  return groups.map((g) => ({
+    status: g.status,
+    subStatus: g.subStatus,
+    paidStatus: g.paidStatus,
+    invoicedStatus: g.invoicedStatus,
+    shippedStatus: g.shippedStatus,
+    count: g._count._all,
+  }));
+}
+
+function compactKey(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+type StatusCategory = NonNullable<(typeof SALES_ORDER_COLUMNS)[number]['statusCategory']>;
+
+function statusMatches(raw: string, selected: string, category: StatusCategory): boolean {
+  if (compactKey(raw) === compactKey(selected)) return true;
+  return (
+    getSalesOrderStatusConfig(raw, category).label ===
+    getSalesOrderStatusConfig(selected, category).label
+  );
+}
+
+function ruleValues(value: unknown): string[] {
+  if (Array.isArray(value)) return value.map(String).filter((v) => v.trim() !== '');
+  if (typeof value === 'string' && value.trim() !== '') return [value.trim()];
+  return [];
+}
+
+function comboTicketKey(combo: StatusCombo): string {
+  return getTicketStatus(combo).raw;
+}
+
+function comboWhere(combo: StatusCombo): W {
+  return { AND: STATUS_FIELDS.map((f) => ({ [f]: combo[f] === null ? null : combo[f] }) as W) };
+}
+
+function buildTicketWhere(rule: SalesOrderFilterRule, combos: StatusCombo[]): W {
+  const op = rule.operator;
+  if (op === 'is_empty') return MATCH_NONE; // always computed, never empty
+  const selected = ruleValues(rule.value);
+  if (selected.length === 0) return {};
+  const negate = op === 'not_equals' || op === 'not_in';
+  if (!negate && op !== 'equals' && op !== 'in') return {};
+  const wanted = new Set(selected);
+  const matching = combos.filter((c) => wanted.has(comboTicketKey(c)) !== negate);
+  if (matching.length === 0) return MATCH_NONE;
+  return { OR: matching.map(comboWhere) };
+}
+
+function buildStatusWhere(
+  field: StatusField,
+  category: StatusCategory,
+  rule: SalesOrderFilterRule,
+  combos: StatusCombo[]
+): W {
+  const op = rule.operator;
+  if (op === 'is_empty') return { OR: [{ [field]: null }, { [field]: '' }] } as W;
+  const selected = ruleValues(rule.value);
+  if (selected.length === 0) return {};
+  const distinct = [...new Set(combos.map((c) => c[field]).filter((v): v is string => !!v))];
+  const matched = distinct.filter((raw) => selected.some((sel) => statusMatches(raw, sel, category)));
+  if (op === 'equals' || op === 'in') {
+    return matched.length === 0 ? MATCH_NONE : ({ [field]: { in: matched } } as W);
+  }
+  if (op === 'not_equals' || op === 'not_in') {
+    if (matched.length === 0) return {};
+    return { OR: [{ [field]: null }, { [field]: { notIn: matched } }] } as W;
+  }
+  return {};
+}
+
+function buildTextWhere(field: string, rule: SalesOrderFilterRule): W {
+  const op = rule.operator;
+  if (op === 'is_empty') return { OR: [{ [field]: null }, { [field]: '' }] } as W;
+  if (op === 'is_not_empty') return { AND: [{ [field]: { not: null } }, { [field]: { not: '' } }] } as W;
+  const val = typeof rule.value === 'string' ? rule.value.trim() : typeof rule.value === 'number' ? String(rule.value) : '';
+  if (!val) return {};
+  const ci = { mode: 'insensitive' as const };
+  switch (op) {
+    case 'contains':
+      return { [field]: { contains: val, ...ci } } as W;
+    case 'not_contains':
+      return { OR: [{ [field]: null }, { NOT: { [field]: { contains: val, ...ci } } }] } as W;
+    case 'equals':
+      return { [field]: { equals: val, ...ci } } as W;
+    case 'not_equals':
+      return { OR: [{ [field]: null }, { NOT: { [field]: { equals: val, ...ci } } }] } as W;
+    case 'starts_with':
+      return { [field]: { startsWith: val, ...ci } } as W;
+    default:
+      return {};
+  }
+}
+
+function toNumber(raw: unknown): number | null {
+  if (raw === undefined || raw === null || raw === '') return null;
+  const n = typeof raw === 'number' ? raw : Number(String(raw).replace(/[$,\s]/g, ''));
+  return Number.isFinite(n) ? n : null;
+}
+
+function buildNumberWhere(field: string, rule: SalesOrderFilterRule): W {
+  const num = toNumber(rule.value);
+  const numTo = toNumber(rule.valueTo);
+  if (rule.operator === 'between') {
+    if (num === null || numTo === null) return {};
+    return { [field]: { gte: Math.min(num, numTo), lte: Math.max(num, numTo) } } as W;
+  }
+  if (num === null) return {};
+  const map: Record<string, string> = {
+    equals: 'equals',
+    greater_than: 'gt',
+    greater_or_equal: 'gte',
+    less_than: 'lt',
+    less_or_equal: 'lte',
+  };
+  const key = map[rule.operator];
+  return key ? ({ [field]: { [key]: num } } as W) : {};
+}
+
+/** Parses `YYYY-MM-DD` (or any ISO string) to the UTC midnight of that calendar day. */
+function parseDay(value: unknown): Date | null {
+  if (typeof value !== 'string' || value.trim() === '') return null;
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(value.trim());
+  if (match) return new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
+  const d = new Date(value);
+  return Number.isNaN(d.getTime())
+    ? null
+    : new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+}
+
+function todayInBusinessZone(): Date {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: BUSINESS_TIME_ZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date());
+  return parseDay(parts) as Date;
+}
+
+/** Returns a half-open [from, to) range of calendar days for a shortcut. */
+function resolveDateShortcut(shortcut: string): { from: Date; to: Date } | null {
+  const today = todayInBusinessZone();
+  const tomorrow = new Date(today.getTime() + DAY_MS);
   switch (shortcut) {
     case 'today':
-      return { from: startOfDay, to: endOfDay };
-    case 'yesterday': {
-      const from = new Date(startOfDay);
-      from.setDate(from.getDate() - 1);
-      const to = new Date(endOfDay);
-      to.setDate(to.getDate() - 1);
-      return { from, to };
-    }
+      return { from: today, to: tomorrow };
+    case 'yesterday':
+      return { from: new Date(today.getTime() - DAY_MS), to: today };
     case 'this_week': {
-      const day = startOfDay.getDay();
-      const from = new Date(startOfDay);
-      from.setDate(from.getDate() - day);
-      return { from, to: endOfDay };
+      const day = today.getUTCDay(); // 0 = domingo
+      const offset = day === 0 ? 6 : day - 1; // semana inicia lunes
+      return { from: new Date(today.getTime() - offset * DAY_MS), to: tomorrow };
     }
-    case 'this_month': {
-      const from = new Date(now.getFullYear(), now.getMonth(), 1);
-      return { from, to: endOfDay };
-    }
-    case 'last_7_days': {
-      const from = new Date(startOfDay);
-      from.setDate(from.getDate() - 6);
-      return { from, to: endOfDay };
-    }
-    case 'last_30_days': {
-      const from = new Date(startOfDay);
-      from.setDate(from.getDate() - 29);
-      return { from, to: endOfDay };
-    }
+    case 'this_month':
+      return {
+        from: new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1)),
+        to: tomorrow,
+      };
+    case 'last_7_days':
+      return { from: new Date(today.getTime() - 6 * DAY_MS), to: tomorrow };
+    case 'last_30_days':
+      return { from: new Date(today.getTime() - 29 * DAY_MS), to: tomorrow };
     default:
       return null;
   }
 }
 
-function parseDate(value: string | Date): Date | null {
-  if (value instanceof Date) return value;
-  const d = new Date(value);
-  return Number.isNaN(d.getTime()) ? null : d;
-}
-
-function buildRuleWhere(
-  rule: z.infer<typeof salesOrderFilterGroupSchema>['rules'][number]
-): Prisma.SalesOrderWhereInput {
-  const column = SALES_ORDER_COLUMNS.find((c) => c.field === rule.field);
-  if (!column) return {};
-
-  const field = rule.field as keyof Prisma.SalesOrderWhereInput;
-  const type = column.type;
-
-  switch (type) {
-    case 'text': {
-      const op = rule.operator as string;
-      const val = 'value' in rule ? (rule.value as string | undefined) : undefined;
-      if (op === 'is_empty') return { [field]: { equals: null } } as Prisma.SalesOrderWhereInput;
-      if (op === 'is_not_empty') return { [field]: { not: null } } as Prisma.SalesOrderWhereInput;
-      if (!val) return {};
-      if (op === 'contains')
-        return { [field]: { contains: val, mode: 'insensitive' } } as Prisma.SalesOrderWhereInput;
-      if (op === 'not_contains')
-        return {
-          [field]: { not: { contains: val, mode: 'insensitive' } },
-        } as Prisma.SalesOrderWhereInput;
-      if (op === 'equals')
-        return { [field]: { equals: val, mode: 'insensitive' } } as Prisma.SalesOrderWhereInput;
-      if (op === 'not_equals')
-        return {
-          [field]: { not: { equals: val, mode: 'insensitive' } },
-        } as Prisma.SalesOrderWhereInput;
-      if (op === 'starts_with')
-        return { [field]: { startsWith: val, mode: 'insensitive' } } as Prisma.SalesOrderWhereInput;
-      return {};
-    }
-    case 'status': {
-      const op = rule.operator as string;
-      const val = 'value' in rule ? rule.value : undefined;
-      if (op === 'is_empty') return { [field]: { equals: null } } as Prisma.SalesOrderWhereInput;
-      if (op === 'equals') {
-        if (typeof val !== 'string') return {};
-        return { [field]: { equals: val, mode: 'insensitive' } } as Prisma.SalesOrderWhereInput;
-      }
-      if (op === 'not_equals') {
-        if (typeof val !== 'string') return {};
-        return {
-          [field]: { not: { equals: val, mode: 'insensitive' } },
-        } as Prisma.SalesOrderWhereInput;
-      }
-      if (op === 'in') {
-        const arr = Array.isArray(val) ? val : typeof val === 'string' ? [val] : [];
-        if (arr.length === 0) return {};
-        return { [field]: { in: arr, mode: 'insensitive' } } as Prisma.SalesOrderWhereInput;
-      }
-      if (op === 'not_in') {
-        const arr = Array.isArray(val) ? val : typeof val === 'string' ? [val] : [];
-        if (arr.length === 0) return {};
-        return {
-          [field]: { notIn: arr, mode: 'insensitive' },
-        } as Prisma.SalesOrderWhereInput;
-      }
-      return {};
-    }
-    case 'number':
-    case 'currency': {
-      const op = rule.operator as string;
-      const raw = 'value' in rule ? rule.value : undefined;
-      const rawTo = 'valueTo' in rule ? rule.valueTo : undefined;
-      const num = raw !== undefined && raw !== null && raw !== '' ? Number(raw) : null;
-      const numTo = rawTo !== undefined && rawTo !== null && rawTo !== '' ? Number(rawTo) : null;
-      if (op === 'equals' && num !== null && !Number.isNaN(num))
-        return { [field]: { equals: num } } as Prisma.SalesOrderWhereInput;
-      if (op === 'greater_than' && num !== null && !Number.isNaN(num))
-        return { [field]: { gt: num } } as Prisma.SalesOrderWhereInput;
-      if (op === 'greater_or_equal' && num !== null && !Number.isNaN(num))
-        return { [field]: { gte: num } } as Prisma.SalesOrderWhereInput;
-      if (op === 'less_than' && num !== null && !Number.isNaN(num))
-        return { [field]: { lt: num } } as Prisma.SalesOrderWhereInput;
-      if (op === 'less_or_equal' && num !== null && !Number.isNaN(num))
-        return { [field]: { lte: num } } as Prisma.SalesOrderWhereInput;
-      if (
-        op === 'between' &&
-        num !== null &&
-        numTo !== null &&
-        !Number.isNaN(num) &&
-        !Number.isNaN(numTo)
-      )
-        return { [field]: { gte: num, lte: numTo } } as Prisma.SalesOrderWhereInput;
-      return {};
-    }
-    case 'date': {
-      const op = rule.operator as string;
-      const shortcut = 'shortcut' in rule ? rule.shortcut : undefined;
-      const rawVal = 'value' in rule ? rule.value : undefined;
-      const rawValTo = 'valueTo' in rule ? rule.valueTo : undefined;
-
-      if (shortcut && DATE_SHORTCUTS.includes(shortcut as (typeof DATE_SHORTCUTS)[number])) {
-        const range = resolveDateShortcut(shortcut);
-        if (range)
-          return { [field]: { gte: range.from, lte: range.to } } as Prisma.SalesOrderWhereInput;
-      }
-
-      const val = rawVal ? parseDate(rawVal as string | Date) : null;
-      const valTo = rawValTo ? parseDate(rawValTo as string | Date) : null;
-      if (op === 'equals' && val)
-        return { [field]: { equals: val } } as Prisma.SalesOrderWhereInput;
-      if (op === 'before' && val) return { [field]: { lt: val } } as Prisma.SalesOrderWhereInput;
-      if (op === 'after' && val) return { [field]: { gt: val } } as Prisma.SalesOrderWhereInput;
-      if (op === 'between' && val && valTo)
-        return { [field]: { gte: val, lte: valTo } } as Prisma.SalesOrderWhereInput;
-      return {};
-    }
-    case 'boolean': {
-      const op = rule.operator as string;
-      const val = 'value' in rule ? rule.value : undefined;
-      if (op === 'equals' && typeof val === 'boolean')
-        return { [field]: { equals: val } } as Prisma.SalesOrderWhereInput;
-      return {};
+function buildDateWhere(field: string, rule: SalesOrderFilterRule): W {
+  if (rule.shortcut && DATE_SHORTCUTS.includes(rule.shortcut)) {
+    const range = resolveDateShortcut(rule.shortcut);
+    if (range) return { [field]: { gte: range.from, lt: range.to } } as W;
+  }
+  const from = parseDay(rule.value);
+  const to = parseDay(rule.valueTo);
+  switch (rule.operator) {
+    case 'equals':
+      return from ? ({ [field]: { gte: from, lt: new Date(from.getTime() + DAY_MS) } } as W) : {};
+    case 'before':
+      return from ? ({ [field]: { lt: from } } as W) : {};
+    case 'after':
+      return from ? ({ [field]: { gte: new Date(from.getTime() + DAY_MS) } } as W) : {};
+    case 'between': {
+      if (!from || !to) return {};
+      const [lo, hi] = from <= to ? [from, to] : [to, from];
+      return { [field]: { gte: lo, lt: new Date(hi.getTime() + DAY_MS) } } as W;
     }
     default:
       return {};
   }
 }
 
-function buildFilterWhere(filterGroup: SalesOrderFilterGroup): Prisma.SalesOrderWhereInput {
+function buildBooleanWhere(field: string, rule: SalesOrderFilterRule): W {
+  if (rule.operator !== 'equals') return {};
+  const val = rule.value === true || rule.value === 'true' ? true : rule.value === false || rule.value === 'false' ? false : null;
+  return val === null ? {} : ({ [field]: val } as W);
+}
+
+function buildRuleWhere(rule: SalesOrderFilterRule, combos: StatusCombo[]): W {
+  const column = SALES_ORDER_COLUMNS.find((c) => c.field === rule.field && c.filterable);
+  if (!column) return {};
+  const allowed = FILTER_OPERATORS_BY_TYPE[column.type] ?? [];
+  if (!allowed.includes(rule.operator)) return {};
+
+  switch (column.type) {
+    case 'text':
+      return buildTextWhere(column.field, rule);
+    case 'status':
+      if (column.field === 'ticketStatus') return buildTicketWhere(rule, combos);
+      if ((STATUS_FIELDS as readonly string[]).includes(column.field) && column.statusCategory)
+        return buildStatusWhere(column.field as StatusField, column.statusCategory, rule, combos);
+      return {};
+    case 'number':
+    case 'currency':
+      return buildNumberWhere(column.field, rule);
+    case 'date':
+      return buildDateWhere(column.field, rule);
+    case 'boolean':
+      return buildBooleanWhere(column.field, rule);
+    default:
+      return {};
+  }
+}
+
+function needsStatusCombos(filterGroup: SalesOrderFilterGroup): boolean {
+  return filterGroup.rules.some((r) => {
+    const col = SALES_ORDER_COLUMNS.find((c) => c.field === r.field);
+    return col?.type === 'status';
+  });
+}
+
+async function buildFilterWhere(filterGroup: SalesOrderFilterGroup): Promise<W> {
   if (!filterGroup.rules || filterGroup.rules.length === 0) return {};
-  const conditions = filterGroup.rules.map(buildRuleWhere).filter((c) => Object.keys(c).length > 0);
+  const combos = needsStatusCombos(filterGroup) ? await loadStatusCombos() : [];
+  const conditions = filterGroup.rules
+    .map((rule) => buildRuleWhere(rule, combos))
+    .filter((c) => Object.keys(c).length > 0);
   if (conditions.length === 0) return {};
   if (filterGroup.logic === 'OR') return { OR: conditions };
   return { AND: conditions };
 }
 
-function buildSearchWhere(search: string | undefined): Prisma.SalesOrderWhereInput {
-  if (!search || search.length === 0) return {};
+function buildSearchWhere(search: string | undefined): W {
+  const term = search?.trim();
+  if (!term) return {};
   return {
     OR: [
-      { salesOrderNumber: { contains: search, mode: 'insensitive' } },
-      { customerName: { contains: search, mode: 'insensitive' } },
-      { customerPhone: { contains: search, mode: 'insensitive' } },
-      { referenceNumber: { contains: search, mode: 'insensitive' } },
+      { salesOrderNumber: { contains: term, mode: 'insensitive' } },
+      { customerName: { contains: term, mode: 'insensitive' } },
+      { customerPhone: { contains: term, mode: 'insensitive' } },
+      { referenceNumber: { contains: term, mode: 'insensitive' } },
     ],
   };
 }
@@ -272,10 +369,39 @@ function buildSortOrderBy(sort: SalesOrderSort): Prisma.SalesOrderOrderByWithRel
   return sort.map((s) => ({ [s.field]: s.direction }) as Prisma.SalesOrderOrderByWithRelationInput);
 }
 
-function buildWhere(query: SalesOrderQueryState): Prisma.SalesOrderWhereInput {
+async function buildWhere(query: SalesOrderQueryState): Promise<W> {
   const searchWhere = buildSearchWhere(query.search);
-  const filterWhere = buildFilterWhere(query.filters);
+  const filterWhere = await buildFilterWhere(query.filters);
   return { AND: [searchWhere, filterWhere].filter((w) => Object.keys(w).length > 0) };
+}
+
+// ---------------------------------------------------------------------------
+// Filter options — status values that actually exist, with counts
+// ---------------------------------------------------------------------------
+
+export type SalesOrderFilterOptions = Record<string, { value: string; label: string; count: number }[]>;
+
+export async function getSalesOrderFilterOptions(): Promise<SalesOrderFilterOptions> {
+  const combos = await loadStatusCombos();
+  const options: SalesOrderFilterOptions = {};
+  for (const column of SALES_ORDER_COLUMNS) {
+    if (column.type !== 'status' || !column.filterable || !column.statusCategory) continue;
+    const byLabel = new Map<string, { value: string; label: string; count: number }>();
+    for (const combo of combos) {
+      let raw: string | null;
+      if (column.field === 'ticketStatus') raw = comboTicketKey(combo);
+      else if ((STATUS_FIELDS as readonly string[]).includes(column.field))
+        raw = combo[column.field as StatusField];
+      else continue;
+      if (!raw) continue;
+      const config = getSalesOrderStatusConfig(raw, column.statusCategory);
+      const existing = byLabel.get(config.label);
+      if (existing) existing.count += combo.count;
+      else byLabel.set(config.label, { value: config.raw || raw, label: config.label, count: combo.count });
+    }
+    options[column.field] = [...byLabel.values()].sort((a, b) => b.count - a.count);
+  }
+  return options;
 }
 
 // ---------------------------------------------------------------------------
@@ -374,7 +500,7 @@ export interface SalesOrdersListResult {
 
 export async function getSalesOrdersWorkspace(rawQuery: unknown): Promise<SalesOrdersListResult> {
   const query = salesOrderQueryStateSchema.parse(rawQuery);
-  const where = buildWhere(query);
+  const where = await buildWhere(query);
   const orderBy = buildSortOrderBy(query.sort);
   const skip = (query.page - MIN_PAGE) * query.page_size;
 
@@ -513,7 +639,7 @@ export async function getSalesOrdersForExport(
   options: ExportOptions
 ): Promise<{ rows: SalesOrderListRow[]; columns: typeof SALES_ORDER_COLUMNS }> {
   const query = salesOrderQueryStateSchema.parse(rawQuery);
-  const where = buildWhere(query);
+  const where = await buildWhere(query);
   const orderBy = buildSortOrderBy(query.sort);
 
   let orders: SalesOrderListEntity[];

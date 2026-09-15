@@ -11,6 +11,7 @@ import { Avatar, AvatarFallback } from '@/components/shadcn/avatar';
 import { ScrollArea } from '@/components/shadcn/scroll-area';
 import { Skeleton } from '@/components/shadcn/skeleton';
 import { cn } from '@/lib/utils';
+import { ChatBotBadge } from './ChatBotBadge';
 import type { ChatMessageDTO } from '@/modules/chat/chat-events';
 import type { CurrentUser } from '@/modules/auth/authorization';
 
@@ -119,6 +120,7 @@ export function ChatThreadPanel({ threadId, rootMessage, channelId, user, onClos
                 <span className="text-sm font-semibold text-foreground">
                   {rootMessage.senderName}
                 </span>
+                {rootMessage.senderIsBot && <ChatBotBadge />}
                 <span className="text-xs text-muted-foreground">
                   {formatTime(rootMessage.createdAt)}
                 </span>
@@ -169,6 +171,7 @@ export function ChatThreadPanel({ threadId, rootMessage, channelId, user, onClos
                   <div className={cn('flex flex-col gap-0.5 max-w-[80%]', isOwn && 'items-end')}>
                     <div className="flex items-center gap-2">
                       <span className="text-xs font-medium text-foreground">{msg.senderName}</span>
+                      {msg.senderIsBot && <ChatBotBadge />}
                       <span className="text-[10px] text-muted-foreground">
                         {formatTime(msg.createdAt)}
                       </span>

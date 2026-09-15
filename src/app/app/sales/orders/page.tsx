@@ -1,5 +1,8 @@
 import { requirePermission, hasPermission } from '@/modules/auth/authorization';
-import { getSalesOrdersWorkspace } from '@/modules/sales/sales-orders-service';
+import {
+  getSalesOrderFilterOptions,
+  getSalesOrdersWorkspace,
+} from '@/modules/sales/sales-orders-service';
 import { getUserTablePreference } from '@/modules/sales/table-preferences-service';
 import { listTableViews, getDefaultTableView } from '@/modules/sales/table-views-service';
 import { getUnreadNotificationCount } from '@/modules/sales/notifications-service';
@@ -67,11 +70,23 @@ export default async function SalesOrdersPage({
     page_size: params.page_size ? Number(params.page_size) : 50,
   };
 
-  const query = salesOrderQueryStateSchema.parse(queryInput);
+  // A malformed or outdated `filters` param must not crash the page.
+  const parsedQuery = salesOrderQueryStateSchema.safeParse(queryInput);
+  const query = parsedQuery.success
+    ? parsedQuery.data
+    : salesOrderQueryStateSchema.parse({ ...queryInput, filters: { logic: 'AND', rules: [] } });
 
   // Load data server-side
-  const [result, preference, views, defaultView, unreadCount, activeSyncRun, latestSyncRun] =
-    await Promise.all([
+  const [
+    result,
+    preference,
+    views,
+    defaultView,
+    unreadCount,
+    activeSyncRun,
+    latestSyncRun,
+    filterOptions,
+  ] = await Promise.all([
       getSalesOrdersWorkspace(query),
       getUserTablePreference(user.id, SALES_ORDERS_TABLE_KEY),
       listTableViews(user.id, SALES_ORDERS_TABLE_KEY),
@@ -79,6 +94,7 @@ export default async function SalesOrdersPage({
       getUnreadNotificationCount(user.id),
       getActiveSyncRun(),
       getLatestSyncRun(),
+      getSalesOrderFilterOptions(),
     ]);
 
   // Get watched entity IDs for the current page
@@ -91,6 +107,7 @@ export default async function SalesOrdersPage({
   const canExport = hasPermission(user, 'sales_orders.export');
   const canWatch = hasPermission(user, 'sales_orders.watch');
   const canShareViews = hasPermission(user, 'sales_orders.share_views');
+  const canCloseTickets = hasPermission(user, 'sales_orders.close_tickets');
 
   const defaultPreference: TablePreferenceConfig = {
     version: 1,
@@ -115,7 +132,9 @@ export default async function SalesOrdersPage({
       canExport={canExport}
       canWatch={canWatch}
       canShareViews={canShareViews}
+      canCloseTickets={canCloseTickets}
       initialSyncStatus={formatSyncStatus(latestSyncRun, activeSyncRun)}
+      filterOptions={filterOptions}
     />
   );
 }

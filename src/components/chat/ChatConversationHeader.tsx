@@ -1,7 +1,23 @@
 'use client';
 
+import { areaWorkspaceHref, operationsCaseHref } from '@/components/operations/copilot-starters';
 import React from 'react';
-import { ArrowLeft, MoreVertical, Users, Phone, Video, Search, Pin, Sparkles } from 'lucide-react';
+import Link from 'next/link';
+import {
+  ArrowLeft,
+  MoreVertical,
+  Users,
+  Phone,
+  Video,
+  Search,
+  Pin,
+  Sparkles,
+  Building2,
+  Briefcase,
+  FolderOpen,
+  LayoutDashboard,
+} from 'lucide-react';
+import { Button } from '@/components/shadcn/button';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator,
 } from '@/components/shadcn/dropdown-menu';
@@ -40,18 +56,28 @@ export function ChatConversationHeader({
   aiOpen,
   onToggleAi,
 }: ChatConversationHeaderProps) {
-  const isGroup = channel?.type === 'group';
+  const type = channel?.type;
+  const isArea = type === 'area';
+  const isCase = type === 'case';
+  // Area channels and sales rooms: managed by the operations layer (no calls, no settings).
+  const isManaged = isArea || isCase;
+  // Every non-DM channel renders as a multi-party conversation.
+  const isGroup = !!channel && type !== 'dm';
   const otherUser = channel?.members.find((m) => m.userId !== user.id);
   const otherUserOnline = !isGroup && otherUser?.status === 'online';
 
   const getChannelName = () => {
     if (!channel) return '';
     if (channel.type === 'group') return channel.name ?? 'Grupo';
+    if (isArea) return channel.name ?? 'Canal de área';
+    if (isCase) return channel.name ?? 'Sala de venta';
     return otherUser?.name ?? 'Usuario';
   };
 
   const getChannelSubtitle = () => {
     if (!channel) return '';
+    if (isArea) return `Canal de área · ${channel.members.length} miembros`;
+    if (isCase) return `Sala de venta · ${channel.members.length} miembros`;
     if (isGroup) return `${channel.members.length} miembros`;
     if (!otherUser) return '';
     if (otherUser.status === 'online') return 'En línea';
@@ -68,7 +94,16 @@ export function ChatConversationHeader({
           ? 'away'
           : 'offline';
 
-  const canCall = isGroup ? (channel?.members.length ?? 0) <= 8 : true;
+  const canCall = !isManaged && (isGroup ? (channel?.members.length ?? 0) <= 8 : true);
+
+  // Links to the area work center and the case page appear only once those pages exist.
+  const areaHref = isArea ? areaWorkspaceHref(channel?.areaKey) : null;
+  const caseHref = isCase ? operationsCaseHref(channel?.caseId) : null;
+  const workLink = areaHref
+    ? { href: areaHref, label: 'Abrir centro de trabajo', icon: <LayoutDashboard aria-hidden="true" /> }
+    : caseHref
+      ? { href: caseHref, label: 'Ver expediente', icon: <FolderOpen aria-hidden="true" /> }
+      : null;
 
   return (
     <div className="chat-conversation-header">
@@ -86,7 +121,15 @@ export function ChatConversationHeader({
         aria-hidden="true"
       >
         {channel &&
-          (isGroup ? <Users size={18} /> : (otherUser?.name.slice(0, 2).toUpperCase() ?? '??'))}
+          (isArea ? (
+            <Building2 size={18} />
+          ) : isCase ? (
+            <Briefcase size={18} />
+          ) : isGroup ? (
+            <Users size={18} />
+          ) : (
+            (otherUser?.name.slice(0, 2).toUpperCase() ?? '??')
+          ))}
         {otherUserOnline && <span className="chat-presence" />}
       </span>
 
@@ -115,6 +158,14 @@ export function ChatConversationHeader({
       </div>
 
       <div className="chat-conversation-actions">
+        {workLink && (
+          <Button asChild variant="outline" size="sm">
+            <Link href={workLink.href} aria-label={workLink.label} title={workLink.label}>
+              {workLink.icon}
+              <span className="hidden sm:inline">{workLink.label}</span>
+            </Link>
+          </Button>
+        )}
         {onToggleAi && (
           <button
             type="button"
@@ -172,26 +223,40 @@ export function ChatConversationHeader({
           </button>
         )}
 
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button type="button" className="chat-icon-btn" aria-label="Configuración" title="Más opciones">
-              <MoreVertical size={18} />
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem onClick={onShowSettings}>
-              <Users size={16} /> Ver información
-            </DropdownMenuItem>
-            {onShowPinned && (
-              <DropdownMenuItem onClick={onShowPinned}>
-                <Pin size={16} /> Mensajes fijados
-                {pinnedCount && pinnedCount > 0 ? ` (${pinnedCount})` : ''}
+        {isManaged && channel && (
+          <button
+            type="button"
+            className="chat-icon-btn"
+            onClick={onShowSettings}
+            aria-label="Ver miembros"
+            title="Ver miembros"
+          >
+            <Users size={18} />
+          </button>
+        )}
+
+        {!isManaged && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button type="button" className="chat-icon-btn" aria-label="Configuración" title="Más opciones">
+                <MoreVertical size={18} />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={onShowSettings}>
+                <Users size={16} /> Ver información
               </DropdownMenuItem>
-            )}
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={onShowSettings}>Configuración</DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+              {onShowPinned && (
+                <DropdownMenuItem onClick={onShowPinned}>
+                  <Pin size={16} /> Mensajes fijados
+                  {pinnedCount && pinnedCount > 0 ? ` (${pinnedCount})` : ''}
+                </DropdownMenuItem>
+              )}
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={onShowSettings}>Configuración</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
       </div>
     </div>
   );

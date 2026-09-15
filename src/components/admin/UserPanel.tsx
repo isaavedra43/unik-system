@@ -15,6 +15,7 @@ import {
   SimpleFormState,
   updateUserAction,
 } from '@/app/app/admin/users/actions';
+import { SUPER_ADMIN_ROLE_KEY } from '@/modules/auth/constants';
 import { UserView, RoleOption, UserPermissions } from './types';
 
 function CopyButton({ value }: { value: string }) {
@@ -214,6 +215,8 @@ function AssignRolesDrawer({
 }) {
   const [state, formAction, pending] = useActionState(assignRolesAction, simpleInitial);
   const assigned = new Set(user.roles.map((r) => r.id));
+  // The server rejects super_admin for AI users; the drawer does not offer it.
+  const assignable = user.isBot ? roles.filter((role) => role.key !== SUPER_ADMIN_ROLE_KEY) : roles;
 
   return (
     <Drawer
@@ -239,7 +242,13 @@ function AssignRolesDrawer({
         <input type="hidden" name="userId" value={user.id} />
         <div className="form-field">
           <span className="form-label">Roles</span>
-          {roles.map((role) => (
+          {user.isBot ? (
+            <p className="text-muted text-small" style={{ margin: '0 0 0.5rem' }}>
+              Usuario de IA: sus permisos vienen de su rol de agente y nunca puede ser super
+              administrador.
+            </p>
+          ) : null}
+          {assignable.map((role) => (
             <label key={role.id} className="checkbox-row">
               <input
                 type="checkbox"
@@ -378,7 +387,7 @@ function UserRowMenu({
       icon: <Icon name="users" size={16} />,
     });
   }
-  if (permissions.canResetPassword) {
+  if (permissions.canResetPassword && !user.isBot) {
     items.push({
       label: 'Restablecer contraseña',
       onClick: () => onReset(user),
@@ -532,7 +541,19 @@ export function UserPanel({
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                       <Avatar name={user.name} />
                       <div>
-                        <div className="text-strong">{user.name}</div>
+                        <div className="text-strong">
+                          {user.name}
+                          {user.isBot ? (
+                            <Badge
+                              variant="info"
+                              style={{ marginLeft: '0.35rem' }}
+                              className="align-middle"
+                            >
+                              <span aria-hidden="true">IA</span>
+                              <span className="sr-only">Usuario de IA</span>
+                            </Badge>
+                          ) : null}
+                        </div>
                         <div className="text-muted text-small">
                           {user.username} · {user.email ?? 'sin correo'}
                         </div>
@@ -556,7 +577,7 @@ export function UserPanel({
                     >
                       {user.isActive ? 'Activo' : 'Inactivo'}
                     </Badge>
-                    {user.mustChangePassword ? (
+                    {user.mustChangePassword && !user.isBot ? (
                       <Badge variant="warning" style={{ marginLeft: '0.35rem' }}>
                         Cambio pendiente
                       </Badge>

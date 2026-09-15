@@ -8,6 +8,11 @@ tools, permisos, aprobaciones, memoria personal y contexto reciente.
 | Asistente IA | `/app/assistant` (+ widget flotante) | `POST /app/assistant/api/chat` | `null` / `{page}` |
 | Copiloto de bandeja externa | aside en `/app/inbox` | `POST /app/inbox/api/conversations/{id}/copilot` | `inbox_copilot` (`commConversationId`) |
 | Copiloto de chat interno | aside en `/app/chat` | `POST /app/chat/api/channels/{id}/copilot` | `chat_copilot` (`chatChannelId`) |
+| Copiloto de área | centro de trabajo del área | `POST /app/operations/api/areas/{key}/copilot` | `area_copilot` (`areaKey`) |
+| Copiloto de expediente | sala / Expediente 360 | `POST /app/operations/api/cases/{id}/copilot` | `case_copilot` (`caseId`) |
+| Mi trabajo | `/app/mywork` | `POST /app/operations/api/mywork/copilot` | `mywork_copilot` (`userId`) |
+| Control Tower | Administración → Control Tower | `POST /app/admin/control-tower/api/copilot` | `control_tower_copilot` (`scope`) |
+| IA coordinada (bots por área) | salas de venta y canales de área del chat | job `agents.dispatch` → `runAgentTurn` | `case_copilot` / `area_copilot` del usuario bot |
 | Servidor MCP | agentes externos | `POST /api/mcp` | sin hilo (audita como tool calls) |
 
 ## Configuración en un solo lugar
@@ -23,7 +28,31 @@ tools, permisos, aprobaciones, memoria personal y contexto reciente.
   dentro del panel (`PATCH /app/inbox/api/copilot/mode` fue eliminado).
 - Tono, idioma, profundidad, formato, instrucciones personales y memoria.
 
-Servicio: `src/modules/copilot/preferences-service.ts` (`getCopilotMode(userId, 'inbox'|'chat')`).
+- **Copilotos de operaciones** (`surfaceModes`: `mywork`, `area`, `case`, `control_tower`): Mi trabajo nace
+  activo y las demás a petición; `PATCH /app/assistant/api/preferences {surfaceModes: {[superficie]: modo}}` cambia
+  sólo las superficies que nombra.
+
+Servicio: `src/modules/copilot/preferences-service.ts` (`getCopilotMode(userId, 'inbox'|'chat'|'area'|'case'|'mywork'|'control_tower')`).
+
+## IA coordinada por áreas (2026-09-15)
+
+Detalle completo en [`docs/modules/agents.md`](./modules/agents.md). Resumen de lo que cambia en la IA unificada:
+
+- **No es otra IA.** Siete usuarios bot (`ia_ventas`, `ia_compras`, `ia_inventario`, `ia_manufactura`,
+  `ia_logistica`, `ia_contabilidad`, `ia_admin`) corren turnos `⟦auto:…⟧` por `runAssistant` con `context.agent`:
+  prompt base corto, `AGENT_TOOL_ALLOWLIST` del área, `tool_choice: 'required'` en la primera llamada (o
+  `concludeAgentTurn` por nombre si el proveedor no acepta `required`), tope de 4 iteraciones, modelo `routine`,
+  sin rate limit, resumen, aprendizaje ni juez; el consumo se mide por agente, área y expediente.
+- **Superficies nuevas** de copiloto para personas: área, expediente, Mi trabajo y Control Tower, con el mismo
+  `CopilotPanel` (`preferenceKey: 'surfaceModes.<superficie>'`, `context()` por turno, `minAutoIntervalMs`) y la
+  tarjeta de borrador `proposeAreaAction`.
+- **Tools de operaciones** (`agents-tools`, `mywork-tools`, `control-tower-tools`, categoría `operations`): lecturas,
+  tareas internas automáticas y escrituras de negocio como propuesta; dominio `operations` en `tool-selector.ts`.
+  La IA administradora usa las de Control Tower por `allowActor` sin tener `operations.admin`.
+- **Aprobación por alcance**: `approverScope` en `AiProposal` (responsable y suplente del área); los bots nunca
+  deciden; una propuesta de bot aprobada que falla despierta al bot una vez (`action_failed`).
+- **Chat**: salas de venta y canales de área con bots, tarjetas de solicitud/propuesta y respuesta a @menciones.
+- `ai-conversation-summary.ts` etiqueta los hilos de área, expediente, Mi trabajo y Control Tower.
 
 ## Contexto compartido
 

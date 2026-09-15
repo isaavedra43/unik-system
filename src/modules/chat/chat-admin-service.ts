@@ -129,8 +129,10 @@ interface ChatTopUser {
 }
 
 export async function getTopChatUsers(limit = 10): Promise<ChatTopUser[]> {
+  // Ranking of people: AI bot users (template posts) would crowd it out.
   const users = await prisma.user.findMany({
     where: {
+      isBot: false,
       chatMessages: { some: {} },
     },
     select: {
@@ -338,6 +340,7 @@ interface AdminUserActivity {
   channelCount: number;
   attachmentCount: number;
   lastActivity: string | null;
+  isBot: boolean;
 }
 
 export async function listChatUsers(): Promise<AdminUserActivity[]> {
@@ -350,6 +353,7 @@ export async function listChatUsers(): Promise<AdminUserActivity[]> {
       name: true,
       username: true,
       email: true,
+      isBot: true,
       _count: {
         select: {
           chatMessages: true,
@@ -386,6 +390,7 @@ export async function listChatUsers(): Promise<AdminUserActivity[]> {
     channelCount: u._count.chatMemberships,
     attachmentCount: attachmentMap.get(u.id) ?? 0,
     lastActivity: u.chatMessages[0]?.createdAt.toISOString() ?? null,
+    isBot: u.isBot,
   }));
 }
 
@@ -633,8 +638,11 @@ export async function getSuspendedUserIds(): Promise<Set<string>> {
 }
 
 export async function suspendUser(actor: CurrentUser, userId: string): Promise<void> {
-  const user = await prisma.user.findUnique({ where: { id: userId }, select: { id: true, name: true } });
+  const user = await prisma.user.findUnique({ where: { id: userId }, select: { id: true, name: true, isBot: true } });
   if (!user) throw new Error('Usuario no encontrado');
+  if (user.isBot) {
+    throw new Error('Los usuarios de IA no se suspenden del chat; pausa su identidad desde la administración de agentes');
+  }
 
   const current = await getSuspendedUserIds();
   if (current.has(userId)) throw new Error('El usuario ya está suspendido');

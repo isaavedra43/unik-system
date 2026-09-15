@@ -3,10 +3,11 @@ import { prisma } from '@/lib/prisma';
 import { registerJobHandler, JOB_PRIORITY } from '@/modules/jobs/job-queue';
 import { registerRecurringJob } from '@/modules/jobs/scheduled-jobs';
 import { publishRealtime, REALTIME_CHANNELS } from '@/modules/realtime/realtime-service';
+import { isKnownPermission } from '@/modules/auth/permissions';
 import { saveGeneratedFile } from '@/modules/storage/storage-service';
 import { getChannelAdapter, hasMediaFetcher } from './adapters';
 import { markOverdueCommitments } from './commitments-service';
-import { COMMS_PROCESS_INBOUND_JOB } from './comms-service';
+import { COMMS_MESSAGE_FANOUT_JOB, COMMS_PROCESS_INBOUND_JOB } from './comms-service';
 import './comms-storage';
 
 /**
@@ -17,12 +18,97 @@ import './comms-storage';
  *                                 the object storage (purpose comm_media).
  * - comms.commitments_overdue  → hourly: marks due commitments as overdue
  *                                 and notifies their owners.
+ * - comms.message_fanout       → per stored message (inbound, or outbound after
+ *                                 sending; dedupe `fanout:{messageId}`): the CRM
+ *                                 touch of the conversation's opportunities and,
+ *                                 for inbound replies in conversations tagged
+ *                                 `rfq:*`, the RFQ reply interpretation.
  *
  * Importing this file also registers the channel adapters and the storage
  * resolvers (upload target `comm_conversation`, access for `comm_media`).
  */
 
 export const COMMS_COMMITMENTS_OVERDUE_JOB = 'comms.commitments_overdue';
+
+/** Conversations of a request for quotation carry the tag `rfq:{rfqId}`. */
+export const RFQ_CONVERSATION_TAG_PREFIX = 'rfq:';
+
+/** Receivers of the fan-out (loaded on demand so messaging does not load CRM or purchases). */
+export interface MessageFanoutDeps {
+  touchConversation(messageId: string): Promise<unknown>;
+  interpretRfqReplyIfTagged(messageId: string): Promise<unknown>;
+}
+
+/** Result of a receiver whose module is not installed (its permissions are not registered): nothing to retry. */
+export const FANOUT_RECEIVER_NOT_INSTALLED = { skipped: 'module_not_installed' } as const;
+
+export const defaultMessageFanoutDeps: MessageFanoutDeps = {
+  async touchConversation(messageId) {
+    // Loading a module whose permission keys are not in the registry throws at import: never retry for that.
+    if (!isKnownPermission('crm.view')) return FANOUT_RECEIVER_NOT_INSTALLED;
+    const { touchConversation } = await import('@/modules/crm/opportunities-service');
+    return touchConversation(messageId);
+  },
+  async interpretRfqReplyIfTagged(messageId) {
+    if (!isKnownPermission('purchases.view')) return FANOUT_RECEIVER_NOT_INSTALLED;
+    const { interpretRfqReplyIfTagged } = await import('@/modules/purchases/rfq-service');
+    return interpretRfqReplyIfTagged(messageId);
+  },
+};
+
+export interface MessageFanoutResult {
+  messageId: string;
+  skipped?: 'missing';
+  crm: 'done' | 'skipped';
+  rfq: 'done' | 'not_tagged' | 'outbound';
+}
+
+const describeError = (error: unknown) => (error instanceof Error ? error.message : String(error));
+
+/**
+ * Runs both receivers even when one fails, then throws so the queue retries the
+ * job; both receivers are idempotent per message (the CRM touch through its
+ * command ledger).
+ */
+export async function runMessageFanout(
+  messageId: string,
+  deps: MessageFanoutDeps = defaultMessageFanoutDeps
+): Promise<MessageFanoutResult> {
+  const message = await prisma.commMessage.findUnique({
+    where: { id: messageId },
+    select: { id: true, direction: true, conversation: { select: { tags: true } } },
+  });
+  if (!message) return { messageId, skipped: 'missing', crm: 'skipped', rfq: 'not_tagged' };
+  const errors: string[] = [];
+  const tagged = message.conversation.tags.some((tag) => tag.startsWith(RFQ_CONVERSATION_TAG_PREFIX));
+  const rfq: MessageFanoutResult['rfq'] = !tagged ? 'not_tagged' : message.direction === 'inbound' ? 'done' : 'outbound';
+  if (rfq === 'done') {
+    try {
+      await deps.interpretRfqReplyIfTagged(messageId);
+    } catch (error) {
+      errors.push(`RFQ: ${describeError(error)}`);
+    }
+  }
+  try {
+    await deps.touchConversation(messageId);
+  } catch (error) {
+    errors.push(`CRM: ${describeError(error)}`);
+  }
+  if (errors.length > 0) {
+    throw new Error(`Fan-out incompleto del mensaje ${messageId}: ${errors.join(' | ')}`);
+  }
+  return { messageId, crm: 'done', rfq };
+}
+
+registerJobHandler<{ messageId: string }>(
+  COMMS_MESSAGE_FANOUT_JOB,
+  async (ctx) => {
+    const result = await runMessageFanout(ctx.payload.messageId);
+    ctx.log('fanout', { crm: result.crm, rfq: result.rfq, skipped: result.skipped ?? null });
+    return result;
+  },
+  { timeoutMs: 2 * 60 * 1000 }
+);
 
 interface PendingMedia {
   url: string;

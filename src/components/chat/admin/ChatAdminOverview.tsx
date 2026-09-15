@@ -11,7 +11,8 @@ import {
   Calendar,
   BarChart3,
 } from 'lucide-react';
-import { ChatAdminStatCard } from './ChatAdminStatCard';
+import { KpiGrid } from '@/components/patterns/dashboard/KpiGrid';
+import { StatCard } from '@/components/patterns/dashboard/StatCard';
 
 interface StatsData {
   stats: {
@@ -71,50 +72,50 @@ export function ChatAdminOverview() {
 
   return (
     <div className="chat-admin-overview">
-      <div className="chat-admin-stat-grid">
-        <ChatAdminStatCard
+      <KpiGrid columns={4} className="mb-6">
+        <StatCard
           label="Total canales"
           value={s.totalChannels.toLocaleString('es-MX')}
           icon={<Hash size={20} />}
         />
-        <ChatAdminStatCard
+        <StatCard
           label="Total mensajes"
           value={s.totalMessages.toLocaleString('es-MX')}
           icon={<MessageSquare size={20} />}
         />
-        <ChatAdminStatCard
+        <StatCard
           label="Mensajes 24h"
           value={s.messages24h.toLocaleString('es-MX')}
           icon={<Activity size={20} />}
         />
-        <ChatAdminStatCard
+        <StatCard
           label="Usuarios activos 24h"
           value={s.activeUsers24h.toLocaleString('es-MX')}
           icon={<Users size={20} />}
         />
-        <ChatAdminStatCard
+        <StatCard
           label="Encuestas"
           value={s.totalPolls.toLocaleString('es-MX')}
           icon={<BarChart3 size={20} />}
         />
-        <ChatAdminStatCard
+        <StatCard
           label="Eventos"
           value={s.totalEvents.toLocaleString('es-MX')}
           icon={<Calendar size={20} />}
         />
-        <ChatAdminStatCard
+        <StatCard
           label="Menciones no leídas"
           value={s.unreadMentions.toLocaleString('es-MX')}
           icon={<AtSign size={20} />}
           tone={s.unreadMentions > 0 ? 'warning' : 'default'}
         />
-        <ChatAdminStatCard
+        <StatCard
           label="Alertas activas"
           value={s.activeAlerts.toLocaleString('es-MX')}
           icon={<AlertTriangle size={20} />}
           tone={s.activeAlerts > 0 ? 'danger' : 'default'}
         />
-      </div>
+      </KpiGrid>
 
       <div className="chat-admin-section">
         <h3 className="chat-admin-section-title">Mensajes por día (30 días)</h3>

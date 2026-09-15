@@ -12,7 +12,8 @@ import {
   AlertCircle,
   CheckCircle2,
 } from 'lucide-react';
-import { AssistantAdminStatCard } from '@/components/assistant/admin/AssistantAdminStatCard';
+import { KpiGrid } from '@/components/patterns/dashboard/KpiGrid';
+import { StatCard } from '@/components/patterns/dashboard/StatCard';
 
 /**
  * Storage administration panel. Reuses the assistant-admin design classes so
@@ -274,8 +275,8 @@ export function FilesAdminPanel() {
       <div className="assistant-admin-tab-content">
         {activeTab === 'overview' && (
           <div className="assistant-admin-overview">
-            <div className="assistant-admin-stat-grid">
-              <AssistantAdminStatCard
+            <KpiGrid columns={3} className="mb-6">
+              <StatCard
                 label="Proveedor"
                 value={overview.driver === 'r2' ? 'Cloudflare R2' : 'Disco local'}
                 hint={
@@ -286,31 +287,31 @@ export function FilesAdminPanel() {
                 icon={<HardDrive size={20} />}
                 tone={overview.driver === 'disk' ? 'warning' : 'success'}
               />
-              <AssistantAdminStatCard
+              <StatCard
                 label="Objetos"
                 value={t.objects.toLocaleString('es-MX')}
                 hint={`${t.byStatus.ready ?? 0} listos`}
                 icon={<Database size={20} />}
               />
-              <AssistantAdminStatCard
+              <StatCard
                 label="Almacenado (listos)"
                 value={formatBytes(t.readyBytes)}
                 icon={<Archive size={20} />}
               />
-              <AssistantAdminStatCard
+              <StatCard
                 label="Cargas en curso"
                 value={t.pendingUploads}
                 hint="Se abortan a las 24 h"
                 icon={<Upload size={20} />}
               />
-              <AssistantAdminStatCard
+              <StatCard
                 label="Archivos heredados sin migrar"
                 value={legacyTotal.toLocaleString('es-MX')}
                 hint={`IA ${t.legacyReferences.aiAttachments} · Chat ${t.legacyReferences.chatAttachments} · Artefactos ${t.legacyReferences.aiArtifacts}`}
                 icon={<RefreshCw size={20} />}
                 tone={legacyTotal > 0 ? 'warning' : 'success'}
               />
-              <AssistantAdminStatCard
+              <StatCard
                 label="Respaldo"
                 value={
                   overview.backup?.lastRunAt
@@ -325,7 +326,7 @@ export function FilesAdminPanel() {
                 icon={<ShieldCheck size={20} />}
                 tone={overview.backupConfigured ? 'default' : 'warning'}
               />
-            </div>
+            </KpiGrid>
 
             <div className="assistant-admin-section">
               <h3 className="assistant-admin-section-title">Por estado</h3>
@@ -411,15 +412,11 @@ export function FilesAdminPanel() {
                   Último modo: <strong>{overview.migration.mode}</strong> · actualizado{' '}
                   {new Date(overview.migration.updatedAt).toLocaleString('es-MX')}
                 </div>
-                <div className="assistant-admin-stat-grid">
+                <KpiGrid columns={3} className="mb-6">
                   {Object.entries(overview.migration.totals).map(([k, v]) => (
-                    <AssistantAdminStatCard
-                      key={k}
-                      label={k}
-                      value={k === 'bytes' ? formatBytes(v) : v}
-                    />
+                    <StatCard key={k} label={k} value={k === 'bytes' ? formatBytes(v) : v} />
                   ))}
-                </div>
+                </KpiGrid>
               </div>
             )}
             {overview.reconcile && (
@@ -512,11 +509,11 @@ export function FilesAdminPanel() {
         {activeTab === 'jobs' && (
           <div className="assistant-admin-section">
             <h3 className="assistant-admin-section-title">Trabajos de segundo plano</h3>
-            <div className="assistant-admin-stat-grid">
+            <KpiGrid columns={3} className="mb-6">
               {Object.entries(overview.jobs).map(([status, count]) => (
-                <AssistantAdminStatCard key={status} label={status} value={count} />
+                <StatCard key={status} label={status} value={count} />
               ))}
-            </div>
+            </KpiGrid>
             <div className="assistant-admin-table-wrap">
               <table className="assistant-admin-table">
                 <thead>

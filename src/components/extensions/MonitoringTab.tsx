@@ -11,6 +11,8 @@ import {
   XCircle,
   Zap,
 } from 'lucide-react';
+import { KpiGrid } from '@/components/patterns/dashboard/KpiGrid';
+import { StatCard } from '@/components/patterns/dashboard/StatCard';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -183,32 +185,27 @@ export function MonitoringTab({ extensions }: { extensions: ExtensionRow[] }) {
       </div>
 
       {/* Overall stats */}
-      <div className="monitoring-stats-grid">
-        <MonitoringStatCard
-          icon={<Zap size={20} />}
-          label="Llamadas totales"
-          value={overall.totalCalls}
-          color="var(--unik-brand)"
-        />
-        <MonitoringStatCard
+      <KpiGrid columns={4}>
+        <StatCard icon={<Zap size={20} />} label="Llamadas totales" value={overall.totalCalls} />
+        <StatCard
           icon={<CheckCircle2 size={20} />}
           label="Exitosas"
           value={overall.totalSuccess}
-          color="var(--unik-success, #16a34a)"
+          tone={overall.totalSuccess > 0 ? 'success' : 'default'}
         />
-        <MonitoringStatCard
+        <StatCard
           icon={<XCircle size={20} />}
           label="Fallidas"
           value={overall.totalFailed}
-          color="var(--unik-danger)"
+          tone={overall.totalFailed > 0 ? 'danger' : 'default'}
         />
-        <MonitoringStatCard
+        {/* Sin umbral de latencia definido: métrica neutra, sin tono de estado. */}
+        <StatCard
           icon={<Clock size={20} />}
           label="Latencia promedio"
           value={`${overall.avgLatency} ms`}
-          color="var(--unik-warning, #f59e0b)"
         />
-      </div>
+      </KpiGrid>
 
       {/* Per-extension health */}
       <div className="monitoring-section">
@@ -362,34 +359,6 @@ export function MonitoringTab({ extensions }: { extensions: ExtensionRow[] }) {
             </table>
           </div>
         )}
-      </div>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Stat card
-// ---------------------------------------------------------------------------
-
-function MonitoringStatCard({
-  icon,
-  label,
-  value,
-  color,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  value: string | number;
-  color: string;
-}) {
-  return (
-    <div className="monitoring-stat-card">
-      <div className="monitoring-stat-icon" style={{ color }}>
-        {icon}
-      </div>
-      <div className="monitoring-stat-body">
-        <div className="monitoring-stat-value">{value}</div>
-        <div className="monitoring-stat-label">{label}</div>
       </div>
     </div>
   );

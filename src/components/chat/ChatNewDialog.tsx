@@ -16,6 +16,7 @@ import { Button } from '@/components/shadcn/button';
 import { Avatar, AvatarFallback } from '@/components/shadcn/avatar';
 import { ScrollArea } from '@/components/shadcn/scroll-area';
 import { cn } from '@/lib/utils';
+import { ChatBotBadge } from './ChatBotBadge';
 
 export interface ChatNewDialogProps {
   onClose: () => void;
@@ -28,6 +29,7 @@ interface UserSearchResult {
   username: string;
   email: string | null;
   status: string;
+  isBot?: boolean;
 }
 
 export function ChatNewDialog({ onClose, onChannelCreated }: ChatNewDialogProps) {
@@ -59,6 +61,8 @@ export function ChatNewDialog({ onClose, onChannelCreated }: ChatNewDialogProps)
   }, [search]);
 
   const toggleSelect = (user: UserSearchResult) => {
+    // AI users only live in area channels and sales rooms (the server rejects them too).
+    if (user.isBot) return;
     if (mode === 'dm') {
       setSelected([user]);
     } else {
@@ -187,9 +191,12 @@ export function ChatNewDialog({ onClose, onChannelCreated }: ChatNewDialogProps)
                   className={cn(
                     'flex items-center gap-3 rounded-md p-2 text-left transition-colors',
                     'hover:bg-accent focus:bg-accent focus:outline-none',
-                    isSelected && 'bg-accent'
+                    isSelected && 'bg-accent',
+                    user.isBot && 'cursor-not-allowed opacity-70 hover:bg-transparent'
                   )}
                   onClick={() => toggleSelect(user)}
+                  disabled={user.isBot}
+                  aria-disabled={user.isBot || undefined}
                 >
                   <div className="relative">
                     <Avatar className="size-9">
@@ -202,8 +209,14 @@ export function ChatNewDialog({ onClose, onChannelCreated }: ChatNewDialogProps)
                     )}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <div className="text-sm font-medium text-foreground truncate">{user.name}</div>
-                    <div className="text-xs text-muted-foreground truncate">@{user.username}</div>
+                    <div className="flex items-center gap-1.5 text-sm font-medium text-foreground">
+                      <span className="truncate">{user.name}</span>
+                      {user.isBot && <ChatBotBadge withIcon />}
+                    </div>
+                    <div className="text-xs text-muted-foreground truncate">
+                      @{user.username}
+                      {user.isBot && ' · menciónala en el canal de su área o en la sala de venta'}
+                    </div>
                   </div>
                   {isSelected && <Check size={18} className="text-primary shrink-0" />}
                 </button>

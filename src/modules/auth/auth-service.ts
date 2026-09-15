@@ -45,7 +45,9 @@ export async function login(identifier: string, password: string): Promise<Login
     return { ok: false, error: GENERIC_LOGIN_ERROR };
   }
 
-  if (!user.isActive) {
+  // Bot users of the agents layer never sign in (their hash is unusable anyway);
+  // same timing and generic message as an inactive account.
+  if (!user.isActive || user.isBot) {
     await verifyPassword(password, DUMMY_HASH);
     return { ok: false, error: GENERIC_LOGIN_ERROR };
   }
@@ -101,7 +103,7 @@ export async function changeOwnPassword(
   newPassword: string
 ): Promise<ChangeOwnPasswordResult> {
   const user = await prisma.user.findUnique({ where: { id: userId } });
-  if (!user || !user.isActive) {
+  if (!user || !user.isActive || user.isBot) {
     return { ok: false, error: 'Sesión inválida' };
   }
 

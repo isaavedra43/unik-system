@@ -1,11 +1,14 @@
 'use client';
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { ChatBotBadge } from './ChatBotBadge';
 
 export interface ChatMentionMember {
   userId: string;
   name: string;
   username: string;
+  /** AI (bot) member: mentioning it asks that area's AI to act. */
+  isBot?: boolean;
 }
 
 export interface ChatMentionPickerProps {
@@ -109,6 +112,7 @@ export function ChatMentionPicker({
           }}
         >
           <span className="chat-mention-name">{member.name}</span>
+          {member.isBot && <ChatBotBadge withIcon />}
           <span className="chat-mention-username">@{member.username}</span>
         </button>
       ))}

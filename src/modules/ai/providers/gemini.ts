@@ -14,6 +14,9 @@ import { getProviderConfig } from '../ai-config';
  *
  * When activated, this will use the `@google/generative-ai` package and adapt
  * the OpenAI-style messages/tools to Gemini's format.
+ * opts.toolChoice → `toolConfig` via `toGeminiToolConfig` (tool-choice.ts): 'required' →
+ * functionCallingConfig mode "ANY", forced function → "ANY" + allowedFunctionNames, 'auto' → omitted.
+ * While this is a stub every call throws before building a request, so toolChoice is ignored safely.
  *
  * Data privacy: Google does NOT train on Gemini API data by default.
  * See https://ai.google.dev/gemini-api/data

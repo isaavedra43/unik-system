@@ -15,6 +15,7 @@ import { recordAiApiCall } from '../ai-audit';
 import { getProviderConfig } from '../ai-config';
 import { getModelById } from '../model-catalog';
 import { createThinkFilter, stripThink } from './think-filter';
+import { toOpenAiToolChoice, toolNamesOf } from './tool-choice';
 
 /**
  * Provider for any OpenAI-compatible inference API (Canopy Wave, vLLM/SGLang hosts…).
@@ -141,10 +142,13 @@ export function createOpenAiCompatibleProvider(options: OpenAiCompatibleOptions)
       const c = await getClient();
       const start = Date.now();
       try {
+        const tools = toTools(opts.tools);
+        const toolChoice = toOpenAiToolChoice(opts.toolChoice, toolNamesOf(tools));
         const response = await c.chat.completions.create({
           model,
           messages: adaptMessagesForModel(opts.messages, supportsVision(model)) as unknown as OpenAI.Chat.Completions.ChatCompletionMessageParam[],
-          tools: toTools(opts.tools),
+          tools,
+          ...(toolChoice ? { tool_choice: toolChoice } : {}),
           temperature: opts.temperature ?? 0.3,
           max_tokens: opts.maxTokens ?? 2000,
         });
@@ -201,13 +205,12 @@ export function createOpenAiCompatibleProvider(options: OpenAiCompatibleOptions)
       const start = Date.now();
       try {
         const tools = toTools(opts.tools);
-        const choice = opts.toolChoice && opts.toolChoice !== 'auto' ? opts.toolChoice : null;
-        const forced = choice && tools?.some((t) => t.type === 'function' && t.function.name === choice.function.name) ? choice : null;
+        const toolChoice = toOpenAiToolChoice(opts.toolChoice, toolNamesOf(tools));
         const stream = await c.chat.completions.create({
           model,
           messages: adaptMessagesForModel(opts.messages, supportsVision(model)) as unknown as OpenAI.Chat.Completions.ChatCompletionMessageParam[],
           tools,
-          ...(forced ? { tool_choice: forced } : {}),
+          ...(toolChoice ? { tool_choice: toolChoice } : {}),
           temperature: opts.temperature ?? 0.3,
           max_tokens: opts.maxTokens ?? 2000,
           stream: true,

@@ -31,6 +31,8 @@ export interface ChatBroadcastDialogProps {
 function getChannelDisplayName(c: Channel): string {
   if (c.name) return c.name;
   if (c.type === 'group') return 'Grupo';
+  if (c.type === 'area') return 'Canal de área';
+  if (c.type === 'case') return 'Sala de venta';
   // DM — derive name from the other member
   const otherMember = c.members?.[0];
   return otherMember?.name ?? 'Chat';
@@ -137,7 +139,7 @@ export function ChatBroadcastDialog({ onClose, onSent }: ChatBroadcastDialogProp
                       >
                         <Avatar className="size-8">
                           <AvatarFallback className="text-xs font-semibold">
-                            {c.type === 'group' ? (
+                            {c.type !== 'dm' ? (
                               <Users size={14} />
                             ) : (
                               displayName.slice(0, 2).toUpperCase()

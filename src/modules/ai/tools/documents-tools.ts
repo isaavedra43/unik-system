@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
+import { parseJsonObject } from '../json-utils';
 import { registerTool } from './registry';
 import { chatCompletion, type ContentPart } from '../ai-client';
 import { getAiSettings } from '../ai-admin-config-service';
@@ -89,15 +90,6 @@ const EXTRACTION_SYSTEM_PROMPT = `Eres un extractor de datos de documentos comer
 Devuelve SOLO un objeto JSON válido, sin texto adicional ni bloques de código, con esta forma exacta:
 {"documentType": string|null, "issuer": {"name","rfc","address","phone","email"}, "receiver": {"name","rfc"}, "folio": string|null, "series": string|null, "uuid": string|null, "date": "YYYY-MM-DD"|null, "dueDate": "YYYY-MM-DD"|null, "currency": "MXN"|"USD"|null, "items": [{"description","sku","quantity","unit","unitPrice","amount"}], "subtotal": number|null, "taxes": [{"name","rate","amount"}], "total": number|null, "paymentMethod": string|null, "paymentTerms": string|null, "notes": string|null, "confidence": 0..1, "warnings": [string]}
 Reglas: usa null cuando un dato no aparece (nunca inventes); los importes son números sin símbolos; el RFC va en mayúsculas; si hay varios impuestos lista cada uno; en "warnings" indica ilegibilidades, totales que no cuadran o campos dudosos; "confidence" refleja qué tan legible y completo fue el documento.`;
-
-/** Extracts the first JSON object of a model answer (tolerates code fences and prose). */
-export function parseJsonObject(text: string): unknown {
-  const cleaned = text.replace(/```(?:json)?/gi, '').trim();
-  const start = cleaned.indexOf('{');
-  const end = cleaned.lastIndexOf('}');
-  if (start < 0 || end <= start) throw new Error('El modelo no devolvió JSON');
-  return JSON.parse(cleaned.slice(start, end + 1));
-}
 
 async function extractFromAttachment(
   actorId: string,

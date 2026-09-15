@@ -31,7 +31,12 @@ import type { PackageDetail } from './packages-contract';
  */
 
 export class PackageShippingError extends Error {
-  constructor(message: string, public readonly status = 400) {
+  constructor(
+    message: string,
+    public readonly status = 400,
+    /** HTTP status Zoho answered, when the error comes from Zoho. */
+    public readonly upstreamStatus?: number
+  ) {
     super(message);
     this.name = 'PackageShippingError';
   }
@@ -43,7 +48,13 @@ export const shipmentInputSchema = z.object({
   carrier: z.string().trim().min(1, 'Elige o escribe el transportista').max(100),
   date: isoDay,
   trackingNumber: z.string().trim().max(100).optional().or(z.literal('')),
-  trackingUrl: z.string().trim().max(500).url('URL de seguimiento inválida').optional().or(z.literal('')),
+  trackingUrl: z
+    .string()
+    .trim()
+    .max(500)
+    .url('URL de seguimiento inválida')
+    .optional()
+    .or(z.literal('')),
   shippingCharge: z.coerce.number().min(0).optional().nullable(),
   notes: z.string().trim().max(2000).optional().or(z.literal('')),
   /** "Envío ya entregado" */
@@ -58,9 +69,20 @@ export const packageEditSchema = z.object({
 });
 export type PackageEditInput = z.infer<typeof packageEditSchema>;
 
-interface Actor { id: string }
+interface Actor {
+  id: string;
+}
 
-const PKG_SELECT = { id: true, zohoPackageId: true, zohoSalesOrderId: true, zohoShipmentId: true, shipmentNumber: true, packageNumber: true, status: true, date: true } as const;
+const PKG_SELECT = {
+  id: true,
+  zohoPackageId: true,
+  zohoSalesOrderId: true,
+  zohoShipmentId: true,
+  shipmentNumber: true,
+  packageNumber: true,
+  status: true,
+  date: true,
+} as const;
 
 /** Zoho demands `line_items` on every package update: take them from the last detail Zoho sent us. */
 async function currentLineItems(zohoPackageId: string) {
@@ -75,7 +97,11 @@ async function currentLineItems(zohoPackageId: string) {
 async function loadPackage(id: string) {
   const pkg = await prisma.package.findUnique({ where: { id }, select: PKG_SELECT });
   if (!pkg) throw new PackageShippingError('Paquete no encontrado', 404);
-  if (!pkg.zohoSalesOrderId) throw new PackageShippingError('El paquete no tiene orden de venta en Zoho; no se puede enviar desde aquí.', 409);
+  if (!pkg.zohoSalesOrderId)
+    throw new PackageShippingError(
+      'El paquete no tiene orden de venta en Zoho; no se puede enviar desde aquí.',
+      409
+    );
   return pkg;
 }
 
@@ -83,8 +109,10 @@ function zohoMessage(error: unknown, fallback: string): PackageShippingError {
   if (error instanceof PackageShippingError) return error;
   if (error instanceof ZohoApiError) {
     const msg = error.zohoMessage ?? `Zoho respondió ${error.httpStatus ?? 'con error'}`;
-    const hint = /shipment_number|número de env/i.test(msg) ? ' Activa la numeración automática de órdenes de envío en Zoho (icono de engrane junto al número).' : '';
-    return new PackageShippingError(`${fallback}: ${msg}${hint}`, 502);
+    const hint = /shipment_number|número de env/i.test(msg)
+      ? ' Activa la numeración automática de órdenes de envío en Zoho (icono de engrane junto al número).'
+      : '';
+    return new PackageShippingError(`${fallback}: ${msg}${hint}`, 502, error.httpStatus);
   }
   if (error instanceof Error && error.message.startsWith('Invalid or missing Zoho')) {
     return new PackageShippingError('Faltan credenciales de Zoho en el servidor.', 503);
@@ -93,7 +121,10 @@ function zohoMessage(error: unknown, fallback: string): PackageShippingError {
 }
 
 /** After a Zoho write: re-read the package so the DB mirrors Zoho. Falls back to a local patch. */
-async function readBackOrPatch(id: string, patch: Prisma.PackageUpdateInput): Promise<'zoho' | 'local'> {
+async function readBackOrPatch(
+  id: string,
+  patch: Prisma.PackageUpdateInput
+): Promise<'zoho' | 'local'> {
   const outcome = await refreshPackageOnDemand(id, { force: true });
   if (outcome.status === 'refreshed') return 'zoho';
   await prisma.package.update({ where: { id }, data: { ...patch, lastDetailFetchedAt: null } });
@@ -109,13 +140,31 @@ async function finish(id: string): Promise<PackageDetail> {
 /** Carrier names seen in Zoho shipments (the manual carrier list is not exposed by the API). */
 export async function getCarrierOptions(): Promise<string[]> {
   const [byCarrier, byMethod] = await Promise.all([
-    prisma.package.groupBy({ by: ['carrier'], where: { carrier: { not: null } }, _count: { _all: true }, orderBy: { _count: { carrier: 'desc' } }, take: 100 }),
-    prisma.package.groupBy({ by: ['deliveryMethod'], where: { deliveryMethod: { not: null } }, _count: { _all: true }, orderBy: { _count: { deliveryMethod: 'desc' } }, take: 100 }),
+    prisma.package.groupBy({
+      by: ['carrier'],
+      where: { carrier: { not: null } },
+      _count: { _all: true },
+      orderBy: { _count: { carrier: 'desc' } },
+      take: 100,
+    }),
+    prisma.package.groupBy({
+      by: ['deliveryMethod'],
+      where: { deliveryMethod: { not: null } },
+      _count: { _all: true },
+      orderBy: { _count: { deliveryMethod: 'desc' } },
+      take: 100,
+    }),
   ]);
   const names = new Map<string, number>();
-  for (const r of byCarrier) if (r.carrier?.trim()) names.set(r.carrier.trim(), (names.get(r.carrier.trim()) ?? 0) + r._count._all);
-  for (const r of byMethod) if (r.deliveryMethod?.trim() && !names.has(r.deliveryMethod.trim())) names.set(r.deliveryMethod.trim(), r._count._all);
-  return [...names.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([n]) => n);
+  for (const r of byCarrier)
+    if (r.carrier?.trim())
+      names.set(r.carrier.trim(), (names.get(r.carrier.trim()) ?? 0) + r._count._all);
+  for (const r of byMethod)
+    if (r.deliveryMethod?.trim() && !names.has(r.deliveryMethod.trim()))
+      names.set(r.deliveryMethod.trim(), r._count._all);
+  return [...names.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .map(([n]) => n);
 }
 
 /** Creates the shipment order (first time) or updates it (already shipped). */
@@ -139,18 +188,33 @@ export async function shipPackage(actor: Actor, id: string, raw: unknown): Promi
   try {
     if (!mock) {
       const response = creating
-        ? await createShipmentOrder({ packageId: pkg.zohoPackageId, salesOrderId: pkg.zohoSalesOrderId!, input: zohoInput })
-        : await updateShipmentOrder({ shipmentId: pkg.zohoShipmentId!, packageId: pkg.zohoPackageId, salesOrderId: pkg.zohoSalesOrderId!, input: zohoInput });
+        ? await createShipmentOrder({
+            packageId: pkg.zohoPackageId,
+            salesOrderId: pkg.zohoSalesOrderId!,
+            input: zohoInput,
+          })
+        : await updateShipmentOrder({
+            shipmentId: pkg.zohoShipmentId!,
+            packageId: pkg.zohoPackageId,
+            salesOrderId: pkg.zohoSalesOrderId!,
+            input: zohoInput,
+          });
       const so = extractShipmentOrder(response);
       shipmentId = so?.shipment_id ?? shipmentId;
       shipmentNumber = so?.shipment_number ?? shipmentNumber;
-      if (input.delivered && shipmentId) await markShipmentDelivered(shipmentId, input.deliveryDate || input.date);
+      if (input.delivered && shipmentId)
+        await markShipmentDelivered(shipmentId, input.deliveryDate || input.date);
     } else {
       shipmentId = shipmentId ?? `mock-${Date.now()}`;
       shipmentNumber = shipmentNumber ?? `NE-MOCK-${pkg.packageNumber ?? pkg.id.slice(-5)}`;
     }
   } catch (error) {
-    throw zohoMessage(error, creating ? 'No se pudo crear la orden de envío en Zoho' : 'No se pudo actualizar la orden de envío en Zoho');
+    throw zohoMessage(
+      error,
+      creating
+        ? 'No se pudo crear la orden de envío en Zoho'
+        : 'No se pudo actualizar la orden de envío en Zoho'
+    );
   }
 
   const patch: Prisma.PackageUpdateInput = {
@@ -165,7 +229,9 @@ export async function shipPackage(actor: Actor, id: string, raw: unknown): Promi
     shipmentNumber,
     status: input.delivered ? 'delivered' : 'shipped',
     shipmentStatus: input.delivered ? 'delivered' : 'shipped',
-    deliveryDate: input.delivered ? new Date(`${input.deliveryDate || input.date}T00:00:00.000Z`) : null,
+    deliveryDate: input.delivered
+      ? new Date(`${input.deliveryDate || input.date}T00:00:00.000Z`)
+      : null,
   };
   if (mock) await prisma.package.update({ where: { id }, data: patch });
   else source = await readBackOrPatch(id, patch);
@@ -175,15 +241,33 @@ export async function shipPackage(actor: Actor, id: string, raw: unknown): Promi
     action: creating ? 'packages.shipped' : 'packages.shipment_updated',
     targetType: 'Package',
     targetId: id,
-    metadata: { zohoPackageId: pkg.zohoPackageId, zohoShipmentId: shipmentId, carrier: input.carrier, date: input.date, delivered: input.delivered, source },
+    metadata: {
+      zohoPackageId: pkg.zohoPackageId,
+      zohoShipmentId: shipmentId,
+      carrier: input.carrier,
+      date: input.date,
+      delivered: input.delivered,
+      source,
+    },
   });
   return finish(id);
 }
 
-export async function markPackageDelivered(actor: Actor, id: string, deliveredDate?: string | null): Promise<PackageDetail> {
+export async function markPackageDelivered(
+  actor: Actor,
+  id: string,
+  deliveredDate?: string | null
+): Promise<PackageDetail> {
   const pkg = await loadPackage(id);
-  if (!pkg.zohoShipmentId) throw new PackageShippingError('El paquete aún no tiene orden de envío; primero asigna el transportista.', 409);
-  const day = deliveredDate && isoDay.safeParse(deliveredDate).success ? deliveredDate : new Date().toISOString().slice(0, 10);
+  if (!pkg.zohoShipmentId)
+    throw new PackageShippingError(
+      'El paquete aún no tiene orden de envío; primero asigna el transportista.',
+      409
+    );
+  const day =
+    deliveredDate && isoDay.safeParse(deliveredDate).success
+      ? deliveredDate
+      : new Date().toISOString().slice(0, 10);
   const mock = isZohoBooksMockEnabled();
   let source: 'zoho' | 'local' | 'mock' = 'mock';
   try {
@@ -191,17 +275,33 @@ export async function markPackageDelivered(actor: Actor, id: string, deliveredDa
   } catch (error) {
     throw zohoMessage(error, 'No se pudo marcar como entregado en Zoho');
   }
-  const patch: Prisma.PackageUpdateInput = { status: 'delivered', shipmentStatus: 'delivered', deliveryDate: new Date(`${day}T00:00:00.000Z`) };
+  const patch: Prisma.PackageUpdateInput = {
+    status: 'delivered',
+    shipmentStatus: 'delivered',
+    deliveryDate: new Date(`${day}T00:00:00.000Z`),
+  };
   if (mock) await prisma.package.update({ where: { id }, data: patch });
   else source = await readBackOrPatch(id, patch);
-  await recordAuditEvent({ actorUserId: actor.id, action: 'packages.delivered', targetType: 'Package', targetId: id, metadata: { zohoPackageId: pkg.zohoPackageId, zohoShipmentId: pkg.zohoShipmentId, deliveredDate: day, source } });
+  await recordAuditEvent({
+    actorUserId: actor.id,
+    action: 'packages.delivered',
+    targetType: 'Package',
+    targetId: id,
+    metadata: {
+      zohoPackageId: pkg.zohoPackageId,
+      zohoShipmentId: pkg.zohoShipmentId,
+      deliveredDate: day,
+      source,
+    },
+  });
   return finish(id);
 }
 
 /** Deletes the shipment order in Zoho: the package goes back to "not shipped". */
 export async function cancelPackageShipment(actor: Actor, id: string): Promise<PackageDetail> {
   const pkg = await loadPackage(id);
-  if (!pkg.zohoShipmentId) throw new PackageShippingError('El paquete no tiene orden de envío.', 409);
+  if (!pkg.zohoShipmentId)
+    throw new PackageShippingError('El paquete no tiene orden de envío.', 409);
   const mock = isZohoBooksMockEnabled();
   let source: 'zoho' | 'local' | 'mock' = 'mock';
   try {
@@ -210,12 +310,27 @@ export async function cancelPackageShipment(actor: Actor, id: string): Promise<P
     throw zohoMessage(error, 'No se pudo eliminar la orden de envío en Zoho');
   }
   const patch: Prisma.PackageUpdateInput = {
-    carrier: null, deliveryMethod: null, shipmentDate: null, trackingNumber: null, trackingUrl: null, shippingCharge: null,
-    zohoShipmentId: null, shipmentNumber: null, deliveryDate: null, status: 'not_shipped', shipmentStatus: null,
+    carrier: null,
+    deliveryMethod: null,
+    shipmentDate: null,
+    trackingNumber: null,
+    trackingUrl: null,
+    shippingCharge: null,
+    zohoShipmentId: null,
+    shipmentNumber: null,
+    deliveryDate: null,
+    status: 'not_shipped',
+    shipmentStatus: null,
   };
   if (mock) await prisma.package.update({ where: { id }, data: patch });
   else source = await readBackOrPatch(id, patch);
-  await recordAuditEvent({ actorUserId: actor.id, action: 'packages.shipment_cancelled', targetType: 'Package', targetId: id, metadata: { zohoPackageId: pkg.zohoPackageId, zohoShipmentId: pkg.zohoShipmentId, source } });
+  await recordAuditEvent({
+    actorUserId: actor.id,
+    action: 'packages.shipment_cancelled',
+    targetType: 'Package',
+    targetId: id,
+    metadata: { zohoPackageId: pkg.zohoPackageId, zohoShipmentId: pkg.zohoShipmentId, source },
+  });
   return finish(id);
 }
 
@@ -228,10 +343,18 @@ export async function editPackage(actor: Actor, id: string, raw: unknown): Promi
   try {
     if (!mock) {
       const lineItems = await currentLineItems(pkg.zohoPackageId);
-      if (lineItems.length === 0) throw new PackageShippingError('Zoho exige los artículos del paquete para editarlo y aún no se han leído. Pulsa “Actualizar desde Zoho” e intenta de nuevo.', 409);
+      if (lineItems.length === 0)
+        throw new PackageShippingError(
+          'Zoho exige los artículos del paquete para editarlo y aún no se han leído. Pulsa “Actualizar desde Zoho” e intenta de nuevo.',
+          409
+        );
       const date = input.date || (pkg.date ? pkg.date.toISOString().slice(0, 10) : null);
       if (!date) throw new PackageShippingError('Indica la fecha del paquete.', 400);
-      await updateZohoPackage({ packageId: pkg.zohoPackageId, salesOrderId: pkg.zohoSalesOrderId!, input: { date, notes: input.notes ?? undefined, line_items: lineItems } });
+      await updateZohoPackage({
+        packageId: pkg.zohoPackageId,
+        salesOrderId: pkg.zohoSalesOrderId!,
+        input: { date, notes: input.notes ?? undefined, line_items: lineItems },
+      });
     }
   } catch (error) {
     throw zohoMessage(error, 'No se pudo editar el paquete en Zoho');
@@ -242,6 +365,12 @@ export async function editPackage(actor: Actor, id: string, raw: unknown): Promi
   };
   if (mock) await prisma.package.update({ where: { id }, data: patch });
   else source = await readBackOrPatch(id, patch);
-  await recordAuditEvent({ actorUserId: actor.id, action: 'packages.edited', targetType: 'Package', targetId: id, metadata: { zohoPackageId: pkg.zohoPackageId, date: input.date || null, source } });
+  await recordAuditEvent({
+    actorUserId: actor.id,
+    action: 'packages.edited',
+    targetType: 'Package',
+    targetId: id,
+    metadata: { zohoPackageId: pkg.zohoPackageId, date: input.date || null, source },
+  });
   return finish(id);
 }

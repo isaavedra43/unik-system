@@ -52,6 +52,9 @@ export interface ToolSpec {
   };
 }
 
+/** Canonical tool-calling policy (see `ChatCompletionOptions.toolChoice`). */
+export type ToolChoice = 'auto' | 'required' | { type: 'function'; function: { name: string } };
+
 export interface ChatCompletionOptions {
   messages: ChatMessage[];
   tools?: ToolSpec[];
@@ -61,8 +64,12 @@ export interface ChatCompletionOptions {
   conversationId?: string;
   /** Override the configured model for this call. */
   model?: string;
-  /** Force one tool on this call (OpenAI `tool_choice`); 'auto' lets the model decide. */
-  toolChoice?: 'auto' | { type: 'function'; function: { name: string } };
+  /**
+   * Tool-calling policy for this call: 'auto' (default) lets the model decide, 'required' makes it
+   * call at least one of the offered tools, and `{ type: 'function', function: { name } }` forces
+   * that tool. Each provider maps it to its own wire field (providers/tool-choice.ts).
+   */
+  toolChoice?: ToolChoice;
   /** Thinking budget for reasoning models (GPT-5 / o-series); ignored by the others. */
   reasoningEffort?: ReasoningEffort;
 }

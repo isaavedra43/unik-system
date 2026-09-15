@@ -59,11 +59,174 @@ export interface ChatEventDTO {
   userRsvp: string | null;
 }
 
+// =====================================================
+// Channel kinds and AI (bot) messages
+// =====================================================
+
+/**
+ * `dm`/`group` are created by people from the chat UI; `area` (one per
+ * operational area) and `case` (one sales room per operational case) are
+ * created only by the operations layer through `createAreaChannel` /
+ * `createCaseRoom`, and their members are kept in sync by that layer.
+ */
+export const CHAT_CHANNEL_TYPES = ['dm', 'group', 'area', 'case'] as const;
+export type ChatChannelType = (typeof CHAT_CHANNEL_TYPES)[number];
+
+/** Channel types whose membership is managed by the operations layer. */
+export const OPERATIONS_CHANNEL_TYPES: readonly string[] = ['area', 'case'];
+
+export function isOperationsChannelType(type: string | null | undefined): boolean {
+  return typeof type === 'string' && OPERATIONS_CHANNEL_TYPES.includes(type);
+}
+
+/** Structured metadata attached to a message posted by an AI (bot) user. */
+export type ChatMessageMeta = { kind?: string } & Record<string, unknown>;
+
+/**
+ * `meta.kind` values of rule-based (template) posts. The agents layer notifies
+ * the responsible person directly, so these posts never fan out chat
+ * notifications. Free-form lines written by the model use `agent_reply`
+ * (or any other kind) and notify like a normal message.
+ */
+export const CHAT_BOT_TEMPLATE_KINDS: readonly string[] = [
+  'agent_request',
+  'agent_proposal',
+  'agent_notice',
+  'agent_update',
+  'agent_timeline',
+];
+
+export function isBotTemplateMeta(meta: unknown): boolean {
+  if (!meta || typeof meta !== 'object' || Array.isArray(meta)) return false;
+  const record = meta as Record<string, unknown>;
+  if (record.template === true) return true;
+  return typeof record.kind === 'string' && CHAT_BOT_TEMPLATE_KINDS.includes(record.kind);
+}
+
+export const AGENT_REQUEST_QUICK_ACTIONS = ['accept', 'block', 'open_case'] as const;
+export type AgentRequestQuickAction = (typeof AGENT_REQUEST_QUICK_ACTIONS)[number];
+
+export interface ChatAgentRequestMeta {
+  kind: 'agent_request';
+  requestId: string;
+  caseId: string | null;
+  areaKey: string | null;
+  quickActions: AgentRequestQuickAction[];
+  /** When present, only these users see Aceptar/Bloquear (the server still validates). */
+  actorUserIds: string[] | null;
+  /** AreaRequest status when the post was written; kept current by the room stream and a live read. */
+  status: string | null;
+  /** Id of the room card this post copies (the copy in an area channel informs; it has no actions). */
+  copyOf: string | null;
+}
+
+export interface ChatAgentProposalMeta {
+  kind: 'agent_proposal';
+  proposalId: string;
+  caseId: string | null;
+  toolName: string | null;
+  summary: string | null;
+  effect: string | null;
+  expiresAt: string | null;
+  args: unknown;
+  status: string | null;
+  /** Responsible and backup who may decide it (others see a read-only card; approvers by permission use Mi trabajo). */
+  approverUserIds: string[] | null;
+  /** The tool needs two distinct signatures. */
+  requiresSecondApproval: boolean;
+}
+
+function asString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value : null;
+}
+
+function asStringList(value: unknown): string[] | null {
+  if (!Array.isArray(value)) return null;
+  return value.filter((item): item is string => typeof item === 'string' && item.length > 0);
+}
+
+/** Typed view of an `agent_request` meta, or null when the shape is not usable. */
+export function parseAgentRequestMeta(meta: unknown): ChatAgentRequestMeta | null {
+  if (!meta || typeof meta !== 'object' || Array.isArray(meta)) return null;
+  const record = meta as Record<string, unknown>;
+  const requestId = asString(record.requestId);
+  if (record.kind !== 'agent_request' || !requestId) return null;
+  const listed = asStringList(record.quickActions);
+  const quickActions = (listed ?? [...AGENT_REQUEST_QUICK_ACTIONS]).filter(
+    (action): action is AgentRequestQuickAction =>
+      (AGENT_REQUEST_QUICK_ACTIONS as readonly string[]).includes(action)
+  );
+  return {
+    kind: 'agent_request',
+    requestId,
+    caseId: asString(record.caseId),
+    areaKey: asString(record.areaKey),
+    quickActions: [...new Set(quickActions)],
+    actorUserIds: asStringList(record.actorUserIds),
+    status: asString(record.status),
+    copyOf: asString(record.copyOf),
+  };
+}
+
+/**
+ * Status carried by an `agent_update` post of an area request (`{requestId, status}`), or null.
+ * The room stream uses it to refresh the status of the request's earlier cards.
+ */
+export function agentRequestStatusUpdate(message: Pick<ChatMessageDTO, 'meta'>): { requestId: string; status: string } | null {
+  const meta = message.meta;
+  if (!meta || meta.kind !== 'agent_update') return null;
+  const requestId = asString(meta.requestId);
+  const status = asString(meta.status);
+  return requestId && status ? { requestId, status } : null;
+}
+
+/** Messages with the status of every `agent_request` card of that request replaced (same array when nothing changes). Pure. */
+export function applyAgentRequestStatus<T extends Pick<ChatMessageDTO, 'meta'>>(
+  messages: T[],
+  update: { requestId: string; status: string }
+): T[] {
+  let changed = false;
+  const next = messages.map((message) => {
+    const meta = message.meta;
+    if (!meta || meta.kind !== 'agent_request' || meta.requestId !== update.requestId || meta.status === update.status) {
+      return message;
+    }
+    changed = true;
+    return { ...message, meta: { ...meta, status: update.status } };
+  });
+  return changed ? next : messages;
+}
+
+/** Typed view of an `agent_proposal` meta, or null when the shape is not usable. */
+export function parseAgentProposalMeta(meta: unknown): ChatAgentProposalMeta | null {
+  if (!meta || typeof meta !== 'object' || Array.isArray(meta)) return null;
+  const record = meta as Record<string, unknown>;
+  const proposalId = asString(record.proposalId);
+  if (record.kind !== 'agent_proposal' || !proposalId) return null;
+  return {
+    kind: 'agent_proposal',
+    proposalId,
+    caseId: asString(record.caseId),
+    toolName: asString(record.toolName),
+    summary: asString(record.summary),
+    effect: asString(record.effect),
+    expiresAt: asString(record.expiresAt),
+    args: record.args,
+    status: asString(record.status),
+    approverUserIds: asStringList(record.approverUserIds),
+    requiresSecondApproval: record.requiresSecondApproval === true,
+  };
+}
+
 export interface ChatMessageDTO {
   id: string;
   channelId: string;
   senderId: string;
   senderName: string;
+  /** The sender is an AI (bot) user of the agents layer. */
+  senderIsBot: boolean;
+  /** Structured metadata (only bot posts carry it). */
+  meta: ChatMessageMeta | null;
   content: string | null;
   replyToId: string | null;
   replyToPreview: string | null;
@@ -99,6 +262,10 @@ export interface ChatChannelDTO {
   lastMessagePreview: string | null;
   lastMessageSenderName: string | null;
   members: ChatChannelMemberDTO[];
+  /** Area key when `type === 'area'` (Area.chatChannelId points to this channel). */
+  areaKey: string | null;
+  /** OperationalCase id when `type === 'case'` (OperationalCase.chatChannelId points here). */
+  caseId: string | null;
 }
 
 export interface ChatChannelMemberDTO {
@@ -108,6 +275,7 @@ export interface ChatChannelMemberDTO {
   role: string;
   status: string;
   lastSeenAt: string;
+  isBot: boolean;
 }
 
 export interface ChatCallDTO {

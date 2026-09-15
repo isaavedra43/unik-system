@@ -15,6 +15,8 @@ const CHAT_PERMISSION = 'chat.use';
 
 function shortChannelLabel(c: { type: string; name: string | null; members: { userId: string; name: string }[] }, actorId: string): string {
   if (c.type === 'group') return `grupo "${c.name ?? 'sin nombre'}"`;
+  if (c.type === 'area') return `canal de área "${c.name ?? 'sin nombre'}"`;
+  if (c.type === 'case') return `sala de venta "${c.name ?? 'sin nombre'}"`;
   const other = c.members.find((m) => m.userId !== actorId);
   return `chat con ${other?.name ?? 'usuario'}`;
 }

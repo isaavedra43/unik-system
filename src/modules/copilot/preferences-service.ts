@@ -1,3 +1,4 @@
+import type { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 
@@ -23,7 +24,67 @@ export const COPILOT_MODES = ['active', 'on_demand', 'paused'] as const;
 export const PLAN_MODES = ['auto', 'always', 'never'] as const;
 export type PlanMode = (typeof PLAN_MODES)[number];
 export type CopilotMode = (typeof COPILOT_MODES)[number];
-export type CopilotSurfaceKind = 'inbox' | 'chat';
+export const COPILOT_SURFACE_KINDS = ['inbox', 'chat', 'area', 'case', 'mywork', 'control_tower'] as const;
+export type CopilotSurfaceKind = (typeof COPILOT_SURFACE_KINDS)[number];
+
+/**
+ * Surfaces whose proactivity lives in `AiUserPreference.surfaceModes` (Json).
+ * Inbox and internal chat keep their two literal columns.
+ */
+export const SURFACE_MODE_KINDS = ['area', 'case', 'mywork', 'control_tower'] as const;
+export type SurfaceModeKind = (typeof SURFACE_MODE_KINDS)[number];
+export type SurfaceModes = Record<SurfaceModeKind, CopilotMode>;
+
+/** "Mi trabajo" analyzes on its own; the shared area/case/control tower panels wait to be asked. */
+export const DEFAULT_SURFACE_MODES: Readonly<SurfaceModes> = {
+  area: 'on_demand',
+  case: 'on_demand',
+  mywork: 'active',
+  control_tower: 'on_demand',
+};
+
+export function isSurfaceModeKind(value: unknown): value is SurfaceModeKind {
+  return typeof value === 'string' && (SURFACE_MODE_KINDS as readonly string[]).includes(value);
+}
+
+function isCopilotMode(value: unknown): value is CopilotMode {
+  return typeof value === 'string' && (COPILOT_MODES as readonly string[]).includes(value);
+}
+
+/** Stored Json → complete map (unknown kinds dropped, invalid or missing modes → default). Pure. */
+export function normalizeSurfaceModes(raw: unknown): SurfaceModes {
+  const source = raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
+  const out = { ...DEFAULT_SURFACE_MODES };
+  for (const kind of SURFACE_MODE_KINDS) {
+    if (isCopilotMode(source[kind])) out[kind] = source[kind];
+  }
+  return out;
+}
+
+const copilotModeEnum = z.enum(COPILOT_MODES);
+
+/** Stored/complete surface modes: tolerant (bad values fall back to the defaults). */
+const surfaceModesSchema = z
+  .unknown()
+  .transform((value) => normalizeSurfaceModes(value))
+  .default({ ...DEFAULT_SURFACE_MODES });
+
+/**
+ * Partial update of surface modes: `{surfaceModes: {[kind]: mode}}`. Accepts
+ * every surface kind; `inbox`/`chat` are written to their literal columns.
+ */
+export const surfaceModesPatchSchema = z
+  .object({
+    inbox: copilotModeEnum,
+    chat: copilotModeEnum,
+    area: copilotModeEnum,
+    case: copilotModeEnum,
+    mywork: copilotModeEnum,
+    control_tower: copilotModeEnum,
+  })
+  .partial()
+  .strict();
+export type SurfaceModesPatch = z.infer<typeof surfaceModesPatchSchema>;
 
 export const preferencesSchema = z.object({
   mode: z.enum(['paused', 'on_request', 'autonomous_verified']).default('on_request'),
@@ -39,10 +100,22 @@ export const preferencesSchema = z.object({
   chatCopilotMode: z.enum(COPILOT_MODES).default('active'),
   /** Plan-then-execute: auto (solo tareas complejas) | always | never. */
   planMode: z.enum(PLAN_MODES).default('auto'),
+  /** Proactivity of the operations surfaces (área, expediente, Mi trabajo, Control Tower). */
+  surfaceModes: surfaceModesSchema,
 });
 
 export type AssistantPreferences = z.infer<typeof preferencesSchema>;
 export type InboxCopilotMode = CopilotMode;
+
+/**
+ * PATCH body of `/app/assistant/api/preferences`: every field optional and
+ * `surfaceModes` partial, so changing one surface never resets the others.
+ */
+export const preferencesPatchSchema = preferencesSchema
+  .omit({ surfaceModes: true })
+  .partial()
+  .extend({ surfaceModes: surfaceModesPatchSchema.optional() });
+export type PreferencesPatch = z.infer<typeof preferencesPatchSchema>;
 
 export const DEFAULT_PREFERENCES: AssistantPreferences = {
   mode: 'on_request',
@@ -55,11 +128,16 @@ export const DEFAULT_PREFERENCES: AssistantPreferences = {
   inboxCopilotMode: 'active',
   chatCopilotMode: 'active',
   planMode: 'auto',
+  surfaceModes: { ...DEFAULT_SURFACE_MODES },
 };
+
+function defaultPreferences(): AssistantPreferences {
+  return { ...DEFAULT_PREFERENCES, surfaceModes: { ...DEFAULT_SURFACE_MODES } };
+}
 
 export async function getPreferences(userId: string): Promise<AssistantPreferences> {
   const row = await prisma.aiUserPreference.findUnique({ where: { userId } });
-  if (!row) return { ...DEFAULT_PREFERENCES };
+  if (!row) return defaultPreferences();
   const parsed = preferencesSchema.safeParse({
     mode: row.mode,
     tone: row.tone,
@@ -71,32 +149,62 @@ export async function getPreferences(userId: string): Promise<AssistantPreferenc
     inboxCopilotMode: row.inboxCopilotMode,
     chatCopilotMode: row.chatCopilotMode,
     planMode: row.planMode,
+    surfaceModes: row.surfaceModes,
   });
-  return parsed.success ? parsed.data : { ...DEFAULT_PREFERENCES };
+  return parsed.success ? parsed.data : defaultPreferences();
 }
 
-export async function updatePreferences(
-  userId: string,
-  patch: Partial<AssistantPreferences>
-): Promise<AssistantPreferences> {
+/**
+ * Current preferences + patch. `surfaceModes` is FUSED (only the kinds in the
+ * patch change); `surfaceModes.inbox|chat` are written to their literal
+ * columns, and an explicit `inboxCopilotMode`/`chatCopilotMode` wins. Pure.
+ */
+export function mergePreferences(current: AssistantPreferences, patch: PreferencesPatch): AssistantPreferences {
+  const { surfaceModes: modesPatch, ...rest } = patch;
+  const { inbox, chat, ...operationsModes } = modesPatch ?? {};
+  const defined = <T extends Record<string, unknown>>(obj: T): Partial<T> =>
+    Object.fromEntries(Object.entries(obj).filter(([, v]) => v !== undefined)) as Partial<T>;
+  return preferencesSchema.parse({
+    ...current,
+    ...(inbox ? { inboxCopilotMode: inbox } : {}),
+    ...(chat ? { chatCopilotMode: chat } : {}),
+    ...defined(rest),
+    surfaceModes: { ...normalizeSurfaceModes(current.surfaceModes), ...defined(operationsModes) },
+  });
+}
+
+export async function updatePreferences(userId: string, patch: PreferencesPatch): Promise<AssistantPreferences> {
   const current = await getPreferences(userId);
-  const merged = preferencesSchema.parse({ ...current, ...patch });
+  const merged = mergePreferences(current, patch);
+  const data = {
+    ...merged,
+    customInstructions: merged.customInstructions ?? null,
+    surfaceModes: merged.surfaceModes as unknown as Prisma.InputJsonValue,
+  };
   await prisma.aiUserPreference.upsert({
     where: { userId },
-    create: { userId, ...merged, customInstructions: merged.customInstructions ?? null },
-    update: { ...merged, customInstructions: merged.customInstructions ?? null },
+    create: { userId, ...data },
+    update: data,
   });
   return merged;
 }
 
-/** Proactivity of the copilot for one surface (inbox / internal chat). */
+/** Proactivity of the copilot for one surface: inbox/chat read their columns, the rest `surfaceModes`. */
 export function copilotModeFor(prefs: AssistantPreferences, surface: CopilotSurfaceKind): CopilotMode {
-  return surface === 'inbox' ? prefs.inboxCopilotMode : prefs.chatCopilotMode;
+  if (surface === 'inbox') return prefs.inboxCopilotMode;
+  if (surface === 'chat') return prefs.chatCopilotMode;
+  const stored = prefs.surfaceModes?.[surface];
+  return isCopilotMode(stored) ? stored : DEFAULT_SURFACE_MODES[surface];
+}
+
+/** Mode used when preferences cannot be read (inbox/chat keep their historical 'active'). */
+export function fallbackCopilotMode(surface: CopilotSurfaceKind): CopilotMode {
+  return surface === 'inbox' || surface === 'chat' ? 'active' : DEFAULT_SURFACE_MODES[surface];
 }
 
 export async function getCopilotMode(userId: string, surface: CopilotSurfaceKind): Promise<CopilotMode> {
   const prefs = await getPreferences(userId).catch(() => null);
-  return prefs ? copilotModeFor(prefs, surface) : 'active';
+  return prefs ? copilotModeFor(prefs, surface) : fallbackCopilotMode(surface);
 }
 
 export const COPILOT_MODE_LABELS: Record<CopilotMode, { label: string; hint: string }> = {

@@ -16,6 +16,7 @@ import {
   Settings,
   Smartphone,
   Inbox,
+  Workflow,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import type { NotificationRow } from '@/modules/notifications/notification-service';
@@ -35,6 +36,7 @@ const GROUP_ICONS: Record<string, React.ReactNode> = {
   Mensajes: <MessageCircle size={16} />,
   'Asistente IA': <Bot size={16} />,
   Seguimiento: <Eye size={16} />,
+  Operaciones: <Workflow size={16} />,
   Sistema: <Bell size={16} />,
 };
 

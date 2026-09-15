@@ -1,6 +1,10 @@
 # Paquetes (Zoho Inventory)
 
-Ruta `/app/packages`. Solo lectura: Zoho es la fuente de verdad; UNIK sincroniza, normaliza y muestra.
+Ruta `/app/packages`. Zoho es la fuente de verdad: UNIK sincroniza, normaliza y muestra, y además escribe
+en Zoho unas pocas operaciones (asignar transportista / orden de envío, editar el envío, marcar entregado,
+cancelar el envío y editar fecha/notas del paquete) con el flujo **escribir → releer → parche local** de
+`src/modules/packages/packages-shipping-service.ts` (permisos `packages.ship` y `packages.edit`). El detalle de
+esas escrituras está en `docs/integrations/zoho.md` → "Escrituras hacia Zoho → Paquetes y órdenes de envío".
 
 ## Piezas
 

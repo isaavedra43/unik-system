@@ -36,6 +36,7 @@ import {
   X,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { CloseTicketsDialog } from '@/components/sales/CloseTicketsDialog';
 import { CurrentUser } from '@/modules/auth/authorization';
 import {
   SALES_ORDER_COLUMNS,
@@ -51,7 +52,11 @@ import {
   DATE_SHORTCUTS,
   DATE_SHORTCUT_LABELS,
 } from '@/modules/sales/sales-orders-filters';
-import { SalesOrdersListResult, SalesOrderListRow } from '@/modules/sales/sales-orders-service';
+import {
+  SalesOrderFilterOptions,
+  SalesOrdersListResult,
+  SalesOrderListRow,
+} from '@/modules/sales/sales-orders-service';
 import {
   formatCurrency,
   formatDateOnly,
@@ -102,7 +107,10 @@ interface WorkspaceProps {
   canExport: boolean;
   canWatch: boolean;
   canShareViews: boolean;
+  canCloseTickets?: boolean;
   initialSyncStatus?: SyncStatus | null;
+  /** Status values that exist in the DB (with counts), keyed by field. */
+  filterOptions?: SalesOrderFilterOptions;
 }
 
 type Density = 'compact' | 'normal' | 'comfortable';
@@ -447,6 +455,8 @@ export function SalesOrdersWorkspace({
   canWatch,
   canShareViews,
   initialSyncStatus,
+  filterOptions,
+  canCloseTickets = false,
 }: WorkspaceProps) {
   const router = useRouter();
 
@@ -497,7 +507,9 @@ export function SalesOrdersWorkspace({
   );
 
   // Fetch data when query changes
+  const fetchSeqRef = useRef(0);
   const fetchData = useCallback(async (q: SalesOrderQueryState) => {
+    const seq = ++fetchSeqRef.current;
     setLoading(true);
     setError(null);
     try {
@@ -508,11 +520,14 @@ export function SalesOrdersWorkspace({
       });
       if (!res.ok) throw new Error('No pudimos cargar las órdenes.');
       const json = await res.json();
+      // Ignore stale responses when filters changed while a request was in flight.
+      if (seq !== fetchSeqRef.current) return;
       setData(json);
     } catch (err) {
+      if (seq !== fetchSeqRef.current) return;
       setError(err instanceof Error ? err.message : 'No pudimos cargar las órdenes.');
     } finally {
-      setLoading(false);
+      if (seq === fetchSeqRef.current) setLoading(false);
     }
   }, []);
 
@@ -1391,10 +1406,23 @@ export function SalesOrdersWorkspace({
                 if (!('value' in rule) || rule.value === undefined || rule.value === null) return '';
                 if (col.type === 'boolean') return rule.value === true ? 'Sí' : 'No';
                 if (col.type === 'status' && col.statusCategory) {
-                  return getSalesOrderStatusLabel(String(rule.value), col.statusCategory);
+                  const values = Array.isArray(rule.value) ? rule.value : [String(rule.value)];
+                  return values
+                    .map((v) => getSalesOrderStatusLabel(v, col.statusCategory))
+                    .join(', ');
                 }
                 return String(rule.value);
               })();
+              if (col.type === 'date' && rule.shortcut) {
+                return (
+                  <span key={i} className="so-filter-chip">
+                    <strong>{col.label}:</strong> {DATE_SHORTCUT_LABELS[rule.shortcut] ?? rule.shortcut}
+                    <button onClick={() => removeFilter(i)} aria-label="Quitar filtro">
+                      <X size={12} />
+                    </button>
+                  </span>
+                );
+              }
               const valTo = 'valueTo' in rule ? String(rule.valueTo ?? '') : '';
               const fullValue =
                 rule.operator === 'between' && valTo ? `${displayValue} y ${valTo}` : displayValue;
@@ -1451,7 +1479,9 @@ export function SalesOrdersWorkspace({
                       </option>
                     ))}
                   </select>
-                  {rule.operator !== 'is_empty' && rule.operator !== 'is_not_empty' ? (
+                  {rule.operator !== 'is_empty' &&
+                  rule.operator !== 'is_not_empty' &&
+                  !(col?.type === 'date' && rule.shortcut) ? (
                     <div className="so-filter-values" style={{ display: 'flex', gap: '0.5rem' }}>
                       {col?.type === 'status' && col.statusCategory ? (
                         <select
@@ -1459,9 +1489,13 @@ export function SalesOrdersWorkspace({
                           onChange={(e) => updateFilter(i, { value: e.target.value })}
                         >
                           <option value="">Seleccionar...</option>
-                          {getSalesOrderStatusOptions(col.statusCategory).map((opt) => (
+                          {(filterOptions?.[col.field]?.length
+                            ? filterOptions[col.field]
+                            : getSalesOrderStatusOptions(col.statusCategory)
+                          ).map((opt) => (
                             <option key={opt.value} value={opt.value}>
                               {opt.label}
+                              {'count' in opt ? ` (${Number(opt.count).toLocaleString('es-MX')})` : ''}
                             </option>
                           ))}
                         </select>
@@ -1513,7 +1547,7 @@ export function SalesOrdersWorkspace({
                       ) : null}
                     </div>
                   ) : null}
-                  {col?.type === 'date' && 'shortcut' in rule ? (
+                  {col?.type === 'date' ? (
                     <select
                       value={rule.shortcut ?? ''}
                       onChange={(e) => updateFilter(i, { shortcut: e.target.value || undefined })}
@@ -1584,6 +1618,17 @@ export function SalesOrdersWorkspace({
             <button className="btn btn-secondary btn-sm" onClick={handleCopyFolios}>
               <Copy size={14} /> Copiar folios
             </button>
+            {canCloseTickets ? (
+              <CloseTicketsDialog
+                orders={data.data
+                  .filter((o) => selectedIds.has(o.id))
+                  .map((o) => ({ id: o.id, salesOrderNumber: o.salesOrderNumber }))}
+                onFinished={() => {
+                  clearSelection();
+                  fetchData(query);
+                }}
+              />
+            ) : null}
             <button className="btn btn-ghost btn-sm" onClick={clearSelection}>
               Limpiar selección
             </button>

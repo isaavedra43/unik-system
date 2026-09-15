@@ -1,5 +1,6 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
+import { DEFAULT_AGENT_SETTINGS, normalizeAgentSettings, type AgentSettings } from './agent-settings';
 
 /**
  * AI Assistant configuration service.
@@ -19,7 +20,24 @@ export interface ProviderConfigEntry {
   enabled: boolean; // whether this provider is available for selection
   /** Model ids the provider's key reported (GET /models), saved by the admin provider test. */
   models?: string[];
+  /**
+   * Flat monthly fee (USD) of a flat-rate plan (Canopy Wave Unlimited). Absent = its
+   * models cost 0; present = reports show the fee amortized per token of the month.
+   */
+  monthlyFeeUsd?: number;
 }
+
+/** The coordinated AI layer settings live in an isomorphic module (the admin panel renders them). */
+export {
+  AGENT_LLM_TRIGGERS,
+  AGENT_LLM_TRIGGER_LABELS,
+  AGENT_SETTING_LIMITS,
+  DEFAULT_AGENT_SETTINGS,
+  normalizeAgentSettings,
+  type AgentLlmTrigger,
+  type AgentQuietHours,
+  type AgentSettings,
+} from './agent-settings';
 
 export interface AiSettings {
   // Global enable/disable
@@ -57,9 +75,8 @@ export interface AiSettings {
   // Guardrails
   inputMaxLength: number;
   promptInjectionDetection: boolean;
-  // Autonomía (Nivel 4, Fase 5+)
-  autonomousModeEnabled: boolean;
-  autonomousTasks: string[];
+  // Capa de IA coordinada: agentes por área, horario, topes y presupuestos
+  agents: AgentSettings;
   dailyReportHour: number;
   dailyReportRoles: string[];
   anomalyThreshold: number;
@@ -109,6 +126,23 @@ export interface AiSettings {
 
 /** Tipos permitidos antes de la ampliación (se migran automáticamente si nunca se personalizaron). */
 const LEGACY_DEFAULT_MIME_TYPES = new Set(['image/png', 'image/jpeg', 'application/pdf', 'text/plain', 'text/csv']);
+
+/**
+ * Placeholders of the old "autonomous mode" that never had an implementation. Rows saved
+ * before the agents layer may still carry them: they are read without error, ignored (the
+ * agents layer does not inherit their `false`, by decision of the user) and dropped on the
+ * next save.
+ */
+export const LEGACY_AUTONOMY_SETTING_KEYS = ['autonomousModeEnabled', 'autonomousTasks'] as const;
+
+/** Flat monthly fee of a provider, when configured as a positive number. */
+export function providerMonthlyFeeUsd(
+  providerConfigs: Record<string, Partial<ProviderConfigEntry>> | undefined,
+  provider: string
+): number | null {
+  const fee = providerConfigs?.[provider]?.monthlyFeeUsd;
+  return typeof fee === 'number' && Number.isFinite(fee) && fee > 0 ? fee : null;
+}
 
 export const DEFAULT_AI_SETTINGS: AiSettings = {
   isEnabled: true,
@@ -308,6 +342,76 @@ export const DEFAULT_AI_SETTINGS: AiSettings = {
     'extractDocumentData',
     'draftBillFromDocument',
     'getZohoBooksStatus',
+    // Operaciones — capa de IA coordinada (fijadas por superficie; nunca en CORE_TOOL_NAMES)
+    'getCaseSnapshot',
+    'explainCase',
+    'listAreaWorkItems',
+    'findResponsible',
+    'summarizeAreaDay',
+    'proposeDeliveryPlan',
+    'createAreaRequest',
+    'acknowledgeAreaRequest',
+    'openIncident',
+    'escalateCase',
+    'assignWorkItem',
+    'postCaseNote',
+    'requestStockVerification',
+    'respondAreaRequest',
+    'completeWorkItem',
+    'reserveStock',
+    'createPurchaseRequest',
+    'createProductionOrder',
+    'assignCarrier',
+    'recordExpense',
+    'authorizePayment',
+    'concludeAgentTurn',
+    'researchSourcing',
+    'proposeAreaAction',
+    // Operaciones — Mi trabajo
+    'myNextActions',
+    'startWorkItem',
+    'recordCount',
+    // Operaciones — Torre de Control
+    'getCompanyPulse',
+    'findStuckCases',
+    'whoIsBlocking',
+    'simulateDelay',
+    // Compras y Sourcing
+    'listPurchaseRequests',
+    'searchSuppliers',
+    'runSourcingSearch',
+    'listSourcingCandidates',
+    'draftRfq',
+    'sendRfq',
+    'interpretRfqReply',
+    'compareRfq',
+    'createProcurementOrderDraft',
+    'submitProcurementOrder',
+    'recordGoodsReceipt',
+    // Manufactura
+    'listProductionOrders',
+    'getProductionBoard',
+    'createTransformationOrderDraft',
+    'recordProductionOutput',
+    'reportScrap',
+    // Contabilidad interna
+    'captureExpenseDraft',
+    'proposeExpenseFields',
+    'checkExpenseDuplicate',
+    'submitExpense',
+    'getCashflowProjection',
+    'getBudgetVsActual',
+    'listUnmatchedPayments',
+    'matchPaymentToObligation',
+    'getCashBook',
+    // Ventas / CRM (createSalesOrderFromQuote queda opt-in: enabledByDefault=false)
+    'listOpportunities',
+    'getOpportunity',
+    'listRadarSignals',
+    'explainRadarSignal',
+    'draftRadarMessage',
+    'createOpportunityFromConversation',
+    'updateOpportunityStage',
   ],
   maxAttachmentSizeMb: 25,
   allowedMimeTypes: [
@@ -335,8 +439,7 @@ export const DEFAULT_AI_SETTINGS: AiSettings = {
   ttsVoice: 'coral',
   inputMaxLength: 10_000,
   promptInjectionDetection: true,
-  autonomousModeEnabled: false,
-  autonomousTasks: ['daily_report', 'anomaly_detection', 'artifact_cleanup'],
+  agents: DEFAULT_AGENT_SETTINGS,
   dailyReportHour: 18,
   dailyReportRoles: ['super_admin'],
   anomalyThreshold: 0.3,
@@ -376,9 +479,27 @@ interface CachedConfig {
 const cache = new Map<string, CachedConfig>();
 const CACHE_TTL_MS = 10_000;
 
-function mergeWithDefaults(stored: unknown): AiSettings {
+/** Keeps a provider's flat monthly fee only when it is a positive finite number. */
+function sanitizeProviderFees(value: unknown): unknown {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+  const out: Record<string, unknown> = {};
+  for (const [provider, entry] of Object.entries(value as Record<string, unknown>)) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      out[provider] = entry;
+      continue;
+    }
+    const { monthlyFeeUsd, ...rest } = entry as Record<string, unknown>;
+    out[provider] =
+      typeof monthlyFeeUsd === 'number' && Number.isFinite(monthlyFeeUsd) && monthlyFeeUsd > 0
+        ? { ...rest, monthlyFeeUsd }
+        : rest;
+  }
+  return out;
+}
+
+export function mergeWithDefaults(stored: unknown): AiSettings {
   const defaults = DEFAULT_AI_SETTINGS;
-  if (!stored || typeof stored !== 'object') return { ...defaults };
+  if (!stored || typeof stored !== 'object') return { ...defaults, agents: normalizeAgentSettings(undefined) };
   const s = stored as Record<string, unknown>;
   const merged = { ...defaults } as Record<string, unknown>;
   for (const key of Object.keys(defaults) as (keyof AiSettings)[]) {
@@ -414,6 +535,10 @@ function mergeWithDefaults(stored: unknown): AiSettings {
   if (Array.isArray(storedMimes) && storedMimes.every((t) => typeof t === 'string' && LEGACY_DEFAULT_MIME_TYPES.has(t))) {
     merged.allowedMimeTypes = [...defaults.allowedMimeTypes];
   }
+  // Agents layer: validated field by field (a partial or older bag keeps the rest of the defaults).
+  // The legacy autonomous* placeholders are not default keys, so they never reach the result.
+  merged.agents = normalizeAgentSettings(s.agents);
+  merged.providerConfigs = sanitizeProviderFees(merged.providerConfigs);
   return merged as unknown as AiSettings;
 }
 
@@ -496,12 +621,13 @@ export async function updateAiConfig(patch: {
   // We detect this and keep the previously stored value.
   let incomingSettings = patch.settings ?? {};
   if (incomingSettings.providerConfigs && currentSettings.providerConfigs) {
-    const currentProviders = currentSettings.providerConfigs as Record<string, { apiKey?: string; endpoint?: string; enabled?: boolean }>;
-    const incomingProviders = incomingSettings.providerConfigs as Record<string, { apiKey?: string; endpoint?: string; enabled?: boolean }>;
-    const mergedProviders: Record<string, { apiKey?: string; endpoint?: string; enabled?: boolean }> = {};
+    type StoredProvider = { apiKey?: string; endpoint?: string; enabled?: boolean; monthlyFeeUsd?: number | null };
+    const currentProviders = currentSettings.providerConfigs as Record<string, StoredProvider>;
+    const incomingProviders = incomingSettings.providerConfigs as Record<string, StoredProvider>;
+    const mergedProviders: Record<string, StoredProvider> = {};
     for (const [providerId, incoming] of Object.entries(incomingProviders)) {
       const existing = currentProviders[providerId] ?? {};
-      mergedProviders[providerId] = {
+      const entry: StoredProvider = {
         ...existing,
         ...incoming,
         // If apiKey is empty/undefined in incoming, keep the existing one
@@ -509,9 +635,13 @@ export async function updateAiConfig(patch: {
           ? incoming.apiKey
           : existing.apiKey ?? '',
       };
+      // An explicit null clears the flat monthly fee; an absent field keeps the stored one.
+      if (incoming.monthlyFeeUsd === null) delete entry.monthlyFeeUsd;
+      mergedProviders[providerId] = entry;
     }
     incomingSettings = { ...incomingSettings, providerConfigs: mergedProviders };
   }
+  // Legacy autonomous* keys (LEGACY_AUTONOMY_SETTING_KEYS) are not default keys: mergeWithDefaults drops them here.
 
   const mergedSettings =
     patch.settings !== undefined

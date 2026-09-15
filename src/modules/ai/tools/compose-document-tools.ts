@@ -18,7 +18,7 @@ import { storeArtifactFile, withTempArtifactFile } from './artifact-tools';
 import { generateComposedPdf } from '../generators/document-pdf-generator';
 import { generateComposedDocx } from '../generators/document-docx-generator';
 import { imageDimensions, type ComposedDocumentSpec, type DocBlock, type DocColumn, type DocImage, type DocKpi } from '../generators/document-spec';
-import { parseJsonObject } from './documents-tools';
+import { parseJsonObject } from '../json-utils';
 import { matchSalesOrderNumbers, normalizeOrderNumber } from './lookup-tools';
 
 /**

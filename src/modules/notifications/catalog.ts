@@ -16,6 +16,15 @@ export const NOTIFICATION_CATEGORIES = [
   'ai_task_done',
   'ai_user_message',
   'entity_change',
+  'ops_workitem',
+  'ops_escalation',
+  'ops_incident',
+  'ops_request',
+  'approval_requested',
+  'approval_decided',
+  'agent_request',
+  'agent_proposal',
+  'agent_budget',
   'system',
 ] as const;
 
@@ -25,7 +34,7 @@ export interface CategoryDefinition {
   key: NotificationCategory;
   label: string;
   description: string;
-  group: 'Llamadas' | 'Mensajes' | 'Asistente IA' | 'Seguimiento' | 'Sistema';
+  group: 'Llamadas' | 'Mensajes' | 'Asistente IA' | 'Seguimiento' | 'Operaciones' | 'Sistema';
   defaults: { inApp: boolean; push: boolean };
   /** Skips quiet hours and mute (the user still needs push enabled for the category). */
   urgent?: boolean;
@@ -102,9 +111,80 @@ export const NOTIFICATION_CATALOG: CategoryDefinition[] = [
   {
     key: 'entity_change',
     label: 'Cambios en lo que sigues',
-    description: 'Órdenes, cotizaciones, facturas, clientes y demás registros que marcaste como seguidos.',
+    description:
+      'Órdenes, cotizaciones, facturas, clientes y demás registros que marcaste como seguidos.',
     group: 'Seguimiento',
     defaults: { inApp: true, push: true },
+  },
+  {
+    key: 'ops_workitem',
+    label: 'Trabajo asignado',
+    description:
+      'Te toca un trabajo de un expediente (verificar, preparar, entregar...), con su vencimiento.',
+    group: 'Operaciones',
+    defaults: { inApp: true, push: true },
+  },
+  {
+    key: 'ops_escalation',
+    label: 'Trabajo vencido o escalado',
+    description: 'Un trabajo tuyo o de tu área venció y se escaló a ti.',
+    group: 'Operaciones',
+    defaults: { inApp: true, push: true },
+    urgent: true,
+  },
+  {
+    key: 'ops_incident',
+    label: 'Incidencia operativa',
+    description:
+      'Se abrió una incidencia en tu área (conflicto de inventario, falla con Zoho, entrega parcial...).',
+    group: 'Operaciones',
+    defaults: { inApp: true, push: true },
+  },
+  {
+    key: 'ops_request',
+    label: 'Solicitud de otra área',
+    description:
+      'Otra área te pide algo sobre un expediente (compra, producción, entrega, aviso al cliente...).',
+    group: 'Operaciones',
+    defaults: { inApp: true, push: true },
+  },
+  {
+    key: 'approval_requested',
+    label: 'Aprobación pendiente',
+    description: 'Una compra, gasto, pago o ajuste espera tu aprobación.',
+    group: 'Operaciones',
+    defaults: { inApp: true, push: true },
+  },
+  {
+    key: 'approval_decided',
+    label: 'Aprobación resuelta',
+    description: 'Se aprobó o rechazó algo que solicitaste.',
+    group: 'Operaciones',
+    defaults: { inApp: true, push: true },
+  },
+  {
+    key: 'agent_request',
+    label: 'Solicitud anunciada por la IA de un área',
+    description:
+      'La IA de otra área te avisa de una solicitud sobre un expediente, con acciones rápidas para aceptarla o bloquearla.',
+    group: 'Operaciones',
+    defaults: { inApp: true, push: true },
+  },
+  {
+    key: 'agent_proposal',
+    label: 'Propuesta de la IA que puedes aprobar',
+    description:
+      'La IA de un área propone una acción (reservar, pedir compra, asignar transportista...) y tú estás entre quienes la aprueban.',
+    group: 'Operaciones',
+    defaults: { inApp: true, push: true },
+  },
+  {
+    key: 'agent_budget',
+    label: 'Presupuesto de la IA de un área',
+    description:
+      'La IA de un área llegó a su límite diario de tokens o mensual de costo y pasó a modo bajo demanda o en pausa.',
+    group: 'Operaciones',
+    defaults: { inApp: true, push: false },
   },
   {
     key: 'system',

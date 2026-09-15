@@ -179,6 +179,10 @@ model User {
   lockedUntil          DateTime?
   lastLoginAt          DateTime?
   passwordChangedAt    DateTime?
+  /// Usuario-bot de la capa de agentes (no puede iniciar sesión)
+  isBot                Boolean                              @default(false)
+  /// area | admin (sólo si isBot)
+  botKind              String?
   createdAt            DateTime                             @default(now())
   updatedAt            DateTime                             @updatedAt
   roles                UserRole[]
@@ -1231,6 +1235,8 @@ model InternalChatMessage {
   deletedAt       DateTime?
   priority        String                      @default("normal") // "normal" | "urgent"
   threadId        String?
+  /// Metadatos estructurados (p. ej. {kind:'agent_request', requestId, caseId, quickActions})
+  meta            Json?
   createdAt       DateTime                    @default(now())
   channel         InternalChatChannel         @relation(fields: [channelId], references: [id], onDelete: Cascade)
   sender          User                        @relation(fields: [senderId], references: [id], onDelete: Cascade)
@@ -1645,7 +1651,7 @@ model StorageObject {
   rejectionReason  String?
   /// User id or service identity (e.g. "service:ai", "service:livekit").
   createdBy        String?
-  /// chat | ai_attachment | ai_artifact | document | recording | transcript | plugin | knowledge | comm_media
+  /// chat | ai_attachment | ai_artifact | document | recording | transcript | plugin | knowledge | comm_media | export | evidence
   purpose          String
   /// default | protected (approved or shared documents are never removed by generic cleanup)
   retentionPolicy  String    @default("default")
@@ -1920,31 +1926,36 @@ model OAuthState {
 /// tool, version, connection, arguments, recipient, files and context; any
 /// material change invalidates it.
 model AiProposal {
-  id             String    @id @default(cuid())
-  conversationId String?
-  messageId      String?
-  userId         String
-  toolName       String
-  toolVersion    String?
-  capabilityId   String?
-  connectionId   String?
-  argsHash       String
-  args           Json
-  summary        String
-  recipient      String?
-  fileIds        String[]  @default([])
-  contextHash    String?
-  effect         String
-  /// pending | approved | rejected | executed | failed | expired | invalidated | pending_review
-  status         String    @default("pending")
-  decisionBy     String?
-  decidedAt      DateTime?
-  executedAt     DateTime?
-  result         Json?
-  error          String?
-  expiresAt      DateTime
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
+  id               String    @id @default(cuid())
+  conversationId   String?
+  messageId        String?
+  userId           String
+  toolName         String
+  toolVersion      String?
+  capabilityId     String?
+  connectionId     String?
+  argsHash         String
+  args             Json
+  summary          String
+  recipient        String?
+  fileIds          String[]  @default([])
+  contextHash      String?
+  effect           String
+  /// pending | approved | rejected | executed | failed | expired | invalidated | pending_review | awaiting_second_approval
+  status           String    @default("pending")
+  decisionBy       String?
+  decidedAt        DateTime?
+  /// Alcance de aprobación en turnos de agente: {caseId, areaKey, userIds[], permission}
+  approverScope    Json?
+  /// Segunda firma (doble aprobación)
+  secondDecisionBy String?
+  secondDecidedAt  DateTime?
+  executedAt       DateTime?
+  result           Json?
+  error            String?
+  expiresAt        DateTime
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
   @@index([userId, status])
   @@index([conversationId])
@@ -2064,6 +2075,8 @@ model AiUserPreference {
   chatCopilotMode    String   @default("active")
   /// Plan-then-execute: auto (only complex tasks) | always | never
   planMode           String   @default("auto")
+  /// Modo por superficie de copiloto {area|case|mywork|control_tower: active|on_demand|paused}; inbox/chat siguen en sus columnas
+  surfaceModes       Json?
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 }
@@ -2471,4 +2484,2406 @@ model VoiceSupervision {
 
   @@index([callId])
   @@index([supervisorUserId])
+}
+
+// ===== Núcleo operativo (plan UNIK Neural Operations) =====
+
+/// Área operativa. Sembrada de forma idempotente por ensureOperationsSeed().
+model Area {
+  id              String   @id @default(cuid())
+  /// ventas | compras | inventario | manufactura | logistica | contabilidad | administracion
+  key             String   @unique
+  label           String
+  /// Slug de Responsible.area (responsable y suplente del área)
+  responsibleArea String
+  leadUserId      String?
+  /// Canal del área en el chat interno (InternalChatChannel.id)
+  chatChannelId   String?  @unique
+  sortOrder       Int      @default(0)
+  active          Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([active, sortOrder])
+  @@index([leadUserId])
+}
+
+/// Expediente operativo (EXP-{caseSeq}) que nace de una orden de venta.
+model OperationalCase {
+  id               String       @id @default(cuid())
+  /// Consecutivo de Sequence('case') tomado en la transacción de case.start (sin autoincrement:
+  /// caseNumber es obligatorio y se escribe en el mismo INSERT)
+  caseSeq          Int          @unique
+  /// EXP-{caseSeq}
+  caseNumber       String       @unique
+  /// sales_fulfillment
+  kind             String
+  /// sales_order
+  sourceType       String
+  sourceId         String
+  zohoSalesOrderId String?
+  salesOrderNumber String?
+  customerName     String?
+  zohoCustomerId   String?
+  salespersonName  String?
+  locationId       String?
+  locationName     String?
+  deliveryMethod   String?
+  orderDate        DateTime?
+  /// ProcessVersion.id con el que se instanciaron los pasos
+  processVersionId String
+  /// open | waiting | blocked | ready_to_close | closed | cancelled
+  status           String       @default("open")
+  /// planning | sourcing | preparing | delivering | closing
+  phase            String       @default("planning")
+  /// normal | high | urgent
+  priority         String       @default("normal")
+  ownerUserId      String
+  promisedAt       DateTime?
+  openedAt         DateTime     @default(now())
+  closedAt         DateTime?
+  cancelledAt      DateTime?
+  closeReason      String?
+  lastActivityAt   DateTime     @default(now())
+  /// Sala del expediente en el chat interno (InternalChatChannel.id)
+  chatChannelId    String?      @unique
+  aiSummary        String?
+  /// OperationalEvent.id más reciente incluido en aiSummary
+  aiSummaryEventId BigInt?
+  version          Int          @default(1)
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+  demands          CaseDemand[]
+  steps            CaseStep[]
+
+  @@unique([kind, sourceType, sourceId])
+  @@index([status, lastActivityAt])
+  @@index([zohoSalesOrderId])
+  @@index([ownerUserId, status])
+  @@index([phase, status])
+  @@index([locationId, status])
+  @@index([promisedAt])
+  @@index([openedAt])
+}
+
+/// Necesidad de un expediente (una por línea de la orden).
+model CaseDemand {
+  id                String             @id @default(cuid())
+  caseId            String
+  /// zohoLineItemId o idx:n
+  lineRef           String
+  zohoItemId        String?
+  sku               String?
+  name              String
+  quantity          Decimal            @db.Decimal(18, 4)
+  unit              String
+  baseQuantity      Decimal            @db.Decimal(18, 4)
+  baseUnit          String
+  variantKey        String             @default("")
+  variantJson       Json?
+  locationId        String?
+  requestedAt       DateTime?
+  /// pending | verifying | planned | allocated | fulfilled | cancelled
+  status            String             @default("pending")
+  fulfilledQuantity Decimal            @default(0) @db.Decimal(18, 4)
+  sortOrder         Int                @default(0)
+  version           Int                @default(1)
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  case              OperationalCase    @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  allocations       DemandAllocation[]
+
+  @@unique([caseId, lineRef])
+  @@index([zohoItemId, status])
+  @@index([sku, status])
+  @@index([status])
+}
+
+/// Cómo se cubre (parte de) una necesidad: stock, compra, manufactura o proveedor directo.
+model DemandAllocation {
+  id                 String     @id @default(cuid())
+  demandId           String
+  caseId             String
+  /// stock | purchase | manufacture | direct_supplier
+  source             String
+  /// Cantidad en unidad base
+  quantity           Decimal    @db.Decimal(18, 4)
+  /// planned | reserved | requested | in_progress | ready | released | delivered | reopened | cancelled
+  status             String     @default("planned")
+  warehouseId        String?
+  stockReservationId String?
+  /// Objeto vinculado (solicitud de compra, orden de producción)
+  linkedType         String?
+  linkedId           String?
+  expectedAt         DateTime?
+  readyAt            DateTime?
+  deliveredQuantity  Decimal    @default(0) @db.Decimal(18, 4)
+  version            Int        @default(1)
+  createdAt          DateTime   @default(now())
+  updatedAt          DateTime   @updatedAt
+  demand             CaseDemand @relation(fields: [demandId], references: [id], onDelete: Cascade)
+
+  @@index([caseId, status])
+  @@index([demandId])
+  @@index([linkedType, linkedId])
+  @@index([stockReservationId])
+  @@index([source, status])
+}
+
+/// Definición versionada e inmutable de un proceso (blueprint), p. ej. sales_fulfillment@1.
+model ProcessVersion {
+  id         String   @id @default(cuid())
+  processKey String
+  /// Número de versión del blueprint (no es control de concurrencia)
+  version    Int
+  definition Json
+  checksum   String
+  active     Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([processKey, version])
+  @@index([processKey, active])
+}
+
+/// Paso instanciado de un expediente (por caso, necesidad o asignación).
+model CaseStep {
+  id               String          @id @default(cuid())
+  caseId           String
+  processVersionId String
+  stepKey          String
+  /// case | demand | allocation
+  scope            String          @default("case")
+  /// "" para scope=case; demandId o allocationId en los demás
+  scopeKey         String          @default("")
+  demandId         String?
+  allocationId     String?
+  areaKey          String
+  /// action | wait | approval | verification | external_sync
+  kind             String
+  /// pending | ready | active | waiting | done | skipped | failed | cancelled
+  status           String          @default("pending")
+  dependsOn        String[]        @default([])
+  /// SLA en minutos (0 = sin SLA)
+  slaMinutes       Int             @default(0)
+  dueAt            DateTime?
+  startedAt        DateTime?
+  completedAt      DateTime?
+  exitEvidence     Json?
+  version          Int             @default(1)
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+  case             OperationalCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@unique([caseId, stepKey, scopeKey])
+  @@index([areaKey, status])
+  @@index([status, dueAt])
+  @@index([demandId])
+  @@index([allocationId])
+}
+
+/// Trabajo asignado a una persona (con dueño, suplente, vencimiento y escalamiento).
+model WorkItem {
+  id               String    @id @default(cuid())
+  caseId           String?
+  stepId           String?
+  areaKey          String
+  /// action | wait | approval | verification | external_sync | incident_followup
+  kind             String
+  title            String
+  description      String?
+  /// open | in_progress | waiting | escalated | done | cancelled
+  status           String    @default("open")
+  ownerUserId      String
+  backupUserId     String?
+  dueAt            DateTime
+  escalationLevel  Int       @default(0)
+  escalatedAt      DateTime?
+  waitReason       String?
+  waitUntil        DateTime?
+  objectType       String?
+  objectId         String?
+  requiredEvidence String[]  @default([])
+  result           Json?
+  completedBy      String?
+  completedAt      DateTime?
+  version          Int       @default(1)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@index([status, dueAt])
+  @@index([areaKey, status, dueAt])
+  @@index([ownerUserId, status])
+  @@index([backupUserId, status])
+  @@index([caseId])
+  @@index([stepId])
+  @@index([objectType, objectId])
+}
+
+/// Solicitud entre áreas; siempre ligada a un expediente y a un objeto operativo.
+model AreaRequest {
+  id             String    @id @default(cuid())
+  caseId         String
+  fromAreaKey    String
+  toAreaKey      String
+  /// availability_check | purchase_shortfall | payment_authorization | vendor_pickup | transformation | material_shortfall | finished_goods | delivery_update | create_package_in_zoho | resolve_difference | customer_notice | cancel | escalation | info
+  kind           String
+  objectType     String
+  objectId       String
+  title          String
+  /// Validado con el esquema Zod del kind (request-kinds.ts)
+  payload        Json
+  /// Único campo no estructurado (≤800 caracteres); siempre se trata como no confiable
+  freeText       String?
+  /// normal | high | urgent
+  priority       String    @default("normal")
+  /// sent | acknowledged | accepted | blocked | resolved | rejected | cancelled | expired
+  status         String    @default("sent")
+  blocksDelivery Boolean   @default(false)
+  dueAt          DateTime
+  ownerUserId    String
+  backupUserId   String?
+  workItemId     String?
+  /// user | ai | system
+  createdByType  String
+  createdById    String?
+  chatMessageId  String?
+  answer         Json?
+  answeredAt     DateTime?
+  closedAt       DateTime?
+  version        Int       @default(1)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([toAreaKey, status, dueAt])
+  @@index([fromAreaKey, status])
+  @@index([caseId])
+  @@index([ownerUserId, status])
+  @@index([status, dueAt])
+  @@index([objectType, objectId])
+  @@index([workItemId])
+}
+
+/// Incidencia operativa deduplicada por dedupeKey.
+model Incident {
+  id          String    @id @default(cuid())
+  caseId      String?
+  areaKey     String
+  /// sla_breach | orphan_case | stock_conflict | count_dispute | zoho_conflict | zoho_failure | partial_delivery | owner_absent | order_change_conflict | cancellation_compensation | ai_failure | purchase_difference | excess_scrap | quality_failure | production_substitution | zoho_readback_mismatch | sales_order_readback_mismatch
+  kind        String
+  /// low | medium | high | critical
+  severity    String    @default("medium")
+  /// open | acknowledged | resolved | dismissed
+  status      String    @default("open")
+  title       String
+  detail      Json      @default("{}")
+  ownerUserId String?
+  dedupeKey   String    @unique
+  openedAt    DateTime  @default(now())
+  resolvedAt  DateTime?
+  resolvedBy  String?
+  resolution  String?
+  version     Int       @default(1)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([status, severity, openedAt])
+  @@index([areaKey, status])
+  @@index([caseId])
+  @@index([kind, status])
+  @@index([ownerUserId, status])
+}
+
+/// Bitácora inmutable de eventos del núcleo (append-only, particionable por fecha; sin FKs).
+model OperationalEvent {
+  id         BigInt   @default(autoincrement())
+  occurredAt DateTime @default(now())
+  /// now() = inicio de la transacción que inserta. id se asigna al insertar, no al confirmar:
+  /// ct.projections_refresh relee una ventana por recordedAt (ver CtProjectionWatermark)
+  recordedAt DateTime @default(now())
+  caseId     String?
+  areaKey    String?
+  /// p. ej. case.started, demand.shortfall_confirmed, request.created, ai.turn
+  type       String
+  /// user | ai | system | zoho
+  actorType  String
+  actorId    String?
+  commandId  String?
+  objectType String?
+  objectId   String?
+  payload    Json     @default("{}")
+
+  @@id([id, occurredAt])
+  @@index([caseId, id])
+  @@index([type, occurredAt])
+  @@index([commandId])
+  @@index([areaKey, occurredAt])
+  @@index([objectType, objectId])
+  @@index([recordedAt])
+  @@index([actorId, occurredAt])
+}
+
+/// Ledger de comandos idempotentes: repetir un commandId devuelve el resultado guardado.
+model OperationalCommand {
+  /// = commandId (UUID generado por quien emite el comando)
+  id              String    @id
+  type            String
+  /// user | ai | system | zoho
+  actorType       String
+  actorId         String
+  aggregateType   String
+  aggregateId     String
+  expectedVersion Int?
+  payloadHash     String
+  deviceId        String?
+  /// accepted | completed | pending_external | rejected | failed
+  status          String    @default("accepted")
+  result          Json?
+  errorCode       String?
+  receivedAt      DateTime  @default(now())
+  completedAt     DateTime?
+  updatedAt       DateTime  @updatedAt
+
+  @@index([aggregateType, aggregateId])
+  @@index([deviceId, receivedAt])
+  @@index([status, receivedAt])
+  @@index([actorId, receivedAt])
+}
+
+/// Evidencia (foto, firma, documento, conteo, relectura de Zoho) ligada a un objeto operativo.
+model EvidenceLink {
+  id              String   @id @default(cuid())
+  caseId          String?
+  workItemId      String?
+  stepId          String?
+  objectType      String
+  objectId        String
+  /// photo | signature | document | note | count | zoho_readback
+  kind            String
+  storageObjectId String?
+  note            String?
+  createdBy       String
+  createdAt       DateTime @default(now())
+
+  @@index([objectType, objectId])
+  @@index([caseId])
+  @@index([workItemId])
+  @@index([stepId])
+}
+
+/// Proyección reconstruible del grafo de objetos (relación vigente si validTo es null).
+model ObjectRelation {
+  id        String    @id @default(cuid())
+  fromType  String
+  fromId    String
+  toType    String
+  toId      String
+  relation  String
+  validFrom DateTime  @default(now())
+  validTo   DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@unique([fromType, fromId, toType, toId, relation])
+  @@index([toType, toId])
+}
+
+/// Contador de folios humanos (OC-, OP-, RC-, RFQ-, GX-, OPP-, NOM-); se incrementa dentro de la transacción del comando.
+model Sequence {
+  key       String   @id
+  next      Int      @default(1)
+  updatedAt DateTime @updatedAt
+}
+
+/// Política de aprobación de negocio por alcance y rango de monto.
+model ApprovalPolicy {
+  id                String   @id @default(cuid())
+  /// expense | procurement | payment | payroll | production_incident | inventory_adjustment
+  scope             String
+  categoryId        String?
+  minAmount         Decimal  @default(0) @db.Decimal(18, 4)
+  maxAmount         Decimal? @db.Decimal(18, 4)
+  currency          String   @default("MXN")
+  requiredApprovals Int      @default(1)
+  approverRoleKeys  String[] @default([])
+  active            Boolean  @default(true)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([scope, active, minAmount])
+  @@index([categoryId])
+}
+
+/// Solicitud de aprobación de negocio (un voto por usuario; aprobadores distintos).
+model ApprovalRequest {
+  id                String    @id @default(cuid())
+  /// expense | procurement | payment | payroll | production_incident | inventory_adjustment
+  scope             String
+  targetType        String
+  targetId          String
+  amount            Decimal   @db.Decimal(18, 4)
+  currency          String    @default("MXN")
+  policyId          String?
+  requiredApprovals Int
+  /// pending | approved | rejected | expired | cancelled
+  status            String    @default("pending")
+  requestedByUserId String
+  /// [{userId, decision, at, note}]
+  decisions         Json      @default("[]")
+  expiresAt         DateTime?
+  decidedAt         DateTime?
+  caseId            String?
+  areaKey           String?
+  version           Int       @default(1)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@index([targetType, targetId])
+  @@index([status, scope])
+  @@index([status, expiresAt])
+  @@index([requestedByUserId, status])
+  @@index([areaKey, status])
+  @@index([caseId])
+  @@index([policyId])
+}
+
+// ===== Capa de agentes (plan UNIK Neural Operations) =====
+
+/// Identidad de un agente IA (coordinadora de área o administradora) respaldada por un usuario-bot.
+model AgentIdentity {
+  id                    String   @id @default(cuid())
+  /// 'area:<areaKey>' | 'admin'
+  key                   String   @unique
+  /// personal | area | admin
+  kind                  String
+  areaKey               String?  @unique
+  /// p. ej. 'IA de Compras'
+  displayName           String
+  /// User.id del usuario-bot (User.isBot = true)
+  botUserId             String   @unique
+  /// active | on_demand | paused
+  mode                  String   @default("active")
+  dailyTokenBudget      Int      @default(150000)
+  monthlyCostBudgetUsd  Decimal  @default(40) @db.Decimal(10, 4)
+  maxTurnsPerCasePerDay Int      @default(4)
+  /// Horario silencioso, p. ej. {tz, start:'20:00', end:'08:00', days[]}
+  quietHours            Json?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@index([kind, mode])
+}
+
+// ===== Inventario progresivo (plan UNIK Neural Operations) =====
+
+/// Bodega física de UNIK (opcionalmente ligada a una ubicación de Zoho).
+model Warehouse {
+  id             String   @id @default(cuid())
+  key            String   @unique
+  name           String
+  /// location_id de Zoho cuando la bodega existe allá
+  zohoLocationId String?  @unique
+  active         Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([active])
+}
+
+/// Ubicación dentro de una bodega (GENERAL por bodega; scrap para merma).
+model StorageLocation {
+  id          String   @id @default(cuid())
+  warehouseId String
+  /// GENERAL por bodega; códigos libres para racks, bins, etc.
+  code        String
+  label       String?
+  /// rack | bin | floor | yard | virtual
+  kind        String
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([warehouseId, code])
+  @@index([warehouseId, active])
+}
+
+/// Perfil de inventario de un artículo de Zoho (unidad base, conversiones, confianza del conteo).
+model ProductInventoryProfile {
+  id                    String    @id @default(cuid())
+  zohoItemId            String    @unique
+  baseUnit              String
+  /// [{unit, factor}] factor = unidades base por unidad
+  conversions           Json      @default("[]")
+  /// Tolerancia de conteo en porcentaje (0 = exacto)
+  tolerancePct          Decimal   @default(0) @db.Decimal(9, 4)
+  isBulk                Boolean   @default(false)
+  /// none | lot | roll | sheet | container
+  trackingPolicy        String    @default("none")
+  /// medida | color | acabado | lote | rollo | placa
+  variantAxes           String[]  @default([])
+  /// stock | purchase | manufacture | direct_supplier
+  defaultSource         String    @default("stock")
+  /// UNCOUNTED | PROVISIONAL | CONTROLLED | DISPUTED
+  confidence            String    @default("UNCOUNTED")
+  consecutiveGoodCounts Int       @default(0)
+  lastCountAt           DateTime?
+  controlledAt          DateTime?
+  /// Peso en kg por unidad base (capacidad de carga en route-rules)
+  weightKgPerBaseUnit   Decimal?  @db.Decimal(18, 4)
+  /// Superficie en m² por unidad base (capacidad de carga en route-rules)
+  areaM2PerBaseUnit     Decimal?  @db.Decimal(18, 4)
+  version               Int       @default(1)
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@index([confidence])
+  @@index([trackingPolicy])
+}
+
+/// Existencia por artículo, bodega, ubicación, variante y contenedor. Cantidades en unidad base.
+/// known = baseline + receipts + returns + produced − issued − consumed + adjustments
+model StockItem {
+  id                      String    @id @default(cuid())
+  zohoItemId              String
+  warehouseId             String
+  locationId              String
+  /// Canónica, p. ej. "color=gris|medida=60x60"; "" sin variante
+  variantKey              String    @default("")
+  variantJson             Json?
+  /// Etiqueta de rollo/placa/contenedor (RL-000123, PL-000045); "" sin contenedor
+  containerKey            String    @default("")
+  baseline                Decimal   @default(0) @db.Decimal(18, 4)
+  receipts                Decimal   @default(0) @db.Decimal(18, 4)
+  returns                 Decimal   @default(0) @db.Decimal(18, 4)
+  produced                Decimal   @default(0) @db.Decimal(18, 4)
+  issued                  Decimal   @default(0) @db.Decimal(18, 4)
+  consumed                Decimal   @default(0) @db.Decimal(18, 4)
+  /// Con signo
+  adjustments             Decimal   @default(0) @db.Decimal(18, 4)
+  reserved                Decimal   @default(0) @db.Decimal(18, 4)
+  blocked                 Decimal   @default(0) @db.Decimal(18, 4)
+  assignedToProduction    Decimal   @default(0) @db.Decimal(18, 4)
+  knownQty                Decimal   @default(0) @db.Decimal(18, 4)
+  lastCountedAt           DateTime?
+  /// ProductionOrder.id que produjo esta existencia (trazabilidad a materias primas y venta)
+  originProductionOrderId String?
+  /// Medidas de sobrantes vendibles, p. ej. {largo, ancho, unidad}
+  dimensions              Json?
+  version                 Int       @default(1)
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
+
+  // La llave única también atiende la disponibilidad por (zohoItemId, warehouseId)
+  @@unique([zohoItemId, warehouseId, locationId, variantKey, containerKey])
+  @@index([warehouseId, locationId])
+  @@index([originProductionOrderId])
+  @@index([containerKey])
+}
+
+/// Movimiento de inventario (append-only).
+model StockMovement {
+  id               String   @id @default(cuid())
+  stockItemId      String
+  zohoItemId       String
+  warehouseId      String
+  /// baseline | receipt | issue | transfer_in | transfer_out | adjust | consume | produce | return | block | unblock
+  kind             String
+  /// En unidad base (en adjust lleva signo)
+  quantity         Decimal  @db.Decimal(18, 4)
+  originalQuantity Decimal  @db.Decimal(18, 4)
+  originalUnit     String
+  /// p. ej. stock_count, stock_reservation, delivery_order, production_order, purchase_receipt
+  referenceType    String?
+  referenceId      String?
+  commandId        String?
+  actorId          String
+  note             String?
+  occurredAt       DateTime @default(now())
+  createdAt        DateTime @default(now())
+
+  @@index([stockItemId, occurredAt])
+  @@index([referenceType, referenceId])
+  @@index([zohoItemId, warehouseId, occurredAt])
+  @@index([kind, occurredAt])
+  @@index([commandId])
+}
+
+/// Reserva de existencia para una necesidad de un expediente.
+model StockReservation {
+  id                  String    @id @default(cuid())
+  stockItemId         String
+  zohoItemId          String
+  warehouseId         String
+  caseId              String
+  demandId            String
+  allocationId        String?
+  /// En unidad base
+  quantity            Decimal   @db.Decimal(18, 4)
+  /// active | released | consumed | expired
+  status              String    @default("active")
+  /// Confianza del perfil al reservar: UNCOUNTED | PROVISIONAL | CONTROLLED | DISPUTED
+  confidenceAtReserve String
+  expiresAt           DateTime?
+  releasedAt          DateTime?
+  version             Int       @default(1)
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  @@index([stockItemId, status])
+  @@index([zohoItemId, warehouseId, status])
+  @@index([caseId])
+  @@index([demandId])
+  @@index([allocationId])
+  @@index([status, createdAt])
+}
+
+/// Conteo físico (spot por demanda, cíclico o completo).
+model StockCount {
+  id          String           @id @default(cuid())
+  warehouseId String
+  /// spot | cycle | full
+  scope       String           @default("spot")
+  /// draft | in_progress | closed | cancelled
+  status      String           @default("draft")
+  startedBy   String
+  closedAt    DateTime?
+  version     Int              @default(1)
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  lines       StockCountLine[]
+
+  @@index([warehouseId, status])
+  @@index([status, createdAt])
+  @@index([startedBy])
+}
+
+/// Línea de un conteo físico por existencia.
+model StockCountLine {
+  id              String     @id @default(cuid())
+  countId         String
+  stockItemId     String
+  expectedQty     Decimal    @db.Decimal(18, 4)
+  countedQty      Decimal    @db.Decimal(18, 4)
+  /// Unidad en que se capturó el conteo
+  unit            String
+  diffQty         Decimal    @db.Decimal(18, 4)
+  withinTolerance Boolean
+  /// pending | accepted | adjusted | disputed
+  resolution      String     @default("pending")
+  countedBy       String
+  countedAt       DateTime   @default(now())
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+  count           StockCount @relation(fields: [countId], references: [id], onDelete: Cascade)
+
+  @@unique([countId, stockItemId])
+  @@index([stockItemId, countedAt])
+  @@index([resolution])
+}
+
+/// Compromiso previo al corte (orden anterior o acuerdo verbal) que resta del disponible hasta confirmarse o liberarse.
+model LegacyCommitmentClaim {
+  id          String    @id @default(cuid())
+  zohoItemId  String
+  warehouseId String
+  variantKey  String    @default("")
+  quantity    Decimal   @db.Decimal(18, 4)
+  unit        String
+  /// pre_cutover_order | verbal | other
+  source      String
+  reference   String?
+  caseId      String?
+  /// claimed | confirmed | released | expired
+  status      String    @default("claimed")
+  claimedBy   String
+  expiresAt   DateTime
+  resolvedAt  DateTime?
+  version     Int       @default(1)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([zohoItemId, warehouseId, status])
+  @@index([status, expiresAt])
+  @@index([caseId])
+  @@index([claimedBy, status])
+}
+
+// ===== Logística núcleo (plan UNIK Neural Operations) =====
+
+/// Vehículo de la flotilla propia.
+model Vehicle {
+  id               String    @id @default(cuid())
+  code             String    @unique
+  plate            String
+  label            String
+  capacityKg       Decimal?  @db.Decimal(18, 4)
+  capacityM2       Decimal?  @db.Decimal(18, 4)
+  capacityPieces   Int?
+  /// En mantenimiento hasta esta fecha (no asignable)
+  maintenanceUntil DateTime?
+  active           Boolean   @default(true)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@index([active])
+  @@index([plate])
+}
+
+/// Chofer (puede o no tener usuario del sistema).
+model Driver {
+  id            String   @id @default(cuid())
+  userId        String?  @unique
+  name          String
+  phone         String?
+  licenseNumber String?
+  active        Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([active])
+}
+
+/// Orden de entrega de (parte de) un expediente, ligada al paquete de Zoho.
+model DeliveryOrder {
+  id                    String    @id @default(cuid())
+  caseId                String
+  /// DemandAllocation.id cubiertos por esta entrega
+  allocationIds         String[]  @default([])
+  /// Package.id local
+  packageId             String?
+  zohoPackageId         String?
+  /// own_fleet | carrier | customer_pickup | direct_supplier
+  mode                  String
+  /// pending | planned | assigned | pending_external | conflict | dispatched | delivered | partially_delivered | failed | cancelled
+  status                String    @default("pending")
+  carrier               String?
+  vehicleId             String?
+  driverId              String?
+  tripId                String?
+  plannedDate           DateTime?
+  windowStart           DateTime?
+  windowEnd             DateTime?
+  addressLine           String?
+  city                  String?
+  state                 String?
+  postalCode            String?
+  contactName           String?
+  contactPhone          String?
+  lat                   Decimal?  @db.Decimal(10, 7)
+  lng                   Decimal?  @db.Decimal(10, 7)
+  /// Lo que se pidió escribir en Zoho: {carrier, shipmentDate, trackingNumber}
+  shipmentInput         Json?
+  zohoShipmentId        String?
+  zohoReadback          Json?
+  conflictDetail        Json?
+  /// not_required | pending_write | written | readback_ok | readback_mismatch | delivered_pending_write | delivered_written | failed
+  zohoSyncState         String    @default("not_required")
+  zohoLastAttemptAt     DateTime?
+  zohoError             String?
+  /// [{allocationId, deliveredQty}]
+  deliveredLines        Json?
+  partialReason         String?
+  /// Orden de entrega original cuando ésta cubre el remanente de una entrega parcial
+  parentDeliveryOrderId String?
+  deliveredAt           DateTime?
+  receivedBy            String?
+  version               Int       @default(1)
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@index([caseId])
+  @@index([status, plannedDate])
+  @@index([tripId])
+  @@index([zohoPackageId])
+  @@index([packageId])
+  @@index([zohoSyncState, zohoLastAttemptAt])
+  @@index([parentDeliveryOrderId])
+  @@index([driverId, plannedDate])
+}
+
+/// Viaje de un vehículo con su chofer en una fecha.
+model Trip {
+  id        String     @id @default(cuid())
+  number    String     @unique
+  date      DateTime   @db.Date
+  vehicleId String
+  driverId  String
+  /// planned | en_route | done | cancelled
+  status    String     @default("planned")
+  startedAt DateTime?
+  endedAt   DateTime?
+  notes     String?
+  version   Int        @default(1)
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  stops     TripStop[]
+
+  @@index([date, status])
+  @@index([driverId, date])
+  @@index([vehicleId, date])
+  @@index([status])
+}
+
+/// Parada de un viaje (una por orden de entrega).
+model TripStop {
+  id              String    @id @default(cuid())
+  tripId          String
+  deliveryOrderId String
+  sequence        Int
+  /// pending | arrived | done | failed (la entrega parcial vive en DeliveryOrder: partially_delivered + orden hija)
+  status          String    @default("pending")
+  etaAt           DateTime?
+  arrivedAt       DateTime?
+  departedAt      DateTime?
+  lat             Decimal?  @db.Decimal(10, 7)
+  lng             Decimal?  @db.Decimal(10, 7)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  trip            Trip      @relation(fields: [tripId], references: [id], onDelete: Cascade)
+
+  @@unique([tripId, deliveryOrderId])
+  @@index([tripId, sequence])
+  @@index([deliveryOrderId])
+  @@index([status])
+}
+
+/// Evidencia de entrega (foto, firma, nota o confirmación de cantidades); no se edita.
+model DeliveryEvidence {
+  id              String   @id @default(cuid())
+  deliveryOrderId String
+  /// photo | signature | note | qty_confirmation
+  kind            String
+  storageObjectId String?
+  /// [{allocationId, deliveredQty}]
+  deliveredLines  Json?
+  note            String?
+  lat             Decimal? @db.Decimal(10, 7)
+  lng             Decimal? @db.Decimal(10, 7)
+  commandId       String?
+  createdBy       String
+  createdAt       DateTime @default(now())
+
+  @@index([deliveryOrderId, createdAt])
+  @@index([storageObjectId])
+  @@index([commandId])
+}
+
+// ===== Compras y Sourcing (plan UNIK Neural Operations) =====
+
+/// Proveedor nativo de UNIK (PRV-), opcionalmente ligado a un contacto de Zoho.
+model Supplier {
+  id                  String               @id @default(cuid())
+  /// Folio PRV-
+  number              String               @unique
+  name                String
+  legalName           String?
+  /// RFC
+  taxRegNo            String?
+  zohoContactId       String?              @unique
+  /// active | blocked | archived
+  status              String               @default("active")
+  /// [{type: whatsapp|sms|telegram|email|phone|web, value}]
+  channels            Json                 @default("[]")
+  primaryPhone        String?
+  primaryEmail        String?
+  website             String?
+  /// Contact.id del módulo de comunicaciones
+  commContactId       String?
+  paymentTermsDays    Int?
+  /// prepaid | credit | cod
+  paymentMode         String               @default("prepaid")
+  currency            String               @default("MXN")
+  leadTimeDaysDefault Int?
+  freightTerms        String?
+  /// Calificaciones 0–5 calculadas por supplier-rating.ts
+  ratingOverall       Decimal?             @db.Decimal(4, 2)
+  ratingOnTime        Decimal?             @db.Decimal(4, 2)
+  ratingQuality       Decimal?             @db.Decimal(4, 2)
+  ratingPrice         Decimal?             @db.Decimal(4, 2)
+  evaluationsCount    Int                  @default(0)
+  lastEvaluatedAt     DateTime?
+  /// SourcingCandidate.id del que se promovió
+  sourceCandidateId   String?              @unique
+  tags                String[]             @default([])
+  notes               String?
+  createdByUserId     String
+  version             Int                  @default(1)
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+  products            SupplierProduct[]
+  evaluations         SupplierEvaluation[]
+
+  @@index([name])
+  @@index([status])
+  @@index([taxRegNo])
+  @@index([commContactId])
+}
+
+/// Precio y plazo de un artículo con un proveedor.
+model SupplierProduct {
+  id               String    @id @default(cuid())
+  supplierId       String
+  /// "" cuando el artículo no existe en Zoho
+  zohoItemId       String    @default("")
+  /// "" cuando el proveedor no maneja clave propia
+  supplierSku      String    @default("")
+  description      String
+  unit             String
+  /// Unidades base por unidad del proveedor
+  unitFactorToBase Decimal   @default(1) @db.Decimal(18, 6)
+  lastPrice        Decimal?  @db.Decimal(18, 4)
+  currency         String    @default("MXN")
+  lastQuotedAt     DateTime?
+  leadTimeDays     Int?
+  minOrderQty      Decimal?  @db.Decimal(18, 4)
+  /// rfq | receipt | manual
+  source           String    @default("manual")
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  supplier         Supplier  @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+
+  @@unique([supplierId, zohoItemId, supplierSku])
+  @@index([zohoItemId])
+}
+
+/// Solicitud de compra (SC-) de un área o de la demanda de un expediente.
+model PurchaseRequest {
+  id                String                @id @default(cuid())
+  /// Folio SC-
+  number            String                @unique
+  caseId            String?
+  requestedByUserId String
+  areaKey           String
+  /// draft | open | consolidated | sourcing | ordered | closed | cancelled
+  status            String                @default("draft")
+  /// normal | high | urgent
+  priority          String                @default("normal")
+  neededBy          DateTime?
+  reason            String?
+  version           Int                   @default(1)
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+  lines             PurchaseRequestLine[]
+
+  @@index([status, createdAt])
+  @@index([status, neededBy])
+  @@index([caseId])
+  @@index([requestedByUserId, status])
+  @@index([areaKey, status])
+}
+
+/// Renglón de una solicitud de compra.
+model PurchaseRequestLine {
+  id               String          @id @default(cuid())
+  requestId        String
+  /// CaseDemand.id
+  demandId         String?
+  /// DemandAllocation.id (source purchase)
+  allocationId     String?
+  zohoItemId       String?
+  /// zohoItemId|semana ISO (p. ej. LP-01|2026-W38) para sugerir consolidación (purchases.consolidate_suggest)
+  consolidationKey String?
+  description      String
+  qty              Decimal         @db.Decimal(18, 4)
+  unit             String
+  qtyOrdered       Decimal         @default(0) @db.Decimal(18, 4)
+  qtyReceived      Decimal         @default(0) @db.Decimal(18, 4)
+  /// open | ordered | received | cancelled
+  status           String          @default("open")
+  sortOrder        Int             @default(0)
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+  request          PurchaseRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+
+  @@index([requestId])
+  @@index([demandId])
+  @@index([allocationId])
+  @@index([zohoItemId, status])
+  @@index([consolidationKey, status])
+}
+
+/// Solicitud de cotización (RFQ-) enviada a proveedores o candidatos.
+model Rfq {
+  id               String          @id @default(cuid())
+  /// Folio RFQ-
+  number           String          @unique
+  title            String
+  /// draft | sent | collecting | compared | closed | cancelled
+  status           String          @default("draft")
+  dueAt            DateTime?
+  sourcingSearchId String?
+  createdByUserId  String
+  version          Int             @default(1)
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+  lines            RfqLine[]
+  invitations      RfqInvitation[]
+  responses        RfqResponse[]
+
+  @@index([status, dueAt])
+  @@index([status, createdAt])
+  @@index([createdByUserId, status])
+  @@index([sourcingSearchId])
+}
+
+/// Renglón solicitado en una RFQ.
+model RfqLine {
+  id            String   @id @default(cuid())
+  rfqId         String
+  /// PurchaseRequestLine.id
+  requestLineId String?
+  zohoItemId    String?
+  description   String
+  qty           Decimal  @db.Decimal(18, 4)
+  unit          String
+  /// Especificaciones: medidas, acabado, color, norma
+  specs         Json?
+  sortOrder     Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  rfq           Rfq      @relation(fields: [rfqId], references: [id], onDelete: Cascade)
+
+  @@index([rfqId])
+  @@index([requestLineId])
+}
+
+/// Invitación de una RFQ a un proveedor o candidato por un canal.
+model RfqInvitation {
+  id             String    @id @default(cuid())
+  rfqId          String
+  supplierId     String?
+  candidateId    String?
+  /// whatsapp | sms | telegram | email
+  channel        String
+  /// Cuenta de comunicaciones usada para enviar
+  accountId      String?
+  conversationId String?
+  messageId      String?
+  /// pending | sent | failed | replied | declined | expired
+  status         String    @default("pending")
+  sentAt         DateTime?
+  repliedAt      DateTime?
+  error          String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  rfq            Rfq       @relation(fields: [rfqId], references: [id], onDelete: Cascade)
+
+  @@index([rfqId, status])
+  @@index([supplierId])
+  @@index([candidateId])
+  @@index([conversationId])
+  @@index([status, sentAt])
+}
+
+/// Cotización recibida (interpretada por IA o capturada) para una RFQ.
+model RfqResponse {
+  id               String            @id @default(cuid())
+  rfqId            String
+  invitationId     String?
+  supplierId       String?
+  candidateId      String?
+  /// conversation | manual
+  receivedVia      String
+  sourceMessageIds String[]          @default([])
+  currency         String            @default("MXN")
+  exchangeRate     Decimal?          @db.Decimal(18, 6)
+  taxIncluded      Boolean           @default(false)
+  /// Fracción (0.16 = 16 %)
+  taxRate          Decimal?          @db.Decimal(9, 4)
+  freight          Decimal           @default(0) @db.Decimal(18, 4)
+  otherCosts       Decimal           @default(0) @db.Decimal(18, 4)
+  leadTimeDays     Int?
+  validUntil       DateTime?
+  paymentTerms     String?
+  landedTotal      Decimal?          @db.Decimal(18, 4)
+  /// Puntaje de rfq-scoring.ts
+  score            Decimal?          @db.Decimal(9, 4)
+  specMatch        Decimal?          @db.Decimal(9, 4)
+  riskScore        Decimal?          @db.Decimal(9, 4)
+  confidence       Decimal?          @db.Decimal(4, 3)
+  /// Salida validada de rfqInterpretationSchema
+  interpretation   Json?
+  /// parsed | needs_review | confirmed | rejected | selected
+  status           String            @default("parsed")
+  reviewedByUserId String?
+  version          Int               @default(1)
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  rfq              Rfq               @relation(fields: [rfqId], references: [id], onDelete: Cascade)
+  lines            RfqResponseLine[]
+
+  @@index([rfqId, status])
+  @@index([invitationId])
+  @@index([supplierId, createdAt])
+  @@index([candidateId])
+  @@index([status, createdAt])
+}
+
+/// Precio cotizado por renglón. landedUnitCost = (precio·factor + flete/qty + otros/qty)·(iva incluido ? 1 : 1+tasa)
+model RfqResponseLine {
+  id               String      @id @default(cuid())
+  responseId       String
+  rfqLineId        String
+  unitPrice        Decimal     @db.Decimal(18, 4)
+  qty              Decimal     @db.Decimal(18, 4)
+  unit             String
+  /// Unidades base por unidad cotizada
+  unitFactorToBase Decimal     @default(1) @db.Decimal(18, 6)
+  landedUnitCost   Decimal?    @db.Decimal(18, 4)
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+  response         RfqResponse @relation(fields: [responseId], references: [id], onDelete: Cascade)
+
+  @@index([responseId])
+  @@index([rfqLineId])
+}
+
+/// Orden de compra nativa (OC-). zohoPurchaseOrderId es sólo referencia.
+model ProcurementOrder {
+  id                   String                 @id @default(cuid())
+  /// Folio OC-
+  number               String                 @unique
+  supplierId           String
+  rfqResponseId        String?
+  /// draft | pending_approval | approved | pending_payment | awaiting_receipt | partially_received | received | closed | cancelled | disputed
+  status               String                 @default("draft")
+  currency             String                 @default("MXN")
+  subtotal             Decimal                @default(0) @db.Decimal(18, 4)
+  taxTotal             Decimal                @default(0) @db.Decimal(18, 4)
+  freight              Decimal                @default(0) @db.Decimal(18, 4)
+  total                Decimal                @default(0) @db.Decimal(18, 4)
+  /// prepaid | credit | cod (se copia del proveedor)
+  paymentMode          String
+  /// unpaid | partial | paid
+  paymentStatus        String                 @default("unpaid")
+  /// Obligation.id (payable) en finanzas
+  obligationId         String?
+  approvalRequestId    String?
+  expectedAt           DateTime?
+  /// warehouse | direct_to_customer
+  deliveryMode         String                 @default("warehouse")
+  warehouseId          String?
+  /// OperationalCase.id cuando el proveedor entrega directo al cliente
+  directDeliveryCaseId String?
+  sentToSupplierAt     DateTime?
+  /// whatsapp | sms | telegram | email | pdf
+  sentVia              String?
+  conversationId       String?
+  zohoPurchaseOrderId  String?
+  evidenceObjectIds    String[]               @default([])
+  notes                String?
+  createdByUserId      String
+  version              Int                    @default(1)
+  createdAt            DateTime               @default(now())
+  updatedAt            DateTime               @updatedAt
+  lines                ProcurementOrderLine[]
+  receipts             GoodsReceipt[]
+
+  @@index([status, createdAt])
+  @@index([status, expectedAt])
+  @@index([supplierId, status])
+  @@index([paymentStatus, status])
+  @@index([createdByUserId, status])
+  @@index([rfqResponseId])
+  @@index([obligationId])
+  @@index([approvalRequestId])
+  @@index([directDeliveryCaseId])
+  @@index([warehouseId, status])
+  @@index([conversationId])
+  @@index([zohoPurchaseOrderId])
+}
+
+/// Renglón de una orden de compra.
+model ProcurementOrderLine {
+  id                String                  @id @default(cuid())
+  orderId           String
+  /// PurchaseRequestLine.id
+  requestLineId     String?
+  zohoItemId        String?
+  supplierProductId String?
+  description       String
+  qty               Decimal                 @db.Decimal(18, 4)
+  unit              String
+  unitPrice         Decimal                 @db.Decimal(18, 4)
+  /// Fracción (0.16 = 16 %)
+  taxRate           Decimal?                @db.Decimal(9, 4)
+  lineTotal         Decimal                 @db.Decimal(18, 4)
+  qtyReceived       Decimal                 @default(0) @db.Decimal(18, 4)
+  qtyAccepted       Decimal                 @default(0) @db.Decimal(18, 4)
+  qtyRejected       Decimal                 @default(0) @db.Decimal(18, 4)
+  /// open | partial | received | closed | cancelled
+  status            String                  @default("open")
+  sortOrder         Int                     @default(0)
+  createdAt         DateTime                @default(now())
+  updatedAt         DateTime                @updatedAt
+  order             ProcurementOrder        @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  allocations       ProcurementAllocation[]
+
+  @@index([orderId])
+  @@index([requestLineId])
+  @@index([zohoItemId, status])
+  @@index([supplierProductId])
+}
+
+/// Reparto exacto de un renglón de compra entre demandas de expedientes.
+model ProcurementAllocation {
+  id                 String               @id @default(cuid())
+  orderLineId        String
+  /// CaseDemand.id
+  demandId           String
+  requestLineId      String?
+  /// DemandAllocation.id (source purchase)
+  demandAllocationId String?
+  qty                Decimal              @db.Decimal(18, 4)
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
+  orderLine          ProcurementOrderLine @relation(fields: [orderLineId], references: [id], onDelete: Cascade)
+
+  @@unique([orderLineId, demandId])
+  @@index([demandId])
+  @@index([demandAllocationId])
+  @@index([requestLineId])
+}
+
+/// Recepción de mercancía (RC-) en bodega o confirmación de entrega directa.
+model GoodsReceipt {
+  id                      String             @id @default(cuid())
+  /// Folio RC-
+  number                  String             @unique
+  orderId                 String
+  receivedByUserId        String
+  receivedAt              DateTime           @default(now())
+  /// warehouse | direct_delivery
+  mode                    String             @default("warehouse")
+  warehouseId             String?
+  locationId              String?
+  directConfirmedByUserId String?
+  evidenceObjectIds       String[]           @default([])
+  /// draft | posted | disputed
+  status                  String             @default("draft")
+  notes                   String?
+  version                 Int                @default(1)
+  createdAt               DateTime           @default(now())
+  updatedAt               DateTime           @updatedAt
+  /// Restrict: una recepción contabilizada no se borra con la orden
+  order                   ProcurementOrder   @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  lines                   GoodsReceiptLine[]
+
+  @@index([orderId])
+  @@index([status, receivedAt])
+  @@index([receivedByUserId, receivedAt])
+  @@index([warehouseId, receivedAt])
+}
+
+/// Renglón recibido; diferencias generan incidencia.
+model GoodsReceiptLine {
+  id              String       @id @default(cuid())
+  receiptId       String
+  /// ProcurementOrderLine.id
+  orderLineId     String
+  qtyReceived     Decimal      @db.Decimal(18, 4)
+  qtyAccepted     Decimal      @db.Decimal(18, 4)
+  qtyRejected     Decimal      @default(0) @db.Decimal(18, 4)
+  unit            String
+  lotCode         String?
+  stockMovementId String?
+  /// none | short | over | damaged | wrong_item
+  differenceKind  String       @default("none")
+  incidentId      String?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  receipt         GoodsReceipt @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+
+  @@index([receiptId])
+  @@index([orderLineId])
+  @@index([stockMovementId])
+  @@index([incidentId])
+}
+
+/// Búsqueda del laboratorio de Sourcing, cacheada por queryHash.
+model SourcingSearch {
+  id                String    @id @default(cuid())
+  queryText         String
+  queryHash         String    @unique
+  /// brave_search | catalog_page
+  providerKey       String
+  filters           Json?
+  /// pending | done | failed
+  status            String    @default("pending")
+  resultCount       Int       @default(0)
+  /// StorageObject.id con la respuesta cruda
+  rawResultObjectId String?
+  costUnits         Int       @default(0)
+  error             String?
+  createdByUserId   String
+  executedAt        DateTime?
+  expiresAt         DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@index([status, createdAt])
+  @@index([createdByUserId, createdAt])
+  @@index([providerKey, executedAt])
+  @@index([expiresAt])
+}
+
+/// Proveedor potencial encontrado en Sourcing. dedupeKey = nombre normalizado|dominio|teléfono.
+model SourcingCandidate {
+  id              String    @id @default(cuid())
+  searchId        String?
+  dedupeKey       String    @unique
+  name            String
+  domain          String?
+  url             String?
+  phone           String?
+  email           String?
+  location        String?
+  productsSummary String?
+  /// [{text, price, currency, unit, url}]
+  priceSnippets   Json      @default("[]")
+  confidence      Decimal?  @db.Decimal(4, 3)
+  /// [{url, fetchedAt, objectId, sha256}]
+  evidence        Json      @default("[]")
+  /// new | contacted | rfq_sent | quoted | approved | rejected | promoted
+  status          String    @default("new")
+  /// Supplier.id al promoverse o si ya existía
+  supplierId      String?
+  commContactId   String?
+  lastFetchedAt   DateTime?
+  version         Int       @default(1)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([searchId])
+  @@index([status, updatedAt])
+  @@index([domain])
+  @@index([phone])
+  @@index([supplierId])
+  @@index([commContactId])
+}
+
+/// Evaluación de un proveedor tras una compra o recepción (1–5 por criterio).
+model SupplierEvaluation {
+  id                String   @id @default(cuid())
+  supplierId        String
+  orderId           String?
+  receiptId         String?
+  onTime            Int
+  quality           Int
+  price             Int
+  communication     Int
+  comment           String?
+  evaluatedByUserId String
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  supplier          Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+
+  @@index([supplierId, createdAt])
+  @@index([orderId])
+  @@index([receiptId])
+  @@index([evaluatedByUserId])
+}
+
+// ===== Manufactura (plan UNIK Neural Operations) =====
+
+/// Centro de trabajo (corte, acabado, ensamble) con capacidad por turno.
+model WorkCenter {
+  id               String   @id @default(cuid())
+  key              String   @unique
+  name             String
+  warehouseId      String?
+  capacityPerShift Decimal  @db.Decimal(18, 4)
+  /// m2 | pieces | minutes
+  capacityUnit     String
+  /// [{name, start: "HH:mm", end: "HH:mm", days: [1..7]}]
+  shifts           Json     @default("[]")
+  costPerHour      Decimal? @db.Decimal(18, 4)
+  currency         String   @default("MXN")
+  /// active | inactive
+  status           String   @default("active")
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([status])
+  @@index([warehouseId])
+}
+
+/// Lista de materiales versionada, sólo para productos repetibles.
+model Bom {
+  id                String         @id @default(cuid())
+  outputZohoItemId  String
+  /// Número de revisión de la BOM (no es control de concurrencia)
+  version           Int            @default(1)
+  /// transformation | assembly
+  kind              String
+  /// draft | active | retired
+  status            String         @default("draft")
+  outputQty         Decimal        @db.Decimal(18, 4)
+  outputUnit        String
+  /// Fracción esperada (0.9500 = 95 %)
+  expectedYield     Decimal?       @db.Decimal(5, 4)
+  /// Porcentaje de merma permitido (5.000 = 5 %)
+  scrapAllowancePct Decimal?       @db.Decimal(6, 3)
+  notes             String?
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+  lines             BomLine[]
+  operations        BomOperation[]
+
+  @@unique([outputZohoItemId, version])
+  @@index([outputZohoItemId, status])
+  @@index([status])
+}
+
+/// Insumo de una BOM con sus sustitutos permitidos.
+model BomLine {
+  id                    String   @id @default(cuid())
+  bomId                 String
+  inputZohoItemId       String
+  /// Cantidad de insumo por unidad de salida
+  qtyPerOutput          Decimal  @db.Decimal(18, 6)
+  unit                  String
+  substituteZohoItemIds String[] @default([])
+  /// Porcentaje de merma esperado del insumo
+  scrapPct              Decimal? @db.Decimal(6, 3)
+  sortOrder             Int      @default(0)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  bom                   Bom      @relation(fields: [bomId], references: [id], onDelete: Cascade)
+
+  @@index([bomId])
+  @@index([inputZohoItemId])
+}
+
+/// Operación de la ruta de una BOM.
+model BomOperation {
+  id           String   @id @default(cuid())
+  bomId        String
+  seq          Int
+  /// WorkCenter.id
+  workCenterId String
+  name         String
+  stdMinutes   Int
+  setupMinutes Int      @default(0)
+  qcRequired   Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  bom          Bom      @relation(fields: [bomId], references: [id], onDelete: Cascade)
+
+  @@index([bomId, seq])
+  @@index([workCenterId])
+}
+
+/// Orden de producción (OP-): transformación por defecto o por BOM.
+model ProductionOrder {
+  id                 String                @id @default(cuid())
+  /// Folio OP-
+  number             String                @unique
+  /// transformation | bom
+  kind               String                @default("transformation")
+  bomId              String?
+  caseId             String?
+  /// CaseDemand.id
+  demandId           String?
+  /// DemandAllocation.id (source manufacture)
+  demandAllocationId String?
+  outputZohoItemId   String
+  outputName         String?
+  plannedQty         Decimal               @db.Decimal(18, 4)
+  plannedUnit        String
+  producedQty        Decimal               @default(0) @db.Decimal(18, 4)
+  scrapQty           Decimal               @default(0) @db.Decimal(18, 4)
+  leftoverQty        Decimal               @default(0) @db.Decimal(18, 4)
+  /// draft | reserved | prepared | in_progress | inspection | completed | released | cancelled | blocked
+  status             String                @default("draft")
+  /// normal | high | urgent
+  priority           String                @default("normal")
+  plannedStartAt     DateTime?
+  plannedEndAt       DateTime?
+  startedAt          DateTime?
+  completedAt        DateTime?
+  workCenterId       String?
+  /// inventory | logistics
+  releaseTarget      String                @default("inventory")
+  /// Warehouse.id donde se libera la salida (obligatorio: produce/recordOutput necesita bodega)
+  outputWarehouseId  String
+  outputLocationId   String?
+  blockedReason      String?
+  /// Transformación: [{zohoItemId, qty, unit}]
+  inputs             Json?
+  createdByUserId    String
+  version            Int                   @default(1)
+  createdAt          DateTime              @default(now())
+  updatedAt          DateTime              @updatedAt
+  operations         ProductionOperation[]
+  consumptions       MaterialConsumption[]
+  outputs            ProductionOutput[]
+  qualityChecks      QualityCheck[]
+
+  @@index([status, plannedStartAt])
+  @@index([status, createdAt])
+  @@index([workCenterId, plannedStartAt])
+  @@index([caseId])
+  @@index([demandId])
+  @@index([demandAllocationId])
+  @@index([bomId])
+  @@index([outputZohoItemId, status])
+  @@index([createdByUserId, status])
+}
+
+/// Operación de una orden de producción (WIP y minutos reales).
+model ProductionOperation {
+  id                String          @id @default(cuid())
+  productionOrderId String
+  seq               Int
+  /// WorkCenter.id
+  workCenterId      String
+  name              String
+  /// pending | running | paused | done | skipped
+  status            String          @default("pending")
+  assignedUserId    String?
+  plannedStartAt    DateTime?
+  /// Minutos planeados (estándar + preparación) para capacity-rules
+  plannedMinutes    Int?
+  startedAt         DateTime?
+  finishedAt        DateTime?
+  actualMinutes     Int?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  productionOrder   ProductionOrder @relation(fields: [productionOrderId], references: [id], onDelete: Cascade)
+
+  @@index([productionOrderId, seq])
+  @@index([workCenterId, status, plannedStartAt])
+  @@index([assignedUserId, status])
+}
+
+/// Consumo de material de una orden de producción (planeado, real o sustitución).
+model MaterialConsumption {
+  id                       String          @id @default(cuid())
+  productionOrderId        String
+  operationId              String?
+  inputZohoItemId          String
+  stockItemId              String?
+  /// StockReservation.id contra la que se consume
+  reservationId            String?
+  qtyPlanned               Decimal         @default(0) @db.Decimal(18, 4)
+  qtyActual                Decimal         @default(0) @db.Decimal(18, 4)
+  unit                     String
+  /// planned | actual | substitution
+  kind                     String
+  substitutedForZohoItemId String?
+  stockMovementId          String?
+  /// ApprovalRequest.id (production_incident) para sustituciones fuera de BOM
+  approvalRequestId        String?
+  recordedByUserId         String
+  createdAt                DateTime        @default(now())
+  updatedAt                DateTime        @updatedAt
+  productionOrder          ProductionOrder @relation(fields: [productionOrderId], references: [id], onDelete: Cascade)
+
+  @@index([productionOrderId, kind])
+  @@index([operationId])
+  @@index([inputZohoItemId, createdAt])
+  @@index([reservationId])
+  @@index([stockItemId])
+  @@index([stockMovementId])
+  @@index([approvalRequestId])
+}
+
+/// Salida de producción: terminado, merma o sobrante (con dimensiones si es vendible).
+model ProductionOutput {
+  id                String          @id @default(cuid())
+  productionOrderId String
+  /// finished | scrap | leftover
+  kind              String
+  zohoItemId        String
+  qty               Decimal         @db.Decimal(18, 4)
+  unit              String
+  /// Sobrante vendible: {largo, ancho, espesor, unidad}
+  dimensions        Json?
+  stockMovementId   String?
+  stockItemId       String?
+  locationId        String?
+  qualityCheckId    String?
+  recordedByUserId  String
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  productionOrder   ProductionOrder @relation(fields: [productionOrderId], references: [id], onDelete: Cascade)
+
+  @@index([productionOrderId, kind])
+  @@index([zohoItemId, createdAt])
+  @@index([stockMovementId])
+  @@index([stockItemId])
+  @@index([qualityCheckId])
+}
+
+/// Inspección de calidad de una orden u operación.
+model QualityCheck {
+  id                String          @id @default(cuid())
+  productionOrderId String
+  operationId       String?
+  /// pass | fail | conditional
+  result            String
+  /// [{item, ok, note}]
+  checklist         Json?
+  notes             String?
+  evidenceObjectIds String[]        @default([])
+  inspectedByUserId String
+  inspectedAt       DateTime        @default(now())
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  productionOrder   ProductionOrder @relation(fields: [productionOrderId], references: [id], onDelete: Cascade)
+
+  @@index([productionOrderId, inspectedAt])
+  @@index([operationId])
+  @@index([result, inspectedAt])
+  @@index([inspectedByUserId, inspectedAt])
+}
+
+// ===== Contabilidad interna (plan UNIK Neural Operations) =====
+
+/// Cuenta de caja/banco interna. currentBalance lo actualiza ledger-service al contabilizar.
+model CashAccount {
+  id             String   @id @default(cuid())
+  key            String   @unique
+  name           String
+  /// cash | bank | card | petty_cash | digital
+  kind           String
+  currency       String   @default("MXN")
+  openingBalance Decimal  @default(0) @db.Decimal(18, 4)
+  currentBalance Decimal  @default(0) @db.Decimal(18, 4)
+  /// active | closed
+  status         String   @default("active")
+  version        Int      @default(1)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([status, kind])
+}
+
+/// Catálogo de categorías de ingreso/egreso (árbol por parentId).
+model FinanceCategory {
+  id                  String   @id @default(cuid())
+  key                 String   @unique
+  name                String
+  /// income | expense | transfer | payroll | tax | debt
+  kind                String
+  /// Costo directo (atribuible a venta/proyecto)
+  isDirect            Boolean  @default(false)
+  /// FinanceCategory.id padre
+  parentId            String?
+  /// CostCenter.id sugerido
+  defaultCostCenterId String?
+  /// active | archived
+  status              String   @default("active")
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@index([kind, status])
+  @@index([parentId])
+  @@index([defaultCostCenterId])
+}
+
+/// Centro de costo (árbol por parentId, opcionalmente ligado a un área).
+model CostCenter {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  name      String
+  /// Area.key
+  areaKey   String?
+  /// CostCenter.id padre
+  parentId  String?
+  /// active | archived
+  status    String   @default("active")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([areaKey])
+  @@index([parentId])
+  @@index([status])
+}
+
+/// Asiento contable de partida doble. No se edita: la única corrección es un asiento reversal.
+model LedgerEntry {
+  id                String       @id @default(cuid())
+  /// Folio AS-
+  number            String       @unique
+  /// income | expense | transfer | obligation | settlement | payroll | adjustment | reversal | close
+  kind              String
+  date              DateTime     @db.Date
+  /// YYYY-MM
+  periodKey         String
+  description       String
+  currency          String       @default("MXN")
+  /// expense | obligation | payroll_run | procurement_order | period_close | ...
+  sourceType        String?
+  sourceId          String?
+  /// LedgerEntry.id que este asiento revierte (sólo kind=reversal)
+  reversesEntryId   String?      @unique
+  /// LedgerEntry.id del asiento que revirtió a éste
+  reversedByEntryId String?
+  postedByUserId    String
+  postedAt          DateTime     @default(now())
+  evidenceObjectIds String[]     @default([])
+  meta              Json?
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+  lines             LedgerLine[]
+
+  @@index([periodKey])
+  @@index([sourceType, sourceId])
+  @@index([kind, date])
+  @@index([date])
+  @@index([postedByUserId, postedAt])
+}
+
+/// Renglón de un asiento. Sólo inserción (sin updatedAt). Σdebit = Σcredit por asiento.
+model LedgerLine {
+  id                 String      @id @default(cuid())
+  entryId            String
+  seq                Int
+  /// cash | category | receivable | payable | equity | clearing
+  accountType        String
+  /// CashAccount.id, FinanceCategory.id, Obligation.id o clave de cuenta según accountType
+  accountId          String
+  debit              Decimal     @default(0) @db.Decimal(18, 4)
+  credit             Decimal     @default(0) @db.Decimal(18, 4)
+  costCenterId       String?
+  /// OperationalCase.id
+  caseId             String?
+  procurementOrderId String?
+  projectRef         String?
+  memo               String?
+  createdAt          DateTime    @default(now())
+  entry              LedgerEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+
+  @@unique([entryId, seq])
+  @@index([accountType, accountId])
+  @@index([caseId])
+  @@index([costCenterId])
+  @@index([procurementOrderId])
+}
+
+/// Cuenta por pagar o por cobrar esperada (ingreso esperado vs cobro real).
+model Obligation {
+  id                 String                 @id @default(cuid())
+  /// Folio OB-
+  number             String                 @unique
+  /// payable | receivable
+  kind               String
+  /// supplier | customer | employee | tax | lender | other
+  counterpartyType   String
+  counterpartyName   String?
+  supplierId         String?
+  zohoContactId      String?
+  employeeId         String?
+  /// OperationalCase.id
+  caseId             String?
+  procurementOrderId String?
+  payrollRunId       String?
+  expenseId          String?
+  zohoSalesOrderId   String?
+  zohoInvoiceId      String?
+  description        String
+  currency           String                 @default("MXN")
+  expectedAmount     Decimal                @db.Decimal(18, 4)
+  settledAmount      Decimal                @default(0) @db.Decimal(18, 4)
+  dueAt              DateTime?
+  expectedCashAt     DateTime?
+  /// expected | partially_settled | settled | written_off | cancelled
+  status             String                 @default("expected")
+  /// FinanceCategory.id (obligatorio: presupuesto contra real y cierre por categoría)
+  categoryId         String
+  costCenterId       String?
+  /// LedgerEntry.id del asiento kind=obligation
+  ledgerEntryId      String?
+  version            Int                    @default(1)
+  createdAt          DateTime               @default(now())
+  updatedAt          DateTime               @updatedAt
+  settlements        ObligationSettlement[]
+
+  @@index([kind, status, dueAt])
+  @@index([zohoSalesOrderId])
+  @@index([supplierId])
+  @@index([zohoContactId, status])
+  @@index([employeeId, status])
+  @@index([status, expectedCashAt])
+  @@index([caseId])
+  @@index([procurementOrderId])
+  @@index([payrollRunId])
+  @@index([expenseId])
+  @@index([zohoInvoiceId])
+  @@index([ledgerEntryId])
+}
+
+/// Liquidación (parcial o total) de una obligación. Sólo inserción; mueve caja vía su asiento.
+/// onDelete Restrict: una obligación con pagos registrados no se borra (se cancela por reverso).
+model ObligationSettlement {
+  id                String     @id @default(cuid())
+  obligationId      String
+  /// LedgerEntry.id del asiento kind=settlement
+  ledgerEntryId     String
+  /// En la moneda de la obligación
+  amount            Decimal    @db.Decimal(18, 4)
+  settledAt         DateTime   @default(now())
+  cashAccountId     String?
+  /// CustomerPayment.zohoPaymentId conciliado; un pago puede repartirse entre varias obligaciones (FIFO)
+  zohoPaymentId     String?
+  /// Llave de idempotencia: zoho_payment:{zohoPaymentId}:{obligationId} (finance.reconcile_collections)
+  externalRef       String?    @unique
+  evidenceObjectIds String[]   @default([])
+  createdByUserId   String
+  createdAt         DateTime   @default(now())
+  obligation        Obligation @relation(fields: [obligationId], references: [id], onDelete: Restrict)
+
+  @@index([obligationId, settledAt])
+  @@index([ledgerEntryId])
+  @@index([cashAccountId, settledAt])
+  @@index([zohoPaymentId])
+}
+
+/// Gasto capturado (formulario, texto, voz, foto, plantilla o recurrente).
+model Expense {
+  id                String         @id @default(cuid())
+  /// Folio GX-
+  number            String         @unique
+  /// draft | pending_approval | approved | posted | rejected
+  status            String         @default("draft")
+  /// form | text | voice | photo | template | recurring
+  captureMode       String         @default("form")
+  rawInput          String?
+  /// Propuesta de finance.expense_propose (proveedor, categoría, importe, centro, split)
+  aiProposal        Json?
+  /// 0 mientras el borrador no tiene importe confirmado/propuesto
+  amount            Decimal        @default(0) @db.Decimal(18, 4)
+  currency          String         @default("MXN")
+  date              DateTime       @db.Date
+  supplierId        String?
+  supplierNameFree  String?
+  categoryId        String?
+  costCenterId      String?
+  cashAccountId     String?
+  /// cash | transfer | card | other
+  paymentMethod     String?
+  /// false ⇒ al contabilizar se crea Obligation payable
+  isPaid            Boolean        @default(true)
+  description       String?
+  receiptObjectIds  String[]       @default([])
+  /// sha256 del comprobante
+  receiptHash       String?
+  /// importe|fecha|proveedor normalizados (duplicado exacto)
+  duplicateKey      String?
+  /// Expense.id del posible original
+  duplicateOfId     String?
+  /// none | suspect | confirmed_unique | confirmed_duplicate
+  duplicateStatus   String         @default("none")
+  approvalRequestId String?
+  ledgerEntryId     String?
+  obligationId      String?
+  templateId        String?
+  /// OperationalCase.id
+  caseId            String?
+  createdByUserId   String
+  approvedByUserId  String?
+  postedAt          DateTime?
+  rejectedReason    String?
+  version           Int            @default(1)
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+  splits            ExpenseSplit[]
+
+  @@index([duplicateKey])
+  @@index([status, date])
+  @@index([createdByUserId, status])
+  @@index([date])
+  @@index([receiptHash])
+  @@index([duplicateOfId])
+  @@index([supplierId, date])
+  @@index([categoryId, date])
+  @@index([costCenterId, date])
+  @@index([approvalRequestId])
+  @@index([templateId])
+  @@index([caseId])
+}
+
+/// Reparto de un gasto entre centros de costo, expedientes o proyectos.
+model ExpenseSplit {
+  id           String   @id @default(cuid())
+  expenseId    String
+  costCenterId String?
+  /// OperationalCase.id
+  caseId       String?
+  projectRef   String?
+  /// En la moneda del gasto
+  amount       Decimal  @db.Decimal(18, 4)
+  /// Porcentaje 0–100 (33.3333 = 33.3333 %)
+  pct          Decimal? @db.Decimal(7, 4)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  expense      Expense  @relation(fields: [expenseId], references: [id], onDelete: Cascade)
+
+  @@index([expenseId])
+  @@index([costCenterId])
+  @@index([caseId])
+}
+
+/// Plantilla de gasto frecuente o recurrente (job finance.recurring_expenses).
+model ExpenseTemplate {
+  id              String    @id @default(cuid())
+  name            String
+  categoryId      String
+  costCenterId    String?
+  supplierId      String?
+  defaultAmount   Decimal?  @db.Decimal(18, 4)
+  currency        String    @default("MXN")
+  /// {freq: daily|weekly|monthly|yearly, interval, dayOfMonth?, weekday?} o null si no es recurrente
+  recurrence      Json?
+  nextRunAt       DateTime?
+  active          Boolean   @default(true)
+  createdByUserId String
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([active, nextRunAt])
+  @@index([createdByUserId])
+  @@index([categoryId])
+}
+
+/// Presupuesto por periodo; "" en costCenterId/categoryId = todos.
+model Budget {
+  id           String   @id @default(cuid())
+  /// YYYY-MM
+  periodKey    String
+  /// CostCenter.id o "" (sin centro)
+  costCenterId String   @default("")
+  /// FinanceCategory.id o "" (sin categoría)
+  categoryId   String   @default("")
+  amount       Decimal  @db.Decimal(18, 4)
+  currency     String   @default("MXN")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([periodKey, costCenterId, categoryId])
+  @@index([costCenterId, periodKey])
+  @@index([categoryId, periodKey])
+}
+
+/// Directorio de empleados para nómina y anticipos (no todo empleado tiene login).
+model Employee {
+  id           String   @id @default(cuid())
+  /// Folio EMP-
+  number       String   @unique
+  name         String
+  position     String?
+  /// User.id si tiene acceso al sistema
+  userId       String?  @unique
+  /// Area.key
+  areaKey      String?
+  costCenterId String?
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([active, name])
+  @@index([areaKey])
+  @@index([costCenterId])
+}
+
+/// Corrida de nómina: aprobación → una Obligation payable employee por línea → pagos.
+model PayrollRun {
+  id                String        @id @default(cuid())
+  /// Folio NOM-
+  number            String        @unique
+  /// YYYY-MM
+  periodKey         String
+  periodStart       DateTime      @db.Date
+  periodEnd         DateTime      @db.Date
+  /// draft | pending_approval | approved | obligations_created | paid | closed | cancelled
+  status            String        @default("draft")
+  currency          String        @default("MXN")
+  totalGross        Decimal       @default(0) @db.Decimal(18, 4)
+  totalDeductions   Decimal       @default(0) @db.Decimal(18, 4)
+  totalNet          Decimal       @default(0) @db.Decimal(18, 4)
+  approvalRequestId String?
+  createdByUserId   String
+  version           Int           @default(1)
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  lines             PayrollLine[]
+
+  @@index([periodKey, status])
+  @@index([status, createdAt])
+  @@index([approvalRequestId])
+  @@index([createdByUserId])
+}
+
+/// Línea de nómina por empleado (anticipos = Obligation receivable employee).
+model PayrollLine {
+  id              String     @id @default(cuid())
+  payrollRunId    String
+  employeeId      String
+  gross           Decimal    @db.Decimal(18, 4)
+  /// [{kind, label, amount}]
+  deductions      Json       @default("[]")
+  advancesApplied Decimal    @default(0) @db.Decimal(18, 4)
+  net             Decimal    @db.Decimal(18, 4)
+  costCenterId    String?
+  /// Obligation.id (payable employee)
+  obligationId    String?
+  /// pending | paid
+  status          String     @default("pending")
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+  payrollRun      PayrollRun @relation(fields: [payrollRunId], references: [id], onDelete: Cascade)
+
+  @@unique([payrollRunId, employeeId])
+  @@index([employeeId])
+  @@index([obligationId])
+}
+
+/// Cierre diario o mensual; closed ⇒ ledger-service rechaza asientos del periodo.
+model PeriodClose {
+  id             String    @id @default(cuid())
+  /// YYYY-MM (monthly) o YYYY-MM-DD (daily)
+  periodKey      String
+  /// daily | monthly
+  kind           String
+  /// open | closing | closed | reopened
+  status         String    @default("open")
+  closedByUserId String?
+  closedAt       DateTime?
+  /// Saldos, presupuesto vs real, antigüedad AR/AP, proyectado vs realizado
+  snapshot       Json?
+  /// Resultado de close-rules.ts [{key, ok, detail}]
+  checks         Json?
+  reopenReason   String?
+  version        Int       @default(1)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@unique([periodKey, kind])
+  @@index([kind, status])
+}
+
+// ===== Ventas / CRM (plan UNIK Neural Operations) =====
+
+/// Etapa del embudo comercial (editable en admin).
+model PipelineStage {
+  id                 String   @id @default(cuid())
+  key                String   @unique
+  name               String
+  order              Int
+  /// Probabilidad por defecto 0–1
+  probabilityDefault Decimal  @default(0) @db.Decimal(4, 3)
+  /// open | won | lost
+  kind               String   @default("open")
+  /// Horas máximas en la etapa antes de alertar (null = sin SLA)
+  slaHours           Int?
+  active             Boolean  @default(true)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@index([active, order])
+}
+
+/// Oportunidad de venta ligada a conversaciones, llamadas, cotizaciones, órdenes y expedientes.
+model Opportunity {
+  id                String                @id @default(cuid())
+  /// Folio OPP-
+  number            String                @unique
+  title             String
+  /// Contact.id del módulo de comunicaciones
+  commContactId     String?
+  zohoContactId     String?
+  contactName       String
+  salespersonUserId String
+  /// PipelineStage.id
+  stageId           String
+  stageEnteredAt    DateTime              @default(now())
+  estimatedValue    Decimal?              @db.Decimal(18, 4)
+  currency          String                @default("MXN")
+  /// 0–1 (null = usar probabilityDefault de la etapa)
+  probability       Decimal?              @db.Decimal(4, 3)
+  expectedCloseAt   DateTime?
+  nextActionAt      DateTime?
+  nextActionText    String?
+  /// inbox | call | manual | quote | web
+  source            String                @default("manual")
+  conversationIds   String[]              @default([])
+  voiceCallIds      String[]              @default([])
+  zohoEstimateIds   String[]              @default([])
+  zohoSalesOrderIds String[]              @default([])
+  /// OperationalCase.id
+  caseIds           String[]              @default([])
+  /// open | won | lost | dormant
+  status            String                @default("open")
+  lostReason        String?
+  wonAt             DateTime?
+  lostAt            DateTime?
+  lastActivityAt    DateTime              @default(now())
+  lastInboundAt     DateTime?
+  lastOutboundAt    DateTime?
+  tags              String[]              @default([])
+  version           Int                   @default(1)
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+  activities        OpportunityActivity[]
+
+  @@index([salespersonUserId, status])
+  @@index([commContactId])
+  @@index([zohoContactId])
+  @@index([stageId])
+  @@index([nextActionAt])
+  @@index([status, lastActivityAt])
+  @@index([status, expectedCloseAt])
+  @@index([conversationIds], type: Gin)
+  @@index([voiceCallIds], type: Gin)
+  @@index([zohoEstimateIds], type: Gin)
+  @@index([zohoSalesOrderIds], type: Gin)
+  @@index([caseIds], type: Gin)
+}
+
+/// Línea de tiempo de una oportunidad. Sólo inserción (sin updatedAt).
+model OpportunityActivity {
+  id            String      @id @default(cuid())
+  opportunityId String
+  /// note | message_in | message_out | call | quote_sent | quote_viewed | quote_accepted | quote_declined | stage_change | order_created | task | objection | objection_resolved | ai_suggestion
+  kind          String
+  /// message | voice_call | quote | sales_order | case | work_item | ...
+  refType       String?
+  refId         String?
+  summary       String
+  payload       Json?
+  /// null = sistema/IA
+  userId        String?
+  at            DateTime    @default(now())
+  createdAt     DateTime    @default(now())
+  opportunity   Opportunity @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+
+  @@index([opportunityId, at])
+  @@index([refType, refId])
+  @@index([kind, at])
+  @@index([userId, at])
+}
+
+/// Ledger idempotente de escrituras de órdenes de venta a Zoho (espejo de QuoteWriteRequest).
+model SalesOrderWriteRequest {
+  id               String    @id @default(cuid())
+  requestKey       String    @unique
+  operation        String
+  userId           String
+  opportunityId    String?
+  /// Quote.id local
+  quoteId          String?
+  zohoEstimateId   String?
+  /// SalesOrder.id local
+  salesOrderId     String?
+  zohoSalesOrderId String?
+  /// pending | completed | failed
+  status           String    @default("pending")
+  errorMessage     String?
+  completedAt      DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@index([userId, createdAt])
+  @@index([status, createdAt])
+  @@index([opportunityId])
+  @@index([quoteId])
+  @@index([zohoSalesOrderId])
+}
+
+/// Señal del radar comercial calculada por radar-rules.ts (una por kind+subjectKey).
+model RadarSignal {
+  id                 String    @id @default(cuid())
+  /// no_first_reply | no_followup | quote_expiring | next_action_overdue | objection_open | high_intent | repurchase_overdue | delivery_incident
+  kind               String
+  /// Sujeto de la regla (p. ej. conversationId, quoteId, opportunityId, zohoContactId)
+  subjectKey         String
+  opportunityId      String?
+  conversationId     String?
+  quoteId            String?
+  zohoContactId      String?
+  commContactId      String?
+  customerName       String?
+  salespersonUserId  String?
+  /// 0–100
+  score              Int
+  /// Explicación determinista en español con cifras
+  reason             String
+  data               Json?
+  computedAt         DateTime  @default(now())
+  expiresAt          DateTime
+  /// active | snoozed | dismissed | resolved
+  status             String    @default("active")
+  snoozedUntil       DateTime?
+  aiExplanation      String?
+  aiSuggestedMessage String?
+  aiGeneratedAt      DateTime?
+  version            Int       @default(1)
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  @@unique([kind, subjectKey])
+  @@index([salespersonUserId, status, score])
+  @@index([status, expiresAt])
+  @@index([status, snoozedUntil])
+  @@index([opportunityId])
+  @@index([conversationId])
+  @@index([zohoContactId])
+}
+
+// ===== Dashboards y Control Tower (plan UNIK Neural Operations) =====
+
+/// Caché del dashboard por alcance, refrescada por el job areas.dashboard_refresh (una fila por scopeType+scopeKey).
+model DashboardSnapshot {
+  id         String   @id @default(cuid())
+  /// area | control_tower
+  scopeType  String
+  /// Area.key para scopeType=area; "" para control_tower
+  scopeKey   String   @default("")
+  /// Tiles, series y alertas ya calculados
+  payload    Json
+  computedAt DateTime @default(now())
+  /// Duración del cálculo en milisegundos
+  durationMs Int      @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([scopeType, scopeKey])
+}
+
+/// Proyección: variante observada de un expediente (secuencia de pasos completados y conformidad con el blueprint).
+model CtCaseVariant {
+  id             String   @id @default(cuid())
+  /// OperationalCase.id
+  caseId         String   @unique
+  processKey     String
+  /// ProcessVersion.version con la que corrió el expediente
+  processVersion Int
+  /// Hash (calculado en TS) de la secuencia de stepKey
+  variantHash    String
+  /// stepKey en orden de step.completed (occurredAt, id)
+  sequence       String[]
+  stepCount      Int
+  /// Duración de apertura a cierre en minutos (null = expediente abierto)
+  durationMin    Int?
+  conformant     Boolean
+  /// Resultado de checkConformance: [{kind, stepKey, detail}]
+  violations     Json?
+  /// Pasos (caso, paso) activados más de una vez
+  reworkCount    Int      @default(0)
+  computedAt     DateTime @default(now())
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([processKey, variantHash])
+  @@index([processKey, processVersion])
+}
+
+/// Proyección diaria de métricas por paso de proceso (día de cierre del paso).
+model CtStepMetricDaily {
+  id           String   @id @default(cuid())
+  day          DateTime @db.Date
+  processKey   String
+  stepKey      String
+  areaKey      String
+  started      Int      @default(0)
+  completed    Int      @default(0)
+  /// Minutos activos (percentile_cont) de los pasos cerrados ese día
+  p50ActiveMin Float?
+  p90ActiveMin Float?
+  avgActiveMin Float?
+  /// Minutos en espera (intervalos step.waiting → step.active)
+  p50WaitMin   Float?
+  p90WaitMin   Float?
+  /// Pasos que rebasaron su SLA
+  breached     Int      @default(0)
+  /// Pasos reactivados (retrabajo)
+  reworked     Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([day, processKey, stepKey])
+  @@index([processKey, day])
+  @@index([areaKey, day])
+}
+
+/// Proyección diaria de traspasos entre áreas (solicitudes y reasignaciones de work items).
+model CtHandoffDaily {
+  id             String   @id @default(cuid())
+  day            DateTime @db.Date
+  fromAreaKey    String
+  toAreaKey      String
+  /// request | workitem
+  kind           String
+  count          Int      @default(0)
+  /// Minutos hasta el primer acuse o respuesta
+  p50ResponseMin Float?
+  p90ResponseMin Float?
+  expired        Int      @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([day, fromAreaKey, toAreaKey, kind])
+  @@index([fromAreaKey, day])
+  @@index([toAreaKey, day])
+}
+
+/// Proyección diaria de causas de bloqueo (incidencias y waitReason unidos por ObjectRelation).
+model CtBlockCauseDaily {
+  id         String   @id @default(cuid())
+  day        DateTime @db.Date
+  /// vendor | product | route | customer | wait_reason
+  causeType  String
+  /// Id o clave del objeto causante (p. ej. Supplier.id, zohoItemId, waitReason)
+  causeKey   String
+  causeLabel String
+  blocks     Int      @default(0)
+  /// Minutos de espera acumulados
+  waitMin    Float    @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([day, causeType, causeKey])
+  @@index([causeType, day])
+}
+
+/// Marca de agua del job ct.projections_refresh (último OperationalEvent.id procesado).
+/// OperationalEvent.id se asigna al insertar, no al confirmar: una transacción lenta puede confirmar un id
+/// menor que lastEventId. Cada corrida procesa id > lastEventId OR recordedAt >= lastRunAt - 10 min
+/// (índice OperationalEvent.recordedAt) con recálculos idempotentes, y guarda en lastRunAt su hora de INICIO.
+model CtProjectionWatermark {
+  /// Nombre de la proyección (p. ej. variants, step_metrics, handoffs, block_causes)
+  key            String   @id
+  lastEventId    BigInt   @default(0)
+  /// Hora de inicio de la última corrida (base de la ventana de relectura por recordedAt)
+  lastRunAt      DateTime
+  lastDurationMs Int?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+/// Escena guardada del GraphExplorer (raíces, filtros, layout y tiempo fijado).
+model CtGraphScene {
+  id             String    @id @default(cuid())
+  /// User.id del dueño
+  userId         String
+  name           String
+  /// Clave de perspectives.ts
+  perspectiveKey String
+  /// [{type, id}]
+  roots          Json
+  filters        Json?
+  /// Posiciones de nodos y viewport
+  layout         Json?
+  /// Instante fijado por TimeSlider (null = ahora)
+  at             DateTime?
+  /// Visible para otros usuarios con acceso a la perspectiva
+  shared         Boolean   @default(false)
+  version        Int       @default(1)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([userId])
+  @@index([shared, perspectiveKey])
 }

@@ -92,6 +92,7 @@ import {
 } from './comms-service';
 import { CommsError } from './comms-errors';
 import { detectConsentKeyword, normalizePhone } from './normalize';
+import { enqueueJob } from '@/modules/jobs/job-queue';
 
 const agent: CurrentUser = {
   id: 'u_agent',
@@ -315,5 +316,47 @@ describe('duplicate contacts', () => {
       telegramId: null,
     });
     expect(db.rows('commContact').find((c) => c.id === survivor.id)?.telegramId).toBe('555');
+  });
+});
+
+describe('message fan-out', () => {
+  const fanouts = () =>
+    vi
+      .mocked(enqueueJob)
+      .mock.calls.map((call) => call[0] as { type: string; payload: unknown; dedupeKey?: string; priority?: number })
+      .filter((job) => job.type === 'comms.message_fanout');
+
+  it('enqueues one fan-out per stored inbound message, deduplicated by message', async () => {
+    vi.mocked(enqueueJob).mockClear();
+    const first = await recordInboundMessage(account, inbound('ext-fan-1', 'Hola, ¿tienen porcelanato?'));
+    await recordInboundMessage(account, inbound('ext-fan-1', 'Hola, ¿tienen porcelanato?'));
+    expect(fanouts()).toEqual([
+      expect.objectContaining({
+        payload: { messageId: first.message.id },
+        dedupeKey: `fanout:${first.message.id}`,
+        priority: 100,
+      }),
+    ]);
+  });
+
+  it('enqueues the fan-out after sending an outbound message', async () => {
+    const { conversation } = await recordInboundMessage(account, inbound('ext-fan-2', 'Hola'));
+    vi.mocked(enqueueJob).mockClear();
+    const message = await sendOutboundMessage({
+      accountId: account.id,
+      conversationId: conversation.id,
+      body: 'Buen día, con gusto le cotizamos',
+      sentByUserId: 'u_agent',
+      actor: agent,
+    });
+    expect(fanouts()).toEqual([
+      expect.objectContaining({ payload: { messageId: message.id }, dedupeKey: `fanout:${message.id}` }),
+    ]);
+  });
+
+  it('never breaks messaging when the queue is unavailable', async () => {
+    vi.mocked(enqueueJob).mockRejectedValueOnce(new Error('queue down'));
+    const result = await recordInboundMessage(account, inbound('ext-fan-3', 'Hola'));
+    expect(result.created).toBe(true);
   });
 });

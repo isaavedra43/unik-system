@@ -65,6 +65,15 @@ export interface CopilotProposal {
   recipient?: string | null;
   status?: string;
   error?: string | null;
+  /** Approver scope proposals (agents layer): who proposed and who may decide. */
+  proposedBy?: string | null;
+  approverScope?: { caseId?: string; areaKey?: string; userIds: string[]; permission?: string } | null;
+  decisionBy?: string | null;
+  secondDecisionBy?: string | null;
+  /** First signature given; another person with permission must give the second one. */
+  awaitingSecondApproval?: boolean;
+  /** The tool needs two distinct signatures: approving first only records the first one. */
+  requiresSecondApproval?: boolean;
 }
 
 export type ActionKind = 'reply' | 'task' | 'lookup' | 'status' | 'note' | 'escalate' | 'send' | 'other';
@@ -97,12 +106,39 @@ export interface LiveStep {
 
 export const AUTO_PREFIX = '⟦auto:';
 
-export type AutoEventKind = 'open' | 'inbound' | 'action_failed';
+export const AUTO_EVENT_KINDS = [
+  'open',
+  'inbound',
+  'action_failed',
+  'interpret_request',
+  'unblock',
+  'triage',
+  'replan_check',
+  'stuck_review',
+  'mention',
+  'digest',
+] as const;
+export type AutoEventKind = (typeof AUTO_EVENT_KINDS)[number];
 
 export function autoKind(content: string | null | undefined): AutoEventKind | null {
   if (!content || !content.startsWith(AUTO_PREFIX)) return null;
-  if (content.startsWith(`${AUTO_PREFIX}action_failed`)) return 'action_failed';
-  return content.startsWith(`${AUTO_PREFIX}inbound`) ? 'inbound' : 'open';
+  const name = /^⟦auto:([a-z_]+)⟧/.exec(content)?.[1];
+  // Unknown or malformed triggers keep the historical reading: an "open" analysis.
+  return name && (AUTO_EVENT_KINDS as readonly string[]).includes(name) ? (name as AutoEventKind) : 'open';
+}
+
+/** Surfaces whose proactivity is stored per kind in `AiUserPreference.surfaceModes`. */
+export type CopilotSurfaceModeKind = 'inbox' | 'chat' | 'area' | 'case' | 'mywork' | 'control_tower';
+
+/** Where a copilot surface stores its proactivity: a literal column (inbox/chat) or `surfaceModes.<kind>`. */
+export type CopilotPreferenceKey = 'inboxCopilotMode' | 'chatCopilotMode' | `surfaceModes.${CopilotSurfaceModeKind}`;
+
+/** PATCH body for `/app/assistant/api/preferences` that changes only this surface's mode. */
+export function preferencePatchFor(key: CopilotPreferenceKey, mode: CopilotMode): Record<string, unknown> {
+  if (key.startsWith('surfaceModes.')) {
+    return { surfaceModes: { [key.slice('surfaceModes.'.length)]: mode } };
+  }
+  return { [key]: mode };
 }
 
 /** Client-side twin of the server trigger: sent when an approved action failed so the AI fixes it. */
@@ -115,6 +151,13 @@ export const AUTO_EVENT_LABELS: Record<AutoEventKind, string> = {
   open: 'Analicé el contexto al abrir',
   inbound: 'Llegó algo nuevo · reanalicé',
   action_failed: 'Una acción aprobada falló · la IA la está corrigiendo',
+  interpret_request: 'Llegó una solicitud con texto libre · la IA la interpreta',
+  unblock: 'Algo venció o se trabó · la IA busca destrabarlo',
+  triage: 'Se abrió una incidencia · la IA la clasifica',
+  replan_check: 'Cambió el plan · la IA revisa la promesa al cliente',
+  stuck_review: 'Expediente sin avance · la IA revisa qué lo detiene',
+  mention: 'Mencionaron a la IA en el chat',
+  digest: 'Resumen del día',
 };
 
 /** Result of an executed tool that must open something in the UI (call dock, internal call). */
@@ -188,7 +231,7 @@ export const MODE_META: Record<CopilotMode, { label: string; hint: string }> = {
 export const AI_SETTINGS_HREF = '/app/assistant?settings=1';
 
 /** Human labels for tool activity ("qué está haciendo") — falls back to the tool name. */
-const TOOL_LABELS: Record<string, { running: string; done: string }> = {
+export const TOOL_LABELS: Record<string, { running: string; done: string }> = {
   suggestNextActions: { running: 'Preparando acciones', done: 'Acciones listas' },
   proposeInboxDraft: { running: 'Redactando respuesta', done: 'Borrador listo' },
   draftReply: { running: 'Redactando respuesta', done: 'Borrador listo' },
@@ -253,6 +296,38 @@ const TOOL_LABELS: Record<string, { running: string; done: string }> = {
   sendQuoteToContact: { running: 'Preparando envío de cotización', done: 'Envío de cotización propuesto' },
   getPickupLocation: { running: 'Buscando ubicación de bodega', done: 'Ubicación lista' },
   getWorkDigest: { running: 'Calculando tu digest', done: 'Digest listo' },
+  // Operations layer
+  getCaseSnapshot: { running: 'Revisando el expediente', done: 'Expediente revisado' },
+  explainCase: { running: 'Explicando el expediente', done: 'Expediente explicado' },
+  listAreaWorkItems: { running: 'Revisando trabajos del área', done: 'Trabajos del área revisados' },
+  findResponsible: { running: 'Buscando al responsable', done: 'Responsable encontrado' },
+  summarizeAreaDay: { running: 'Resumiendo el día del área', done: 'Resumen del área listo' },
+  proposeDeliveryPlan: { running: 'Armando plan de entrega', done: 'Plan de entrega propuesto' },
+  createAreaRequest: { running: 'Enviando solicitud a otra área', done: 'Solicitud enviada' },
+  acknowledgeAreaRequest: { running: 'Confirmando recepción de la solicitud', done: 'Solicitud recibida' },
+  respondAreaRequest: { running: 'Preparando respuesta a la solicitud', done: 'Respuesta propuesta' },
+  openIncident: { running: 'Abriendo incidencia', done: 'Incidencia abierta' },
+  escalateCase: { running: 'Escalando el expediente', done: 'Expediente escalado' },
+  assignWorkItem: { running: 'Asignando el trabajo', done: 'Trabajo asignado' },
+  completeWorkItem: { running: 'Preparando cierre del trabajo', done: 'Cierre propuesto' },
+  postCaseNote: { running: 'Anotando en la sala del expediente', done: 'Nota publicada' },
+  requestStockVerification: { running: 'Pidiendo verificación de existencias', done: 'Verificación solicitada' },
+  reserveStock: { running: 'Preparando apartado de material', done: 'Apartado propuesto' },
+  createPurchaseRequest: { running: 'Preparando solicitud de compra', done: 'Solicitud de compra propuesta' },
+  createProductionOrder: { running: 'Preparando orden de producción', done: 'Orden de producción propuesta' },
+  assignCarrier: { running: 'Preparando asignación de transportista', done: 'Transportista propuesto' },
+  recordExpense: { running: 'Preparando registro de gasto', done: 'Gasto propuesto' },
+  authorizePayment: { running: 'Preparando autorización de pago', done: 'Autorización propuesta' },
+  researchSourcing: { running: 'Investigando proveedores', done: 'Proveedores investigados' },
+  myNextActions: { running: 'Ordenando tus pendientes', done: 'Pendientes ordenados' },
+  startWorkItem: { running: 'Iniciando el trabajo', done: 'Trabajo iniciado' },
+  recordCount: { running: 'Preparando el conteo', done: 'Conteo propuesto' },
+  getCompanyPulse: { running: 'Tomando el pulso de la empresa', done: 'Pulso de la empresa listo' },
+  findStuckCases: { running: 'Buscando expedientes atorados', done: 'Expedientes atorados revisados' },
+  whoIsBlocking: { running: 'Buscando quién está bloqueando', done: 'Bloqueos identificados' },
+  simulateDelay: { running: 'Simulando el retraso', done: 'Simulación lista' },
+  concludeAgentTurn: { running: 'Cerrando el turno', done: 'Turno cerrado' },
+  proposeAreaAction: { running: 'Redactando borrador de operaciones', done: 'Borrador listo' },
 };
 
 export interface PlanStep {
@@ -298,6 +373,76 @@ export function parsePlan(args: unknown): PlanData | null {
 
 /** Message the host sends when the user confirms a plan. */
 export const RUN_PLAN_MESSAGE = 'Ejecuta el plan propuesto tal cual, paso por paso, e infórmame el avance de cada paso.';
+
+/** Spanish titles of the approval cards of side-effecting tools. */
+export const PROPOSAL_TOOL_TITLES: Readonly<Record<string, string>> = {
+  sendInboxMessage: 'Enviar mensaje al cliente',
+  sendMessageToContact: 'Enviar mensaje al contacto',
+  sendBulkMessages: 'Envío a varios contactos',
+  sendQuoteToContact: 'Enviar cotización con PDF de Zoho',
+  sendInternalChatMessage: 'Enviar por chat interno',
+  callContact: 'Llamada telefónica',
+  startOutboundCall: 'Llamada telefónica',
+  createQuote: 'Crear cotización en Zoho Books',
+  updateQuote: 'Editar cotización en Zoho Books',
+  approveCampaign: 'Aprobar campaña',
+  cleanupArtifacts: 'Limpiar archivos generados',
+  respondAreaRequest: 'Responder solicitud de área',
+  completeWorkItem: 'Completar trabajo',
+  reserveStock: 'Apartar material',
+  createPurchaseRequest: 'Crear solicitud de compra',
+  createProductionOrder: 'Crear orden de producción',
+  assignCarrier: 'Asignar transportista',
+  recordExpense: 'Registrar gasto',
+  authorizePayment: 'Autorizar pago',
+  recordCount: 'Registrar conteo',
+  startWorkItem: 'Iniciar trabajo',
+  createAreaRequest: 'Enviar solicitud a otra área',
+  escalateCase: 'Escalar expediente',
+  openIncident: 'Abrir incidencia',
+  assignWorkItem: 'Asignar trabajo',
+};
+
+/** Spanish title of a proposal: known tools, their progress label, human text as is, else a generic title. Pure. */
+export function proposalTitle(toolName: string): string {
+  const known = PROPOSAL_TOOL_TITLES[toolName];
+  if (known) return known;
+  const label = TOOL_LABELS[toolName]?.done;
+  if (label) return label;
+  // A human text (e.g. "Propuesta de la IA") is shown as it is; an identifier never is.
+  if (/\s/.test(toolName.trim())) return toolName.trim();
+  return 'Acción propuesta por la IA';
+}
+
+/** Whether `next` activity is later than `previous` (ISO dates; other text counts only when it changes). Pure. */
+export function isNewerActivity(previous: string | null, next: string): boolean {
+  if (!previous) return true;
+  const nextTime = Date.parse(next);
+  const previousTime = Date.parse(previous);
+  if (Number.isNaN(nextTime) || Number.isNaN(previousTime)) return previous !== next;
+  return nextTime > previousTime;
+}
+
+/** Operations surfaces a person can open (sent by the preferences API). */
+export interface OperationsSurfaceAccess {
+  mywork: boolean;
+  case: boolean;
+  controlTower: boolean;
+  area: boolean;
+}
+
+/** Without the API answer only the surfaces every person has are shown. */
+export const DEFAULT_SURFACE_ACCESS: OperationsSurfaceAccess = { mywork: true, case: true, controlTower: false, area: false };
+
+/** Preference rows of the operations surfaces the person can use. Pure. */
+export function visibleSurfaceRows<T extends { key: 'mywork' | 'area' | 'case' | 'control_tower' }>(
+  rows: readonly T[],
+  access: OperationsSurfaceAccess
+): T[] {
+  return rows.filter((row) =>
+    row.key === 'control_tower' ? access.controlTower : row.key === 'area' ? access.area : row.key === 'case' ? access.case : access.mywork
+  );
+}
 
 export function toolLabel(name: string, status: 'running' | 'done' = 'done'): string {
   const meta = TOOL_LABELS[name];

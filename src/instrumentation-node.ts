@@ -52,7 +52,9 @@ export async function startNodeInstrumentation() {
     const { startJobWorker } = await import('@/modules/jobs/job-queue');
     const { startRecurringScheduler } = await import('@/modules/jobs/scheduled-jobs');
     startJobWorker();
-    startRecurringScheduler();
+    // Checked every minute so short recurring jobs (ops.supervisor every 4 min) keep
+    // their cadence; each job still runs only when its own interval has elapsed.
+    startRecurringScheduler(60_000);
     const { startNotificationDispatcher } = await import('@/modules/notifications/notification-jobs');
     startNotificationDispatcher();
     log('jobs.worker_start_requested');
@@ -65,5 +67,55 @@ export async function startNodeInstrumentation() {
         stack: err instanceof Error ? err.stack?.split('\n').slice(0, 6).join(' | ') : undefined,
       })
     );
+  }
+
+  // Operations core seed: configuration row, the 7 areas and the responsible checks.
+  // Idempotent and safe when several instances boot at once; it never blocks the
+  // server start and a failure (e.g. migrations not applied yet) is only logged.
+  if (process.env.NEXT_PHASE !== 'phase-production-build') {
+    const logFailure = (event: string, err: unknown, extra: Record<string, unknown> = {}) =>
+      console.error(
+        JSON.stringify({
+          component: 'instrumentation',
+          event,
+          ...extra,
+          message: err instanceof Error ? err.message : String(err),
+        })
+      );
+    void (async () => {
+      try {
+        const { ensureOperationsSeed } = await import('@/modules/operations/seed');
+        await ensureOperationsSeed();
+      } catch (err) {
+        logFailure('operations.seed_failed', err);
+      }
+
+      // Agents layer (after the areas exist): the bot identities, then one chat
+      // channel per area. Idempotent; a failure is only logged and never blocks
+      // the server (e.g. migrations not applied yet). One area failing does not
+      // stop the others.
+      try {
+        const { ensureAgentIdentities } = await import('@/modules/agents/identities');
+        await ensureAgentIdentities();
+      } catch (err) {
+        logFailure('agents.identities_failed', err);
+        return;
+      }
+      try {
+        const [{ ensureAreaChannel }, { AREA_KEYS }] = await Promise.all([
+          import('@/modules/agents/chat-bridge'),
+          import('@/modules/operations/types'),
+        ]);
+        for (const areaKey of AREA_KEYS) {
+          try {
+            await ensureAreaChannel(areaKey);
+          } catch (err) {
+            logFailure('agents.area_channel_failed', err, { areaKey });
+          }
+        }
+      } catch (err) {
+        logFailure('agents.area_channels_failed', err);
+      }
+    })();
   }
 }

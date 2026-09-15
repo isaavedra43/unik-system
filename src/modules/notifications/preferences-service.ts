@@ -34,7 +34,9 @@ function parsePreferences(value: Prisma.JsonValue | null | undefined): Preferenc
   return value as PreferencesJson;
 }
 
-function resolveCategories(overrides: PreferencesJson): Record<NotificationCategory, CategoryPreference> {
+function resolveCategories(
+  overrides: PreferencesJson
+): Record<NotificationCategory, CategoryPreference> {
   const out = {} as Record<NotificationCategory, CategoryPreference>;
   for (const def of NOTIFICATION_CATALOG) {
     const o = overrides[def.key] ?? {};
@@ -46,8 +48,12 @@ function resolveCategories(overrides: PreferencesJson): Record<NotificationCateg
   return out;
 }
 
-export async function getNotificationSettings(userId: string): Promise<NotificationSettings> {
-  const row = await prisma.userNotificationSettings.findUnique({ where: { userId } });
+/** `db`: the caller's transaction client when there is one (never a second connection inside it). */
+export async function getNotificationSettings(
+  userId: string,
+  db: Prisma.TransactionClient = prisma
+): Promise<NotificationSettings> {
+  const row = await db.userNotificationSettings.findUnique({ where: { userId } });
   return {
     pushEnabled: row?.pushEnabled ?? true,
     quietHoursStart: row?.quietHoursStart ?? null,

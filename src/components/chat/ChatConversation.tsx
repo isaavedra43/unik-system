@@ -4,6 +4,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { toast } from 'sonner';
 import type { CurrentUser } from '@/modules/auth/authorization';
 import type { ChatChannelDTO, ChatMessageDTO, ChatStreamEvent } from '@/modules/chat/chat-events';
+import { agentRequestStatusUpdate, applyAgentRequestStatus } from '@/modules/chat/chat-events';
 import { ChatMessageList } from './ChatMessageList';
 import { ChatMessageInput } from './ChatMessageInput';
 import { ChatGroupSettings } from './ChatGroupSettings';
@@ -132,17 +133,21 @@ export function ChatConversation({ channelId, user, onRefresh, onBack, onIncomin
       try {
         const evt: ChatStreamEvent = JSON.parse(event.data);
         switch (evt.type) {
-          case 'message':
+          case 'message': {
+            const requestUpdate = agentRequestStatusUpdate(evt.data);
             setMessages((prev) => {
               // Avoid duplicates
               if (prev.some((m) => m.id === evt.data.id)) return prev;
-              return [...prev, evt.data];
+              // An update of an area request keeps the status (and actions) of its earlier cards current.
+              const current = requestUpdate ? applyAgentRequestStatus(prev, requestUpdate) : prev;
+              return [...current, evt.data];
             });
             // Auto mark as read
             fetch(`/app/chat/api/channels/${channelId}/read`, { method: 'POST' }).catch(() => {});
             onRefreshRef.current();
             if (evt.data.senderId !== user.id) onForeignMessageRef.current?.(evt.data.createdAt);
             break;
+          }
           case 'edit':
             setMessages((prev) =>
               prev.map((m) =>
@@ -622,7 +627,7 @@ export function ChatConversation({ channelId, user, onRefresh, onBack, onIncomin
         onRsvpEvent={handleRsvpEvent}
         onOpenThread={(threadId, rootMessage) => setActiveThread({ threadId, rootMessage })}
         channelId={channelId}
-        isGroup={channel?.type === 'group'}
+        isGroup={!!channel && channel.type !== 'dm'}
         typingText={typingText}
         firstOpenAt={firstOpenAtRef.current}
       />

@@ -2,6 +2,11 @@ import { Prisma, PrismaClient } from '@prisma/client';
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { ENTITY_TYPE, SOURCE } from '@/modules/integrations/zoho/sales-orders-sync';
+import {
+  onSalesOrderChanged,
+  onSalesOrderImported,
+  type SalesOrderHookOutcome,
+} from '@/modules/operations/sales-order-hooks';
 import { recordSalesOrderChange } from './sales-orders-change-events';
 
 const CURRENT_SALES_ORDER_NORMALIZER_VERSION = 2;
@@ -573,6 +578,9 @@ export async function normalizeSalesOrderSnapshot(
     const order = await persistNormalizedOrder(tx, payload.salesorder_id, salesOrderData, items);
 
     // Change detection: compare before vs after, record event + notifications.
+    // The id of the recorded change event (null when nothing was recorded) is
+    // kept for the Operations hook that reacts to modified orders.
+    let changeEventId: string | null = null;
     if (existing) {
       const afterOrder = await tx.salesOrder.findUnique({
         where: { id: order.salesOrderId },
@@ -621,7 +629,7 @@ export async function normalizeSalesOrderSnapshot(
       });
 
       if (afterOrder) {
-        await recordSalesOrderChange(
+        changeEventId = await recordSalesOrderChange(
           tx,
           order.salesOrderId,
           payload.salesorder_number ?? null,
@@ -635,6 +643,40 @@ export async function normalizeSalesOrderSnapshot(
       }
     }
 
+    // Operations hooks (plan 2.4): they only enqueue jobs and never throw; the
+    // extra guard keeps normalization independent of the Operations module.
+    try {
+      const hookOutcome: SalesOrderHookOutcome | null = !existing
+        ? await onSalesOrderImported(tx, {
+            salesOrderId: order.salesOrderId,
+            zohoSalesOrderId: payload.salesorder_id,
+          })
+        : changeEventId
+          ? await onSalesOrderChanged(tx, {
+              salesOrderId: order.salesOrderId,
+              zohoSalesOrderId: payload.salesorder_id,
+              changeEventId,
+            })
+          : null;
+      if (hookOutcome && hookOutcome.action !== 'none') {
+        log({
+          event: 'zoho.sales_orders.operations_hook',
+          snapshotId: snapshot.id,
+          externalId: snapshot.externalId,
+          action: hookOutcome.action,
+          jobId: hookOutcome.jobId ?? null,
+          reason: hookOutcome.reason ?? null,
+        });
+      }
+    } catch (error) {
+      log({
+        event: 'zoho.sales_orders.operations_hook_failed',
+        snapshotId: snapshot.id,
+        externalId: snapshot.externalId,
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+
     await markSnapshotProcessed(tx, snapshot.id, CURRENT_SALES_ORDER_NORMALIZER_VERSION, null);
 
     log({
@@ -643,6 +685,7 @@ export async function normalizeSalesOrderSnapshot(
       externalId: snapshot.externalId,
       normalizerVersion: CURRENT_SALES_ORDER_NORMALIZER_VERSION,
       salesOrderId: order.salesOrderId,
+      changeEventId,
     });
 
     return { salesOrderId: order.salesOrderId, status: 'normalized' };

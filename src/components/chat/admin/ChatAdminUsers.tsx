@@ -12,6 +12,7 @@ interface UserRow {
   channelCount: number;
   attachmentCount: number;
   lastActivity: string | null;
+  isBot?: boolean;
 }
 
 export function ChatAdminUsers() {
@@ -102,7 +103,18 @@ export function ChatAdminUsers() {
             const isSuspended = suspendedIds.has(u.userId);
             return (
               <tr key={u.userId}>
-                <td>{u.userName}</td>
+                <td>
+                  {u.userName}
+                  {u.isBot && (
+                    <span
+                      className="chat-admin-status"
+                      style={{ marginLeft: '0.35rem' }}
+                      title="Usuario de IA"
+                    >
+                      IA
+                    </span>
+                  )}
+                </td>
                 <td>{u.username}</td>
                 <td>{u.email ?? '—'}</td>
                 <td>{u.messageCount.toLocaleString('es-MX')}</td>
@@ -117,16 +129,25 @@ export function ChatAdminUsers() {
                   )}
                 </td>
                 <td>
-                  <button
-                    type="button"
-                    className={`chat-admin-btn-sm ${isSuspended ? 'chat-admin-btn-secondary' : 'chat-admin-btn-danger'}`}
-                    disabled={actioningId === u.userId}
-                    onClick={() => handleToggleSuspend(u.userId, isSuspended)}
-                    title={isSuspended ? 'Reactivar' : 'Suspender'}
-                  >
-                    {isSuspended ? <CheckCircle size={14} /> : <Ban size={14} />}
-                    {actioningId === u.userId ? '…' : isSuspended ? 'Reactivar' : 'Suspender'}
-                  </button>
+                  {u.isBot ? (
+                    <span
+                      className="chat-admin-empty"
+                      title="Los usuarios de IA se pausan desde la administración de agentes"
+                    >
+                      —
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      className={`chat-admin-btn-sm ${isSuspended ? 'chat-admin-btn-secondary' : 'chat-admin-btn-danger'}`}
+                      disabled={actioningId === u.userId}
+                      onClick={() => handleToggleSuspend(u.userId, isSuspended)}
+                      title={isSuspended ? 'Reactivar' : 'Suspender'}
+                    >
+                      {isSuspended ? <CheckCircle size={14} /> : <Ban size={14} />}
+                      {actioningId === u.userId ? '…' : isSuspended ? 'Reactivar' : 'Suspender'}
+                    </button>
+                  )}
                 </td>
               </tr>
             );

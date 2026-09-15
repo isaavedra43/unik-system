@@ -1,5 +1,6 @@
 import { z, ZodType } from 'zod';
 import type { CurrentUser } from '@/modules/auth/authorization';
+import type { ApproverScope } from '@/modules/extensions/proposals-service';
 import { zodToJsonSchema } from './zod-to-json-schema';
 import { cacheKeyFor, isCacheableTool, toolResultCache, ttlForArgs } from './tool-cache';
 
@@ -36,7 +37,8 @@ export type ToolCategory =
   | 'extension'
   | 'skill'
   | 'knowledge'
-  | 'communication';
+  | 'communication'
+  | 'operations';
 
 /** Effect categories defined by UNIK after review (never by the tool itself). */
 export type ToolEffect =
@@ -55,6 +57,12 @@ export interface ToolDefinition {
   description: string;
   parameters: ZodType<unknown>;
   requiredPermission?: string;
+  /**
+   * Extra actors allowed besides the holders of `requiredPermission` (built-in tools only), e.g. the
+   * administrator agent identity reading the Control Tower without holding `operations.admin`.
+   * Evaluated on the server when listing and when executing.
+   */
+  allowActor?: (actor: CurrentUser) => boolean;
   execute: (actor: CurrentUser, args: unknown, ctx: ToolExecutionContext) => Promise<unknown>;
   enabledByDefault: boolean;
   category: ToolCategory;
@@ -86,7 +94,13 @@ export interface ToolDefinition {
    * the arguments (what the user approves is what will run) or reject them with
    * a message the model can act on, without wasting an approval.
    */
-  prepareArgs?: (actor: CurrentUser, args: unknown) => Promise<{ args: unknown } | { error: string }>;
+  prepareArgs?: (actor: CurrentUser, args: unknown, ctx?: ToolExecutionContext) => Promise<{ args: unknown } | { error: string }>;
+  /**
+   * The approval proposal needs two distinct human signatures (the second with the scope or tool
+   * permission) before it runs (proposals-service). Business payments keep their double signature
+   * in `ApprovalRequest` instead, so `authorizePayment` does not set it.
+   */
+  requiresSecondApproval?: boolean;
 }
 
 export interface ToolExecutionContext {
@@ -110,6 +124,22 @@ export interface ToolExecutionContext {
   skipCache?: boolean;
   /** Sales-order numbers found in the text attachments of this turn (a PDF/CSV listing orders): the universe to reconcile handwritten folios against. */
   attachmentOrderNumbers?: string[];
+  /**
+   * Agent turns only (set by the orchestrator, never by the model): who may
+   * approve the proposals this turn creates besides the proposer (the bot).
+   */
+  approverScope?: ApproverScope;
+  /** Agent turns only: area of the bot identity; operations tools reject work outside it. */
+  agentAreaKey?: string;
+  /**
+   * Mention turns only: the person who mentioned the bot. Operations tools act only where that
+   * person may act for the area and read only cases that person may open.
+   */
+  agentOnBehalfOfUserId?: string;
+  /** Mention turns in a case room: the room's own case (readable without the person's own access). */
+  agentCaseId?: string;
+  /** Agent turns: the human who caused the turn (recorded on requests the bot creates). */
+  agentCausedByUserId?: string;
 }
 
 export interface ProposalSummary {
@@ -214,6 +244,16 @@ function actorHasPermission(actor: CurrentUser, permission?: string): boolean {
   return actor.isSuperAdmin || actor.permissionKeys.includes(permission as never);
 }
 
+/** Permission gate of a built-in tool: its permission, or the tool's own extra-actor rule. */
+function actorMayUseTool(actor: CurrentUser, tool: ToolDefinition): boolean {
+  if (actorHasPermission(actor, tool.requiredPermission)) return true;
+  try {
+    return tool.allowActor ? tool.allowActor(actor) === true : false;
+  } catch {
+    return false;
+  }
+}
+
 function actorAllowedForExternal(actor: CurrentUser, tool: ToolDefinition): boolean {
   if (actor.isSuperAdmin) return true;
   const allowed = tool.allowedRoleKeys ?? [];
@@ -234,7 +274,7 @@ export function getAvailableTools(
 ): ToolDefinition[] {
   return getAllTools().filter((t) => {
     if (!enabledToolNames.includes(t.name)) return false;
-    return actorHasPermission(actor, t.requiredPermission);
+    return actorMayUseTool(actor, t);
   });
 }
 
@@ -403,8 +443,8 @@ export async function executeTool(
     };
   }
 
-  // 3. Permission
-  if (!actorHasPermission(actor, tool.requiredPermission)) {
+  // 3. Permission (external tools never carry `allowActor`)
+  if (source === 'builtin' ? !actorMayUseTool(actor, tool) : !actorHasPermission(actor, tool.requiredPermission)) {
     await recordDenied(tool, actor, ctx, 'permission');
     return { success: false, error: 'Sin permiso', errorCode: 'forbidden', durationMs: 0 };
   }
@@ -424,7 +464,7 @@ export async function executeTool(
   // approval card shows exactly what will run and impossible requests fail before approval.
   if (tool.prepareArgs && !ctx.approvedProposalId) {
     try {
-      const prepared = await tool.prepareArgs(actor, parsed.data);
+      const prepared = await tool.prepareArgs(actor, parsed.data, ctx);
       if ('error' in prepared) {
         return { success: false, error: prepared.error, errorCode: 'invalid_args', durationMs: 0 };
       }
@@ -447,6 +487,7 @@ export async function executeTool(
       recipient: ctx.recipient,
       fileIds: ctx.fileIds,
       contextHash: ctx.contextHash,
+      approverScope: ctx.approverScope,
     });
     await recordExecution(tool, actor, ctx, {
       status: 'needs_approval',

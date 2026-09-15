@@ -3,6 +3,8 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Eye, Pause, Play, XCircle } from 'lucide-react';
 import { Modal } from '@/components/ui/composite';
+import { KpiGrid } from '@/components/patterns/dashboard/KpiGrid';
+import { StatCard } from '@/components/patterns/dashboard/StatCard';
 import {
   api,
   CAMPAIGN_STATUS_LABEL,
@@ -221,31 +223,27 @@ export function CampaignProgress({
         </div>
       ) : null}
 
-      <div className="assistant-admin-stat-grid">
-        <div className="assistant-admin-stat-card">
-          <div className="assistant-admin-stat-label">Destinatarios</div>
-          <div className="assistant-admin-stat-value">{live.total}</div>
-        </div>
-        <div className="assistant-admin-stat-card">
-          <div className="assistant-admin-stat-label">Enviados</div>
-          <div className="assistant-admin-stat-value">
-            {live.counts.sent + live.counts.delivered}
-          </div>
-        </div>
-        <div className="assistant-admin-stat-card">
-          <div className="assistant-admin-stat-label">Gastado / presupuesto</div>
-          <div className="assistant-admin-stat-value">
-            {money(live.budgetSpent)} /{' '}
-            {campaign.budgetLimit === null ? '∞' : money(campaign.budgetLimit)}
-          </div>
-        </div>
-        <div className="assistant-admin-stat-card">
-          <div className="assistant-admin-stat-label">Programada</div>
-          <div className="assistant-admin-stat-value" style={{ fontSize: '0.95em' }}>
-            {campaign.scheduledAt ? new Date(campaign.scheduledAt).toLocaleString('es-MX') : '—'}
-          </div>
-        </div>
-      </div>
+      <KpiGrid columns={3} className="mb-6">
+        <StatCard label="Destinatarios" value={live.total} />
+        <StatCard label="Enviados" value={live.counts.sent + live.counts.delivered} />
+        <StatCard
+          label="Gastado / presupuesto"
+          value={
+            <>
+              {money(live.budgetSpent)} /{' '}
+              {campaign.budgetLimit === null ? '∞' : money(campaign.budgetLimit)}
+            </>
+          }
+        />
+        <StatCard
+          label="Programada"
+          value={
+            <span style={{ fontSize: 'var(--unik-text-base)' }}>
+              {campaign.scheduledAt ? new Date(campaign.scheduledAt).toLocaleString('es-MX') : '—'}
+            </span>
+          }
+        />
+      </KpiGrid>
 
       <div
         className="assistant-admin-chart"

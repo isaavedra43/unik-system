@@ -1,0 +1,1327 @@
+import { randomUUID } from 'crypto';
+import { z } from 'zod';
+import { prisma } from '@/lib/prisma';
+import type { CurrentUser } from '@/modules/auth/authorization';
+import {
+  executeCommand,
+  registerCommand,
+  versionedAggregate,
+  type CommandResult,
+} from '@/modules/operations/commands';
+import { OperationsError } from '@/modules/operations/errors';
+import { isOpsFlagEnabled } from '@/modules/operations/operations-config';
+import {
+  qty,
+  toCountDTO,
+  toCountLineDTO,
+  toLegacyClaimDTO,
+  toLocationDTO,
+  toMovementDTO,
+  toProfileDTO,
+  toReservationDTO,
+  toWarehouseDTO,
+  type CountDTO,
+  type CountLineDTO,
+  type LegacyClaimDTO,
+  type LocationDTO,
+  type MovementDTO,
+  type ProfileDTO,
+  type ReservationDTO,
+  type WarehouseDTO,
+} from './inventory-dto';
+import {
+  blockStock,
+  consumeReservation,
+  createContainerStockItem,
+  recordInventoryMovement,
+  releaseReservation,
+  reserveStock,
+  transferStock,
+  unblockStock,
+} from './inventory-service';
+import { COUNT_SCOPES, LEGACY_CLAIM_SOURCES, type ConfidenceLevel } from './inventory-types';
+import { buildStockLabel, type LabelDTO } from './labels-service';
+import {
+  claimLegacyCommitment,
+  confirmLegacyClaim,
+  expireLegacyClaim,
+  listDueLegacyClaimIds,
+  releaseLegacyClaim,
+} from './legacy-claims-service';
+import { getOrCreateProfile, updateProfile, updateProfileInputSchema } from './profiles-service';
+import {
+  cancelCount,
+  closeCount,
+  decideCountAdjustment,
+  recordCountLine,
+  resolveCountDispute,
+  startCount,
+  type CloseCountResult,
+} from './stock-count-service';
+import {
+  createLocation,
+  createLocationInputSchema,
+  createWarehouse,
+  createWarehouseInputSchema,
+  ensureDefaultWarehouse,
+  updateLocation,
+  updateLocationInputSchema,
+  updateWarehouse,
+  updateWarehouseInputSchema,
+} from './warehouses-service';
+
+/**
+ * Operational commands of the inventory module (registered on import; the
+ * barrel `operations/register-commands.ts` imports this file).
+ *
+ * | command                          | permission         | aggregate            |
+ * |----------------------------------|--------------------|----------------------|
+ * | stock.count.start                | inventory.count    | warehouse (none)     |
+ * | stock.count.line                 | inventory.count    | stock_count (none)   |
+ * | stock.count.close / cancel       | inventory.count    | stock_count (version)|
+ * | stock.count.decide_adjustment    | inventory.adjust   | stock_count_line     |
+ * | stock.count.resolve_dispute      | inventory.adjust   | stock_count_line     |
+ * | stock.reserve / release          | inventory.reserve  | case_demand / res.   |
+ * | stock.consume                    | inventory.manage   | stock_reservation    |
+ * | stock.move (receipt, issue, return, produce, consume, transfer) | inventory.manage | stock_item |
+ * | stock.adjust / block / unblock   | inventory.adjust   | stock_item           |
+ * | stock.container.create           | inventory.manage   | stock_item           |
+ * | stock.claim_legacy / confirm_legacy / release_legacy | inventory.reserve | legacy_claim |
+ * | stock.expire_legacy              | system only        | legacy_claim         |
+ * | profile.ensure / profile.update  | inventory.manage   | inventory_profile    |
+ * | location.create / update         | inventory.manage   | storage_location     |
+ * | warehouse.create / update / sync_zoho_locations | inventory.manage | warehouse |
+ *
+ * Every handler checks the `inventory` flag (kill switch). Service wrappers
+ * with the uniform signature `fn(actor, input, options?)` are exported at the
+ * end for server actions, routes and AI tools; commands can also be executed
+ * by type through `executeCommand` (offline batch endpoint).
+ */
+
+const log = (event: string, extra: Record<string, unknown> = {}) =>
+  console.info(JSON.stringify({ component: 'inventory-commands', event, ...extra }));
+
+export const INVENTORY_COMMANDS = {
+  countStart: 'stock.count.start',
+  countLine: 'stock.count.line',
+  countClose: 'stock.count.close',
+  countCancel: 'stock.count.cancel',
+  countDecideAdjustment: 'stock.count.decide_adjustment',
+  countResolveDispute: 'stock.count.resolve_dispute',
+  reserve: 'stock.reserve',
+  release: 'stock.release',
+  consume: 'stock.consume',
+  move: 'stock.move',
+  adjust: 'stock.adjust',
+  block: 'stock.block',
+  unblock: 'stock.unblock',
+  containerCreate: 'stock.container.create',
+  claimLegacy: 'stock.claim_legacy',
+  confirmLegacy: 'stock.confirm_legacy',
+  releaseLegacy: 'stock.release_legacy',
+  expireLegacy: 'stock.expire_legacy',
+  profileEnsure: 'profile.ensure',
+  profileUpdate: 'profile.update',
+  locationCreate: 'location.create',
+  locationUpdate: 'location.update',
+  warehouseCreate: 'warehouse.create',
+  warehouseUpdate: 'warehouse.update',
+  warehouseSyncZoho: 'warehouse.sync_zoho_locations',
+} as const;
+
+export type InventoryCommandType = (typeof INVENTORY_COMMANDS)[keyof typeof INVENTORY_COMMANDS];
+
+async function assertInventoryEnabled(): Promise<void> {
+  if (!(await isOpsFlagEnabled('inventory'))) {
+    throw new OperationsError('module_disabled', 'El inventario progresivo está desactivado', {
+      httpStatus: 409,
+    });
+  }
+}
+
+function assertAggregate(aggregateId: string, expected: string, label: string): void {
+  if (aggregateId !== expected) {
+    throw new OperationsError(
+      'invalid_payload',
+      `El ${label} no corresponde al registro del comando`
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Shared schemas
+// ---------------------------------------------------------------------------
+
+const DECIMAL_PATTERN = /^-?\d{1,14}(\.\d{1,6})?$/;
+
+const idSchema = z.string().trim().min(1).max(120);
+const quantitySchema = z
+  .union([z.number().finite(), z.string().trim().regex(DECIMAL_PATTERN, 'Cantidad inválida')])
+  .transform((value) => String(value));
+const positiveQuantitySchema = quantitySchema.refine((value) => Number(value) > 0, {
+  message: 'La cantidad debe ser mayor que cero',
+});
+const signedQuantitySchema = quantitySchema.refine((value) => Number(value) !== 0, {
+  message: 'La cantidad no puede ser cero',
+});
+const unitSchema = z.string().trim().min(1).max(30).nullish();
+const noteSchema = z.string().trim().max(500).nullish();
+const reasonSchema = z.string().trim().min(1, 'Indica el motivo').max(500);
+const locationCodeSchema = z.string().trim().min(1).max(40).nullish();
+const variantKeySchema = z.string().max(400).nullish();
+const variantSchema = z
+  .record(z.string().max(30), z.union([z.string().max(80), z.number(), z.null()]))
+  .nullish();
+const containerKeySchema = z.string().trim().min(1).max(40).nullish();
+const referenceTypeSchema = z.string().trim().min(1).max(60).nullish();
+const referenceIdSchema = z.string().trim().min(1).max(120).nullish();
+
+// ---------------------------------------------------------------------------
+// Counts
+// ---------------------------------------------------------------------------
+
+const startCountSchema = z
+  .object({ warehouseId: idSchema, scope: z.enum(COUNT_SCOPES).default('spot') })
+  .strict();
+
+registerCommand<z.output<typeof startCountSchema>, { count: CountDTO }>(
+  INVENTORY_COMMANDS.countStart,
+  {
+    schema: startCountSchema,
+    permission: 'inventory.count',
+    aggregate: 'none',
+    async handler(tx, cmd, ctx) {
+      await assertInventoryEnabled();
+      const count = await startCount(tx, cmd.payload, ctx);
+      return { data: { count: toCountDTO(count) }, aggregateVersion: count.version };
+    },
+  }
+);
+
+const countLineSchema = z
+  .object({
+    countId: idSchema,
+    stockItemId: idSchema.nullish(),
+    zohoItemId: idSchema.nullish(),
+    locationId: idSchema.nullish(),
+    locationCode: locationCodeSchema,
+    variantKey: variantKeySchema,
+    variant: variantSchema,
+    containerKey: containerKeySchema,
+    countedQty: quantitySchema,
+    unit: unitSchema,
+  })
+  .strict()
+  .refine((value) => Boolean(value.stockItemId || value.zohoItemId), {
+    message: 'Indica la existencia o el artículo contado',
+    path: ['zohoItemId'],
+  });
+
+export interface CountLineData {
+  line: CountLineDTO;
+  stockItemId: string;
+  expected: string;
+  counted: string;
+  diff: string;
+  withinTolerance: boolean;
+  baseUnit: string;
+  confidence: ConfidenceLevel;
+  recount: boolean;
+}
+
+registerCommand<z.output<typeof countLineSchema>, CountLineData>(INVENTORY_COMMANDS.countLine, {
+  schema: countLineSchema,
+  permission: 'inventory.count',
+  aggregate: 'none',
+  async handler(tx, cmd, ctx) {
+    await assertInventoryEnabled();
+    assertAggregate(cmd.aggregate.id, cmd.payload.countId, 'conteo');
+    const result = await recordCountLine(tx, cmd.payload, ctx);
+    return {
+      data: {
+        line: toCountLineDTO(result.line),
+        stockItemId: result.stockItem.id,
+        expected: qty(result.expected),
+        counted: qty(result.counted),
+        diff: qty(result.diff),
+        withinTolerance: result.withinTolerance,
+        baseUnit: result.baseUnit,
+        confidence: result.confidence,
+        recount: result.recount,
+      },
+    };
+  },
+});
+
+const countIdSchema = z.object({ countId: idSchema }).strict();
+
+registerCommand<z.output<typeof countIdSchema>, CloseCountResult>(INVENTORY_COMMANDS.countClose, {
+  schema: countIdSchema,
+  permission: 'inventory.count',
+  aggregate: versionedAggregate('stock_count', 'stockCount'),
+  async handler(tx, cmd, ctx) {
+    await assertInventoryEnabled();
+    assertAggregate(cmd.aggregate.id, cmd.payload.countId, 'conteo');
+    return { data: await closeCount(tx, cmd.payload, ctx) };
+  },
+});
+
+registerCommand<z.output<typeof countIdSchema>, { count: CountDTO }>(
+  INVENTORY_COMMANDS.countCancel,
+  {
+    schema: countIdSchema,
+    permission: 'inventory.count',
+    aggregate: versionedAggregate('stock_count', 'stockCount'),
+    async handler(tx, cmd, ctx) {
+      await assertInventoryEnabled();
+      assertAggregate(cmd.aggregate.id, cmd.payload.countId, 'conteo');
+      const count = await cancelCount(tx, cmd.payload, ctx);
+      return { data: { count: toCountDTO(count) } };
+    },
+  }
+);
+
+const decideAdjustmentSchema = z
+  .object({ lineId: idSchema, decision: z.enum(['approve', 'reject']), note: noteSchema })
+  .strict();
+
+registerCommand<
+  z.output<typeof decideAdjustmentSchema>,
+  { line: CountLineDTO; movementId: string | null; workItemIds: string[] }
+>(INVENTORY_COMMANDS.countDecideAdjustment, {
+  schema: decideAdjustmentSchema,
+  permission: 'inventory.adjust',
+  aggregate: 'none',
+  async handler(tx, cmd, ctx) {
+    await assertInventoryEnabled();
+    const result = await decideCountAdjustment(tx, cmd.payload, ctx);
+    return {
+      data: {
+        line: toCountLineDTO(result.line),
+        movementId: result.movementId,
+        workItemIds: result.workItemIds,
+      },
+    };
+  },
+});
+
+const resolveDisputeSchema = z
+  .object({
+    lineId: idSchema,
+    decision: z.enum(['adjust', 'keep_book']),
+    confirmedQty: quantitySchema.nullish(),
+    unit: unitSchema,
+    note: reasonSchema,
+  })
+  .strict();
+
+registerCommand<
+  z.output<typeof resolveDisputeSchema>,
+  {
+    line: CountLineDTO;
+    movementId: string | null;
+    confidence: ConfidenceLevel;
+    disputeResolved: boolean;
+    resolvedIncidentIds: string[];
+  }
+>(INVENTORY_COMMANDS.countResolveDispute, {
+  schema: resolveDisputeSchema,
+  permission: 'inventory.adjust',
+  aggregate: 'none',
+  audit: 'always',
+  async handler(tx, cmd, ctx) {
+    await assertInventoryEnabled();
+    const result = await resolveCountDispute(tx, cmd.payload, ctx);
+    return { data: { ...result, line: toCountLineDTO(result.line) } };
+  },
+});
+
+// ---------------------------------------------------------------------------
+// Reservations
+// ---------------------------------------------------------------------------
+
+const reserveSchema = z
+  .object({
+    caseId: idSchema,
+    demandId: idSchema,
+    allocationId: idSchema.nullish(),
+    zohoItemId: idSchema,
+    warehouseId: idSchema,
+    variantKey: variantKeySchema,
+    quantity: positiveQuantitySchema,
+    unit: unitSchema,
+    stockItemId: idSchema.nullish(),
+    allowProvisional: z.boolean().default(false),
+    note: noteSchema,
+  })
+  .strict();
+
+export interface ReserveData {
+  reservations: ReservationDTO[];
+  primaryReservationId: string;
+  provisional: boolean;
+  confidence: ConfidenceLevel;
+  quantity: string;
+  baseUnit: string;
+  availableBefore: string;
+  availableAfter: string;
+}
+
+registerCommand<z.output<typeof reserveSchema>, ReserveData>(INVENTORY_COMMANDS.reserve, {
+  schema: reserveSchema,
+  permission: 'inventory.reserve',
+  aggregate: 'none',
+  async handler(tx, cmd, ctx) {
+    await assertInventoryEnabled();
+    const result = await reserveStock(tx, cmd.payload, ctx);
+    return {
+      data: {
+        reservations: result.reservations.map(toReservationDTO),
+        primaryReservationId: result.primaryReservationId,
+        provisional: result.provisional,
+        confidence: result.confidence,
+        quantity: qty(result.quantityBase),
+        baseUnit: result.baseUnit,
+        availableBefore: qty(result.availableBefore),
+        availableAfter: qty(result.availableAfter),
+      },
+    };
+  },
+});
+
+const releaseSchema = z.object({ reservationId: idSchema, reason: noteSchema }).strict();
+
+registerCommand<z.output<typeof releaseSchema>, { reservation: ReservationDTO }>(
+  INVENTORY_COMMANDS.release,
+  {
+    schema: releaseSchema,
+    permission: 'inventory.reserve',
+    aggregate: 'none',
+    async handler(tx, cmd, ctx) {
+      await assertInventoryEnabled();
+      const reservation = await releaseReservation(tx, cmd.payload, ctx);
+      return { data: { reservation: toReservationDTO(reservation) } };
+    },
+  }
+);
+
+const consumeSchema = z
+  .object({
+    reservationId: idSchema,
+    quantity: positiveQuantitySchema.nullish(),
+    unit: unitSchema,
+    kind: z.enum(['issue', 'consume']).default('issue'),
+    referenceType: referenceTypeSchema,
+    referenceId: referenceIdSchema,
+    note: noteSchema,
+  })
+  .strict();
+
+registerCommand<
+  z.output<typeof consumeSchema>,
+  { movement: MovementDTO; reservation: ReservationDTO }
+>(INVENTORY_COMMANDS.consume, {
+  schema: consumeSchema,
+  permission: 'inventory.manage',
+  aggregate: 'none',
+  async handler(tx, cmd, ctx) {
+    await assertInventoryEnabled();
+    const result = await consumeReservation(tx, cmd.payload, ctx);
+    return {
+      data: {
+        movement: toMovementDTO(result.movement),
+        reservation: toReservationDTO(result.reservation),
+      },
+    };
+  },
+});
+
+// ---------------------------------------------------------------------------
+// Movements
+// ---------------------------------------------------------------------------
+
+const movementBase = {
+  zohoItemId: idSchema,
+  warehouseId: idSchema,
+  stockItemId: idSchema.nullish(),
+  locationId: idSchema.nullish(),
+  locationCode: locationCodeSchema,
+  variantKey: variantKeySchema,
+  variant: variantSchema,
+  containerKey: containerKeySchema,
+  quantity: positiveQuantitySchema,
+  unit: unitSchema,
+  referenceType: referenceTypeSchema,
+  referenceId: referenceIdSchema,
+  note: noteSchema,
+  caseId: idSchema.nullish(),
+};
+
+const dimensionsSchema = z
+  .record(z.string().max(30), z.union([z.string().max(80), z.number().finite()]))
+  .nullish();
+
+const moveSchema = z.discriminatedUnion('kind', [
+  z
+    .object({ kind: z.literal('receipt'), ...movementBase, newContainer: z.boolean().optional() })
+    .strict(),
+  z
+    .object({ kind: z.literal('return'), ...movementBase, newContainer: z.boolean().optional() })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('produce'),
+      ...movementBase,
+      newContainer: z.boolean().optional(),
+      originProductionOrderId: idSchema.nullish(),
+      dimensions: dimensionsSchema,
+    })
+    .strict(),
+  z.object({ kind: z.literal('issue'), ...movementBase }).strict(),
+  z.object({ kind: z.literal('consume'), ...movementBase }).strict(),
+  z
+    .object({
+      kind: z.literal('transfer'),
+      zohoItemId: idSchema,
+      fromWarehouseId: idSchema,
+      fromStockItemId: idSchema.nullish(),
+      fromLocationId: idSchema.nullish(),
+      fromLocationCode: locationCodeSchema,
+      variantKey: variantKeySchema,
+      variant: variantSchema,
+      containerKey: containerKeySchema,
+      toWarehouseId: idSchema,
+      toLocationId: idSchema.nullish(),
+      toLocationCode: locationCodeSchema,
+      quantity: positiveQuantitySchema,
+      unit: unitSchema,
+      referenceType: referenceTypeSchema,
+      referenceId: referenceIdSchema,
+      note: noteSchema,
+      caseId: idSchema.nullish(),
+    })
+    .strict(),
+]);
+
+export interface MoveData {
+  kind: 'receipt' | 'return' | 'produce' | 'issue' | 'consume' | 'transfer';
+  movements: MovementDTO[];
+  stockItemIds: string[];
+  /** Container created by an inbound movement. */
+  containerKey: string | null;
+}
+
+registerCommand<z.output<typeof moveSchema>, MoveData>(INVENTORY_COMMANDS.move, {
+  schema: moveSchema,
+  permission: 'inventory.manage',
+  aggregate: 'none',
+  async handler(tx, cmd, ctx) {
+    await assertInventoryEnabled();
+    const payload = cmd.payload;
+    if (payload.kind === 'transfer') {
+      const { kind, ...input } = payload;
+      const result = await transferStock(tx, input, ctx);
+      return {
+        data: {
+          kind,
+          movements: [toMovementDTO(result.out.movement), toMovementDTO(result.in.movement)],
+          stockItemIds: [result.out.stockItem.id, result.in.stockItem.id],
+          containerKey: null,
+        },
+      };
+    }
+    const { kind, ...input } = payload;
+    const result = await recordInventoryMovement(tx, { ...input, kind }, ctx);
+    return {
+      data: {
+        kind,
+        movements: [toMovementDTO(result.movement)],
+        stockItemIds: [result.stockItem.id],
+        containerKey: result.createdContainerKey || null,
+      },
+    };
+  },
+});
+
+const adjustSchema = z
+  .object({
+    zohoItemId: idSchema,
+    warehouseId: idSchema,
+    stockItemId: idSchema.nullish(),
+    locationId: idSchema.nullish(),
+    locationCode: locationCodeSchema,
+    variantKey: variantKeySchema,
+    variant: variantSchema,
+    containerKey: containerKeySchema,
+    quantity: signedQuantitySchema,
+    unit: unitSchema,
+    reason: reasonSchema,
+  })
+  .strict();
+
+registerCommand<z.output<typeof adjustSchema>, { movement: MovementDTO; known: string }>(
+  INVENTORY_COMMANDS.adjust,
+  {
+    schema: adjustSchema,
+    permission: 'inventory.adjust',
+    aggregate: 'none',
+    audit: 'always',
+    async handler(tx, cmd, ctx) {
+      await assertInventoryEnabled();
+      const { reason, ...input } = cmd.payload;
+      const result = await recordInventoryMovement(
+        tx,
+        { ...input, kind: 'adjust', note: reason, referenceType: 'manual_adjustment' },
+        ctx
+      );
+      return {
+        data: { movement: toMovementDTO(result.movement), known: qty(result.stockItem.knownQty) },
+      };
+    },
+  }
+);
+
+const blockSchema = z
+  .object({
+    stockItemId: idSchema,
+    quantity: positiveQuantitySchema,
+    unit: unitSchema,
+    reason: reasonSchema,
+  })
+  .strict();
+
+registerCommand<z.output<typeof blockSchema>, { movement: MovementDTO; blocked: string }>(
+  INVENTORY_COMMANDS.block,
+  {
+    schema: blockSchema,
+    permission: 'inventory.adjust',
+    aggregate: 'none',
+    async handler(tx, cmd, ctx) {
+      await assertInventoryEnabled();
+      const result = await blockStock(tx, cmd.payload, ctx);
+      return {
+        data: { movement: toMovementDTO(result.movement), blocked: qty(result.stockItem.blocked) },
+      };
+    },
+  }
+);
+
+registerCommand<z.output<typeof blockSchema>, { movement: MovementDTO; blocked: string }>(
+  INVENTORY_COMMANDS.unblock,
+  {
+    schema: blockSchema,
+    permission: 'inventory.adjust',
+    aggregate: 'none',
+    async handler(tx, cmd, ctx) {
+      await assertInventoryEnabled();
+      const result = await unblockStock(tx, cmd.payload, ctx);
+      return {
+        data: { movement: toMovementDTO(result.movement), blocked: qty(result.stockItem.blocked) },
+      };
+    },
+  }
+);
+
+const containerSchema = z
+  .object({
+    zohoItemId: idSchema,
+    warehouseId: idSchema,
+    locationId: idSchema.nullish(),
+    locationCode: locationCodeSchema,
+    variantKey: variantKeySchema,
+    variant: variantSchema,
+  })
+  .strict();
+
+registerCommand<
+  z.output<typeof containerSchema>,
+  { stockItemId: string; containerKey: string; label: LabelDTO }
+>(INVENTORY_COMMANDS.containerCreate, {
+  schema: containerSchema,
+  permission: 'inventory.manage',
+  aggregate: 'none',
+  async handler(tx, cmd, ctx) {
+    await assertInventoryEnabled();
+    const { stockItem, containerKey } = await createContainerStockItem(tx, cmd.payload, ctx);
+    const [product, location, warehouse, profile] = await Promise.all([
+      tx.product.findUnique({
+        where: { zohoItemId: stockItem.zohoItemId },
+        select: { name: true, sku: true },
+      }),
+      tx.storageLocation.findUnique({
+        where: { id: stockItem.locationId },
+        select: { code: true },
+      }),
+      tx.warehouse.findUnique({ where: { id: stockItem.warehouseId }, select: { name: true } }),
+      tx.productInventoryProfile.findUnique({
+        where: { zohoItemId: stockItem.zohoItemId },
+        select: { baseUnit: true },
+      }),
+    ]);
+    return {
+      data: {
+        stockItemId: stockItem.id,
+        containerKey,
+        label: buildStockLabel(stockItem, {
+          productName: product?.name,
+          sku: product?.sku,
+          locationCode: location?.code,
+          warehouseName: warehouse?.name,
+          baseUnit: profile?.baseUnit,
+        }),
+      },
+    };
+  },
+});
+
+// ---------------------------------------------------------------------------
+// Legacy claims
+// ---------------------------------------------------------------------------
+
+const claimSchema = z
+  .object({
+    zohoItemId: idSchema,
+    warehouseId: idSchema,
+    variantKey: variantKeySchema,
+    variant: variantSchema,
+    quantity: positiveQuantitySchema,
+    unit: unitSchema,
+    source: z.enum(LEGACY_CLAIM_SOURCES),
+    reference: z.string().trim().max(200).nullish(),
+    expiresAt: z.string().datetime({ offset: true }).nullish(),
+    note: noteSchema,
+  })
+  .strict();
+
+export interface ClaimData {
+  claim: LegacyClaimDTO;
+  confidence: ConfidenceLevel;
+  availableBefore: string;
+  availableAfter: string;
+  exceedsAvailable: boolean;
+  incidentId: string | null;
+}
+
+registerCommand<z.output<typeof claimSchema>, ClaimData>(INVENTORY_COMMANDS.claimLegacy, {
+  schema: claimSchema,
+  permission: 'inventory.reserve',
+  aggregate: 'none',
+  async handler(tx, cmd, ctx) {
+    await assertInventoryEnabled();
+    const { expiresAt, ...input } = cmd.payload;
+    const result = await claimLegacyCommitment(
+      tx,
+      { ...input, expiresAt: expiresAt ? new Date(expiresAt) : null },
+      ctx
+    );
+    return {
+      data: {
+        claim: toLegacyClaimDTO(result.claim),
+        confidence: result.confidence,
+        availableBefore: qty(result.availableBefore),
+        availableAfter: qty(result.availableAfter),
+        exceedsAvailable: result.exceedsAvailable,
+        incidentId: result.incidentId,
+      },
+      aggregateVersion: result.claim.version,
+    };
+  },
+});
+
+const confirmClaimSchema = z
+  .object({
+    claimId: idSchema,
+    caseId: idSchema,
+    demandId: idSchema,
+    allocationId: idSchema.nullish(),
+    stockItemId: idSchema.nullish(),
+    allowProvisional: z.boolean().default(false),
+  })
+  .strict();
+
+registerCommand<
+  z.output<typeof confirmClaimSchema>,
+  { claim: LegacyClaimDTO; reservations: ReservationDTO[]; provisional: boolean }
+>(INVENTORY_COMMANDS.confirmLegacy, {
+  schema: confirmClaimSchema,
+  permission: 'inventory.reserve',
+  aggregate: 'none',
+  async handler(tx, cmd, ctx) {
+    await assertInventoryEnabled();
+    const result = await confirmLegacyClaim(tx, cmd.payload, ctx);
+    return {
+      data: {
+        claim: toLegacyClaimDTO(result.claim),
+        reservations: result.reservation.reservations.map(toReservationDTO),
+        provisional: result.reservation.provisional,
+      },
+    };
+  },
+});
+
+const releaseClaimSchema = z.object({ claimId: idSchema, reason: noteSchema }).strict();
+
+registerCommand<z.output<typeof releaseClaimSchema>, { claim: LegacyClaimDTO }>(
+  INVENTORY_COMMANDS.releaseLegacy,
+  {
+    schema: releaseClaimSchema,
+    permission: 'inventory.reserve',
+    aggregate: 'none',
+    async handler(tx, cmd, ctx) {
+      await assertInventoryEnabled();
+      const claim = await releaseLegacyClaim(tx, cmd.payload, ctx);
+      return { data: { claim: toLegacyClaimDTO(claim) } };
+    },
+  }
+);
+
+const expireClaimSchema = z.object({ claimId: idSchema }).strict();
+
+registerCommand<z.output<typeof expireClaimSchema>, { claim: LegacyClaimDTO }>(
+  INVENTORY_COMMANDS.expireLegacy,
+  {
+    schema: expireClaimSchema,
+    aggregate: 'none',
+    actorTypes: ['system'],
+    audit: 'never',
+    async handler(tx, cmd, ctx) {
+      await assertInventoryEnabled();
+      const claim = await expireLegacyClaim(tx, cmd.payload, ctx);
+      return { data: { claim: toLegacyClaimDTO(claim) } };
+    },
+  }
+);
+
+// ---------------------------------------------------------------------------
+// Profiles, locations, warehouses
+// ---------------------------------------------------------------------------
+
+const ensureProfileSchema = z.object({ zohoItemId: idSchema }).strict();
+
+registerCommand<z.output<typeof ensureProfileSchema>, { profile: ProfileDTO }>(
+  INVENTORY_COMMANDS.profileEnsure,
+  {
+    schema: ensureProfileSchema,
+    permission: 'inventory.manage',
+    aggregate: 'none',
+    async handler(tx, cmd) {
+      await assertInventoryEnabled();
+      const profile = await getOrCreateProfile(tx, cmd.payload.zohoItemId);
+      return { data: { profile: toProfileDTO(profile) }, aggregateVersion: profile.version };
+    },
+  }
+);
+
+registerCommand<z.output<typeof updateProfileInputSchema>, { profile: ProfileDTO }>(
+  INVENTORY_COMMANDS.profileUpdate,
+  {
+    schema: updateProfileInputSchema,
+    permission: 'inventory.manage',
+    aggregate: versionedAggregate('inventory_profile', 'productInventoryProfile'),
+    async handler(tx, cmd) {
+      await assertInventoryEnabled();
+      assertAggregate(cmd.aggregate.id, cmd.payload.profileId, 'perfil');
+      const profile = await updateProfile(tx, cmd.payload);
+      return { data: { profile: toProfileDTO(profile) } };
+    },
+  }
+);
+
+registerCommand<z.output<typeof createLocationInputSchema>, { location: LocationDTO }>(
+  INVENTORY_COMMANDS.locationCreate,
+  {
+    schema: createLocationInputSchema,
+    permission: 'inventory.manage',
+    aggregate: 'none',
+    async handler(tx, cmd) {
+      await assertInventoryEnabled();
+      const location = await createLocation(tx, cmd.payload);
+      return { data: { location: toLocationDTO(location) } };
+    },
+  }
+);
+
+registerCommand<z.output<typeof updateLocationInputSchema>, { location: LocationDTO }>(
+  INVENTORY_COMMANDS.locationUpdate,
+  {
+    schema: updateLocationInputSchema,
+    permission: 'inventory.manage',
+    aggregate: 'none',
+    async handler(tx, cmd) {
+      await assertInventoryEnabled();
+      const location = await updateLocation(tx, cmd.payload);
+      return { data: { location: toLocationDTO(location) } };
+    },
+  }
+);
+
+registerCommand<
+  z.output<typeof createWarehouseInputSchema>,
+  { warehouse: WarehouseDTO; general: LocationDTO }
+>(INVENTORY_COMMANDS.warehouseCreate, {
+  schema: createWarehouseInputSchema,
+  permission: 'inventory.manage',
+  aggregate: 'none',
+  async handler(tx, cmd) {
+    await assertInventoryEnabled();
+    const { warehouse, general } = await createWarehouse(tx, cmd.payload);
+    return { data: { warehouse: toWarehouseDTO(warehouse), general: toLocationDTO(general) } };
+  },
+});
+
+registerCommand<z.output<typeof updateWarehouseInputSchema>, { warehouse: WarehouseDTO }>(
+  INVENTORY_COMMANDS.warehouseUpdate,
+  {
+    schema: updateWarehouseInputSchema,
+    permission: 'inventory.manage',
+    aggregate: 'none',
+    async handler(tx, cmd) {
+      await assertInventoryEnabled();
+      const warehouse = await updateWarehouse(tx, cmd.payload);
+      return { data: { warehouse: toWarehouseDTO(warehouse) } };
+    },
+  }
+);
+
+const syncWarehousesSchema = z.object({}).strict();
+
+registerCommand<
+  z.output<typeof syncWarehousesSchema>,
+  { defaultWarehouseId: string; warehouses: WarehouseDTO[]; created: number }
+>(INVENTORY_COMMANDS.warehouseSyncZoho, {
+  schema: syncWarehousesSchema,
+  permission: 'inventory.manage',
+  aggregate: 'none',
+  async handler(tx) {
+    await assertInventoryEnabled();
+    const result = await ensureDefaultWarehouse(tx);
+    return {
+      data: {
+        defaultWarehouseId: result.defaultWarehouse.id,
+        warehouses: result.warehouses.map(toWarehouseDTO),
+        created: result.created.length,
+      },
+    };
+  },
+});
+
+// ---------------------------------------------------------------------------
+// Service wrappers: fn(actor, input, options?) → CommandResult
+// ---------------------------------------------------------------------------
+
+export interface InventoryCommandOptions {
+  /** Client UUID (offline queue); a new one by default. */
+  commandId?: string;
+  expectedVersion?: number;
+  deviceId?: string;
+  /** ISO instant on the device. */
+  occurredAt?: string;
+  /** Server clock (tests). */
+  now?: Date;
+}
+
+function runAsUser<D>(
+  actor: CurrentUser,
+  type: InventoryCommandType,
+  aggregate: { type: string; id: unknown },
+  payload: unknown,
+  options: InventoryCommandOptions = {}
+): Promise<CommandResult<D>> {
+  return executeCommand<D>(
+    {
+      commandId: options.commandId ?? randomUUID(),
+      type,
+      actor: { type: 'user', id: actor.id },
+      aggregate: { type: aggregate.type, id: String(aggregate.id ?? '') },
+      expectedVersion: options.expectedVersion,
+      payload,
+      deviceId: options.deviceId,
+      occurredAt: options.occurredAt,
+    },
+    actor,
+    { now: options.now }
+  );
+}
+
+type Input<S extends z.ZodTypeAny> = z.input<S>;
+
+export function startStockCount(
+  actor: CurrentUser,
+  input: Input<typeof startCountSchema>,
+  options?: InventoryCommandOptions
+) {
+  return runAsUser<{ count: CountDTO }>(
+    actor,
+    INVENTORY_COMMANDS.countStart,
+    { type: 'warehouse', id: input.warehouseId },
+    input,
+    options
+  );
+}
+
+export function recordStockCountLine(
+  actor: CurrentUser,
+  input: Input<typeof countLineSchema>,
+  options?: InventoryCommandOptions
+) {
+  return runAsUser<CountLineData>(
+    actor,
+    INVENTORY_COMMANDS.countLine,
+    { type: 'stock_count', id: input.countId },
+    input,
+    options
+  );
+}
+
+export function closeStockCount(
+  actor: CurrentUser,
+  input: Input<typeof countIdSchema>,
+  options?: InventoryCommandOptions
+) {
+  return runAsUser<CloseCountResult>(
+    actor,
+    INVENTORY_COMMANDS.countClose,
+    { type: 'stock_count', id: input.countId },
+    input,
+    options
+  );
+}
+
+export function cancelStockCount(
+  actor: CurrentUser,
+  input: Input<typeof countIdSchema>,
+  options?: InventoryCommandOptions
+) {
+  return runAsUser<{ count: CountDTO }>(
+    actor,
+    INVENTORY_COMMANDS.countCancel,
+    { type: 'stock_count', id: input.countId },
+    input,
+    options
+  );
+}
+
+export function decideStockCountAdjustment(
+  actor: CurrentUser,
+  input: Input<typeof decideAdjustmentSchema>,
+  options?: InventoryCommandOptions
+) {
+  return runAsUser<{ line: CountLineDTO; movementId: string | null; workItemIds: string[] }>(
+    actor,
+    INVENTORY_COMMANDS.countDecideAdjustment,
+    { type: 'stock_count_line', id: input.lineId },
+    input,
+    options
+  );
+}
+
+export function resolveStockCountDispute(
+  actor: CurrentUser,
+  input: Input<typeof resolveDisputeSchema>,
+  options?: InventoryCommandOptions
+) {
+  return runAsUser<{
+    line: CountLineDTO;
+    movementId: string | null;
+    confidence: ConfidenceLevel;
+    disputeResolved: boolean;
+    resolvedIncidentIds: string[];
+  }>(
+    actor,
+    INVENTORY_COMMANDS.countResolveDispute,
+    { type: 'stock_count_line', id: input.lineId },
+    input,
+    options
+  );
+}
+
+export function reserveStockForDemand(
+  actor: CurrentUser,
+  input: Input<typeof reserveSchema>,
+  options?: InventoryCommandOptions
+) {
+  return runAsUser<ReserveData>(
+    actor,
+    INVENTORY_COMMANDS.reserve,
+    { type: 'case_demand', id: input.demandId },
+    input,
+    options
+  );
+}
+
+export function releaseStockReservation(
+  actor: CurrentUser,
+  input: Input<typeof releaseSchema>,
+  options?: InventoryCommandOptions
+) {
+  return runAsUser<{ reservation: ReservationDTO }>(
+    actor,
+    INVENTORY_COMMANDS.release,
+    { type: 'stock_reservation', id: input.reservationId },
+    input,
+    options
+  );
+}
+
+export function consumeStockReservation(
+  actor: CurrentUser,
+  input: Input<typeof consumeSchema>,
+  options?: InventoryCommandOptions
+) {
+  return runAsUser<{ movement: MovementDTO; reservation: ReservationDTO }>(
+    actor,
+    INVENTORY_COMMANDS.consume,
+    { type: 'stock_reservation', id: input.reservationId },
+    input,
+    options
+  );
+}
+
+export function moveStock(
+  actor: CurrentUser,
+  input: Input<typeof moveSchema>,
+  options?: InventoryCommandOptions
+) {
+  const aggregateId =
+    input.kind === 'transfer'
+      ? (input.fromStockItemId ?? `${input.zohoItemId}:${input.fromWarehouseId}`)
+      : (input.stockItemId ?? `${input.zohoItemId}:${input.warehouseId}`);
+  return runAsUser<MoveData>(
+    actor,
+    INVENTORY_COMMANDS.move,
+    { type: 'stock_item', id: aggregateId },
+    input,
+    options
+  );
+}
+
+export function adjustStock(
+  actor: CurrentUser,
+  input: Input<typeof adjustSchema>,
+  options?: InventoryCommandOptions
+) {
+  return runAsUser<{ movement: MovementDTO; known: string }>(
+    actor,
+    INVENTORY_COMMANDS.adjust,
+    { type: 'stock_item', id: input.stockItemId ?? `${input.zohoItemId}:${input.warehouseId}` },
+    input,
+    options
+  );
+}
+
+export function blockStockQuantity(
+  actor: CurrentUser,
+  input: Input<typeof blockSchema>,
+  options?: InventoryCommandOptions
+) {
+  return runAsUser<{ movement: MovementDTO; blocked: string }>(
+    actor,
+    INVENTORY_COMMANDS.block,
+    { type: 'stock_item', id: input.stockItemId },
+    input,
+    options
+  );
+}
+
+export function unblockStockQuantity(
+  actor: CurrentUser,
+  input: Input<typeof blockSchema>,
+  options?: InventoryCommandOptions
+) {
+  return runAsUser<{ movement: MovementDTO; blocked: string }>(
+    actor,
+    INVENTORY_COMMANDS.unblock,
+    { type: 'stock_item', id: input.stockItemId },
+    input,
+    options
+  );
+}
+
+export function createStockContainer(
+  actor: CurrentUser,
+  input: Input<typeof containerSchema>,
+  options?: InventoryCommandOptions
+) {
+  return runAsUser<{ stockItemId: string; containerKey: string; label: LabelDTO }>(
+    actor,
+    INVENTORY_COMMANDS.containerCreate,
+    { type: 'stock_item', id: `${input.zohoItemId}:${input.warehouseId}` },
+    input,
+    options
+  );
+}
+
+export function claimLegacyStock(
+  actor: CurrentUser,
+  input: Input<typeof claimSchema>,
+  options?: InventoryCommandOptions
+) {
+  return runAsUser<ClaimData>(
+    actor,
+    INVENTORY_COMMANDS.claimLegacy,
+    { type: 'legacy_claim', id: `${input.zohoItemId}:${input.warehouseId}` },
+    input,
+    options
+  );
+}
+
+export function confirmLegacyStockClaim(
+  actor: CurrentUser,
+  input: Input<typeof confirmClaimSchema>,
+  options?: InventoryCommandOptions
+) {
+  return runAsUser<{ claim: LegacyClaimDTO; reservations: ReservationDTO[]; provisional: boolean }>(
+    actor,
+    INVENTORY_COMMANDS.confirmLegacy,
+    { type: 'legacy_claim', id: input.claimId },
+    input,
+    options
+  );
+}
+
+export function releaseLegacyStockClaim(
+  actor: CurrentUser,
+  input: Input<typeof releaseClaimSchema>,
+  options?: InventoryCommandOptions
+) {
+  return runAsUser<{ claim: LegacyClaimDTO }>(
+    actor,
+    INVENTORY_COMMANDS.releaseLegacy,
+    { type: 'legacy_claim', id: input.claimId },
+    input,
+    options
+  );
+}
+
+export function ensureInventoryProfile(
+  actor: CurrentUser,
+  input: Input<typeof ensureProfileSchema>,
+  options?: InventoryCommandOptions
+) {
+  return runAsUser<{ profile: ProfileDTO }>(
+    actor,
+    INVENTORY_COMMANDS.profileEnsure,
+    { type: 'inventory_profile', id: `item:${input.zohoItemId}` },
+    input,
+    options
+  );
+}
+
+export function updateInventoryProfile(
+  actor: CurrentUser,
+  input: Input<typeof updateProfileInputSchema>,
+  options?: InventoryCommandOptions
+) {
+  return runAsUser<{ profile: ProfileDTO }>(
+    actor,
+    INVENTORY_COMMANDS.profileUpdate,
+    { type: 'inventory_profile', id: input.profileId },
+    input,
+    options
+  );
+}
+
+export function createStorageLocation(
+  actor: CurrentUser,
+  input: Input<typeof createLocationInputSchema>,
+  options?: InventoryCommandOptions
+) {
+  return runAsUser<{ location: LocationDTO }>(
+    actor,
+    INVENTORY_COMMANDS.locationCreate,
+    { type: 'storage_location', id: `${input.warehouseId}:${input.code}` },
+    input,
+    options
+  );
+}
+
+export function updateStorageLocation(
+  actor: CurrentUser,
+  input: Input<typeof updateLocationInputSchema>,
+  options?: InventoryCommandOptions
+) {
+  return runAsUser<{ location: LocationDTO }>(
+    actor,
+    INVENTORY_COMMANDS.locationUpdate,
+    { type: 'storage_location', id: input.locationId },
+    input,
+    options
+  );
+}
+
+export function createInventoryWarehouse(
+  actor: CurrentUser,
+  input: Input<typeof createWarehouseInputSchema>,
+  options?: InventoryCommandOptions
+) {
+  return runAsUser<{ warehouse: WarehouseDTO; general: LocationDTO }>(
+    actor,
+    INVENTORY_COMMANDS.warehouseCreate,
+    { type: 'warehouse', id: input.key ?? input.name },
+    input,
+    options
+  );
+}
+
+export function updateInventoryWarehouse(
+  actor: CurrentUser,
+  input: Input<typeof updateWarehouseInputSchema>,
+  options?: InventoryCommandOptions
+) {
+  return runAsUser<{ warehouse: WarehouseDTO }>(
+    actor,
+    INVENTORY_COMMANDS.warehouseUpdate,
+    { type: 'warehouse', id: input.warehouseId },
+    input,
+    options
+  );
+}
+
+export function syncWarehousesFromZoho(actor: CurrentUser, options?: InventoryCommandOptions) {
+  return runAsUser<{ defaultWarehouseId: string; warehouses: WarehouseDTO[]; created: number }>(
+    actor,
+    INVENTORY_COMMANDS.warehouseSyncZoho,
+    { type: 'warehouse', id: 'zoho_locations' },
+    {},
+    options
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Supervisor sweep
+// ---------------------------------------------------------------------------
+
+export interface ExpireLegacyClaimsOutcome {
+  checked: number;
+  expired: number;
+  rejected: number;
+}
+
+/**
+ * Expires legacy claims past their TTL, one idempotent system command per
+ * claim (`sup:legacy_expire:{claimId}`). For the operations supervisor.
+ */
+export async function expireDueLegacyClaims(
+  options: { now?: Date; limit?: number } = {}
+): Promise<ExpireLegacyClaimsOutcome> {
+  const now = options.now ?? new Date();
+  const ids = await listDueLegacyClaimIds(prisma, now, options.limit ?? 200);
+  const outcome: ExpireLegacyClaimsOutcome = { checked: ids.length, expired: 0, rejected: 0 };
+  for (const claimId of ids) {
+    const result = await executeCommand(
+      {
+        commandId: `sup:legacy_expire:${claimId}`,
+        type: INVENTORY_COMMANDS.expireLegacy,
+        actor: { type: 'system', id: 'inventory.supervisor' },
+        aggregate: { type: 'legacy_claim', id: claimId },
+        payload: { claimId },
+      },
+      null,
+      { now }
+    );
+    if (result.status === 'completed') outcome.expired += 1;
+    else if (result.status === 'rejected') outcome.rejected += 1;
+  }
+  if (ids.length > 0) log('legacy_claims_expired', { ...outcome });
+  return outcome;
+}

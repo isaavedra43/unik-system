@@ -12,6 +12,8 @@ import { ScrollArea } from '@/components/shadcn/scroll-area';
 import { cn } from '@/lib/utils';
 import type { CurrentUser } from '@/modules/auth/authorization';
 import type { ChatChannelDTO } from '@/modules/chat/chat-events';
+import { isOperationsChannelType } from '@/modules/chat/chat-events';
+import { ChatBotBadge } from './ChatBotBadge';
 
 export interface ChatGroupSettingsProps {
   channel: ChatChannelDTO;
@@ -30,6 +32,7 @@ export function ChatGroupSettings({ channel, user, onClose, onRefresh }: ChatGro
   const [error, setError] = useState<string | null>(null);
 
   const isGroup = channel.type === 'group';
+  const isManaged = isOperationsChannelType(channel.type);
   const isOwner = channel.members.find((m) => m.userId === user.id)?.role === 'owner';
   const isAdmin = isOwner || channel.members.find((m) => m.userId === user.id)?.role === 'admin';
 
@@ -258,6 +261,7 @@ export function ChatGroupSettings({ channel, user, onClose, onRefresh }: ChatGro
                   <div className="flex-1 min-w-0">
                     <div className="text-sm font-medium text-foreground truncate">
                       {m.name}
+                      {m.isBot && <ChatBotBadge className="ml-1.5 align-middle" />}
                       {m.userId === user.id && (
                         <span className="text-muted-foreground"> (tú)</span>
                       )}
@@ -285,13 +289,20 @@ export function ChatGroupSettings({ channel, user, onClose, onRefresh }: ChatGro
             </div>
 
             <div className="flex flex-col gap-2 pt-2 border-t border-border">
-              <Button
-                variant="outline"
-                onClick={() => handleRemoveMember(user.id)}
-                className="w-full"
-              >
-                {isGroup ? 'Salir del grupo' : 'Cerrar conversación'}
-              </Button>
+              {isManaged ? (
+                <p className="text-xs text-muted-foreground">
+                  Los miembros de este canal se actualizan solos según los permisos y responsables
+                  de cada área.
+                </p>
+              ) : (
+                <Button
+                  variant="outline"
+                  onClick={() => handleRemoveMember(user.id)}
+                  className="w-full"
+                >
+                  {isGroup ? 'Salir del grupo' : 'Cerrar conversación'}
+                </Button>
+              )}
               {isGroup && isOwner && (
                 <Button
                   variant="destructive"

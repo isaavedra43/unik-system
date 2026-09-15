@@ -168,9 +168,9 @@ export async function getUserDigest(userId: string, date: string): Promise<UserD
   return { metrics, narrative: row.narrative, kpis: buildKpis(metrics), computedAt: row.updatedAt.toISOString() };
 }
 
-/** Recomputes today's and yesterday's digests for every active user (recurring job). */
+/** Recomputes today's and yesterday's digests for every active person (recurring job); AI bot users are skipped. */
 export async function refreshAllDigests(): Promise<{ users: number; days: number }> {
-  const users = await prisma.user.findMany({ where: { isActive: true }, select: { id: true } });
+  const users = await prisma.user.findMany({ where: { isActive: true, isBot: false }, select: { id: true } });
   const today = new Date();
   const yesterday = new Date(today.getTime() - 86_400_000);
   const days = [yesterday, today].map((d) => d.toISOString().slice(0, 10));

@@ -8,6 +8,8 @@ export interface UserView {
   roles: { id: string; key: string; name: string }[];
   lastLoginAt: string | null;
   createdAt: string;
+  /** AI (bot) user of the agents layer: no password reset, never super_admin. */
+  isBot: boolean;
 }
 
 export interface RoleOption {

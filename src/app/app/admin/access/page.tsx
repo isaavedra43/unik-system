@@ -54,6 +54,7 @@ export default async function AdminAccessPage({ searchParams }: AccessPageProps)
     roles: u.roles,
     lastLoginAt: u.lastLoginAt ? u.lastLoginAt.toISOString() : null,
     createdAt: u.createdAt.toISOString(),
+    isBot: u.isBot,
   }));
 
   const roleOptions: RoleOption[] = rawRoles

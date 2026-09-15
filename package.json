@@ -20,10 +20,9 @@
     "storybook": "storybook dev -p 6006",
     "build-storybook": "storybook build",
     "test:components": "vitest",
-    "test:a11y": "vitest --project a11y",
+    "test:a11y": "vitest run --project storybook",
+    "test:integration": "vitest run --project integration",
     "test:e2e": "playwright test",
-    "test:visual": "playwright test --project=visual",
-    "test:visual:update": "playwright test --project=visual --update-snapshots",
     "playwright:install": "playwright install chromium",
     "ui:check": "npm run typecheck && npm run lint && npm run format:check && npm run build && npm run build-storybook"
   },

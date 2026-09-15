@@ -16,10 +16,5 @@ export default defineConfig({
       name: 'chromium',
       use: { ...devices['Desktop Chrome'] },
     },
-    {
-      name: 'visual',
-      use: { ...devices['Desktop Chrome'] },
-      grep: /@visual/,
-    },
   ],
 });

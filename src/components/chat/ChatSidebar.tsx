@@ -11,6 +11,8 @@ import {
   Calendar,
   BarChart3,
   Megaphone,
+  Building2,
+  Briefcase,
 } from 'lucide-react';
 import { ChatNewDialog } from './ChatNewDialog';
 import { Button, Input } from '@/components/ui/primitives';
@@ -50,8 +52,19 @@ function formatTime(iso: string): string {
 
 function getDisplayName(item: ChatInboxItem): string {
   if (item.type === 'group') return item.name ?? 'Grupo';
+  if (item.type === 'area') return item.name ?? 'Canal de área';
+  if (item.type === 'case') return item.name ?? 'Sala de venta';
   return item.otherUserName ?? 'Usuario';
 }
+
+function ChannelTypeIcon({ type }: { type: string }) {
+  if (type === 'area') return <Building2 size={18} />;
+  if (type === 'case') return <Briefcase size={18} />;
+  return <Users size={18} />;
+}
+
+const byActivity = (a: ChatInboxItem, b: ChatInboxItem) =>
+  new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime();
 
 function getInitials(name: string): string {
   const parts = name.trim().split(/\s+/);
@@ -69,7 +82,7 @@ function ChatSidebarItem({
   onSelect: (id: string) => void;
 }) {
   const name = getDisplayName(item);
-  const isGroup = item.type === 'group';
+  const isGroup = item.type !== 'dm';
   const hasUnread = item.unreadCount > 0;
   return (
     <button
@@ -79,7 +92,7 @@ function ChatSidebarItem({
       aria-current={isActive ? 'true' : undefined}
     >
       <span className={cn('chat-avatar', isGroup && 'group')} aria-hidden="true">
-        {isGroup ? <Users size={18} /> : getInitials(name)}
+        {isGroup ? <ChannelTypeIcon type={item.type} /> : getInitials(name)}
         {item.type === 'dm' && item.otherUserStatus === 'online' && (
           <span className="chat-presence" />
         )}
@@ -108,21 +121,25 @@ function Section({
   activeId,
   onSelect,
   defaultOpen = true,
+  forceOpen = false,
 }: {
   title: string;
   items: ChatInboxItem[];
   activeId: string | null;
   onSelect: (id: string) => void;
   defaultOpen?: boolean;
+  /** While searching every section shows its matches, whatever the user collapsed. */
+  forceOpen?: boolean;
 }) {
-  const [open, setOpen] = useState(defaultOpen);
+  const [userOpen, setOpen] = useState(defaultOpen);
+  const open = forceOpen || userOpen;
   if (items.length === 0) return null;
   return (
     <div className="chat-sidebar-section">
       <button
         type="button"
         className="chat-sidebar-section-title"
-        onClick={() => setOpen((p) => !p)}
+        onClick={() => setOpen(!open)}
         aria-expanded={open}
       >
         <ChevronRight size={14} className={cn('chat-sidebar-chevron', open && 'open')} />
@@ -158,18 +175,23 @@ export function ChatSidebar({ activeId, inbox, onSelect, onChannelCreated, globa
     });
   }, [inbox, search]);
 
+  const searching = !!search.trim();
   const sections = useMemo(() => {
-    const recent = [...filtered]
-      .sort((a, b) => new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime())
-      .slice(0, 10);
-    const dms = filtered
-      .filter((i) => i.type === 'dm')
-      .sort((a, b) => new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime());
-    const groups = filtered
-      .filter((i) => i.type === 'group')
-      .sort((a, b) => new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime());
-    return { recent, dms, groups };
-  }, [filtered]);
+    const recent = [...filtered].sort(byActivity).slice(0, 10);
+    const recentIds = new Set(recent.map((i) => i.channelId));
+    // While browsing, a channel already in "Recientes" is not repeated below.
+    const ofType = (type: string) =>
+      filtered
+        .filter((i) => i.type === type && (searching || !recentIds.has(i.channelId)))
+        .sort(byActivity);
+    return {
+      recent,
+      areas: ofType('area'),
+      cases: ofType('case'),
+      dms: ofType('dm'),
+      groups: ofType('group'),
+    };
+  }, [filtered, searching]);
 
   const totalUnread = useMemo(() => inbox.reduce((sum, i) => sum + i.unreadCount, 0), [inbox]);
 
@@ -253,7 +275,7 @@ export function ChatSidebar({ activeId, inbox, onSelect, onChannelCreated, globa
           )}
           {filtered.length > 0 && (
             <>
-              {!search.trim() && (
+              {!searching && (
                 <Section
                   title="Recientes"
                   items={sections.recent}
@@ -262,18 +284,35 @@ export function ChatSidebar({ activeId, inbox, onSelect, onChannelCreated, globa
                 />
               )}
               <Section
-                title="Mensajes directos"
-                items={search.trim() ? sections.dms : sections.dms.filter((i) => !sections.recent.includes(i))}
+                title="Áreas"
+                items={sections.areas}
                 activeId={activeId}
                 onSelect={onSelect}
-                defaultOpen={!!search.trim()}
+                forceOpen={searching}
+              />
+              <Section
+                title="Salas de venta"
+                items={sections.cases}
+                activeId={activeId}
+                onSelect={onSelect}
+                defaultOpen={false}
+                forceOpen={searching}
+              />
+              <Section
+                title="Mensajes directos"
+                items={sections.dms}
+                activeId={activeId}
+                onSelect={onSelect}
+                defaultOpen={searching}
+                forceOpen={searching}
               />
               <Section
                 title="Grupos"
-                items={search.trim() ? sections.groups : sections.groups.filter((i) => !sections.recent.includes(i))}
+                items={sections.groups}
                 activeId={activeId}
                 onSelect={onSelect}
-                defaultOpen={!!search.trim()}
+                defaultOpen={searching}
+                forceOpen={searching}
               />
             </>
           )}

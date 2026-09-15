@@ -1,5 +1,9 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
+import { getAiSettings, providerMonthlyFeeUsd, type ProviderConfigEntry } from './ai-admin-config-service';
+import { getModelById, getProviderForModel } from './model-catalog';
+import { resolveProviderForModel } from './provider-resolution';
+import { PROVIDER_IDS, type ProviderId } from './providers/types';
 
 export interface AiStats {
   totalConversations: number;
@@ -33,13 +37,159 @@ const PRICING: Record<string, { prompt: number; completion: number }> = {
   'gemini-2.0-flash': { prompt: 0.1, completion: 0.4 },
 };
 
-function estimateCost(
+/** Providers billed by a flat monthly plan instead of per token. */
+export const FLAT_RATE_PROVIDERS: ReadonlySet<ProviderId> = new Set<ProviderId>(['canopywave']);
+
+export interface CostContext {
+  /** `AiSettings.providerConfigs`: discovered models, enabled providers and flat monthly fees. */
+  providerConfigs?: Record<string, Partial<ProviderConfigEntry>>;
+  /**
+   * Tokens served by the flat-rate provider in the month of the call(s). Used to amortize
+   * `monthlyFeeUsd` per token; absent = the call is the only known usage of the month.
+   */
+  flatRateMonthTokens?: number;
+}
+
+/** Provider that serves a model id for costing (catalog → discovered ids → namespaced open model). Pure. */
+export function providerForCost(deployment: string, ctx: CostContext = {}): ProviderId {
+  const configs = ctx.providerConfigs;
+  const discovered: Partial<Record<ProviderId, string[]>> = {};
+  const configured: ProviderId[] = [];
+  for (const provider of PROVIDER_IDS) {
+    const entry = configs?.[provider];
+    if (Array.isArray(entry?.models)) discovered[provider] = entry.models;
+    if (entry?.enabled) configured.push(provider);
+  }
+  // Without settings a namespaced id ("vendor/model") can only have been served by Canopy Wave:
+  // OpenAI, Anthropic and Gemini ids never contain "/".
+  if (!configs) configured.push('canopywave');
+  return resolveProviderForModel(deployment, {
+    catalogProvider: getProviderForModel(deployment),
+    discovered,
+    configured,
+    defaultProvider: 'openai',
+  });
+}
+
+/** Whether the model is billed by a flat monthly plan (its marginal cost is 0). Pure. */
+export function isFlatRateModel(deployment: string, ctx: CostContext = {}): boolean {
+  return FLAT_RATE_PROVIDERS.has(providerForCost(deployment, ctx));
+}
+
+/**
+ * Estimated USD of a call. Pure.
+ * - Flat-rate models (Canopy Wave): 0, unless `providerConfigs.canopywave.monthlyFeeUsd` is set;
+ *   then the fee amortized per token of the month: tokens × fee / max(month tokens, tokens).
+ * - Priced models: the pricing table, then the catalog price, then gpt-4o prices.
+ */
+export function estimateCost(
   promptTokens: number,
   completionTokens: number,
-  deployment = 'gpt-4o'
+  deployment = 'gpt-4o',
+  ctx: CostContext = {}
 ): number {
-  const p = PRICING[deployment] ?? PRICING['gpt-4o'];
-  return (promptTokens / 1_000_000) * p.prompt + (completionTokens / 1_000_000) * p.completion;
+  const prompt = Math.max(0, Number(promptTokens) || 0);
+  const completion = Math.max(0, Number(completionTokens) || 0);
+  const provider = providerForCost(deployment, ctx);
+  if (FLAT_RATE_PROVIDERS.has(provider)) {
+    const fee = providerMonthlyFeeUsd(ctx.providerConfigs, provider);
+    const tokens = prompt + completion;
+    if (fee === null || tokens === 0) return 0;
+    const monthTokens = Math.max(Number(ctx.flatRateMonthTokens) || 0, tokens);
+    return (tokens * fee) / monthTokens;
+  }
+  const catalog = getModelById(deployment)?.costPer1M;
+  const p =
+    PRICING[deployment] ??
+    (catalog ? { prompt: catalog.input, completion: catalog.output } : PRICING['gpt-4o']);
+  return (prompt / 1_000_000) * p.prompt + (completion / 1_000_000) * p.completion;
+}
+
+/** YYYY-MM of a date (UTC, like the AiApiCall day buckets of these reports). */
+function monthKeyOf(date: Date): string {
+  return date.toISOString().slice(0, 7);
+}
+
+/**
+ * Tokens served by flat-rate models per month (YYYY-MM), only when a flat fee is configured
+ * (without a fee flat-rate calls cost 0 and nothing needs to be amortized).
+ */
+async function flatRateTokensByMonth(
+  months: Iterable<string>,
+  providerConfigs: CostContext['providerConfigs']
+): Promise<Map<string, number>> {
+  const result = new Map<string, number>();
+  const hasFee = [...FLAT_RATE_PROVIDERS].some((p) => providerMonthlyFeeUsd(providerConfigs, p) !== null);
+  if (!hasFee) return result;
+  for (const month of new Set(months)) {
+    const [year, mon] = month.split('-').map(Number);
+    const from = new Date(Date.UTC(year, mon - 1, 1));
+    const to = new Date(Date.UTC(year, mon, 1));
+    const groups = await prisma.aiApiCall.groupBy({
+      by: ['deployment'],
+      where: { createdAt: { gte: from, lt: to } },
+      _sum: { promptTokens: true, completionTokens: true },
+    });
+    let tokens = 0;
+    for (const g of groups) {
+      if (!isFlatRateModel(g.deployment, { providerConfigs })) continue;
+      tokens += (g._sum.promptTokens ?? 0) + (g._sum.completionTokens ?? 0);
+    }
+    result.set(month, tokens);
+  }
+  return result;
+}
+
+/** Exported for the agents usage reports (amortization denominator of each month). */
+export const getFlatRateTokensByMonth = flatRateTokensByMonth;
+
+async function loadProviderConfigs(): Promise<CostContext['providerConfigs']> {
+  try {
+    return (await getAiSettings()).providerConfigs;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Σ estimated cost of calls grouped by UTC month and deployment, amortizing flat fees per month. */
+async function estimateGroupedCost(
+  groups: Array<{ month: string; deployment: string; promptTokens: number; completionTokens: number }>,
+  providerConfigs: CostContext['providerConfigs']
+): Promise<number> {
+  const flatByMonth = new Map<string, number>();
+  for (const g of groups) {
+    if (!isFlatRateModel(g.deployment, { providerConfigs })) continue;
+    flatByMonth.set(g.month, (flatByMonth.get(g.month) ?? 0) + g.promptTokens + g.completionTokens);
+  }
+  let total = 0;
+  for (const g of groups) {
+    total += estimateCost(g.promptTokens, g.completionTokens, g.deployment, {
+      providerConfigs,
+      flatRateMonthTokens: flatByMonth.get(g.month),
+    });
+  }
+  return total;
+}
+
+async function allTimeUsageByMonthAndDeployment(): Promise<
+  Array<{ month: string; deployment: string; promptTokens: number; completionTokens: number }>
+> {
+  const rows = await prisma.$queryRaw<
+    Array<{ month: string; deployment: string; prompt: bigint | number | null; completion: bigint | number | null }>
+  >(Prisma.sql`
+    SELECT to_char("createdAt", 'YYYY-MM') AS month,
+           "deployment" AS deployment,
+           COALESCE(SUM("promptTokens"), 0) AS prompt,
+           COALESCE(SUM("completionTokens"), 0) AS completion
+    FROM "AiApiCall"
+    GROUP BY 1, 2
+  `);
+  return rows.map((r) => ({
+    month: r.month,
+    deployment: r.deployment,
+    promptTokens: Number(r.prompt ?? 0),
+    completionTokens: Number(r.completion ?? 0),
+  }));
 }
 
 export async function getAiStats(): Promise<AiStats> {
@@ -81,9 +231,10 @@ export async function getAiStats(): Promise<AiStats> {
   const activeUsers24h = new Set(activeUsers24hRows.map((m) => m.conversation.userId)).size;
   const activeUsers7d = new Set(activeUsers7dRows.map((m) => m.conversation.userId)).size;
   const successRate = apiCalls > 0 ? ((apiCalls - errCount) / apiCalls) * 100 : 100;
-  const estimatedCostUsd = estimateCost(
-    apiAgg._sum.promptTokens ?? 0,
-    apiAgg._sum.completionTokens ?? 0
+  // Priced per model (flat-rate models cost 0 or their amortized monthly fee), not as if every token were gpt-4o.
+  const estimatedCostUsd = await estimateGroupedCost(
+    await allTimeUsageByMonthAndDeployment(),
+    await loadProviderConfigs()
   );
 
   return {
@@ -113,13 +264,21 @@ export async function getAiStatsByDay(days: number): Promise<
     select: { createdAt: true, totalTokens: true, promptTokens: true, completionTokens: true, deployment: true },
   });
 
+  const providerConfigs = await loadProviderConfigs();
+  const flatByMonth = await flatRateTokensByMonth(
+    rows.map((row) => monthKeyOf(row.createdAt)),
+    providerConfigs
+  );
   const byDay = new Map<string, { messages: number; tokens: number; cost: number }>();
   for (const row of rows) {
     const date = row.createdAt.toISOString().slice(0, 10);
     const entry = byDay.get(date) ?? { messages: 0, tokens: 0, cost: 0 };
     entry.messages++;
     entry.tokens += row.totalTokens;
-    entry.cost += estimateCost(row.promptTokens, row.completionTokens, row.deployment);
+    entry.cost += estimateCost(row.promptTokens, row.completionTokens, row.deployment, {
+      providerConfigs,
+      flatRateMonthTokens: flatByMonth.get(monthKeyOf(row.createdAt)),
+    });
     byDay.set(date, entry);
   }
 
@@ -382,6 +541,11 @@ export async function listAllApiCalls(filters: {
     }),
     prisma.aiApiCall.count({ where }),
   ]);
+  const providerConfigs = await loadProviderConfigs();
+  const flatByMonth = await flatRateTokensByMonth(
+    data.map((c) => monthKeyOf(c.createdAt)),
+    providerConfigs
+  );
 
   return {
     data: data.map((c) => ({
@@ -396,7 +560,11 @@ export async function listAllApiCalls(filters: {
       success: c.success,
       errorCode: c.errorCode,
       finishReason: c.finishReason,
-      estimatedCostUsd: estimateCost(c.promptTokens, c.completionTokens, c.deployment),
+      estimatedCostUsd: estimateCost(c.promptTokens, c.completionTokens, c.deployment, {
+        providerConfigs,
+        flatRateMonthTokens: flatByMonth.get(monthKeyOf(c.createdAt)),
+      }),
+      flatRate: isFlatRateModel(c.deployment, { providerConfigs }),
       createdAt: c.createdAt.toISOString(),
     })),
     total,

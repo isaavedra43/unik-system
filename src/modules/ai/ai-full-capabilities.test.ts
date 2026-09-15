@@ -46,7 +46,10 @@ describe('artifact share tokens', () => {
     process.env.UNIK_SHARE_LINK_SECRET = 'test-secret';
     const token = buildShareToken('cmartifact123', 1);
     expect(verifyShareToken(token)?.artifactId).toBe('cmartifact123');
-    expect(verifyShareToken(token.replace(/.$/, 'Z'))).toBeNull();
+    // The MAC is base64url: swap its last char for one that is guaranteed to differ
+    // (a fixed 'Z' left the token untouched ~1/64 of the time and made this test flaky).
+    const last = token.slice(-1);
+    expect(verifyShareToken(`${token.slice(0, -1)}${last === 'Z' ? 'Y' : 'Z'}`)).toBeNull();
     expect(verifyShareToken('a.b')).toBeNull();
   });
 

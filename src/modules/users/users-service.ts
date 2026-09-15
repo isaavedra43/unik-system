@@ -25,6 +25,9 @@ interface UserListItem {
   roles: { id: string; key: string; name: string }[];
   lastLoginAt: Date | null;
   createdAt: Date;
+  /** AI (bot) user of the agents layer: no password, no login, never super_admin. */
+  isBot: boolean;
+  botKind: string | null;
 }
 
 export async function listUsers(): Promise<UserListItem[]> {
@@ -43,7 +46,19 @@ export async function listUsers(): Promise<UserListItem[]> {
     roles: user.roles.map((ur) => ({ id: ur.role.id, key: ur.role.key, name: ur.role.name })),
     lastLoginAt: user.lastLoginAt,
     createdAt: user.createdAt,
+    isBot: user.isBot,
+    botKind: user.botKind,
   }));
+}
+
+const BOT_PASSWORD_ERROR = 'Los usuarios de IA no tienen contraseña ni pueden iniciar sesión';
+const BOT_SUPER_ADMIN_ERROR = 'Un usuario de IA no puede tener el rol super_admin';
+const HUMAN_AGENT_ROLE_ERROR = 'Los roles de agente de IA (agent_*) sólo se asignan a usuarios de IA';
+const BOT_NON_AGENT_ROLE_ERROR = 'Un usuario de IA sólo puede tener roles de agente (agent_*)';
+
+/** System roles of the AI identities (`agent_<área>`, `agent_admin`). */
+function isAgentRoleKey(key: string): boolean {
+  return key.startsWith('agent_');
 }
 
 async function getRolesByIds(roleIds: string[]) {
@@ -283,6 +298,18 @@ export async function assignRoles(
   const hadSuperAdmin = await targetIsSuperAdmin(userId);
   const willHaveSuperAdmin = includesSuperAdmin(newRoles);
 
+  if (user.isBot && willHaveSuperAdmin) {
+    throw new UserManagementError(BOT_SUPER_ADMIN_ERROR);
+  }
+  // Agent roles and AI users go together: a person never gets an `agent_*` role (it would be read
+  // as an AI identity's fixed permissions) and an AI user only carries agent roles.
+  if (!user.isBot && newRoles.some((role) => isAgentRoleKey(role.key))) {
+    throw new UserManagementError(HUMAN_AGENT_ROLE_ERROR);
+  }
+  if (user.isBot && newRoles.some((role) => !isAgentRoleKey(role.key))) {
+    throw new UserManagementError(BOT_NON_AGENT_ROLE_ERROR);
+  }
+
   if (hadSuperAdmin !== willHaveSuperAdmin && !actor.isSuperAdmin) {
     throw new AuthorizationError(
       'Solo un super administrador puede asignar o quitar el rol super_admin'
@@ -379,6 +406,9 @@ export async function resetUserPassword(
   const user = await prisma.user.findUnique({ where: { id: userId } });
   if (!user) {
     throw new UserManagementError('Usuario no encontrado');
+  }
+  if (user.isBot) {
+    throw new UserManagementError(BOT_PASSWORD_ERROR);
   }
 
   if ((await targetIsSuperAdmin(userId)) && !actor.isSuperAdmin) {

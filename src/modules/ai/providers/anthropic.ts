@@ -17,6 +17,9 @@ import { getProviderConfig } from '../ai-config';
  *   - tool_calls → tool_use content blocks
  *   - role: "tool" → user message with tool_result block
  *   - tools wrapper: { type: "function", function: {...} } → { name, description, input_schema }
+ *   - opts.toolChoice → `tool_choice` via `toAnthropicToolChoice` (tool-choice.ts):
+ *     'required' → { type: "any" }, forced function → { type: "tool", name }, 'auto' → omitted.
+ *     While this is a stub every call throws before building a request, so toolChoice is ignored safely.
  *
  * Data privacy: Anthropic does NOT train on commercial API data by default.
  * Zero Data Retention (ZDR) available on request.

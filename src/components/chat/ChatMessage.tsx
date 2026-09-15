@@ -17,9 +17,11 @@ import {
   AlertCircle,
   MessageSquareText,
   Copy,
+  Bot,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import type { ChatMessageDTO } from '@/modules/chat/chat-events';
+import { parseAgentProposalMeta, parseAgentRequestMeta } from '@/modules/chat/chat-events';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from '@/components/shadcn/dialog';
@@ -44,6 +46,8 @@ const ChatLocationMap = dynamic(
 import { ChatPollMessage } from './ChatPollMessage';
 import { ChatEventMessage } from './ChatEventMessage';
 import { ChatReadReceiptsDialog } from './ChatReadReceiptsDialog';
+import { ChatBotBadge } from './ChatBotBadge';
+import { ChatAgentActions, ChatAgentProposal } from './ChatAgentActions';
 
 export interface ChatMessageProps {
   message: ChatMessageDTO;
@@ -211,6 +215,10 @@ export function ChatMessage({
 
   const isDeleted = !!message.deletedAt;
   const isForwarded = !!message.forwardedFromId;
+  // Only AI (bot) posts carry actionable metadata; the server validates every action.
+  const isBotSender = message.senderIsBot;
+  const agentRequest = isBotSender ? parseAgentRequestMeta(message.meta) : null;
+  const agentProposal = isBotSender && !agentRequest ? parseAgentProposalMeta(message.meta) : null;
   const canEdit = isOwn && !isDeleted && !message.attachments.length;
   const canDelete = isOwn;
 
@@ -219,14 +227,17 @@ export function ChatMessage({
     message.attachments.length > 0 ||
     !!message.location ||
     !!message.poll ||
-    !!message.event;
+    !!message.event ||
+    !!agentRequest ||
+    !!agentProposal;
   const isMediaOnly =
     !message.content &&
     message.attachments.length > 0 &&
     message.attachments.every(
       (a) => a.mimeType.startsWith('image/') || a.mimeType.startsWith('video/')
     );
-  const hasRichBlock = !!message.location || !!message.poll || !!message.event;
+  const hasRichBlock =
+    !!message.location || !!message.poll || !!message.event || !!agentRequest || !!agentProposal;
 
   const meta = (
     <div className="chat-msg-meta">
@@ -278,16 +289,31 @@ export function ChatMessage({
     >
       {/* Avatar (groups only) */}
       {!isOwn && isGroup && (showAvatar ? (
-        <div className="chat-msg-avatar" aria-hidden="true">
-          {senderName.slice(0, 2).toUpperCase()}
-        </div>
+        isBotSender ? (
+          <div
+            className="chat-msg-avatar"
+            aria-hidden="true"
+            style={{ background: 'var(--unik-brand-subtle)', color: 'var(--unik-brand-text)' }}
+          >
+            <Bot size={16} />
+          </div>
+        ) : (
+          <div className="chat-msg-avatar" aria-hidden="true">
+            {senderName.slice(0, 2).toUpperCase()}
+          </div>
+        )
       ) : (
         <div className="chat-msg-avatar-spacer" aria-hidden="true" />
       ))}
 
       <div className="chat-msg-content">
         {/* Sender name (groups only, not own) */}
-        {showAvatar && !isOwn && isGroup && <div className="chat-msg-sender">{senderName}</div>}
+        {showAvatar && !isOwn && isGroup && (
+          <div className="chat-msg-sender">
+            {senderName}
+            {isBotSender && <ChatBotBadge className="ml-1.5 align-middle" />}
+          </div>
+        )}
 
         {/* Reply quote */}
         {message.replyToId && message.replyToPreview && (
@@ -380,6 +406,15 @@ export function ChatMessage({
               <ChatEventMessage
                 event={message.event}
                 onRsvp={(status) => onRsvpEvent(message.event!.id, status)}
+              />
+            )}
+            {agentRequest && <ChatAgentActions meta={agentRequest} currentUserId={currentUserId} />}
+            {agentProposal && (
+              <ChatAgentProposal
+                meta={agentProposal}
+                fallbackSummary={message.content}
+                createdAt={message.createdAt}
+                currentUserId={currentUserId}
               />
             )}
             {!hasBody && (
@@ -532,9 +567,10 @@ function ForwardDialog({
               }) => ({
                 id: c.id,
                 name:
-                  c.type === 'group'
-                    ? c.name
-                    : (c.members.find((m: { name: string }) => m)?.name ?? 'Chat'),
+                  c.type === 'dm'
+                    ? (c.members.find((m: { name: string }) => m)?.name ?? 'Chat')
+                    : (c.name ??
+                      (c.type === 'area' ? 'Canal de área' : c.type === 'case' ? 'Sala de venta' : 'Grupo')),
                 type: c.type,
               })
             )
@@ -588,7 +624,7 @@ function ForwardDialog({
                   >
                     <Avatar className="size-8">
                       <AvatarFallback className="text-xs font-semibold">
-                        {c.type === 'group' ? <Users size={14} /> : c.name.slice(0, 2).toUpperCase()}
+                        {c.type !== 'dm' ? <Users size={14} /> : c.name.slice(0, 2).toUpperCase()}
                       </AvatarFallback>
                     </Avatar>
                     <span className="flex-1 text-sm font-medium text-foreground truncate">

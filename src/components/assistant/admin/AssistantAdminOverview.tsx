@@ -1,8 +1,10 @@
 'use client';
 
 import React, { useEffect, useState, useCallback } from 'react';
-import { Activity, DollarSign, MessageSquare, ShieldCheck, Star, ThumbsUp, Users, Zap } from 'lucide-react';
-import { AssistantAdminStatCard } from './AssistantAdminStatCard';
+import { Activity, CheckCircle2, DollarSign, MessageSquare, ShieldCheck, Star, ThumbsUp, Users, Zap } from 'lucide-react';
+import { KpiGrid } from '@/components/patterns/dashboard/KpiGrid';
+import { StatCard } from '@/components/patterns/dashboard/StatCard';
+import { successRateTone } from '@/components/patterns/dashboard/dashboard-utils';
 
 interface StatsData {
   stats: {
@@ -65,67 +67,68 @@ export function AssistantAdminOverview() {
 
   return (
     <div className="assistant-admin-overview">
-      <div className="assistant-admin-stat-grid">
-        <AssistantAdminStatCard
+      <KpiGrid columns={3} className="mb-6">
+        <StatCard
           label="Conversaciones"
           value={s.totalConversations.toLocaleString('es-MX')}
           icon={<MessageSquare size={20} />}
         />
-        <AssistantAdminStatCard
+        <StatCard
           label="Mensajes"
           value={s.totalMessages.toLocaleString('es-MX')}
           hint={`${s.last24hMessages} en 24h`}
           icon={<Activity size={20} />}
         />
-        <AssistantAdminStatCard
+        <StatCard
           label="Tokens consumidos"
           value={s.totalTokens.toLocaleString('es-MX')}
           hint={`${s.last24hTokens.toLocaleString('es-MX')} en 24h`}
           icon={<Zap size={20} />}
         />
-        <AssistantAdminStatCard
+        <StatCard
           label="Costo estimado"
           value={`$${s.estimatedCostUsd.toFixed(4)} USD`}
           icon={<DollarSign size={20} />}
         />
-        <AssistantAdminStatCard
+        <StatCard
           label="Usuarios activos 24h"
           value={s.activeUsers24h}
           hint={`${s.activeUsers7d} en 7 días`}
           icon={<Users size={20} />}
         />
-        <AssistantAdminStatCard
+        <StatCard
           label="Tasa de éxito"
           value={`${s.successRate.toFixed(1)}%`}
           hint={`${s.errorCount} errores`}
-          tone={s.successRate > 95 ? 'success' : s.successRate > 80 ? 'warning' : 'danger'}
+          icon={<CheckCircle2 size={20} />}
+          tone={successRateTone(s.successRate)}
         />
-      </div>
+      </KpiGrid>
 
       {data.feedback && (
         <div className="assistant-admin-section">
           <h3 className="assistant-admin-section-title">Calidad de respuestas (30 días)</h3>
-          <div className="assistant-admin-stat-grid">
-            <AssistantAdminStatCard
+          <KpiGrid columns={3} className="mb-6">
+            <StatCard
               label="Respuestas útiles"
               value={data.feedback.total > 0 ? `${data.feedback.helpfulRate.toFixed(0)}%` : '—'}
               hint={`${data.feedback.up} 👍 · ${data.feedback.down} 👎`}
               icon={<ThumbsUp size={20} />}
               tone={data.feedback.total === 0 ? 'default' : data.feedback.helpfulRate >= 85 ? 'success' : data.feedback.helpfulRate >= 60 ? 'warning' : 'danger'}
             />
-            <AssistantAdminStatCard
+            <StatCard
               label="Juez automático"
               value={data.feedback.avgJudgeScore != null ? `${data.feedback.avgJudgeScore.toFixed(2)} / 5` : 'Apagado'}
               hint={data.feedback.judged > 0 ? `${data.feedback.judged} respuestas evaluadas` : 'Actívalo en Configuración'}
               icon={<Star size={20} />}
             />
-            <AssistantAdminStatCard
+            <StatCard
               label="Con datos verificados"
               value={data.feedback.verifiedShare != null ? `${data.feedback.verifiedShare.toFixed(0)}%` : '—'}
               hint="Respuestas respaldadas por tools del mismo turno"
               icon={<ShieldCheck size={20} />}
             />
-          </div>
+          </KpiGrid>
           {data.feedback.recentComments.length > 0 && (
             <div className="assistant-admin-list">
               {data.feedback.recentComments.map((c) => (

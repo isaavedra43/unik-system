@@ -8,3 +8,7 @@ import '@/modules/storage/storage-access';
 import '@/modules/copilot/knowledge-service';
 import '@/modules/voice/voice-access';
 import '@/modules/comms/comms-storage';
+import '@/modules/operations/operations-storage';
+import '@/modules/logistics/logistics-storage';
+import '@/modules/purchases/purchases-storage';
+import '@/modules/finance/finance-storage';

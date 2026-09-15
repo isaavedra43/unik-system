@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { AlertCircle, Check, CheckCircle2, Pencil, Plus, Trash2, X } from 'lucide-react';
 import { Drawer } from '@/components/ui/composite';
+import { DEFAULT_SURFACE_ACCESS, visibleSurfaceRows, type OperationsSurfaceAccess } from './copilot-types';
 
 /**
  * Personalization (mode, tone, language, depth, format, instructions) and
@@ -20,8 +21,19 @@ interface Preferences {
   memoryEnabled: boolean;
   inboxCopilotMode: 'active' | 'on_demand' | 'paused';
   chatCopilotMode: 'active' | 'on_demand' | 'paused';
+  /** Operations surfaces (Mi trabajo starts active; the rest on demand). */
+  surfaceModes?: Partial<Record<SurfaceModeKey, 'active' | 'on_demand' | 'paused'>>;
   planMode: 'auto' | 'always' | 'never';
 }
+
+type SurfaceModeKey = 'mywork' | 'area' | 'case' | 'control_tower';
+
+const SURFACE_MODE_ROWS: Array<{ key: SurfaceModeKey; label: string; fallback: 'active' | 'on_demand' }> = [
+  { key: 'mywork', label: 'Mi trabajo', fallback: 'active' },
+  { key: 'area', label: 'Centro de trabajo de cada área', fallback: 'on_demand' },
+  { key: 'case', label: 'Sala del expediente', fallback: 'on_demand' },
+  { key: 'control_tower', label: 'Control Tower', fallback: 'on_demand' },
+];
 
 const PLAN_MODES: Array<{ value: Preferences['planMode']; label: string; hint: string }> = [
   { value: 'auto', label: 'Automático', hint: 'Propone un plan solo en tareas complejas (varios pasos o fuentes) y espera tu confirmación.' },
@@ -85,6 +97,7 @@ export function AssistantPreferencesPanel({
   onClose: () => void;
 }) {
   const [prefs, setPrefs] = useState<Preferences | null>(null);
+  const [surfaces, setSurfaces] = useState<OperationsSurfaceAccess>(DEFAULT_SURFACE_ACCESS);
   const [memories, setMemories] = useState<Memory[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -96,10 +109,11 @@ export function AssistantPreferencesPanel({
     setLoading(true);
     try {
       const [p, m] = await Promise.all([
-        api<{ preferences: Preferences }>('/app/assistant/api/preferences'),
+        api<{ preferences: Preferences; surfaces?: Partial<OperationsSurfaceAccess> }>('/app/assistant/api/preferences'),
         api<{ memories: Memory[] }>('/app/assistant/api/memory'),
       ]);
       setPrefs(p.preferences);
+      setSurfaces({ ...DEFAULT_SURFACE_ACCESS, ...(p.surfaces ?? {}) });
       setMemories(m.memories);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Error');
@@ -119,6 +133,23 @@ export function AssistantPreferencesPanel({
       const r = await api<{ preferences: Preferences }>('/app/assistant/api/preferences', {
         method: 'PATCH',
         body: JSON.stringify(patch),
+      });
+      setPrefs(r.preferences);
+      setNotice('Preferencias guardadas');
+      setTimeout(() => setNotice(null), 2000);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Error');
+    }
+  }
+
+  /** Changes one operations surface only (the server merges `surfaceModes`). */
+  async function saveSurfaceMode(key: SurfaceModeKey, mode: CopilotMode) {
+    if (!prefs) return;
+    setError(null);
+    try {
+      const r = await api<{ preferences: Preferences }>('/app/assistant/api/preferences', {
+        method: 'PATCH',
+        body: JSON.stringify({ surfaceModes: { [key]: mode } }),
       });
       setPrefs(r.preferences);
       setNotice('Preferencias guardadas');
@@ -219,7 +250,7 @@ export function AssistantPreferencesPanel({
             </div>
           </div>
           <div className="assistant-admin-section">
-            <h3 className="assistant-admin-section-title">Copiloto en bandeja externa y chat interno</h3>
+            <h3 className="assistant-admin-section-title">Copiloto en bandeja, chat interno y operaciones</h3>
             <p className="assistant-admin-muted">
               Es la misma IA del asistente, con tu memoria y tu contexto. Aquí decides qué tan proactiva es en cada lugar; el modo de
               trabajo de arriba aplica en todos.
@@ -250,6 +281,27 @@ export function AssistantPreferencesPanel({
                   </span>
                 </div>
               ))}
+              {visibleSurfaceRows(SURFACE_MODE_ROWS, surfaces).map((surface) => {
+                const value = prefs.surfaceModes?.[surface.key] ?? surface.fallback;
+                return (
+                  <div key={surface.key} className="assistant-admin-config-field">
+                    <label htmlFor={`pref-surface-${surface.key}`}>Operaciones · {surface.label}</label>
+                    <select
+                      id={`pref-surface-${surface.key}`}
+                      className="assistant-admin-select"
+                      value={value}
+                      onChange={(e) => saveSurfaceMode(surface.key, e.target.value as CopilotMode)}
+                    >
+                      {COPILOT_MODES.map((m) => (
+                        <option key={m.value} value={m.value}>
+                          {m.label}
+                        </option>
+                      ))}
+                    </select>
+                    <span className="assistant-admin-muted">{COPILOT_MODES.find((m) => m.value === value)?.hint}</span>
+                  </div>
+                );
+              })}
               <div className="assistant-admin-config-field">
                 <label htmlFor="pref-planMode">Planear antes de ejecutar</label>
                 <select
