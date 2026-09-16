@@ -5,6 +5,7 @@ import { prisma } from '@/lib/prisma';
 import { hasPermission, type CurrentUser } from '@/modules/auth/authorization';
 import { SUPER_ADMIN_ROLE_KEY } from '@/modules/auth/constants';
 import { assertKnownPermission, isKnownPermission } from '@/modules/auth/permissions';
+import { takeApprovalFirstSignature } from './approval-first-signature';
 import {
   executeCommand,
   registerCommand,
@@ -46,6 +47,12 @@ import {
  *   distinct approvals approve. Bots can never vote.
  * - Modules react with `onApprovalDecided(targetType, handler)`; handlers run
  *   inside the same transaction as the decision.
+ * - Primera firma heredada de la IA (plan 5.4): cuando la solicitud la abre la
+ *   ejecución de una propuesta de IA ya aprobada por una persona, esa decisión
+ *   cuenta como su voto (`approval.voted`) siempre que cumpla la política; así
+ *   no se le piden dos clics por lo mismo ni queda excluida como solicitante.
+ *   La firma viaja por `runWithApprovalFirstSignature` (ver
+ *   `approval-first-signature.ts`), no por los argumentos de cada módulo.
  */
 
 const MAX_APPROVERS = 25;
@@ -265,7 +272,14 @@ export function isEligibleApprover(
 export interface ApprovalDecidedEvent {
   approvalRequest: ApprovalRequest;
   status: 'approved' | 'rejected';
-  /** True when the policy auto-approved it at request time. */
+  /**
+   * True when the request was decided AT REQUEST TIME, inside the requesting
+   * command's own transaction — the policy auto-approved it (`decidedByUserId`
+   * null) or the first signature was inherited from the person who approved the
+   * AI proposal (`decidedByUserId` set). Handlers use it to skip the version
+   * bump: in that case the subject is the running command's aggregate and the
+   * engine already bumps it.
+   */
   auto: boolean;
   decidedByUserId: string | null;
   ctx: CommandContext;
@@ -351,11 +365,17 @@ export type RequestApprovalInput = z.input<typeof requestApprovalSchema>;
 export interface RequestApprovalOutcome {
   approvalRequest: ApprovalRequest;
   status: ApprovalStatus;
+  /** True ONLY when the policy required zero signatures (never when a person signed). */
   autoApproved: boolean;
   /** True when a pending request for the same target already existed (nothing new was created). */
   reused: boolean;
   approverUserIds: string[];
   workItemIds: string[];
+  /**
+   * Person whose decision on the AI proposal was recorded as the first business
+   * signature (plan 5.4), or null when nothing was inherited.
+   */
+  firstSignatureByUserId: string | null;
 }
 
 function formatMoney(amount: Prisma.Decimal, currency: string): string {
@@ -390,6 +410,19 @@ function toRule(row: {
   };
 }
 
+/** Roles that make a user an approver of `scope` under `approverRoleKeys`. */
+function approverRoleFilters(
+  scope: ApprovalScope,
+  approverRoleKeys: string[]
+): Prisma.RoleWhereInput[] {
+  const roleFilters: Prisma.RoleWhereInput[] = [
+    { key: SUPER_ADMIN_ROLE_KEY },
+    { permissions: { some: { permissionKey: { in: approverPermissionsFor(scope) } } } },
+  ];
+  if (approverRoleKeys.length > 0) roleFilters.unshift({ key: { in: approverRoleKeys } });
+  return roleFilters;
+}
+
 /** Active human users eligible to approve `scope` (never `excludeUserId`). */
 export async function findEligibleApprovers(
   tx: Prisma.TransactionClient,
@@ -397,22 +430,44 @@ export async function findEligibleApprovers(
   approverRoleKeys: string[],
   excludeUserId: string
 ): Promise<Array<{ id: string; name: string }>> {
-  const roleFilters: Prisma.RoleWhereInput[] = [
-    { key: SUPER_ADMIN_ROLE_KEY },
-    { permissions: { some: { permissionKey: { in: approverPermissionsFor(scope) } } } },
-  ];
-  if (approverRoleKeys.length > 0) roleFilters.unshift({ key: { in: approverRoleKeys } });
   return tx.user.findMany({
     where: {
       isActive: true,
       isBot: false,
       id: { not: excludeUserId },
-      roles: { some: { role: { isActive: true, OR: roleFilters } } },
+      roles: {
+        some: { role: { isActive: true, OR: approverRoleFilters(scope, approverRoleKeys) } },
+      },
     },
     select: { id: true, name: true },
     orderBy: { createdAt: 'asc' },
     take: MAX_APPROVERS,
   });
+}
+
+/**
+ * Whether `userId` would qualify as an approver of `scope` — the same rule as
+ * `findEligibleApprovers`, but for one person and WITHOUT excluding them (they
+ * are the requester when the signature is inherited from an AI proposal).
+ */
+export async function isEligibleApproverInTx(
+  tx: Prisma.TransactionClient,
+  scope: ApprovalScope,
+  approverRoleKeys: string[],
+  userId: string
+): Promise<boolean> {
+  const row = await tx.user.findFirst({
+    where: {
+      id: userId,
+      isActive: true,
+      isBot: false,
+      roles: {
+        some: { role: { isActive: true, OR: approverRoleFilters(scope, approverRoleKeys) } },
+      },
+    },
+    select: { id: true },
+  });
+  return Boolean(row);
 }
 
 export interface ApprovalRequirement {
@@ -433,12 +488,17 @@ export async function resolveApprovalRequirement(
   minApprovals?: number
 ): Promise<ApprovalRequirement> {
   const config = await getOperationsConfig();
-  const stored = await db.approvalPolicy.findMany({ where: { scope: subject.scope, active: true } });
+  const stored = await db.approvalPolicy.findMany({
+    where: { scope: subject.scope, active: true },
+  });
   const rules =
     stored.length > 0 ? stored.map(toRule) : defaultApprovalPolicies(config.approvalThresholds);
   const policy =
-    selectApprovalPolicy(rules, { ...subject, amount: D(subject.amount), categoryId: subject.categoryId ?? null }) ??
-    fallbackApprovalRule(subject.scope, rules);
+    selectApprovalPolicy(rules, {
+      ...subject,
+      amount: D(subject.amount),
+      categoryId: subject.categoryId ?? null,
+    }) ?? fallbackApprovalRule(subject.scope, rules);
   return { policy, requiredApprovals: Math.max(policy.requiredApprovals, minApprovals ?? 0) };
 }
 
@@ -481,6 +541,7 @@ export async function requestApproval(
       reused: true,
       approverUserIds: [],
       workItemIds: [],
+      firstSignatureByUserId: null,
     };
   }
 
@@ -513,6 +574,32 @@ export async function requestApproval(
     areaKey,
     objectType: 'approval_request',
     objectId: id,
+  });
+
+  // Plan 5.4: the decision this person already took on the AI proposal that opened this request
+  // counts as their signature — but only if the policy would admit them as an approver.
+  const inherited =
+    requiredApprovals > 0 ? takeApprovalFirstSignature(data.requestedByUserId) : null;
+  const firstVote: ApprovalVote | null =
+    inherited &&
+    (await isEligibleApproverInTx(tx, data.scope, policy.approverRoleKeys, inherited.userId))
+      ? {
+          userId: inherited.userId,
+          decision: 'approve',
+          at: ctx.now.toISOString(),
+          note: `Firma tomada de la propuesta de IA ${inherited.proposalId} (${inherited.toolName})`,
+        }
+      : null;
+  const voteSummary = (requestId: string) => ({
+    approvalRequestId: requestId,
+    scope: data.scope,
+    targetType: data.targetType,
+    targetId: data.targetId,
+    decision: 'approve' as const,
+    approvals: 1,
+    rejections: 0,
+    requiredApprovals,
+    fromProposalId: inherited?.proposalId ?? null,
   });
 
   if (requiredApprovals <= 0) {
@@ -558,6 +645,57 @@ export async function requestApproval(
       reused: false,
       approverUserIds: [],
       workItemIds: [],
+      firstSignatureByUserId: null,
+    };
+  }
+
+  // The inherited signature closes a one-signature policy right here: same transaction, same
+  // `auto` semantics as a policy auto-approval (the subject is the running command's aggregate).
+  if (firstVote && evaluateApproval([firstVote], requiredApprovals).status === 'approved') {
+    const approved = await tx.approvalRequest.create({
+      data: {
+        scope: data.scope,
+        targetType: data.targetType,
+        targetId: data.targetId,
+        amount: data.amount,
+        currency: data.currency,
+        policyId: policy.id,
+        requiredApprovals,
+        status: 'approved',
+        requestedByUserId: data.requestedByUserId,
+        decisions: toOperationalJson([firstVote]),
+        expiresAt: data.expiresAt ?? null,
+        decidedAt: ctx.now,
+        caseId: data.caseId ?? null,
+        areaKey,
+      },
+    });
+    ctx.emit(
+      OPS_EVENTS.approval.requested,
+      { approvalRequestId: approved.id, ...baseEvent, approverUserIds: [] },
+      eventOptions(approved.id)
+    );
+    ctx.emit(OPS_EVENTS.approval.voted, voteSummary(approved.id), eventOptions(approved.id));
+    ctx.emit(
+      OPS_EVENTS.approval.approved,
+      { ...voteSummary(approved.id), auto: true, decidedByUserId: firstVote.userId },
+      eventOptions(approved.id)
+    );
+    await runReactions(tx, {
+      approvalRequest: approved,
+      status: 'approved',
+      auto: true,
+      decidedByUserId: firstVote.userId,
+      ctx,
+    });
+    return {
+      approvalRequest: approved,
+      status: 'approved',
+      autoApproved: false,
+      reused: false,
+      approverUserIds: [],
+      workItemIds: [],
+      firstSignatureByUserId: firstVote.userId,
     };
   }
 
@@ -567,14 +705,15 @@ export async function requestApproval(
     policy.approverRoleKeys,
     data.requestedByUserId
   );
-  if (approvers.length < requiredApprovals) {
+  const stillNeeded = requiredApprovals - (firstVote ? 1 : 0);
+  if (approvers.length < stillNeeded) {
     throw new OperationsError(
       'no_approvers',
-      `Se necesitan ${requiredApprovals} aprobadores distintos y sólo hay ${approvers.length} con permiso para aprobar`,
+      `Se necesitan ${stillNeeded} aprobadores distintos y sólo hay ${approvers.length} con permiso para aprobar`,
       {
         details: {
           scope: data.scope,
-          required: requiredApprovals,
+          required: stillNeeded,
           eligible: approvers.length,
         },
       }
@@ -592,7 +731,7 @@ export async function requestApproval(
       requiredApprovals,
       status: 'pending',
       requestedByUserId: data.requestedByUserId,
-      decisions: [],
+      decisions: firstVote ? toOperationalJson([firstVote]) : [],
       expiresAt: data.expiresAt ?? null,
       caseId: data.caseId ?? null,
       areaKey,
@@ -600,7 +739,9 @@ export async function requestApproval(
   });
 
   const signatures =
-    requiredApprovals === 1 ? '1 firma' : `${requiredApprovals} firmas distintas`;
+    requiredApprovals === 1
+      ? '1 firma'
+      : `${requiredApprovals} firmas distintas${firstVote ? ' (1 ya registrada)' : ''}`;
   const workItemIds: string[] = [];
   for (const approver of approvers) {
     const item = await ctx.createWorkItem({
@@ -628,6 +769,9 @@ export async function requestApproval(
     { approvalRequestId: request.id, ...baseEvent, approverUserIds: approvers.map((a) => a.id) },
     eventOptions(request.id)
   );
+  if (firstVote) {
+    ctx.emit(OPS_EVENTS.approval.voted, voteSummary(request.id), eventOptions(request.id));
+  }
   return {
     approvalRequest: request,
     status: 'pending',
@@ -635,6 +779,7 @@ export async function requestApproval(
     reused: false,
     approverUserIds: approvers.map((a) => a.id),
     workItemIds,
+    firstSignatureByUserId: firstVote?.userId ?? null,
   };
 }
 

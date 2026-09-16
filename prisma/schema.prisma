@@ -2726,7 +2726,7 @@ model AreaRequest {
   caseId         String
   fromAreaKey    String
   toAreaKey      String
-  /// availability_check | purchase_shortfall | payment_authorization | vendor_pickup | transformation | material_shortfall | finished_goods | delivery_update | create_package_in_zoho | resolve_difference | customer_notice | cancel | escalation | info
+  /// availability_check | purchase_shortfall | direct_delivery | payment_authorization | vendor_pickup | transformation | material_shortfall | finished_goods | delivery_update | create_package_in_zoho | resolve_difference | customer_notice | cancel | escalation | info
   kind           String
   objectType     String
   objectId       String
@@ -3735,6 +3735,8 @@ model ProcurementAllocation {
   /// DemandAllocation.id (source purchase)
   demandAllocationId String?
   qty                Decimal              @db.Decimal(18, 4)
+  /// Cantidad (en unidades base de la demanda) que este renglón ya comprometió a esta asignación en entregas directas anteriores; el camino de bodega lo deduce de sus reservas de stock.
+  directDeliveredQty Decimal              @default(0) @db.Decimal(18, 4)
   createdAt          DateTime             @default(now())
   updatedAt          DateTime             @updatedAt
   orderLine          ProcurementOrderLine @relation(fields: [orderLineId], references: [id], onDelete: Cascade)

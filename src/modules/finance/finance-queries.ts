@@ -88,18 +88,36 @@ export interface Page<T> {
 const DEFAULT_PAGE_SIZE = 50;
 const MAX_PAGE_SIZE = 200;
 
-export function normalizePage(input: PageInput = {}): { page: number; pageSize: number; skip: number } {
-  const pageSize = Math.min(Math.max(Math.trunc(input.pageSize ?? DEFAULT_PAGE_SIZE), 1), MAX_PAGE_SIZE);
+export function normalizePage(input: PageInput = {}): {
+  page: number;
+  pageSize: number;
+  skip: number;
+} {
+  const pageSize = Math.min(
+    Math.max(Math.trunc(input.pageSize ?? DEFAULT_PAGE_SIZE), 1),
+    MAX_PAGE_SIZE
+  );
   const page = Math.max(Math.trunc(input.page ?? 1), 1);
   return { page, pageSize, skip: (page - 1) * pageSize };
 }
 
 function pageOf<T>(rows: T[], total: number, page: { page: number; pageSize: number }): Page<T> {
-  return { rows, total, page: page.page, pageSize: page.pageSize, pageCount: Math.max(1, Math.ceil(total / page.pageSize)) };
+  return {
+    rows,
+    total,
+    page: page.page,
+    pageSize: page.pageSize,
+    pageCount: Math.max(1, Math.ceil(total / page.pageSize)),
+  };
 }
 
-function requireAny(actor: CurrentUser, keys: readonly string[], message = 'No tienes permisos para ver la contabilidad'): void {
-  if (!keys.some((key) => hasFinancePermission(actor, key))) throw new OperationsError('forbidden', message);
+function requireAny(
+  actor: CurrentUser,
+  keys: readonly string[],
+  message = 'No tienes permisos para ver la contabilidad'
+): void {
+  if (!keys.some((key) => hasFinancePermission(actor, key)))
+    throw new OperationsError('forbidden', message);
 }
 
 const VIEW = ['finance.view'] as const;
@@ -113,7 +131,10 @@ function parse<T extends z.ZodTypeAny>(schema: T, input: unknown): z.output<T> {
   if (!parsed.success) {
     throw new OperationsError(
       'invalid_payload',
-      `Filtros inválidos: ${parsed.error.issues.slice(0, 3).map((i) => `${i.path.join('.')}: ${i.message}`).join('; ')}`
+      `Filtros inválidos: ${parsed.error.issues
+        .slice(0, 3)
+        .map((i) => `${i.path.join('.')}: ${i.message}`)
+        .join('; ')}`
     );
   }
   return parsed.data;
@@ -161,19 +182,36 @@ export const ledgerFiltersSchema = z.object({
 
 export type LedgerFilters = z.input<typeof ledgerFiltersSchema>;
 
-export async function listLedgerEntries(actor: CurrentUser, filters: LedgerFilters = {}): Promise<Page<LedgerEntryDTO>> {
+export async function listLedgerEntries(
+  actor: CurrentUser,
+  filters: LedgerFilters = {}
+): Promise<Page<LedgerEntryDTO>> {
   requireAny(actor, VIEW);
   const f = parse(ledgerFiltersSchema, filters);
   const page = normalizePage(f);
   const where: Prisma.LedgerEntryWhereInput = {
     ...(f.periodKey ? { periodKey: f.periodKey } : {}),
-    ...(f.from || f.to ? { date: { ...(f.from ? { gte: toDbDate(f.from) } : {}), ...(f.to ? { lte: toDbDate(f.to) } : {}) } } : {}),
+    ...(f.from || f.to
+      ? {
+          date: {
+            ...(f.from ? { gte: toDbDate(f.from) } : {}),
+            ...(f.to ? { lte: toDbDate(f.to) } : {}),
+          },
+        }
+      : {}),
     ...(f.kind ? { kind: f.kind } : {}),
     ...(f.sourceType ? { sourceType: f.sourceType } : {}),
     ...(f.sourceId ? { sourceId: f.sourceId } : {}),
-    ...(f.cashAccountId ? { lines: { some: { accountType: 'cash', accountId: f.cashAccountId } } } : {}),
+    ...(f.cashAccountId
+      ? { lines: { some: { accountType: 'cash', accountId: f.cashAccountId } } }
+      : {}),
     ...(f.search
-      ? { OR: [{ number: { contains: f.search, mode: 'insensitive' } }, { description: { contains: f.search, mode: 'insensitive' } }] }
+      ? {
+          OR: [
+            { number: { contains: f.search, mode: 'insensitive' } },
+            { description: { contains: f.search, mode: 'insensitive' } },
+          ],
+        }
       : {}),
   };
   const [total, rows] = await Promise.all([
@@ -191,7 +229,10 @@ export async function listLedgerEntries(actor: CurrentUser, filters: LedgerFilte
 
 export async function getLedgerEntry(actor: CurrentUser, entryId: string): Promise<LedgerEntryDTO> {
   requireAny(actor, VIEW);
-  const entry = await prisma.ledgerEntry.findUnique({ where: { id: entryId }, include: { lines: { orderBy: { seq: 'asc' } } } });
+  const entry = await prisma.ledgerEntry.findUnique({
+    where: { id: entryId },
+    include: { lines: { orderBy: { seq: 'asc' } } },
+  });
   if (!entry) throw new OperationsError('not_found', 'No se encontró el asiento');
   return toLedgerEntryDTO(entry);
 }
@@ -200,7 +241,10 @@ export async function getLedgerEntry(actor: CurrentUser, entryId: string): Promi
 // Obligations
 // ---------------------------------------------------------------------------
 
-export function agingRangeWhere(bucket: AgingBucket, todayKey: string): Prisma.ObligationWhereInput {
+export function agingRangeWhere(
+  bucket: AgingBucket,
+  todayKey: string
+): Prisma.ObligationWhereInput {
   const day = (offset: number) => toDbDate(addDaysToKey(todayKey, offset));
   switch (bucket) {
     case 'no_due_date':
@@ -222,7 +266,9 @@ export const obligationFiltersSchema = z.object({
   ...pageFields,
   kind: z.enum(OBLIGATION_KINDS).optional(),
   /** 'open' = expected + partially settled. */
-  status: z.union([z.enum(OBLIGATION_STATUSES), z.literal('open'), z.literal('all')]).default('open'),
+  status: z
+    .union([z.enum(OBLIGATION_STATUSES), z.literal('open'), z.literal('all')])
+    .default('open'),
   counterpartyType: z.enum(COUNTERPARTY_TYPES).optional(),
   agingBucket: z.enum(AGING_BUCKETS).optional(),
   overdueOnly: z.boolean().optional(),
@@ -255,7 +301,14 @@ export async function listObligations(
   if (f.counterpartyType) and.push({ counterpartyType: f.counterpartyType });
   if (f.agingBucket) and.push(agingRangeWhere(f.agingBucket, todayKey));
   if (f.overdueOnly) and.push({ dueAt: { lt: toDbDate(todayKey) } });
-  for (const key of ['caseId', 'employeeId', 'supplierId', 'zohoContactId', 'zohoSalesOrderId', 'procurementOrderId'] as const) {
+  for (const key of [
+    'caseId',
+    'employeeId',
+    'supplierId',
+    'zohoContactId',
+    'zohoSalesOrderId',
+    'procurementOrderId',
+  ] as const) {
     if (f[key]) and.push({ [key]: f[key] });
   }
   if (f.dueFrom) and.push({ dueAt: { gte: toDbDate(f.dueFrom) } });
@@ -272,15 +325,29 @@ export async function listObligations(
   const where: Prisma.ObligationWhereInput = and.length ? { AND: and } : {};
   const [total, rows, openRows] = await Promise.all([
     prisma.obligation.count({ where }),
-    prisma.obligation.findMany({ where, orderBy: [{ dueAt: 'asc' }, { createdAt: 'asc' }], skip: page.skip, take: page.pageSize }),
     prisma.obligation.findMany({
-      where: { AND: [...and.filter((c) => !('status' in c)), { status: { in: [...OBLIGATION_OPEN_STATUSES] } }] },
+      where,
+      orderBy: [{ dueAt: 'asc' }, { createdAt: 'asc' }],
+      skip: page.skip,
+      take: page.pageSize,
+    }),
+    prisma.obligation.findMany({
+      where: {
+        AND: [
+          ...and.filter((c) => !('status' in c)),
+          { status: { in: [...OBLIGATION_OPEN_STATUSES] } },
+        ],
+      },
       select: { kind: true, expectedAmount: true, settledAmount: true, dueAt: true },
       take: 20_000,
     }),
   ]);
   return {
-    ...pageOf(rows.map((row) => toObligationDTO(row, todayKey)), total, page),
+    ...pageOf(
+      rows.map((row) => toObligationDTO(row, todayKey)),
+      total,
+      page
+    ),
     aging: summarizeAging(
       openRows.map((row) => ({ kind: row.kind, remaining: remainingOf(row), dueAt: row.dueAt })),
       todayKey
@@ -290,11 +357,21 @@ export async function listObligations(
 
 export interface ObligationDetailDTO extends ObligationDTO {
   paymentAuthorization: PaymentAuthorizationState;
-  approvals: Array<{ id: string; status: string; amount: string; requiredApprovals: number; createdAt: string }>;
+  approvals: Array<{
+    id: string;
+    status: string;
+    amount: string;
+    requiredApprovals: number;
+    createdAt: string;
+  }>;
   ledgerEntry: LedgerEntryDTO | null;
 }
 
-export async function getObligation(actor: CurrentUser, obligationId: string, options: { now?: Date } = {}): Promise<ObligationDetailDTO> {
+export async function getObligation(
+  actor: CurrentUser,
+  obligationId: string,
+  options: { now?: Date } = {}
+): Promise<ObligationDetailDTO> {
   requireAny(actor, VIEW);
   const obligation = await prisma.obligation.findUnique({
     where: { id: obligationId },
@@ -303,12 +380,19 @@ export async function getObligation(actor: CurrentUser, obligationId: string, op
   if (!obligation) throw new OperationsError('not_found', 'No se encontró la obligación');
   const [approvals, entry] = await Promise.all([
     prisma.approvalRequest.findMany({
-      where: { scope: 'payment', targetType: FINANCE_OBJECT_TYPES.obligation, targetId: obligation.id },
+      where: {
+        scope: 'payment',
+        targetType: FINANCE_OBJECT_TYPES.obligation,
+        targetId: obligation.id,
+      },
       orderBy: { createdAt: 'desc' },
       take: 10,
     }),
     obligation.ledgerEntryId
-      ? prisma.ledgerEntry.findUnique({ where: { id: obligation.ledgerEntryId }, include: { lines: { orderBy: { seq: 'asc' } } } })
+      ? prisma.ledgerEntry.findUnique({
+          where: { id: obligation.ledgerEntryId },
+          include: { lines: { orderBy: { seq: 'asc' } } },
+        })
       : Promise.resolve(null),
   ]);
   return {
@@ -325,15 +409,27 @@ export async function getObligation(actor: CurrentUser, obligationId: string, op
   };
 }
 
-export async function getAgingSummary(actor: CurrentUser, input: { asOf?: string; currency?: string } = {}): Promise<AgingSummary & { asOf: string }> {
+export async function getAgingSummary(
+  actor: CurrentUser,
+  input: { asOf?: string; currency?: string } = {}
+): Promise<AgingSummary & { asOf: string }> {
   requireAny(actor, VIEW);
-  const asOf = input.asOf && dateKeySchema.safeParse(input.asOf).success ? input.asOf : localDateKey(new Date());
+  const asOf =
+    input.asOf && dateKeySchema.safeParse(input.asOf).success
+      ? input.asOf
+      : localDateKey(new Date());
   const rows = await prisma.obligation.findMany({
     where: { status: { in: [...OBLIGATION_OPEN_STATUSES] }, currency: input.currency ?? 'MXN' },
     select: { kind: true, expectedAmount: true, settledAmount: true, dueAt: true },
     take: 20_000,
   });
-  return { ...summarizeAging(rows.map((r) => ({ kind: r.kind, remaining: remainingOf(r), dueAt: r.dueAt })), asOf), asOf };
+  return {
+    ...summarizeAging(
+      rows.map((r) => ({ kind: r.kind, remaining: remainingOf(r), dueAt: r.dueAt })),
+      asOf
+    ),
+    asOf,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -342,7 +438,9 @@ export async function getAgingSummary(actor: CurrentUser, input: { asOf?: string
 
 export const expenseFiltersSchema = z.object({
   ...pageFields,
-  status: z.union([z.enum(EXPENSE_STATUSES), z.literal('pending'), z.literal('all')]).default('all'),
+  status: z
+    .union([z.enum(EXPENSE_STATUSES), z.literal('pending'), z.literal('all')])
+    .default('all'),
   mine: z.boolean().optional(),
   duplicateStatus: z.enum(DUPLICATE_STATUSES).optional(),
   captureMode: z.enum(EXPENSE_CAPTURE_MODES).optional(),
@@ -357,7 +455,10 @@ export const expenseFiltersSchema = z.object({
 
 export type ExpenseFilters = z.input<typeof expenseFiltersSchema>;
 
-export async function listExpenses(actor: CurrentUser, filters: ExpenseFilters = {}): Promise<Page<ExpenseDTO>> {
+export async function listExpenses(
+  actor: CurrentUser,
+  filters: ExpenseFilters = {}
+): Promise<Page<ExpenseDTO>> {
   requireAny(actor, ['finance.view', 'finance.capture_expense']);
   const f = parse(expenseFiltersSchema, filters);
   const page = normalizePage(f);
@@ -375,7 +476,14 @@ export async function listExpenses(actor: CurrentUser, filters: ExpenseFilters =
     ...(f.costCenterId ? { costCenterId: f.costCenterId } : {}),
     ...(f.supplierId ? { supplierId: f.supplierId } : {}),
     ...(f.caseId ? { caseId: f.caseId } : {}),
-    ...(f.from || f.to ? { date: { ...(f.from ? { gte: toDbDate(f.from) } : {}), ...(f.to ? { lte: toDbDate(f.to) } : {}) } } : {}),
+    ...(f.from || f.to
+      ? {
+          date: {
+            ...(f.from ? { gte: toDbDate(f.from) } : {}),
+            ...(f.to ? { lte: toDbDate(f.to) } : {}),
+          },
+        }
+      : {}),
     ...(f.search
       ? {
           OR: [
@@ -406,16 +514,28 @@ export interface ExpenseDetailDTO extends ExpenseDTO {
 
 export async function getExpense(actor: CurrentUser, expenseId: string): Promise<ExpenseDetailDTO> {
   requireAny(actor, ['finance.view', 'finance.capture_expense']);
-  const expense = await prisma.expense.findUnique({ where: { id: expenseId }, include: { splits: true } });
+  const expense = await prisma.expense.findUnique({
+    where: { id: expenseId },
+    include: { splits: true },
+  });
   if (!expense) throw new OperationsError('not_found', 'No se encontró el gasto');
   if (!hasFinancePermission(actor, 'finance.view') && expense.createdByUserId !== actor.id) {
     throw new OperationsError('forbidden', 'Sólo puedes ver los gastos que capturaste');
   }
   const [original, approval] = await Promise.all([
-    expense.duplicateOfId ? prisma.expense.findUnique({ where: { id: expense.duplicateOfId }, select: { number: true } }) : null,
-    expense.approvalRequestId ? prisma.approvalRequest.findUnique({ where: { id: expense.approvalRequestId } }) : null,
+    expense.duplicateOfId
+      ? prisma.expense.findUnique({
+          where: { id: expense.duplicateOfId },
+          select: { number: true },
+        })
+      : null,
+    expense.approvalRequestId
+      ? prisma.approvalRequest.findUnique({ where: { id: expense.approvalRequestId } })
+      : null,
   ]);
-  const votes = Array.isArray(approval?.decisions) ? (approval?.decisions as Array<{ decision?: string }>) : [];
+  const votes = Array.isArray(approval?.decisions)
+    ? (approval?.decisions as Array<{ decision?: string }>)
+    : [];
   return {
     ...toExpenseDTO(expense),
     duplicateOfNumber: original?.number ?? null,
@@ -430,7 +550,10 @@ export async function getExpense(actor: CurrentUser, expenseId: string): Promise
   };
 }
 
-export async function listExpenseTemplates(actor: CurrentUser, input: { activeOnly?: boolean } = {}): Promise<ExpenseTemplateDTO[]> {
+export async function listExpenseTemplates(
+  actor: CurrentUser,
+  input: { activeOnly?: boolean } = {}
+): Promise<ExpenseTemplateDTO[]> {
   requireAny(actor, ['finance.view', 'finance.capture_expense']);
   const rows = await prisma.expenseTemplate.findMany({
     where: input.activeOnly === false ? {} : { active: true },
@@ -451,7 +574,10 @@ export const employeeFiltersSchema = z.object({
   search: z.string().trim().max(120).optional(),
 });
 
-export async function listEmployees(actor: CurrentUser, filters: z.input<typeof employeeFiltersSchema> = {}): Promise<Page<EmployeeDTO>> {
+export async function listEmployees(
+  actor: CurrentUser,
+  filters: z.input<typeof employeeFiltersSchema> = {}
+): Promise<Page<EmployeeDTO>> {
   requireAny(actor, ['finance.payroll', 'finance.view']);
   const f = parse(employeeFiltersSchema, filters);
   const page = normalizePage(f);
@@ -459,14 +585,67 @@ export async function listEmployees(actor: CurrentUser, filters: z.input<typeof 
     ...(f.active !== undefined ? { active: f.active } : {}),
     ...(f.areaKey ? { areaKey: f.areaKey } : {}),
     ...(f.search
-      ? { OR: [{ name: { contains: f.search, mode: 'insensitive' } }, { number: { contains: f.search, mode: 'insensitive' } }] }
+      ? {
+          OR: [
+            { name: { contains: f.search, mode: 'insensitive' } },
+            { number: { contains: f.search, mode: 'insensitive' } },
+          ],
+        }
       : {}),
   };
   const [total, rows] = await Promise.all([
     prisma.employee.count({ where }),
-    prisma.employee.findMany({ where, orderBy: { name: 'asc' }, skip: page.skip, take: page.pageSize }),
+    prisma.employee.findMany({
+      where,
+      orderBy: { name: 'asc' },
+      skip: page.skip,
+      take: page.pageSize,
+    }),
   ]);
   return pageOf(rows.map(toEmployeeDTO), total, page);
+}
+
+/** Cuenta con la que se puede ligar un empleado del directorio. */
+export interface EmployeeUserOption {
+  id: string;
+  name: string;
+  username: string;
+  /** Empleado que ya usa esa cuenta (`Employee.userId` es único). */
+  takenByEmployeeId: string | null;
+}
+
+const MAX_EMPLOYEE_USER_OPTIONS = 300;
+
+/**
+ * Cuentas con las que se puede ligar un empleado (plan 6.0: "no todo empleado
+ * tiene login"). Sólo personas activas: una identidad de IA no es un empleado y
+ * `assertEmployeeRefs` la rechaza de todos modos.
+ *
+ * Devuelve lo mínimo para pintar un selector (nunca correos, roles ni accesos),
+ * y marca las cuentas ya tomadas para que la pantalla no ofrezca un duplicado
+ * que el comando rechazaría.
+ */
+export async function listEmployeeUserOptions(actor: CurrentUser): Promise<EmployeeUserOption[]> {
+  requireAny(actor, ['finance.payroll'], 'No tienes permisos para gestionar la nómina');
+  const [users, linked] = await Promise.all([
+    prisma.user.findMany({
+      where: { isActive: true, isBot: false },
+      select: { id: true, name: true, username: true },
+      orderBy: { name: 'asc' },
+      take: MAX_EMPLOYEE_USER_OPTIONS,
+    }),
+    prisma.employee.findMany({
+      where: { userId: { not: null } },
+      select: { id: true, userId: true },
+    }),
+  ]);
+  const takenBy = new Map(linked.map((row) => [row.userId as string, row.id]));
+  return users.map((user) => ({
+    id: user.id,
+    name: user.name,
+    username: user.username,
+    takenByEmployeeId: takenBy.get(user.id) ?? null,
+  }));
 }
 
 export const payrollFiltersSchema = z.object({
@@ -475,7 +654,10 @@ export const payrollFiltersSchema = z.object({
   status: z.enum(PAYROLL_STATUSES).optional(),
 });
 
-export async function listPayrollRuns(actor: CurrentUser, filters: z.input<typeof payrollFiltersSchema> = {}): Promise<Page<PayrollRunDTO>> {
+export async function listPayrollRuns(
+  actor: CurrentUser,
+  filters: z.input<typeof payrollFiltersSchema> = {}
+): Promise<Page<PayrollRunDTO>> {
   requireAny(actor, ['finance.payroll', 'finance.view']);
   const f = parse(payrollFiltersSchema, filters);
   const page = normalizePage(f);
@@ -485,16 +667,33 @@ export async function listPayrollRuns(actor: CurrentUser, filters: z.input<typeo
   };
   const [total, rows] = await Promise.all([
     prisma.payrollRun.count({ where }),
-    prisma.payrollRun.findMany({ where, orderBy: [{ periodEnd: 'desc' }, { createdAt: 'desc' }], skip: page.skip, take: page.pageSize }),
+    prisma.payrollRun.findMany({
+      where,
+      orderBy: [{ periodEnd: 'desc' }, { createdAt: 'desc' }],
+      skip: page.skip,
+      take: page.pageSize,
+    }),
   ]);
-  return pageOf(rows.map((row) => toPayrollRunDTO(row)), total, page);
+  return pageOf(
+    rows.map((row) => toPayrollRunDTO(row)),
+    total,
+    page
+  );
 }
 
-export async function getPayrollRun(actor: CurrentUser, payrollRunId: string): Promise<PayrollRunDTO & { employees: EmployeeDTO[] }> {
+export async function getPayrollRun(
+  actor: CurrentUser,
+  payrollRunId: string
+): Promise<PayrollRunDTO & { employees: EmployeeDTO[] }> {
   requireAny(actor, ['finance.payroll', 'finance.view']);
-  const run = await prisma.payrollRun.findUnique({ where: { id: payrollRunId }, include: { lines: true } });
+  const run = await prisma.payrollRun.findUnique({
+    where: { id: payrollRunId },
+    include: { lines: true },
+  });
   if (!run) throw new OperationsError('not_found', 'No se encontró la nómina');
-  const employees = await prisma.employee.findMany({ where: { id: { in: run.lines.map((l) => l.employeeId) } } });
+  const employees = await prisma.employee.findMany({
+    where: { id: { in: run.lines.map((l) => l.employeeId) } },
+  });
   return { ...toPayrollRunDTO(run), employees: employees.map(toEmployeeDTO) };
 }
 
@@ -502,23 +701,44 @@ export async function getPayrollRun(actor: CurrentUser, payrollRunId: string): P
 // Budgets, closes, collections
 // ---------------------------------------------------------------------------
 
-export async function listBudgets(actor: CurrentUser, input: { periodKey: string }): Promise<BudgetDTO[]> {
+export async function listBudgets(
+  actor: CurrentUser,
+  input: { periodKey: string }
+): Promise<BudgetDTO[]> {
   requireAny(actor, ['finance.view', 'finance.manage_catalog']);
   const periodKey = parse(z.object({ periodKey: periodKeySchema }), input).periodKey;
-  const rows = await prisma.budget.findMany({ where: { periodKey }, orderBy: [{ costCenterId: 'asc' }, { categoryId: 'asc' }] });
+  const rows = await prisma.budget.findMany({
+    where: { periodKey },
+    orderBy: [{ costCenterId: 'asc' }, { categoryId: 'asc' }],
+  });
   return rows.map(toBudgetDTO);
 }
 
-export const closeFiltersSchema = z.object({ ...pageFields, kind: z.enum(PERIOD_CLOSE_KINDS).optional(), status: z.string().trim().max(20).optional() });
+export const closeFiltersSchema = z.object({
+  ...pageFields,
+  kind: z.enum(PERIOD_CLOSE_KINDS).optional(),
+  status: z.string().trim().max(20).optional(),
+});
 
-export async function listPeriodCloses(actor: CurrentUser, filters: z.input<typeof closeFiltersSchema> = {}): Promise<Page<PeriodCloseDTO>> {
+export async function listPeriodCloses(
+  actor: CurrentUser,
+  filters: z.input<typeof closeFiltersSchema> = {}
+): Promise<Page<PeriodCloseDTO>> {
   requireAny(actor, ['finance.view', 'finance.close']);
   const f = parse(closeFiltersSchema, filters);
   const page = normalizePage(f);
-  const where: Prisma.PeriodCloseWhereInput = { ...(f.kind ? { kind: f.kind } : {}), ...(f.status ? { status: f.status } : {}) };
+  const where: Prisma.PeriodCloseWhereInput = {
+    ...(f.kind ? { kind: f.kind } : {}),
+    ...(f.status ? { status: f.status } : {}),
+  };
   const [total, rows] = await Promise.all([
     prisma.periodClose.count({ where }),
-    prisma.periodClose.findMany({ where, orderBy: [{ periodKey: 'desc' }, { kind: 'asc' }], skip: page.skip, take: page.pageSize }),
+    prisma.periodClose.findMany({
+      where,
+      orderBy: [{ periodKey: 'desc' }, { kind: 'asc' }],
+      skip: page.skip,
+      take: page.pageSize,
+    }),
   ]);
   return pageOf(rows.map(toPeriodCloseDTO), total, page);
 }
@@ -532,7 +752,10 @@ export async function listUnassignedCollections(
   const todayKey = localDateKey(options.now ?? new Date());
   const config = await getOperationsConfig();
   const cutoverKey = localDateKey(new Date(config.cutoverDate));
-  const requested = input.from && dateKeySchema.safeParse(input.from).success ? input.from : addDaysToKey(todayKey, -120);
+  const requested =
+    input.from && dateKeySchema.safeParse(input.from).success
+      ? input.from
+      : addDaysToKey(todayKey, -120);
   const fromKey = compareKeys(requested, cutoverKey) < 0 ? cutoverKey : requested;
   const toKey = input.to && dateKeySchema.safeParse(input.to).success ? input.to : null;
   return listUnmatchedPayments(prisma, { fromKey, toKey, limit: input.limit ?? 100 });
@@ -554,11 +777,28 @@ export interface FinanceBoardSummary {
   lastMonthlyClose: string | null;
 }
 
-export async function getFinanceBoardSummary(actor: CurrentUser, options: { now?: Date } = {}): Promise<FinanceBoardSummary> {
+export async function getFinanceBoardSummary(
+  actor: CurrentUser,
+  options: { now?: Date } = {}
+): Promise<FinanceBoardSummary> {
   requireAny(actor, VIEW);
   const todayKey = localDateKey(options.now ?? new Date());
-  const [accounts, open, draft, pending, approved, suspect, runs, lastDaily, lastMonthly, unassigned] = await Promise.all([
-    prisma.cashAccount.findMany({ where: { status: 'active' }, select: { currency: true, currentBalance: true } }),
+  const [
+    accounts,
+    open,
+    draft,
+    pending,
+    approved,
+    suspect,
+    runs,
+    lastDaily,
+    lastMonthly,
+    unassigned,
+  ] = await Promise.all([
+    prisma.cashAccount.findMany({
+      where: { status: 'active' },
+      select: { currency: true, currentBalance: true },
+    }),
     prisma.obligation.findMany({
       where: { status: { in: [...OBLIGATION_OPEN_STATUSES] } },
       select: { kind: true, expectedAmount: true, settledAmount: true, dueAt: true },
@@ -568,15 +808,28 @@ export async function getFinanceBoardSummary(actor: CurrentUser, options: { now?
     prisma.expense.count({ where: { status: 'pending_approval' } }),
     prisma.expense.count({ where: { status: 'approved' } }),
     prisma.expense.count({ where: { status: 'draft', duplicateStatus: 'suspect' } }),
-    prisma.payrollRun.count({ where: { status: { in: ['draft', 'pending_approval', 'approved', 'obligations_created'] } } }),
-    prisma.periodClose.findFirst({ where: { kind: 'daily', status: 'closed' }, orderBy: { periodKey: 'desc' }, select: { periodKey: true } }),
-    prisma.periodClose.findFirst({ where: { kind: 'monthly', status: 'closed' }, orderBy: { periodKey: 'desc' }, select: { periodKey: true } }),
+    prisma.payrollRun.count({
+      where: { status: { in: ['draft', 'pending_approval', 'approved', 'obligations_created'] } },
+    }),
+    prisma.periodClose.findFirst({
+      where: { kind: 'daily', status: 'closed' },
+      orderBy: { periodKey: 'desc' },
+      select: { periodKey: true },
+    }),
+    prisma.periodClose.findFirst({
+      where: { kind: 'monthly', status: 'closed' },
+      orderBy: { periodKey: 'desc' },
+      select: { periodKey: true },
+    }),
     listUnassignedCollections(actor, {}, options).catch(() => [] as UnmatchedPayment[]),
   ]);
   const cash = new Map<string, { balance: Prisma.Decimal; accounts: number }>();
   for (const account of accounts) {
     const current = cash.get(account.currency) ?? { balance: new Prisma.Decimal(0), accounts: 0 };
-    cash.set(account.currency, { balance: current.balance.plus(D(account.currentBalance)), accounts: current.accounts + 1 });
+    cash.set(account.currency, {
+      balance: current.balance.plus(D(account.currentBalance)),
+      accounts: current.accounts + 1,
+    });
   }
   const totals = (kind: string) => {
     let openAmount = new Prisma.Decimal(0);
@@ -587,19 +840,30 @@ export async function getFinanceBoardSummary(actor: CurrentUser, options: { now?
       const remaining = remainingOf(row);
       openAmount = openAmount.plus(remaining);
       count += 1;
-      if (row.dueAt && compareKeys(dateKeyOf(row.dueAt), todayKey) < 0) overdue = overdue.plus(remaining);
+      if (row.dueAt && compareKeys(dateKeyOf(row.dueAt), todayKey) < 0)
+        overdue = overdue.plus(remaining);
     }
-    return { open: roundMoney(openAmount).toFixed(2), overdue: roundMoney(overdue).toFixed(2), count };
+    return {
+      open: roundMoney(openAmount).toFixed(2),
+      overdue: roundMoney(overdue).toFixed(2),
+      count,
+    };
   };
   return {
     todayKey,
-    cash: [...cash.entries()].map(([currency, value]) => ({ currency, balance: roundMoney(value.balance).toFixed(2), accounts: value.accounts })),
+    cash: [...cash.entries()].map(([currency, value]) => ({
+      currency,
+      balance: roundMoney(value.balance).toFixed(2),
+      accounts: value.accounts,
+    })),
     receivables: totals('receivable'),
     payables: totals('payable'),
     expenses: { draft, pending_approval: pending, approved, suspectDuplicates: suspect },
     unassignedCollections: {
       count: unassigned.length,
-      amount: roundMoney(unassigned.reduce((acc, p) => acc.plus(D(p.remaining)), new Prisma.Decimal(0))).toFixed(2),
+      amount: roundMoney(
+        unassigned.reduce((acc, p) => acc.plus(D(p.remaining)), new Prisma.Decimal(0))
+      ).toFixed(2),
     },
     payrollRunsOpen: runs,
     lastDailyClose: lastDaily?.periodKey ?? null,
@@ -629,10 +893,14 @@ export interface LedgerExportRow {
 export const MAX_EXPORT_LINES = 50_000;
 
 /** Flat ledger lines of a date range for CSV/Excel (`finance.export`). */
-export async function exportLedgerLines(actor: CurrentUser, input: { from: string; to: string }): Promise<{ rows: LedgerExportRow[]; truncated: boolean }> {
+export async function exportLedgerLines(
+  actor: CurrentUser,
+  input: { from: string; to: string }
+): Promise<{ rows: LedgerExportRow[]; truncated: boolean }> {
   requireAny(actor, ['finance.export'], 'No tienes permisos para exportar la contabilidad');
   const f = parse(z.object({ from: dateKeySchema, to: dateKeySchema }), input);
-  if (compareKeys(f.from, f.to) > 0) throw new OperationsError('invalid_payload', 'El rango de exportación es inválido');
+  if (compareKeys(f.from, f.to) > 0)
+    throw new OperationsError('invalid_payload', 'El rango de exportación es inválido');
   const [lines, categories, accounts, centers] = await Promise.all([
     prisma.ledgerLine.findMany({
       where: { entry: { date: { gte: toDbDate(f.from), lte: toDbDate(f.to) } } },
@@ -643,17 +911,34 @@ export async function exportLedgerLines(actor: CurrentUser, input: { from: strin
     prisma.cashAccount.findMany({ select: { id: true, name: true } }),
     prisma.costCenter.findMany({ select: { id: true, name: true } }),
   ]);
-  const names = new Map<string, string>([...categories, ...accounts].map((row) => [row.id, row.name]));
-  const obligationIds = [...new Set(lines.filter((l) => l.accountType === 'receivable' || l.accountType === 'payable').map((l) => l.accountId))];
+  const names = new Map<string, string>(
+    [...categories, ...accounts].map((row) => [row.id, row.name])
+  );
+  const obligationIds = [
+    ...new Set(
+      lines
+        .filter((l) => l.accountType === 'receivable' || l.accountType === 'payable')
+        .map((l) => l.accountId)
+    ),
+  ];
   const obligations = obligationIds.length
-    ? await prisma.obligation.findMany({ where: { id: { in: obligationIds } }, select: { id: true, number: true, counterpartyName: true } })
+    ? await prisma.obligation.findMany({
+        where: { id: { in: obligationIds } },
+        select: { id: true, number: true, counterpartyName: true },
+      })
     : [];
-  for (const o of obligations) names.set(o.id, `${o.number}${o.counterpartyName ? ` · ${o.counterpartyName}` : ''}`);
+  for (const o of obligations)
+    names.set(o.id, `${o.number}${o.counterpartyName ? ` · ${o.counterpartyName}` : ''}`);
   const centerNames = new Map(centers.map((c) => [c.id, c.name]));
   const truncated = lines.length > MAX_EXPORT_LINES;
   const rows = lines
     .slice(0, MAX_EXPORT_LINES)
-    .sort((a, b) => a.entry.date.getTime() - b.entry.date.getTime() || a.entry.number.localeCompare(b.entry.number) || a.seq - b.seq)
+    .sort(
+      (a, b) =>
+        a.entry.date.getTime() - b.entry.date.getTime() ||
+        a.entry.number.localeCompare(b.entry.number) ||
+        a.seq - b.seq
+    )
     .map((line) => ({
       entryNumber: line.entry.number,
       date: dateKeyOf(line.entry.date),
@@ -666,7 +951,9 @@ export async function exportLedgerLines(actor: CurrentUser, input: { from: strin
       accountName: names.get(line.accountId) ?? line.accountId,
       debit: moneyString(line.debit),
       credit: moneyString(line.credit),
-      costCenter: line.costCenterId ? (centerNames.get(line.costCenterId) ?? line.costCenterId) : null,
+      costCenter: line.costCenterId
+        ? (centerNames.get(line.costCenterId) ?? line.costCenterId)
+        : null,
       caseId: line.caseId,
       memo: line.memo,
       sourceType: line.entry.sourceType,

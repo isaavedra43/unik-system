@@ -26,8 +26,18 @@ export const DELIVERY_MODE_LABELS: Record<DeliveryMode, string> = {
   direct_supplier: 'Entrega directa del proveedor',
 };
 
-/** Modes that ship through Zoho (a shipment order is written on the package). */
-export const SHIPPING_MODES: readonly DeliveryMode[] = ['own_fleet', 'carrier'];
+/**
+ * Modes that ship through Zoho (a shipment order is written on the package).
+ * It is a tuple so it can also be the list of modes offered when transport is
+ * assigned (`assignTransport` accepts `mode`, and the dialog builds its select
+ * from here): own fleet or an external carrier, never a pickup.
+ */
+export const SHIPPING_MODES = ['own_fleet', 'carrier'] as const;
+export type ShippingMode = (typeof SHIPPING_MODES)[number];
+
+export function isShippingMode(value: unknown): value is ShippingMode {
+  return typeof value === 'string' && (SHIPPING_MODES as readonly string[]).includes(value);
+}
 
 export const DELIVERY_ORDER_STATUSES = [
   'pending',
@@ -175,6 +185,7 @@ export const LOGISTICS_COMMANDS = {
   tripCompleteStop: 'trip.complete_stop',
   tripFailStop: 'trip.fail_stop',
   tripClose: 'trip.close',
+  tripCancel: 'trip.cancel',
   fleetVehicleCreate: 'fleet.vehicle.create',
   fleetVehicleUpdate: 'fleet.vehicle.update',
   fleetDriverCreate: 'fleet.driver.create',
@@ -221,6 +232,8 @@ export const LOGISTICS_EVENTS = {
     packageRequested: 'delivery.package_requested',
     packageLinked: 'delivery.package_linked',
     transportAssigned: 'delivery.transport_assigned',
+    modeChanged: 'delivery.mode_changed',
+    releasedFromTrip: 'delivery.released_from_trip',
     cancelled: 'delivery.cancelled',
     evidenceAdded: 'delivery.evidence_added',
   },
@@ -233,6 +246,7 @@ export const LOGISTICS_EVENTS = {
     stopCompleted: 'trip.stop_completed',
     stopFailed: 'trip.stop_failed',
     closed: 'trip.closed',
+    cancelled: 'trip.cancelled',
   },
   fleet: {
     vehicleCreated: 'fleet.vehicle_created',

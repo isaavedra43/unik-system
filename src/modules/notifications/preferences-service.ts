@@ -152,8 +152,16 @@ export function decideDelivery(
   category: NotificationCategory,
   now = new Date()
 ): DeliveryDecision {
-  const pref = settings.categories[category];
   const def = getCategoryDefinition(category);
+  // A category the catalogue does not list has no entry in `settings.categories`
+  // (`resolveCategories` only fills the catalogue keys). Falling back to the
+  // definition — `getCategoryDefinition` answers `system` for an unknown key —
+  // keeps a producer that ships a new category ahead of the catalogue from
+  // crashing the delivery instead of merely losing its own defaults.
+  const pref = settings.categories[category] ?? {
+    inApp: def.lockedInApp ? true : def.defaults.inApp,
+    push: def.defaults.push,
+  };
   if (!pref.push) return { inApp: pref.inApp, push: false, pushReason: 'category_off' };
   if (!settings.pushEnabled) return { inApp: pref.inApp, push: false, pushReason: 'push_disabled' };
   if (!def.urgent) {

@@ -14,13 +14,7 @@ import { nextNumber } from '@/modules/operations/sequence-service';
 import { AREA_KEYS } from '@/modules/operations/types';
 import { getFinanceSettings } from './finance-config';
 import { financeError } from './finance-errors';
-import {
-  addDaysToKey,
-  dateKeyOf,
-  dateKeySchema,
-  localDateKey,
-  toDbDate,
-} from './finance-dates';
+import { addDaysToKey, dateKeyOf, dateKeySchema, localDateKey, toDbDate } from './finance-dates';
 import {
   actorUserIdOf,
   financeEventOptions,
@@ -117,29 +111,44 @@ interface ProposalState {
 
 function proposalStateOf(expense: Pick<Expense, 'aiProposal'>): ProposalState {
   const record =
-    expense.aiProposal && typeof expense.aiProposal === 'object' && !Array.isArray(expense.aiProposal)
+    expense.aiProposal &&
+    typeof expense.aiProposal === 'object' &&
+    !Array.isArray(expense.aiProposal)
       ? (expense.aiProposal as Record<string, unknown>)
       : {};
   const provided = Array.isArray(record.userProvided) ? record.userProvided.map(String) : [];
   return { userProvided: new Set(provided), record };
 }
 
-function splitRows(expenseId: string, splits: readonly SplitOutput[]): Prisma.ExpenseSplitCreateManyInput[] {
+function splitRows(
+  expenseId: string,
+  splits: readonly SplitOutput[]
+): Prisma.ExpenseSplitCreateManyInput[] {
   return splits.map((split) => ({
     expenseId,
     amount: roundMoney(split.amount),
-    pct: split.pct === null || split.pct === undefined || split.pct === '' ? null : new Prisma.Decimal(split.pct),
+    pct:
+      split.pct === null || split.pct === undefined || split.pct === ''
+        ? null
+        : new Prisma.Decimal(split.pct),
     costCenterId: split.costCenterId ?? null,
     caseId: split.caseId ?? null,
     projectRef: split.projectRef ?? null,
   }));
 }
 
-function assertCanEdit(ctx: CommandContext, expense: Pick<Expense, 'createdByUserId' | 'number'>, permissions: string[]): void {
+function assertCanEdit(
+  ctx: CommandContext,
+  expense: Pick<Expense, 'createdByUserId' | 'number'>,
+  permissions: string[]
+): void {
   if (ctx.actor.type === 'system') return;
   if (ctx.user && ctx.user.id === expense.createdByUserId) return;
   if (permissions.some((key) => hasFinancePermission(ctx.user, key))) return;
-  throw new OperationsError('forbidden', `Sólo quien capturó ${expense.number} o Contabilidad puede hacer esto`);
+  throw new OperationsError(
+    'forbidden',
+    `Sólo quien capturó ${expense.number} o Contabilidad puede hacer esto`
+  );
 }
 
 async function loadExpense(tx: Db, id: string): Promise<ExpenseWithSplits> {
@@ -160,31 +169,47 @@ async function validateReferences(
   }
 ): Promise<void> {
   if (refs.supplierId) {
-    const supplier = await tx.supplier.findUnique({ where: { id: refs.supplierId }, select: { id: true } });
+    const supplier = await tx.supplier.findUnique({
+      where: { id: refs.supplierId },
+      select: { id: true },
+    });
     if (!supplier) throw new OperationsError('not_found', 'El proveedor no existe');
   }
   if (refs.categoryId) {
     const category = await tx.financeCategory.findUnique({ where: { id: refs.categoryId } });
     if (!category) throw new OperationsError('not_found', 'La categoría no existe');
-    if (!isExpenseCategory(category)) throw financeError('invalid_payload', `La categoría ${category.name} no admite gastos`);
+    if (!isExpenseCategory(category))
+      throw financeError('invalid_payload', `La categoría ${category.name} no admite gastos`);
   }
   const centerIds = [refs.costCenterId, ...(refs.splits ?? []).map((s) => s.costCenterId)].filter(
     (id): id is string => Boolean(id)
   );
   if (centerIds.length > 0) {
-    const centers = await tx.costCenter.findMany({ where: { id: { in: [...new Set(centerIds)] }, status: 'active' }, select: { id: true } });
+    const centers = await tx.costCenter.findMany({
+      where: { id: { in: [...new Set(centerIds)] }, status: 'active' },
+      select: { id: true },
+    });
     if (centers.length !== new Set(centerIds).size) {
       throw new OperationsError('not_found', 'Un centro de costo no existe o está archivado');
     }
   }
   if (refs.cashAccountId) {
-    const account = await tx.cashAccount.findUnique({ where: { id: refs.cashAccountId }, select: { status: true } });
+    const account = await tx.cashAccount.findUnique({
+      where: { id: refs.cashAccountId },
+      select: { status: true },
+    });
     if (!account) throw new OperationsError('not_found', 'La cuenta de pago no existe');
-    if (account.status !== 'active') throw financeError('account_inactive', 'La cuenta de pago está cerrada');
+    if (account.status !== 'active')
+      throw financeError('account_inactive', 'La cuenta de pago está cerrada');
   }
-  const caseIds = [refs.caseId, ...(refs.splits ?? []).map((s) => s.caseId)].filter((id): id is string => Boolean(id));
+  const caseIds = [refs.caseId, ...(refs.splits ?? []).map((s) => s.caseId)].filter(
+    (id): id is string => Boolean(id)
+  );
   for (const caseId of new Set(caseIds)) {
-    const found = await tx.operationalCase.findUnique({ where: { id: caseId }, select: { id: true } });
+    const found = await tx.operationalCase.findUnique({
+      where: { id: caseId },
+      select: { id: true },
+    });
     if (!found) throw new OperationsError('not_found', 'No se encontró el expediente');
   }
 }
@@ -211,16 +236,27 @@ const RECEIPT_SELECT = {
   createdBy: true,
 } as const;
 
-async function loadReceipts(tx: Db, ids: readonly string[], ctx: CommandContext): Promise<ReceiptRow[]> {
+async function loadReceipts(
+  tx: Db,
+  ids: readonly string[],
+  ctx: CommandContext
+): Promise<ReceiptRow[]> {
   if (ids.length === 0) return [];
-  const rows = await tx.storageObject.findMany({ where: { id: { in: [...new Set(ids)] } }, select: RECEIPT_SELECT });
+  const rows = await tx.storageObject.findMany({
+    where: { id: { in: [...new Set(ids)] } },
+    select: RECEIPT_SELECT,
+  });
   for (const id of new Set(ids)) {
     const row = rows.find((r) => r.id === id);
     if (!row) throw new OperationsError('not_found', 'Un comprobante no existe');
     if (['rejected', 'aborted', 'deleted', 'missing'].includes(row.status)) {
       throw financeError('invalid_state', `El comprobante ${row.originalName} no está disponible`);
     }
-    if (ctx.actor.type !== 'system' && row.createdBy !== ctx.actor.id && !hasFinancePermission(ctx.user, 'finance.post')) {
+    if (
+      ctx.actor.type !== 'system' &&
+      row.createdBy !== ctx.actor.id &&
+      !hasFinancePermission(ctx.user, 'finance.post')
+    ) {
       throw new OperationsError('forbidden', 'Sólo puedes adjuntar comprobantes que tú subiste');
     }
   }
@@ -228,7 +264,10 @@ async function loadReceipts(tx: Db, ids: readonly string[], ctx: CommandContext)
 }
 
 /** Expenses that look like `subject` (receipt hash, exact key or ±1 % in ±3 days). */
-export async function findExpenseDuplicates(db: Pick<Db, 'expense'>, subject: DuplicateSubject): Promise<DuplicateMatch[]> {
+export async function findExpenseDuplicates(
+  db: Pick<Db, 'expense'>,
+  subject: DuplicateSubject
+): Promise<DuplicateMatch[]> {
   const or: Prisma.ExpenseWhereInput[] = [];
   const window = duplicateSearchWindow(subject);
   if (window && D(subject.amount).greaterThan(0)) {
@@ -241,7 +280,11 @@ export async function findExpenseDuplicates(db: Pick<Db, 'expense'>, subject: Du
   if (or.length === 0) return [];
   const rows = await db.expense.findMany({
     where: {
-      AND: [{ status: { not: 'rejected' } }, { OR: or }, ...(subject.id ? [{ id: { not: subject.id } }] : [])],
+      AND: [
+        { status: { not: 'rejected' } },
+        { OR: or },
+        ...(subject.id ? [{ id: { not: subject.id } }] : []),
+      ],
     },
     select: {
       id: true,
@@ -263,7 +306,12 @@ export async function findExpenseDuplicates(db: Pick<Db, 'expense'>, subject: Du
   );
 }
 
-function duplicateSubjectOf(expense: Pick<Expense, 'id' | 'amount' | 'date' | 'supplierId' | 'supplierNameFree' | 'receiptHash'>): DuplicateSubject {
+function duplicateSubjectOf(
+  expense: Pick<
+    Expense,
+    'id' | 'amount' | 'date' | 'supplierId' | 'supplierNameFree' | 'receiptHash'
+  >
+): DuplicateSubject {
   return {
     id: expense.id,
     amount: expense.amount,
@@ -274,14 +322,20 @@ function duplicateSubjectOf(expense: Pick<Expense, 'id' | 'amount' | 'date' | 's
   };
 }
 
-function emitDuplicate(ctx: CommandContext, expense: Expense, matches: readonly DuplicateMatch[]): void {
+function emitDuplicate(
+  ctx: CommandContext,
+  expense: Expense,
+  matches: readonly DuplicateMatch[]
+): void {
   if (expense.duplicateStatus !== 'suspect' || matches.length === 0) return;
   ctx.emit(
     FINANCE_EVENTS.expense.duplicateSuspected,
     {
       expenseId: expense.id,
       number: expense.number,
-      matches: matches.slice(0, 5).map((m) => ({ expenseId: m.expenseId, number: m.number, kind: m.kind, reason: m.reason })),
+      matches: matches
+        .slice(0, 5)
+        .map((m) => ({ expenseId: m.expenseId, number: m.number, kind: m.kind, reason: m.reason })),
     },
     financeEventOptions(FINANCE_OBJECT_TYPES.expense, expense.id, expense.caseId)
   );
@@ -299,6 +353,8 @@ export interface ExpenseCommandData {
   approvalRequestId?: string | null;
   autoApproved?: boolean;
   requiredApprovals?: number;
+  /** Persona cuya decisión sobre la propuesta de IA quedó como primera firma (plan 5.4). */
+  firstSignatureByUserId?: string | null;
   ledgerEntryId?: string | null;
   obligationId?: string | null;
   matches?: Array<Pick<DuplicateMatch, 'expenseId' | 'number' | 'kind' | 'reason'>>;
@@ -346,10 +402,18 @@ export const captureExpenseSchema = z
   })
   .superRefine((value, issue) => {
     if (value.captureMode === 'text' && !value.rawInput) {
-      issue.addIssue({ code: z.ZodIssueCode.custom, path: ['rawInput'], message: 'Escribe el gasto' });
+      issue.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['rawInput'],
+        message: 'Escribe el gasto',
+      });
     }
     if (value.captureMode === 'voice' && !value.rawInput && value.receiptObjectIds.length === 0) {
-      issue.addIssue({ code: z.ZodIssueCode.custom, path: ['rawInput'], message: 'Falta la transcripción o la nota de voz' });
+      issue.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['rawInput'],
+        message: 'Falta la transcripción o la nota de voz',
+      });
     }
   });
 
@@ -387,7 +451,11 @@ async function createExpenseDraftInTx(
     const issues = splitIssues(draft.amount, draft.splits);
     if (issues.length > 0) throw financeError('expense_incomplete', issues[0], { issues });
   }
-  const number = await nextNumber(tx, FINANCE_SEQUENCES.expense.key, FINANCE_SEQUENCES.expense.prefix);
+  const number = await nextNumber(
+    tx,
+    FINANCE_SEQUENCES.expense.key,
+    FINANCE_SEQUENCES.expense.prefix
+  );
   const receiptHash = draft.receipts.find((r) => r.sha256)?.sha256 ?? null;
   const subject: DuplicateSubject = {
     amount: draft.amount,
@@ -397,7 +465,11 @@ async function createExpenseDraftInTx(
     receiptHash,
   };
   const matches = await findExpenseDuplicates(tx, subject);
-  const duplicate = evaluateDuplicateStatus({ matches, previousStatus: 'none', identityChanged: true });
+  const duplicate = evaluateDuplicateStatus({
+    matches,
+    previousStatus: 'none',
+    identityChanged: true,
+  });
   const created = await tx.expense.create({
     data: {
       number,
@@ -429,7 +501,8 @@ async function createExpenseDraftInTx(
       createdByUserId: draft.createdByUserId,
     },
   });
-  if (draft.splits.length > 0) await tx.expenseSplit.createMany({ data: splitRows(created.id, draft.splits) });
+  if (draft.splits.length > 0)
+    await tx.expenseSplit.createMany({ data: splitRows(created.id, draft.splits) });
   const expense = await loadExpense(tx, created.id);
   ctx.emit(
     FINANCE_EVENTS.expense.captured,
@@ -468,7 +541,10 @@ export async function captureExpenseInTx(
   ctx: CommandContext
 ): Promise<{ expense: ExpenseWithSplits; matches: DuplicateMatch[] }> {
   if (ctx.actor.type !== 'user' && ctx.actor.type !== 'ai') {
-    throw new OperationsError('forbidden', 'Un gasto lo captura una persona o una identidad de IA registrada');
+    throw new OperationsError(
+      'forbidden',
+      'Un gasto lo captura una persona o una identidad de IA registrada'
+    );
   }
   await validateReferences(tx, input);
   const receipts = await loadReceipts(tx, input.receiptObjectIds, ctx);
@@ -485,13 +561,17 @@ export async function captureExpenseInTx(
   if (input.splits.length > 0) userProvided.push('splits');
   let costCenterId = input.costCenterId ?? null;
   if (!costCenterId && input.areaKey) {
-    const center = await tx.costCenter.findFirst({ where: { areaKey: input.areaKey, status: 'active' }, select: { id: true } });
+    const center = await tx.costCenter.findFirst({
+      where: { areaKey: input.areaKey, status: 'active' },
+      select: { id: true },
+    });
     costCenterId = center?.id ?? null;
   }
   const hasMaterial = Boolean(input.rawInput) || receipts.length > 0;
   const needsProposal =
     (input.captureMode !== 'form' && hasMaterial) ||
-    (!input.categoryId && Boolean(input.description || input.supplierId || input.supplierNameFree || hasMaterial));
+    (!input.categoryId &&
+      Boolean(input.description || input.supplierId || input.supplierNameFree || hasMaterial));
   return createExpenseDraftInTx(
     tx,
     {
@@ -542,7 +622,12 @@ export const updateExpenseSchema = z.object({
   addReceiptObjectIds: z.array(idSchema).max(10).optional(),
 });
 
-async function reevaluateDuplicates(tx: Db, before: Expense, after: Expense, ctx: CommandContext): Promise<{ expense: Expense; matches: DuplicateMatch[] }> {
+async function reevaluateDuplicates(
+  tx: Db,
+  before: Expense,
+  after: Expense,
+  ctx: CommandContext
+): Promise<{ expense: Expense; matches: DuplicateMatch[] }> {
   const beforeIdentity = { ...duplicateSubjectOf(before) };
   const afterSubject = duplicateSubjectOf(after);
   const identityChanged = duplicateIdentityChanged(beforeIdentity, afterSubject);
@@ -554,14 +639,19 @@ async function reevaluateDuplicates(tx: Db, before: Expense, after: Expense, ctx
     identityChanged,
   });
   const key = buildDuplicateKey(afterSubject);
-  if (state.status === after.duplicateStatus && state.duplicateOfId === after.duplicateOfId && key === after.duplicateKey) {
+  if (
+    state.status === after.duplicateStatus &&
+    state.duplicateOfId === after.duplicateOfId &&
+    key === after.duplicateKey
+  ) {
     return { expense: after, matches };
   }
   const expense = await tx.expense.update({
     where: { id: after.id },
     data: { duplicateStatus: state.status, duplicateOfId: state.duplicateOfId, duplicateKey: key },
   });
-  if (state.status === 'suspect' && after.duplicateStatus !== 'suspect') emitDuplicate(ctx, expense, matches);
+  if (state.status === 'suspect' && after.duplicateStatus !== 'suspect')
+    emitDuplicate(ctx, expense, matches);
   return { expense, matches };
 }
 
@@ -571,7 +661,8 @@ export async function updateExpenseInTx(
   ctx: CommandContext
 ): Promise<{ expense: ExpenseWithSplits; matches: DuplicateMatch[] }> {
   const before = await loadExpense(tx, input.expenseId);
-  if (before.status !== 'draft') throw financeError('invalid_state', `${before.number} ya no es un borrador`);
+  if (before.status !== 'draft')
+    throw financeError('invalid_state', `${before.number} ya no es un borrador`);
   assertCanEdit(ctx, before, ['finance.post']);
   await validateReferences(tx, {
     supplierId: input.supplierId,
@@ -596,7 +687,11 @@ export async function updateExpenseInTx(
   if (input.supplierId !== undefined || input.supplierNameFree !== undefined) {
     const supplierId = input.supplierId !== undefined ? input.supplierId : before.supplierId;
     data.supplierId = supplierId ?? null;
-    data.supplierNameFree = supplierId ? null : input.supplierNameFree !== undefined ? input.supplierNameFree : before.supplierNameFree;
+    data.supplierNameFree = supplierId
+      ? null
+      : input.supplierNameFree !== undefined
+        ? input.supplierNameFree
+        : before.supplierNameFree;
     touch('supplier');
   }
   if (input.categoryId !== undefined) {
@@ -622,7 +717,9 @@ export async function updateExpenseInTx(
   }
   if (input.caseId !== undefined) data.caseId = input.caseId;
   if (receipts.length > 0) {
-    data.receiptObjectIds = [...new Set([...before.receiptObjectIds, ...receipts.map((r) => r.id)])].slice(0, 10);
+    data.receiptObjectIds = [
+      ...new Set([...before.receiptObjectIds, ...receipts.map((r) => r.id)]),
+    ].slice(0, 10);
     if (!before.receiptHash) data.receiptHash = receipts.find((r) => r.sha256)?.sha256 ?? null;
   }
   const finalAmount = input.amount !== undefined ? roundMoney(input.amount) : D(before.amount);
@@ -637,7 +734,8 @@ export async function updateExpenseInTx(
   let after = await tx.expense.update({ where: { id: before.id }, data });
   if (input.splits !== undefined) {
     await tx.expenseSplit.deleteMany({ where: { expenseId: before.id } });
-    if (input.splits.length > 0) await tx.expenseSplit.createMany({ data: splitRows(before.id, input.splits) });
+    if (input.splits.length > 0)
+      await tx.expenseSplit.createMany({ data: splitRows(before.id, input.splits) });
   }
   const evaluated = await reevaluateDuplicates(tx, before, after, ctx);
   after = evaluated.expense;
@@ -653,7 +751,11 @@ export async function updateExpenseInTx(
     financeEventOptions(FINANCE_OBJECT_TYPES.expense, after.id, after.caseId)
   );
   if (receipts.length > 0) queueProposal(ctx, after.id);
-  publishBoard(ctx, 'finance.expense', { expenseId: after.id, number: after.number, status: after.status });
+  publishBoard(ctx, 'finance.expense', {
+    expenseId: after.id,
+    number: after.number,
+    status: after.status,
+  });
   return { expense: await loadExpense(tx, after.id), matches: evaluated.matches };
 }
 
@@ -667,7 +769,9 @@ const proposalPayloadSchema = z.object({
   description: z.string().nullable(),
   paymentMethod: z.enum(PAYMENT_METHODS).nullable(),
   isPaid: z.boolean().nullable(),
-  splits: z.array(z.object({ amount: z.string(), pct: z.string().nullable(), costCenterId: z.string() })).max(20),
+  splits: z
+    .array(z.object({ amount: z.string(), pct: z.string().nullable(), costCenterId: z.string() }))
+    .max(20),
   confidence: z.number().min(0).max(1),
   warnings: z.array(z.string().max(500)).max(30),
   reasons: z.array(z.string().max(500)).max(30),
@@ -698,11 +802,17 @@ export async function applyProposalInTx(
     if (!category || !isExpenseCategory(category)) proposal.categoryId = null;
   }
   if (proposal.costCenterId) {
-    const center = await tx.costCenter.findUnique({ where: { id: proposal.costCenterId }, select: { status: true } });
+    const center = await tx.costCenter.findUnique({
+      where: { id: proposal.costCenterId },
+      select: { status: true },
+    });
     if (center?.status !== 'active') proposal.costCenterId = null;
   }
   if (proposal.supplierId) {
-    const supplier = await tx.supplier.findUnique({ where: { id: proposal.supplierId }, select: { id: true } });
+    const supplier = await tx.supplier.findUnique({
+      where: { id: proposal.supplierId },
+      select: { id: true },
+    });
     if (!supplier) proposal.supplierId = null;
   }
   const state = proposalStateOf(before);
@@ -768,7 +878,11 @@ export async function applyProposalInTx(
     number: after.number,
     duplicateStatus: after.duplicateStatus,
   });
-  publishBoard(ctx, 'finance.expense', { expenseId: after.id, number: after.number, status: after.status });
+  publishBoard(ctx, 'finance.expense', {
+    expenseId: after.id,
+    number: after.number,
+    status: after.status,
+  });
   return { applied: true, expense: after, fields: changed };
 }
 
@@ -785,7 +899,8 @@ export async function resolveDuplicateInTx(
   ctx: CommandContext
 ): Promise<Expense> {
   const expense = await loadExpense(tx, input.expenseId);
-  if (expense.status !== 'draft') throw financeError('invalid_state', `${expense.number} ya no es un borrador`);
+  if (expense.status !== 'draft')
+    throw financeError('invalid_state', `${expense.number} ya no es un borrador`);
   assertCanEdit(ctx, expense, ['finance.approve', 'finance.post']);
   let updated: Expense;
   if (input.decision === 'unique') {
@@ -796,15 +911,20 @@ export async function resolveDuplicateInTx(
   } else {
     const originalId = input.duplicateOfId ?? expense.duplicateOfId;
     if (!originalId) throw financeError('invalid_payload', 'Indica de qué gasto es duplicado');
-    const original = await tx.expense.findUnique({ where: { id: originalId }, select: { id: true, number: true } });
-    if (!original || original.id === expense.id) throw new OperationsError('not_found', 'No se encontró el gasto original');
+    const original = await tx.expense.findUnique({
+      where: { id: originalId },
+      select: { id: true, number: true },
+    });
+    if (!original || original.id === expense.id)
+      throw new OperationsError('not_found', 'No se encontró el gasto original');
     updated = await tx.expense.update({
       where: { id: expense.id },
       data: {
         duplicateStatus: 'confirmed_duplicate',
         duplicateOfId: original.id,
         status: 'rejected',
-        rejectedReason: `Duplicado de ${original.number}${input.note ? `: ${input.note}` : ''}`.slice(0, 500),
+        rejectedReason:
+          `Duplicado de ${original.number}${input.note ? `: ${input.note}` : ''}`.slice(0, 500),
       },
     });
   }
@@ -819,7 +939,11 @@ export async function resolveDuplicateInTx(
     },
     financeEventOptions(FINANCE_OBJECT_TYPES.expense, updated.id, updated.caseId)
   );
-  publishBoard(ctx, 'finance.expense', { expenseId: updated.id, number: updated.number, status: updated.status });
+  publishBoard(ctx, 'finance.expense', {
+    expenseId: updated.id,
+    number: updated.number,
+    status: updated.status,
+  });
   return updated;
 }
 
@@ -835,10 +959,14 @@ export async function submitExpenseInTx(
   ctx: CommandContext
 ): Promise<ExpenseCommandData> {
   const expense = await loadExpense(tx, input.expenseId);
-  if (expense.status !== 'draft') throw financeError('invalid_state', `${expense.number} ya fue enviado`);
+  if (expense.status !== 'draft')
+    throw financeError('invalid_state', `${expense.number} ya fue enviado`);
   assertCanEdit(ctx, expense, ['finance.post']);
   if (expense.duplicateStatus === 'suspect') {
-    throw financeError('duplicate_unresolved', `${expense.number} parece duplicado: confirma si es único o duplicado antes de enviarlo`);
+    throw financeError(
+      'duplicate_unresolved',
+      `${expense.number} parece duplicado: confirma si es único o duplicado antes de enviarlo`
+    );
   }
   if (expense.duplicateStatus === 'confirmed_duplicate') {
     throw financeError('invalid_state', `${expense.number} está marcado como duplicado`);
@@ -848,7 +976,9 @@ export async function submitExpenseInTx(
   if (reevaluated.expense.duplicateStatus === 'suspect') {
     return toExpenseCommandData(reevaluated.expense, {
       submitted: false,
-      matches: reevaluated.matches.slice(0, 5).map(({ expenseId, number, kind, reason }) => ({ expenseId, number, kind, reason })),
+      matches: reevaluated.matches
+        .slice(0, 5)
+        .map(({ expenseId, number, kind, reason }) => ({ expenseId, number, kind, reason })),
     });
   }
   const refs = await loadCatalogRefs(tx);
@@ -873,8 +1003,12 @@ export async function submitExpenseInTx(
   );
   if (issues.length > 0) throw financeError('expense_incomplete', issues.join('; '), { issues });
 
-  const creator = await tx.user.findUnique({ where: { id: expense.createdByUserId }, select: { isBot: true } });
-  const requestedByUserId = creator && !creator.isBot ? expense.createdByUserId : actorUserIdOf(ctx);
+  const creator = await tx.user.findUnique({
+    where: { id: expense.createdByUserId },
+    select: { isBot: true },
+  });
+  const requestedByUserId =
+    creator && !creator.isBot ? expense.createdByUserId : actorUserIdOf(ctx);
   await tx.expense.update({ where: { id: expense.id }, data: { status: 'pending_approval' } });
   const supplier = expense.supplierId
     ? await tx.supplier.findUnique({ where: { id: expense.supplierId }, select: { name: true } })
@@ -889,7 +1023,11 @@ export async function submitExpenseInTx(
     caseId: expense.caseId,
     areaKey: FINANCE_AREA_KEY,
     requestedByUserId,
-    title: `Gasto ${expense.number}${supplier?.name || expense.supplierNameFree ? ` · ${supplier?.name ?? expense.supplierNameFree}` : ''}`.slice(0, 200),
+    title:
+      `Gasto ${expense.number}${supplier?.name || expense.supplierNameFree ? ` · ${supplier?.name ?? expense.supplierNameFree}` : ''}`.slice(
+        0,
+        200
+      ),
     description: expense.description,
   });
   const updated = await tx.expense.update({
@@ -909,12 +1047,17 @@ export async function submitExpenseInTx(
     },
     financeEventOptions(FINANCE_OBJECT_TYPES.expense, updated.id, updated.caseId)
   );
-  publishBoard(ctx, 'finance.expense', { expenseId: updated.id, number: updated.number, status: updated.status });
+  publishBoard(ctx, 'finance.expense', {
+    expenseId: updated.id,
+    number: updated.number,
+    status: updated.status,
+  });
   return toExpenseCommandData(updated, {
     submitted: true,
     approvalRequestId: outcome.approvalRequest.id,
     autoApproved: outcome.autoApproved,
     requiredApprovals: outcome.approvalRequest.requiredApprovals,
+    firstSignatureByUserId: outcome.firstSignatureByUserId,
   });
 }
 
@@ -938,7 +1081,12 @@ export function registerExpenseReactions(): void {
     const updated = await tx.expense.update({
       where: { id: expense.id },
       data: approved
-        ? { status: 'approved', approvedByUserId: event.decidedByUserId, approvalRequestId: event.approvalRequest.id, ...version }
+        ? {
+            status: 'approved',
+            approvedByUserId: event.decidedByUserId,
+            approvalRequestId: event.approvalRequest.id,
+            ...version,
+          }
         : {
             status: 'rejected',
             rejectedReason: (rejection?.note ?? 'Rechazado en la aprobación').slice(0, 500),
@@ -958,7 +1106,11 @@ export function registerExpenseReactions(): void {
       },
       financeEventOptions(FINANCE_OBJECT_TYPES.expense, updated.id, updated.caseId)
     );
-    publishBoard(event.ctx, 'finance.expense', { expenseId: updated.id, number: updated.number, status: updated.status });
+    publishBoard(event.ctx, 'finance.expense', {
+      expenseId: updated.id,
+      number: updated.number,
+      status: updated.status,
+    });
   });
 }
 
@@ -980,7 +1132,10 @@ export async function postExpenseInTx(
 ): Promise<ExpenseCommandData> {
   const expense = await loadExpense(tx, input.expenseId);
   if (expense.status !== 'approved') {
-    throw financeError('invalid_state', `${expense.number} debe estar aprobado para contabilizarse (está ${expense.status})`);
+    throw financeError(
+      'invalid_state',
+      `${expense.number} debe estar aprobado para contabilizarse (está ${expense.status})`
+    );
   }
   const cashAccountId = input.cashAccountId ?? expense.cashAccountId;
   const refs = await loadCatalogRefs(tx);
@@ -1014,10 +1169,16 @@ export async function postExpenseInTx(
     splits: expense.splits,
   });
   const supplier = expense.supplierId
-    ? await tx.supplier.findUnique({ where: { id: expense.supplierId }, select: { name: true, paymentTermsDays: true } })
+    ? await tx.supplier.findUnique({
+        where: { id: expense.supplierId },
+        select: { name: true, paymentTermsDays: true },
+      })
     : null;
   const supplierName = supplier?.name ?? expense.supplierNameFree ?? null;
-  const label = `${expense.number} · ${expense.description ?? supplierName ?? 'Gasto'}`.slice(0, 500);
+  const label = `${expense.number} · ${expense.description ?? supplierName ?? 'Gasto'}`.slice(
+    0,
+    500
+  );
 
   let ledgerEntryId: string;
   let obligationId: string | null = null;
@@ -1033,7 +1194,11 @@ export async function postExpenseInTx(
         sourceType: LEDGER_SOURCE_TYPES.expense,
         sourceId: expense.id,
         evidenceObjectIds: expense.receiptObjectIds,
-        meta: { supplierId: expense.supplierId, supplierName, paymentMethod: expense.paymentMethod },
+        meta: {
+          supplierId: expense.supplierId,
+          supplierName,
+          paymentMethod: expense.paymentMethod,
+        },
         lines: [
           ...allocations.map((allocation) => ({
             accountType: 'category' as const,
@@ -1044,7 +1209,12 @@ export async function postExpenseInTx(
             projectRef: allocation.projectRef ?? null,
             memo: expense.description,
           })),
-          { accountType: 'cash' as const, accountId: cashAccountId as string, credit: total, memo: supplierName },
+          {
+            accountType: 'cash' as const,
+            accountId: cashAccountId as string,
+            credit: total,
+            memo: supplierName,
+          },
         ],
       },
       ctx
@@ -1052,7 +1222,10 @@ export async function postExpenseInTx(
     ledgerEntryId = entry.id;
   } else {
     const dueKey =
-      input.dueDate ?? (supplier?.paymentTermsDays ? addDaysToKey(expenseDate, supplier.paymentTermsDays) : expenseDate);
+      input.dueDate ??
+      (supplier?.paymentTermsDays
+        ? addDaysToKey(expenseDate, supplier.paymentTermsDays)
+        : expenseDate);
     const { obligation, ledgerEntry } = await createObligationWithEntry(
       tx,
       {
@@ -1079,7 +1252,13 @@ export async function postExpenseInTx(
   }
   const updated = await tx.expense.update({
     where: { id: expense.id },
-    data: { status: 'posted', postedAt: ctx.now, ledgerEntryId, obligationId, cashAccountId: cashAccountId ?? null },
+    data: {
+      status: 'posted',
+      postedAt: ctx.now,
+      ledgerEntryId,
+      obligationId,
+      cashAccountId: cashAccountId ?? null,
+    },
   });
   ctx.emit(
     FINANCE_EVENTS.expense.posted,
@@ -1095,7 +1274,11 @@ export async function postExpenseInTx(
     },
     financeEventOptions(FINANCE_OBJECT_TYPES.expense, updated.id, updated.caseId)
   );
-  publishBoard(ctx, 'finance.expense', { expenseId: updated.id, number: updated.number, status: updated.status });
+  publishBoard(ctx, 'finance.expense', {
+    expenseId: updated.id,
+    number: updated.number,
+    status: updated.status,
+  });
   return toExpenseCommandData(updated, { ledgerEntryId, obligationId });
 }
 
@@ -1111,9 +1294,13 @@ export async function rejectExpenseInTx(
 ): Promise<Expense> {
   const expense = await loadExpense(tx, input.expenseId);
   if (expense.status === 'pending_approval') {
-    throw financeError('invalid_state', `${expense.number} espera su aprobación: recházalo desde la aprobación`);
+    throw financeError(
+      'invalid_state',
+      `${expense.number} espera su aprobación: recházalo desde la aprobación`
+    );
   }
-  if (expense.status === 'posted') throw financeError('invalid_state', `${expense.number} ya está contabilizado: revérsalo`);
+  if (expense.status === 'posted')
+    throw financeError('invalid_state', `${expense.number} ya está contabilizado: revérsalo`);
   if (expense.status === 'rejected') return expense;
   if (expense.status === 'draft') assertCanEdit(ctx, expense, ['finance.approve', 'finance.post']);
   else if (!hasFinancePermission(ctx.user, 'finance.post') && ctx.actor.type !== 'system') {
@@ -1125,10 +1312,19 @@ export async function rejectExpenseInTx(
   });
   ctx.emit(
     FINANCE_EVENTS.expense.rejected,
-    { expenseId: updated.id, number: updated.number, reason: input.reason, previousStatus: expense.status },
+    {
+      expenseId: updated.id,
+      number: updated.number,
+      reason: input.reason,
+      previousStatus: expense.status,
+    },
     financeEventOptions(FINANCE_OBJECT_TYPES.expense, updated.id, updated.caseId)
   );
-  publishBoard(ctx, 'finance.expense', { expenseId: updated.id, number: updated.number, status: updated.status });
+  publishBoard(ctx, 'finance.expense', {
+    expenseId: updated.id,
+    number: updated.number,
+    status: updated.status,
+  });
   return updated;
 }
 
@@ -1145,18 +1341,31 @@ export async function reverseExpenseInTx(
   ctx: CommandContext
 ): Promise<{ expense: Expense; reversalEntryId: string | null }> {
   const expense = await loadExpense(tx, input.expenseId);
-  if (expense.status !== 'posted') throw financeError('invalid_state', `${expense.number} no está contabilizado`);
+  if (expense.status !== 'posted')
+    throw financeError('invalid_state', `${expense.number} no está contabilizado`);
   let reversalEntryId: string | null = null;
   if (expense.obligationId) {
-    const cancelled = await cancelObligation(tx, expense.obligationId, `Reverso de ${expense.number}: ${input.reason}`, ctx);
+    const cancelled = await cancelObligation(
+      tx,
+      expense.obligationId,
+      `Reverso de ${expense.number}: ${input.reason}`,
+      ctx
+    );
     const entry = cancelled.ledgerEntryId
-      ? await tx.ledgerEntry.findUnique({ where: { id: cancelled.ledgerEntryId }, select: { reversedByEntryId: true } })
+      ? await tx.ledgerEntry.findUnique({
+          where: { id: cancelled.ledgerEntryId },
+          select: { reversedByEntryId: true },
+        })
       : null;
     reversalEntryId = entry?.reversedByEntryId ?? null;
   } else if (expense.ledgerEntryId) {
     const { reversal } = await reverseLedgerEntry(
       tx,
-      { entryId: expense.ledgerEntryId, reason: `Reverso de ${expense.number}: ${input.reason}`, dateKey: input.date ?? null },
+      {
+        entryId: expense.ledgerEntryId,
+        reason: `Reverso de ${expense.number}: ${input.reason}`,
+        dateKey: input.date ?? null,
+      },
       ctx
     );
     reversalEntryId = reversal.id;
@@ -1167,10 +1376,20 @@ export async function reverseExpenseInTx(
   });
   ctx.emit(
     FINANCE_EVENTS.expense.reversed,
-    { expenseId: updated.id, number: updated.number, reason: input.reason, reversalEntryId, obligationId: expense.obligationId },
+    {
+      expenseId: updated.id,
+      number: updated.number,
+      reason: input.reason,
+      reversalEntryId,
+      obligationId: expense.obligationId,
+    },
     financeEventOptions(FINANCE_OBJECT_TYPES.expense, updated.id, updated.caseId)
   );
-  publishBoard(ctx, 'finance.expense', { expenseId: updated.id, number: updated.number, status: updated.status });
+  publishBoard(ctx, 'finance.expense', {
+    expenseId: updated.id,
+    number: updated.number,
+    status: updated.status,
+  });
   return { expense: updated, reversalEntryId };
 }
 
@@ -1191,7 +1410,11 @@ export const expenseTemplateCreateSchema = z
   })
   .superRefine((value, issue) => {
     if (value.recurrence && !value.firstRunDate) {
-      issue.addIssue({ code: z.ZodIssueCode.custom, path: ['firstRunDate'], message: 'Indica la primera fecha del gasto recurrente' });
+      issue.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['firstRunDate'],
+        message: 'Indica la primera fecha del gasto recurrente',
+      });
     }
   });
 
@@ -1224,7 +1447,11 @@ export async function createExpenseTemplateInTx(
   input: z.output<typeof expenseTemplateCreateSchema>,
   ctx: CommandContext
 ): Promise<{ templateId: string; nextRunAt: string | null }> {
-  await validateReferences(tx, { categoryId: input.categoryId, costCenterId: input.costCenterId, supplierId: input.supplierId });
+  await validateReferences(tx, {
+    categoryId: input.categoryId,
+    costCenterId: input.costCenterId,
+    supplierId: input.supplierId,
+  });
   const row = await tx.expenseTemplate.create({
     data: {
       name: input.name,
@@ -1253,13 +1480,25 @@ export async function updateExpenseTemplateInTx(
 ): Promise<{ templateId: string; nextRunAt: string | null; active: boolean }> {
   const template = await tx.expenseTemplate.findUnique({ where: { id: input.templateId } });
   if (!template) throw new OperationsError('not_found', 'No se encontró la plantilla');
-  if (ctx.user?.id !== template.createdByUserId && !hasFinancePermission(ctx.user, 'finance.manage_catalog')) {
-    throw new OperationsError('forbidden', 'Sólo quien creó la plantilla o Contabilidad la modifica');
+  if (
+    ctx.user?.id !== template.createdByUserId &&
+    !hasFinancePermission(ctx.user, 'finance.manage_catalog')
+  ) {
+    throw new OperationsError(
+      'forbidden',
+      'Sólo quien creó la plantilla o Contabilidad la modifica'
+    );
   }
-  await validateReferences(tx, { categoryId: input.categoryId, costCenterId: input.costCenterId, supplierId: input.supplierId });
-  const recurrence = input.recurrence !== undefined ? input.recurrence : parseRecurrence(template.recurrence);
+  await validateReferences(tx, {
+    categoryId: input.categoryId,
+    costCenterId: input.costCenterId,
+    supplierId: input.supplierId,
+  });
+  const recurrence =
+    input.recurrence !== undefined ? input.recurrence : parseRecurrence(template.recurrence);
   let nextRunAt: Date | null | undefined;
-  if (input.nextRunDate !== undefined) nextRunAt = input.nextRunDate ? toDbDate(input.nextRunDate) : null;
+  if (input.nextRunDate !== undefined)
+    nextRunAt = input.nextRunDate ? toDbDate(input.nextRunDate) : null;
   if (!recurrence) nextRunAt = null;
   if (recurrence && nextRunAt === undefined && !template.nextRunAt) {
     throw financeError('invalid_recurrence', 'Indica la próxima fecha del gasto recurrente');
@@ -1271,8 +1510,12 @@ export async function updateExpenseTemplateInTx(
       ...(input.categoryId ? { categoryId: input.categoryId } : {}),
       ...(input.costCenterId !== undefined ? { costCenterId: input.costCenterId } : {}),
       ...(input.supplierId !== undefined ? { supplierId: input.supplierId } : {}),
-      ...(input.defaultAmount !== undefined ? { defaultAmount: input.defaultAmount ? roundMoney(input.defaultAmount) : null } : {}),
-      ...(input.recurrence !== undefined ? { recurrence: input.recurrence ? toOperationalJson(input.recurrence) : Prisma.DbNull } : {}),
+      ...(input.defaultAmount !== undefined
+        ? { defaultAmount: input.defaultAmount ? roundMoney(input.defaultAmount) : null }
+        : {}),
+      ...(input.recurrence !== undefined
+        ? { recurrence: input.recurrence ? toOperationalJson(input.recurrence) : Prisma.DbNull }
+        : {}),
       ...(nextRunAt !== undefined ? { nextRunAt } : {}),
       ...(input.active !== undefined ? { active: input.active } : {}),
     },
@@ -1282,7 +1525,11 @@ export async function updateExpenseTemplateInTx(
     { templateId: row.id, name: row.name, action: 'updated', active: row.active },
     financeEventOptions(FINANCE_OBJECT_TYPES.expenseTemplate, row.id)
   );
-  return { templateId: row.id, nextRunAt: row.nextRunAt ? dateKeyOf(row.nextRunAt) : null, active: row.active };
+  return {
+    templateId: row.id,
+    nextRunAt: row.nextRunAt ? dateKeyOf(row.nextRunAt) : null,
+    active: row.active,
+  };
 }
 
 export async function captureFromTemplateInTx(
@@ -1291,10 +1538,14 @@ export async function captureFromTemplateInTx(
   ctx: CommandContext
 ): Promise<{ expense: ExpenseWithSplits; matches: DuplicateMatch[] }> {
   if (ctx.actor.type !== 'user' && ctx.actor.type !== 'ai') {
-    throw new OperationsError('forbidden', 'Un gasto lo captura una persona o una identidad de IA registrada');
+    throw new OperationsError(
+      'forbidden',
+      'Un gasto lo captura una persona o una identidad de IA registrada'
+    );
   }
   const template = await tx.expenseTemplate.findUnique({ where: { id: input.templateId } });
-  if (!template || !template.active) throw new OperationsError('not_found', 'La plantilla no existe o está inactiva');
+  if (!template || !template.active)
+    throw new OperationsError('not_found', 'La plantilla no existe o está inactiva');
   await validateReferences(tx, { cashAccountId: input.cashAccountId, caseId: input.caseId });
   const amount = roundMoney(input.amount ?? template.defaultAmount ?? 0);
   const userProvided = ['categoryId', 'date'];
@@ -1335,13 +1586,21 @@ export async function runRecurringExpenseInTx(
   tx: Db,
   input: z.output<typeof runRecurringSchema>,
   ctx: CommandContext
-): Promise<{ created: boolean; expenseId: string | null; nextRunAt: string | null; reason?: string }> {
+): Promise<{
+  created: boolean;
+  expenseId: string | null;
+  nextRunAt: string | null;
+  reason?: string;
+}> {
   const template = await tx.expenseTemplate.findUnique({ where: { id: input.templateId } });
-  if (!template || !template.active) return { created: false, expenseId: null, nextRunAt: null, reason: 'inactive' };
+  if (!template || !template.active)
+    return { created: false, expenseId: null, nextRunAt: null, reason: 'inactive' };
   const recurrence = parseRecurrence(template.recurrence);
-  if (!recurrence || !template.nextRunAt) return { created: false, expenseId: null, nextRunAt: null, reason: 'not_recurring' };
+  if (!recurrence || !template.nextRunAt)
+    return { created: false, expenseId: null, nextRunAt: null, reason: 'not_recurring' };
   const due = dateKeyOf(template.nextRunAt);
-  if (due !== input.runDate) return { created: false, expenseId: null, nextRunAt: due, reason: 'not_due' };
+  if (due !== input.runDate)
+    return { created: false, expenseId: null, nextRunAt: due, reason: 'not_due' };
   const { expense } = await createExpenseDraftInTx(
     tx,
     {
@@ -1369,7 +1628,10 @@ export async function runRecurringExpenseInTx(
     ctx
   );
   const next = nextRecurrenceKey(recurrence, due);
-  await tx.expenseTemplate.update({ where: { id: template.id }, data: { nextRunAt: toDbDate(next) } });
+  await tx.expenseTemplate.update({
+    where: { id: template.id },
+    data: { nextRunAt: toDbDate(next) },
+  });
   ctx.realtime(userChannel(template.createdByUserId), 'finance.expense_recurring', {
     expenseId: expense.id,
     number: expense.number,
@@ -1394,7 +1656,10 @@ export interface ProposeExpenseOutcome {
  * once (never required: without AI the history rules still propose), resolves
  * the proposal against the catalog and applies it with a system command.
  */
-export async function proposeExpense(expenseId: string, options: { now?: Date } = {}): Promise<ProposeExpenseOutcome> {
+export async function proposeExpense(
+  expenseId: string,
+  options: { now?: Date } = {}
+): Promise<ProposeExpenseOutcome> {
   const now = options.now ?? new Date();
   const expense = await prisma.expense.findUnique({ where: { id: expenseId } });
   if (!expense) return { status: 'not_found' };
@@ -1403,14 +1668,27 @@ export async function proposeExpense(expenseId: string, options: { now?: Date } 
   const settings = await getFinanceSettings();
   const refs = await loadCatalogRefs(prisma);
   const receipts = expense.receiptObjectIds.length
-    ? await prisma.storageObject.findMany({ where: { id: { in: expense.receiptObjectIds } }, select: RECEIPT_SELECT })
+    ? await prisma.storageObject.findMany({
+        where: { id: { in: expense.receiptObjectIds } },
+        select: RECEIPT_SELECT,
+      })
     : [];
   const receiptHash = receipts.find((r) => r.sha256)?.sha256 ?? null;
   const since = addDaysToKey(todayKey, -30 * settings.expenseHistoryMonths);
   const [history, suppliers, employee] = await Promise.all([
     prisma.expense.findMany({
-      where: { status: { in: ['approved', 'posted'] }, date: { gte: toDbDate(since) }, id: { not: expense.id } },
-      select: { supplierId: true, supplierNameFree: true, categoryId: true, costCenterId: true, date: true },
+      where: {
+        status: { in: ['approved', 'posted'] },
+        date: { gte: toDbDate(since) },
+        id: { not: expense.id },
+      },
+      select: {
+        supplierId: true,
+        supplierNameFree: true,
+        categoryId: true,
+        costCenterId: true,
+        date: true,
+      },
       orderBy: { date: 'desc' },
       take: 1000,
     }),
@@ -1420,7 +1698,10 @@ export async function proposeExpense(expenseId: string, options: { now?: Date } 
       orderBy: { name: 'asc' },
       take: 2000,
     }),
-    prisma.employee.findUnique({ where: { userId: expense.createdByUserId }, select: { areaKey: true } }),
+    prisma.employee.findUnique({
+      where: { userId: expense.createdByUserId },
+      select: { areaKey: true },
+    }),
   ]);
   const historyRows = history.map((row) => ({
     supplierKey: supplierKeyOf(row),
@@ -1428,7 +1709,9 @@ export async function proposeExpense(expenseId: string, options: { now?: Date } 
     costCenterId: row.costCenterId,
     dateKey: dateKeyOf(row.date),
   }));
-  const description = [expense.description, expense.rawInput, expense.supplierNameFree].filter(Boolean).join(' ');
+  const description = [expense.description, expense.rawInput, expense.supplierNameFree]
+    .filter(Boolean)
+    .join(' ');
   const suggest = (supplierKey: string) =>
     suggestExpenseClassification({
       supplierKey,
@@ -1467,10 +1750,15 @@ export async function proposeExpense(expenseId: string, options: { now?: Date } 
     todayKey,
     expenseCurrency: expense.currency,
   };
-  let resolved = resolveExpenseProposal(raw, { ...baseRefs, fallback: suggest(supplierKeyOf(expense)) });
+  let resolved = resolveExpenseProposal(raw, {
+    ...baseRefs,
+    fallback: suggest(supplierKeyOf(expense)),
+  });
   const proposedSupplierKey = supplierKeyOf({
     supplierId: expense.supplierId ?? resolved.supplierId,
-    supplierNameFree: expense.supplierId ? null : (expense.supplierNameFree ?? resolved.supplierNameFree),
+    supplierNameFree: expense.supplierId
+      ? null
+      : (expense.supplierNameFree ?? resolved.supplierNameFree),
   });
   if (!raw?.categoryKey && proposedSupplierKey && proposedSupplierKey !== supplierKeyOf(expense)) {
     resolved = resolveExpenseProposal(raw, { ...baseRefs, fallback: suggest(proposedSupplierKey) });
@@ -1480,11 +1768,20 @@ export async function proposeExpense(expenseId: string, options: { now?: Date } 
       commandId: `finance:propose:${expense.id}:${expense.version}:${receipts.length}`,
       type: FINANCE_COMMANDS.expenseApplyProposal,
       aggregate: { type: FINANCE_OBJECT_TYPES.expense, id: expense.id },
-      payload: { expenseId: expense.id, source, model, error, receiptHash, proposal: resolved, notes: material.notes },
+      payload: {
+        expenseId: expense.id,
+        source,
+        model,
+        error,
+        receiptHash,
+        proposal: resolved,
+        notes: material.notes,
+      },
     },
     { now }
   );
-  if (result.status === 'rejected') return { status: 'rejected', source, error: result.message ?? error };
+  if (result.status === 'rejected')
+    return { status: 'rejected', source, error: result.message ?? error };
   return {
     status: result.data?.applied ? 'applied' : 'skipped',
     source,
@@ -1493,6 +1790,5 @@ export async function proposeExpense(expenseId: string, options: { now?: Date } 
   };
 }
 
-export const CAPTURE_MODES_WITH_PROPOSAL: readonly ExpenseCaptureMode[] = EXPENSE_CAPTURE_MODES.filter(
-  (mode) => mode === 'text' || mode === 'voice' || mode === 'photo'
-);
+export const CAPTURE_MODES_WITH_PROPOSAL: readonly ExpenseCaptureMode[] =
+  EXPENSE_CAPTURE_MODES.filter((mode) => mode === 'text' || mode === 'voice' || mode === 'photo');

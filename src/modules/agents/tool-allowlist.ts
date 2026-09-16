@@ -65,10 +65,20 @@ const ADMIN_TOOLS = [
  * (importing one registers every tool of that module as a side effect).
  */
 /** Ventas: the closing radar loop (see, understand, draft the message for the person). */
-const CRM_TOOLS = ['listOpportunities', 'listRadarSignals', 'explainRadarSignal', 'draftRadarMessage'] as const;
+const CRM_TOOLS = [
+  'listOpportunities',
+  'listRadarSignals',
+  'explainRadarSignal',
+  'draftRadarMessage',
+] as const;
 
 /** Compras: the requests it must cover and the RFQ → order path (receipts are a physical fact of a person). */
-const PROCUREMENT_TOOLS = ['listPurchaseRequests', 'draftRfq', 'compareRfq', 'submitProcurementOrder'] as const;
+const PROCUREMENT_TOOLS = [
+  'listPurchaseRequests',
+  'draftRfq',
+  'compareRfq',
+  'submitProcurementOrder',
+] as const;
 
 const MANUFACTURING_TOOLS = [
   'listProductionOrders',
@@ -78,8 +88,16 @@ const MANUFACTURING_TOOLS = [
   'reportScrap',
 ] as const;
 
+/** Logística: see the day's board, put the load on a truck and close what was really delivered. */
+const LOGISTICS_TOOLS = ['getDispatchBoard', 'buildTrip', 'recordDeliveryResult'] as const;
+
 /** Contabilidad: cash readings and collections (capturing an expense is `recordExpense`). */
-const FINANCE_TOOLS = ['getCashflowProjection', 'listUnmatchedPayments', 'matchPaymentToObligation', 'getCashBook'] as const;
+const FINANCE_TOOLS = [
+  'getCashflowProjection',
+  'listUnmatchedPayments',
+  'matchPaymentToObligation',
+  'getCashBook',
+] as const;
 
 /**
  * Stable order (prefix cache). Tools the bot's permissions do not cover are
@@ -87,8 +105,20 @@ const FINANCE_TOOLS = ['getCashflowProjection', 'listUnmatchedPayments', 'matchP
  * permissions do not exist yet simply sees fewer tools.
  */
 export const AGENT_TOOL_ALLOWLIST: Readonly<Record<AgentAllowlistKey, readonly string[]>> = {
-  ventas: [...COORDINATOR_CORE, 'proposeDeliveryPlan', 'requestStockVerification', ...CRM_TOOLS, ...RUNNER_CONTRACT],
-  compras: [...COORDINATOR_CORE, 'researchSourcing', 'recordExpense', ...PROCUREMENT_TOOLS, ...RUNNER_CONTRACT],
+  ventas: [
+    ...COORDINATOR_CORE,
+    'proposeDeliveryPlan',
+    'requestStockVerification',
+    ...CRM_TOOLS,
+    ...RUNNER_CONTRACT,
+  ],
+  compras: [
+    ...COORDINATOR_CORE,
+    'researchSourcing',
+    'recordExpense',
+    ...PROCUREMENT_TOOLS,
+    ...RUNNER_CONTRACT,
+  ],
   inventario: [
     ...COORDINATOR_CORE,
     'proposeDeliveryPlan',
@@ -99,8 +129,21 @@ export const AGENT_TOOL_ALLOWLIST: Readonly<Record<AgentAllowlistKey, readonly s
     ...RUNNER_CONTRACT,
   ],
   manufactura: [...COORDINATOR_CORE, 'recordExpense', ...MANUFACTURING_TOOLS, ...RUNNER_CONTRACT],
-  logistica: [...COORDINATOR_CORE, 'proposeDeliveryPlan', 'assignCarrier', 'recordExpense', ...RUNNER_CONTRACT],
-  contabilidad: [...COORDINATOR_CORE, 'recordExpense', 'authorizePayment', ...FINANCE_TOOLS, ...RUNNER_CONTRACT],
+  logistica: [
+    ...COORDINATOR_CORE,
+    'proposeDeliveryPlan',
+    'assignCarrier',
+    'recordExpense',
+    ...LOGISTICS_TOOLS,
+    ...RUNNER_CONTRACT,
+  ],
+  contabilidad: [
+    ...COORDINATOR_CORE,
+    'recordExpense',
+    'authorizePayment',
+    ...FINANCE_TOOLS,
+    ...RUNNER_CONTRACT,
+  ],
   administracion: [...ADMIN_TOOLS],
   admin: [...ADMIN_TOOLS],
 };

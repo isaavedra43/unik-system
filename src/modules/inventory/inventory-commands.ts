@@ -2,6 +2,11 @@ import { randomUUID } from 'crypto';
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import type { CurrentUser } from '@/modules/auth/authorization';
+import { isKnownPermission } from '@/modules/auth/permissions';
+import {
+  onApprovalDecided,
+  registerApprovalScopePermission,
+} from '@/modules/operations/approvals-service';
 import {
   executeCommand,
   registerCommand,
@@ -53,6 +58,7 @@ import {
   cancelCount,
   closeCount,
   decideCountAdjustment,
+  handleAdjustmentApprovalDecision,
   recordCountLine,
   resolveCountDispute,
   startCount,
@@ -285,25 +291,44 @@ const decideAdjustmentSchema = z
   .object({ lineId: idSchema, decision: z.enum(['approve', 'reject']), note: noteSchema })
   .strict();
 
-registerCommand<
-  z.output<typeof decideAdjustmentSchema>,
-  { line: CountLineDTO; movementId: string | null; workItemIds: string[] }
->(INVENTORY_COMMANDS.countDecideAdjustment, {
-  schema: decideAdjustmentSchema,
-  permission: 'inventory.adjust',
-  aggregate: 'none',
-  async handler(tx, cmd, ctx) {
-    await assertInventoryEnabled();
-    const result = await decideCountAdjustment(tx, cmd.payload, ctx);
-    return {
-      data: {
-        line: toCountLineDTO(result.line),
-        movementId: result.movementId,
-        workItemIds: result.workItemIds,
-      },
-    };
-  },
-});
+/**
+ * `awaitingApproval` es verdadero cuando la política de `inventory_adjustment`
+ * pide dos o más firmas: se abrió la aprobación de negocio, la línea sigue
+ * pendiente y el ajuste lo aplica la reacción a esa firma, no este comando.
+ * `noApprovers` avisa que la política pide más firmas de las que hay personas
+ * que puedan darlas.
+ */
+export interface DecideAdjustmentData {
+  line: CountLineDTO;
+  movementId: string | null;
+  workItemIds: string[];
+  approvalRequestId: string | null;
+  awaitingApproval: boolean;
+  noApprovers: boolean;
+}
+
+registerCommand<z.output<typeof decideAdjustmentSchema>, DecideAdjustmentData>(
+  INVENTORY_COMMANDS.countDecideAdjustment,
+  {
+    schema: decideAdjustmentSchema,
+    permission: 'inventory.adjust',
+    aggregate: 'none',
+    async handler(tx, cmd, ctx) {
+      await assertInventoryEnabled();
+      const result = await decideCountAdjustment(tx, cmd.payload, ctx);
+      return {
+        data: {
+          line: toCountLineDTO(result.line),
+          movementId: result.movementId,
+          workItemIds: result.workItemIds,
+          approvalRequestId: result.approvalRequestId,
+          awaitingApproval: result.awaitingApproval,
+          noApprovers: result.noApprovers,
+        },
+      };
+    },
+  }
+);
 
 const resolveDisputeSchema = z
   .object({
@@ -906,6 +931,43 @@ registerCommand<
 });
 
 // ---------------------------------------------------------------------------
+// Aprobaciones de negocio del inventario
+// ---------------------------------------------------------------------------
+
+/** La misma llave que exige el comando de ajuste (`inventory.adjust`). */
+const ADJUST_PERMISSION = 'inventory.adjust';
+
+type GlobalWithInventoryApprovals = typeof globalThis & {
+  __unikInventoryApprovalReactions?: Array<() => void>;
+};
+
+/**
+ * Alcance `inventory_adjustment` del plan 6.0, de punta a punta:
+ *
+ * - `registerApprovalScopePermission`: quien puede ajustar inventario es quien
+ *   puede FIRMAR el ajuste. Sin esta línea el único aprobador elegible era el
+ *   respaldo `operations.admin`, así que una política de ajuste de inventario
+ *   configurada en la Torre de Control no tenía quién la firmara dentro del área.
+ * - `onApprovalDecided('stock_count_line', …)`: la firma aplica el ajuste (o
+ *   conserva el saldo en libros) dentro de la MISMA transacción de la decisión.
+ *
+ * Se registra al importar el módulo, igual que Compras y Manufactura, y se
+ * desuscribe lo anterior para que recargarlo en pruebas no duplique reacciones.
+ */
+function registerInventoryApprovalReactions(): void {
+  const scope = globalThis as GlobalWithInventoryApprovals;
+  for (const unsubscribe of scope.__unikInventoryApprovalReactions ?? []) unsubscribe();
+  scope.__unikInventoryApprovalReactions = [
+    onApprovalDecided('stock_count_line', handleAdjustmentApprovalDecision),
+  ];
+  if (isKnownPermission(ADJUST_PERMISSION)) {
+    registerApprovalScopePermission('inventory_adjustment', ADJUST_PERMISSION);
+  }
+}
+
+registerInventoryApprovalReactions();
+
+// ---------------------------------------------------------------------------
 // Service wrappers: fn(actor, input, options?) → CommandResult
 // ---------------------------------------------------------------------------
 
@@ -1006,7 +1068,7 @@ export function decideStockCountAdjustment(
   input: Input<typeof decideAdjustmentSchema>,
   options?: InventoryCommandOptions
 ) {
-  return runAsUser<{ line: CountLineDTO; movementId: string | null; workItemIds: string[] }>(
+  return runAsUser<DecideAdjustmentData>(
     actor,
     INVENTORY_COMMANDS.countDecideAdjustment,
     { type: 'stock_count_line', id: input.lineId },

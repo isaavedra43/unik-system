@@ -1,6 +1,10 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
-import { DEFAULT_AGENT_SETTINGS, normalizeAgentSettings, type AgentSettings } from './agent-settings';
+import {
+  DEFAULT_AGENT_SETTINGS,
+  normalizeAgentSettings,
+  type AgentSettings,
+} from './agent-settings';
 
 /**
  * AI Assistant configuration service.
@@ -125,7 +129,13 @@ export interface AiSettings {
 }
 
 /** Tipos permitidos antes de la ampliación (se migran automáticamente si nunca se personalizaron). */
-const LEGACY_DEFAULT_MIME_TYPES = new Set(['image/png', 'image/jpeg', 'application/pdf', 'text/plain', 'text/csv']);
+const LEGACY_DEFAULT_MIME_TYPES = new Set([
+  'image/png',
+  'image/jpeg',
+  'application/pdf',
+  'text/plain',
+  'text/csv',
+]);
 
 /**
  * Placeholders of the old "autonomous mode" that never had an implementation. Rows saved
@@ -412,6 +422,15 @@ export const DEFAULT_AI_SETTINGS: AiSettings = {
     'draftRadarMessage',
     'createOpportunityFromConversation',
     'updateOpportunityStage',
+    // Logística
+    'getDispatchBoard',
+    'getTripPlan',
+    'buildTrip',
+    'addTripStop',
+    'reorderTripStops',
+    'startTrip',
+    'recordDeliveryResult',
+    'reportFailedStop',
   ],
   maxAttachmentSizeMb: 25,
   allowedMimeTypes: [
@@ -499,7 +518,8 @@ function sanitizeProviderFees(value: unknown): unknown {
 
 export function mergeWithDefaults(stored: unknown): AiSettings {
   const defaults = DEFAULT_AI_SETTINGS;
-  if (!stored || typeof stored !== 'object') return { ...defaults, agents: normalizeAgentSettings(undefined) };
+  if (!stored || typeof stored !== 'object')
+    return { ...defaults, agents: normalizeAgentSettings(undefined) };
   const s = stored as Record<string, unknown>;
   const merged = { ...defaults } as Record<string, unknown>;
   for (const key of Object.keys(defaults) as (keyof AiSettings)[]) {
@@ -532,7 +552,10 @@ export function mergeWithDefaults(stored: unknown): AiSettings {
   // Attachments: installs that never customized the MIME list get the extended defaults
   // (Word, Excel, audio, video, más imágenes); a customized list is respected as-is.
   const storedMimes = s.allowedMimeTypes;
-  if (Array.isArray(storedMimes) && storedMimes.every((t) => typeof t === 'string' && LEGACY_DEFAULT_MIME_TYPES.has(t))) {
+  if (
+    Array.isArray(storedMimes) &&
+    storedMimes.every((t) => typeof t === 'string' && LEGACY_DEFAULT_MIME_TYPES.has(t))
+  ) {
     merged.allowedMimeTypes = [...defaults.allowedMimeTypes];
   }
   // Agents layer: validated field by field (a partial or older bag keeps the rest of the defaults).
@@ -621,7 +644,12 @@ export async function updateAiConfig(patch: {
   // We detect this and keep the previously stored value.
   let incomingSettings = patch.settings ?? {};
   if (incomingSettings.providerConfigs && currentSettings.providerConfigs) {
-    type StoredProvider = { apiKey?: string; endpoint?: string; enabled?: boolean; monthlyFeeUsd?: number | null };
+    type StoredProvider = {
+      apiKey?: string;
+      endpoint?: string;
+      enabled?: boolean;
+      monthlyFeeUsd?: number | null;
+    };
     const currentProviders = currentSettings.providerConfigs as Record<string, StoredProvider>;
     const incomingProviders = incomingSettings.providerConfigs as Record<string, StoredProvider>;
     const mergedProviders: Record<string, StoredProvider> = {};
@@ -631,9 +659,8 @@ export async function updateAiConfig(patch: {
         ...existing,
         ...incoming,
         // If apiKey is empty/undefined in incoming, keep the existing one
-        apiKey: (incoming.apiKey && incoming.apiKey.length > 0)
-          ? incoming.apiKey
-          : existing.apiKey ?? '',
+        apiKey:
+          incoming.apiKey && incoming.apiKey.length > 0 ? incoming.apiKey : (existing.apiKey ?? ''),
       };
       // An explicit null clears the flat monthly fee; an absent field keeps the stored one.
       if (incoming.monthlyFeeUsd === null) delete entry.monthlyFeeUsd;
@@ -663,13 +690,21 @@ export async function updateAiConfig(patch: {
  * Stores the model ids a provider's key reported, keeping its key, endpoint and enabled flag.
  * Written by the admin provider test so the chat selector and model→provider resolution know them.
  */
-export async function saveDiscoveredProviderModels(provider: string, models: string[]): Promise<void> {
+export async function saveDiscoveredProviderModels(
+  provider: string,
+  models: string[]
+): Promise<void> {
   const current = await listAiConfig();
   const settings =
-    current.settings && typeof current.settings === 'object' ? (current.settings as Record<string, unknown>) : {};
-  const configs = (settings.providerConfigs as Record<string, Partial<ProviderConfigEntry>> | undefined) ?? {};
+    current.settings && typeof current.settings === 'object'
+      ? (current.settings as Record<string, unknown>)
+      : {};
+  const configs =
+    (settings.providerConfigs as Record<string, Partial<ProviderConfigEntry>> | undefined) ?? {};
   const existing = configs[provider] ?? {};
-  const unique = [...new Set(models.filter((m) => typeof m === 'string' && m.length > 0 && m.length <= 160))].slice(0, 300);
+  const unique = [
+    ...new Set(models.filter((m) => typeof m === 'string' && m.length > 0 && m.length <= 160)),
+  ].slice(0, 300);
   await prisma.aiConfig.update({
     where: { key: AI_CONFIG_KEY },
     data: {

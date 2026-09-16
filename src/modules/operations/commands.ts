@@ -2,13 +2,17 @@ import { createHash } from 'crypto';
 import { Prisma, type AreaRequest, type Incident, type WorkItem } from '@prisma/client';
 import type { ZodType, ZodTypeDef } from 'zod';
 import { prisma } from '@/lib/prisma';
-import { AuthorizationError, hasPermission, type CurrentUser } from '@/modules/auth/authorization';
+import {
+  hasPermission,
+  isAuthorizationError,
+  type CurrentUser,
+} from '@/modules/auth/authorization';
 import { assertKnownPermission } from '@/modules/auth/permissions';
 import { recordAuditEvent } from '@/modules/auth/audit-service';
 import { SUPER_ADMIN_ROLE_KEY } from '@/modules/auth/constants';
 import { resolveResponsible } from '@/modules/comms/responsibles-service';
 import { canonicalJson } from '@/modules/extensions/json-schema-to-zod';
-import { enqueueJob, JobDedupeConflictError, wakeJobWorker } from '@/modules/jobs/job-queue';
+import { enqueueJob, isJobDedupeConflictError, wakeJobWorker } from '@/modules/jobs/job-queue';
 import type { NotificationCategory } from '@/modules/notifications/catalog';
 import { notifyUser, type NotifyInput } from '@/modules/notifications/notification-service';
 import { publishRealtime } from '@/modules/realtime/realtime-service';
@@ -293,6 +297,7 @@ type AnyDefinition = CommandDefinition<unknown, unknown>;
 
 type GlobalWithCommands = typeof globalThis & {
   __unikOperationalCommands?: Map<string, AnyDefinition>;
+  __unikOperationalCommandContexts?: WeakMap<object, CommandContext>;
 };
 
 function registry(): Map<string, AnyDefinition> {
@@ -359,10 +364,30 @@ export function versionedAggregate(type: string, model: string): AggregateAdapte
 // Ambient context (lets domain helpers called with `tx` reach the command context)
 // ---------------------------------------------------------------------------
 
-const contexts = new WeakMap<object, CommandContext>();
+/**
+ * The running context, keyed by the transaction client.
+ *
+ * It lives on `globalThis`, like the command registry, and for the same
+ * reason: Next.js compiles a server module ONCE PER WEBPACK LAYER, so
+ * `src/modules/operations/commands.ts` is instantiated several times in the
+ * same process (route handlers, server components and the instrumentation hook
+ * each get their own copy). The registry is shared, so a handler registered by
+ * one copy runs under the `executeCommand` of another; with a module-local
+ * WeakMap that handler could not see the context its own command had just
+ * opened and every work-item and request action failed with `outside_command`.
+ * Verified against `next start`: `workitem.start` threw from a different chunk
+ * than the one running the command.
+ */
+function contexts(): WeakMap<object, CommandContext> {
+  const scope = globalThis as GlobalWithCommands;
+  if (!scope.__unikOperationalCommandContexts) {
+    scope.__unikOperationalCommandContexts = new WeakMap();
+  }
+  return scope.__unikOperationalCommandContexts;
+}
 
 export function getCommandContext(tx: Prisma.TransactionClient): CommandContext | null {
-  return contexts.get(tx as object) ?? null;
+  return contexts().get(tx as object) ?? null;
 }
 
 /** For helpers such as `requestApproval(tx, …)` that must run inside a command. */
@@ -874,18 +899,45 @@ class OperationsCommandContext implements CommandContext {
  * code may throw it too: the engine rolls the transaction back and runs the
  * whole command once more, then answers `concurrency_conflict` (retryable).
  */
+const CONCURRENCY_CONFLICT_BRAND: unique symbol = Symbol.for('unik.operations.concurrencyConflict');
+const CLAIM_LOST_BRAND: unique symbol = Symbol.for('unik.operations.claimLost');
+
 export class ConcurrencyConflict extends Error {
+  // Branded like `OperationsError`: this module is compiled once per webpack
+  // layer, so `instanceof` alone misses an error thrown by another copy.
+  readonly [CONCURRENCY_CONFLICT_BRAND] = true;
+
   constructor() {
     super('Aggregate version changed during the command');
     this.name = 'ConcurrencyConflict';
   }
 }
 
+export function isConcurrencyConflict(err: unknown): err is ConcurrencyConflict {
+  if (err instanceof ConcurrencyConflict) return true;
+  return (
+    typeof err === 'object' &&
+    err !== null &&
+    (err as Record<symbol, unknown>)[CONCURRENCY_CONFLICT_BRAND] === true
+  );
+}
+
 class ClaimLostError extends Error {
+  readonly [CLAIM_LOST_BRAND] = true;
+
   constructor() {
     super('The command claim was taken by another execution');
     this.name = 'ClaimLostError';
   }
+}
+
+function isClaimLostError(err: unknown): err is ClaimLostError {
+  if (err instanceof ClaimLostError) return true;
+  return (
+    typeof err === 'object' &&
+    err !== null &&
+    (err as Record<symbol, unknown>)[CLAIM_LOST_BRAND] === true
+  );
 }
 
 function baseResult<D>(cmd: Pick<DomainCommand, 'commandId' | 'type'>): CommandResult<D> {
@@ -1138,7 +1190,7 @@ async function runInTransaction(
         now,
         occurredAt
       );
-      contexts.set(tx as object, ctx);
+      contexts().set(tx as object, ctx);
       try {
         let aggregateVersion = 0;
         if (definition.aggregate !== 'none') {
@@ -1211,7 +1263,7 @@ async function runInTransaction(
         if (closed.count !== 1) throw new ClaimLostError();
         return { result, events, ctx };
       } finally {
-        contexts.delete(tx as object);
+        contexts().delete(tx as object);
       }
     },
     { timeout: TRANSACTION_TIMEOUT_MS, maxWait: TRANSACTION_MAX_WAIT_MS }
@@ -1346,7 +1398,9 @@ export async function executeCommand<D = unknown>(
       });
       return outcome.result as CommandResult<D>;
     } catch (err) {
-      if (err instanceof ConcurrencyConflict || err instanceof JobDedupeConflictError) {
+      // Both guards check the process-wide brand, never only `instanceof`: the
+      // error may come from another compiled copy of its module (see below).
+      if (isConcurrencyConflict(err) || isJobDedupeConflictError(err)) {
         if (attempt === 0) {
           log('command_retry', { commandId: cmd.commandId, type: cmd.type, reason: err.name });
           continue;
@@ -1372,10 +1426,10 @@ export async function executeCommand<D = unknown>(
         });
         return result;
       }
-      if (err instanceof ClaimLostError) {
+      if (isClaimLostError(err)) {
         return { ...baseResult<D>(cmd), status: 'accepted', replayed: true };
       }
-      if (isOperationsError(err) || err instanceof AuthorizationError) {
+      if (isOperationsError(err) || isAuthorizationError(err)) {
         const code = isOperationsError(err) ? err.code : 'forbidden';
         const result = rejection<D>(cmd, code, err.message);
         await finalizeOutside(cmd.commandId, claim.receivedAt, 'rejected', code, result);

@@ -15,7 +15,8 @@ export const OPERATIONS_COPILOT_ENDPOINTS = {
   mywork: '/app/operations/api/mywork/copilot',
   controlTower: '/app/admin/control-tower/api/copilot',
   /** Scope-aware decision route: proposer, area responsible/backup or holder of the scope permission. */
-  proposal: (proposalId: string) => `/app/operations/api/proposals/${encodeURIComponent(proposalId)}`,
+  proposal: (proposalId: string) =>
+    `/app/operations/api/proposals/${encodeURIComponent(proposalId)}`,
 } as const;
 
 /** Area work tables re-analyze at most once a minute (plan 7.2). */
@@ -30,17 +31,22 @@ export const MYWORK_COPILOT_MIN_AUTO_INTERVAL_MS = 5 * 60_000;
  * Pages of the next phases. While they do not exist, links to them are not rendered (the case
  * number is shown as text): a primary button never lands on a 404.
  */
-export const OPERATIONS_CASE_PAGE_ENABLED = false;
-export const AREA_WORKSPACE_PAGE_ENABLED = false;
+export const OPERATIONS_CASE_PAGE_ENABLED = true;
+/** Area workspaces exist since the areas phase: `/app/areas/<key>/trabajo` is a real page. */
+export const AREA_WORKSPACE_PAGE_ENABLED = true;
 
 /** Link of a case (expediente) page, or null while that page does not exist. */
 export function operationsCaseHref(caseId: string | null | undefined): string | null {
-  return OPERATIONS_CASE_PAGE_ENABLED && caseId ? `/app/operations/cases/${encodeURIComponent(caseId)}` : null;
+  return OPERATIONS_CASE_PAGE_ENABLED && caseId
+    ? `/app/operations/cases/${encodeURIComponent(caseId)}`
+    : null;
 }
 
 /** Link of an area work center, or null while that page does not exist. */
 export function areaWorkspaceHref(areaKey: string | null | undefined): string | null {
-  return AREA_WORKSPACE_PAGE_ENABLED && areaKey ? `/app/areas/${encodeURIComponent(areaKey)}/trabajo` : null;
+  return AREA_WORKSPACE_PAGE_ENABLED && areaKey
+    ? `/app/areas/${encodeURIComponent(areaKey)}/trabajo`
+    : null;
 }
 
 /** Case rooms and the Control Tower react to events of many people: a bit slower. */

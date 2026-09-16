@@ -2,10 +2,7 @@ import { Prisma, type ProductionOperation, type ProductionOrder } from '@prisma/
 import { z } from 'zod';
 import { recordInventoryMovement } from '@/modules/inventory/inventory-service';
 import { SCRAP_LOCATION_CODE } from '@/modules/inventory/inventory-types';
-import {
-  requestApproval,
-  type ApprovalDecidedEvent,
-} from '@/modules/operations/approvals-service';
+import { requestApproval, type ApprovalDecidedEvent } from '@/modules/operations/approvals-service';
 import type { CommandContext, DomainCommand } from '@/modules/operations/commands';
 import { OperationsError, isOperationsError } from '@/modules/operations/errors';
 import { toOperationalJson } from '@/modules/operations/events-service';
@@ -17,6 +14,7 @@ import {
   itemLabel,
   loadOperations,
   loadWorkCenter,
+  notifyProductionUpdate,
   num,
   openWorkItemsFor,
   orderEventOptions,
@@ -38,8 +36,18 @@ import {
   QUALITY_RESULTS,
   manufacturingError,
 } from './manufacturing-types';
-import { loadProductionFacts, loadRecipe, operationFactsOf, type ProductionFacts } from './production-facts';
-import { consumeUnassigned, drawAssigned, materialWarehouses, type PostedConsumption } from './production-materials';
+import {
+  loadProductionFacts,
+  loadRecipe,
+  operationFactsOf,
+  type ProductionFacts,
+} from './production-facts';
+import {
+  consumeUnassigned,
+  drawAssigned,
+  materialWarehouses,
+  type PostedConsumption,
+} from './production-materials';
 import {
   accumulatedMinutes,
   classifyConsumption,
@@ -64,7 +72,11 @@ import {
  */
 
 const idText = z.string().trim().min(1).max(120);
-const positiveQty = z.number().finite().positive('La cantidad debe ser mayor que cero').max(1_000_000_000);
+const positiveQty = z
+  .number()
+  .finite()
+  .positive('La cantidad debe ser mayor que cero')
+  .max(1_000_000_000);
 const unitText = z.string().trim().min(1).max(40);
 
 export const startOperationSchema = z.object({
@@ -115,7 +127,13 @@ export const inspectSchema = z
     operationId: idText.nullish(),
     result: z.enum(QUALITY_RESULTS),
     checklist: z
-      .array(z.object({ item: z.string().trim().min(1).max(200), ok: z.boolean(), note: z.string().trim().max(500).nullish() }))
+      .array(
+        z.object({
+          item: z.string().trim().min(1).max(200),
+          ok: z.boolean(),
+          note: z.string().trim().max(500).nullish(),
+        })
+      )
       .max(50)
       .optional(),
     notes: z.string().trim().max(2000).nullish(),
@@ -128,7 +146,8 @@ export const inspectSchema = z
       issue.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['notes'],
-        message: value.result === 'fail' ? 'Describe la falla de calidad' : 'Describe las observaciones',
+        message:
+          value.result === 'fail' ? 'Describe la falla de calidad' : 'Describe las observaciones',
       });
     }
   });
@@ -157,7 +176,11 @@ export const recordOutputSchema = z
   })
   .superRefine((value, issue) => {
     if (value.kind === 'leftover' && !value.dimensions) {
-      issue.addIssue({ code: z.ZodIssueCode.custom, path: ['dimensions'], message: 'Registra las medidas del sobrante' });
+      issue.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['dimensions'],
+        message: 'Registra las medidas del sobrante',
+      });
     }
   });
 export type RecordOutputInput = z.input<typeof recordOutputSchema>;
@@ -189,7 +212,11 @@ async function operationFacts(tx: Db, order: ProductionOrder, operations: Produc
   return operationFactsOf(operations, checks, recipe);
 }
 
-async function loadOrderOperation(tx: Db, order: ProductionOrder, operationId: string): Promise<ProductionOperation | null> {
+async function loadOrderOperation(
+  tx: Db,
+  order: ProductionOrder,
+  operationId: string
+): Promise<ProductionOperation | null> {
   const op = await tx.productionOperation.findUnique({ where: { id: operationId } });
   return op && op.productionOrderId === order.id ? op : null;
 }
@@ -228,25 +255,37 @@ export async function startOperationInTx(
   if (error) throw new OperationsError('invalid_state', error);
   const operations = await loadOperations(tx, order.id);
   if (operations.length === 0) {
-    throw manufacturingError('no_work_center', 'La orden no tiene operaciones; prográmala en un centro de trabajo');
+    throw manufacturingError(
+      'no_work_center',
+      'La orden no tiene operaciones; prográmala en un centro de trabajo'
+    );
   }
   const facts = await operationFacts(tx, order, operations);
   const target = input.operationId
     ? facts.find((op) => op.id === input.operationId)
-    : (nextStartableOperation(facts) ?? sortOperations(facts).find((op) => op.status === 'pending' || op.status === 'paused'));
-  if (!target) throw new OperationsError('invalid_state', 'La orden no tiene operaciones pendientes');
+    : (nextStartableOperation(facts) ??
+      sortOperations(facts).find((op) => op.status === 'pending' || op.status === 'paused'));
+  if (!target)
+    throw new OperationsError('invalid_state', 'La orden no tiene operaciones pendientes');
   const sequenceError = operationStartError(facts, target.id);
   if (sequenceError) throw manufacturingError('operation_sequence', sequenceError);
   const op = operations.find((candidate) => candidate.id === target.id) as ProductionOperation;
   if (input.assignedUserId) {
-    const user = await tx.user.findUnique({ where: { id: input.assignedUserId }, select: { isActive: true, isBot: true } });
+    const user = await tx.user.findUnique({
+      where: { id: input.assignedUserId },
+      select: { isActive: true, isBot: true },
+    });
     if (!user?.isActive || user.isBot) {
-      throw new OperationsError('invalid_payload', 'La persona asignada no existe o no está activa');
+      throw new OperationsError(
+        'invalid_payload',
+        'La persona asignada no existe o no está activa'
+      );
     }
   }
   const at = instantOf(cmd, ctx.now);
   const resumed = op.status === 'paused';
-  const assignedUserId = input.assignedUserId ?? op.assignedUserId ?? (ctx.actor.type === 'user' ? ctx.actor.id : null);
+  const assignedUserId =
+    input.assignedUserId ?? op.assignedUserId ?? (ctx.actor.type === 'user' ? ctx.actor.id : null);
   const updatedOp = await tx.productionOperation.update({
     where: { id: op.id },
     data: { status: 'running', startedAt: op.startedAt ?? at, assignedUserId },
@@ -284,7 +323,9 @@ export async function startOperationInTx(
       orderEventOptions(order)
     );
     if (order.demandAllocationId) {
-      const allocation = await tx.demandAllocation.findUnique({ where: { id: order.demandAllocationId } });
+      const allocation = await tx.demandAllocation.findUnique({
+        where: { id: order.demandAllocationId },
+      });
       if (allocation && (allocation.status === 'planned' || allocation.status === 'requested')) {
         const moved = await tx.demandAllocation.update({
           where: { id: allocation.id },
@@ -292,8 +333,19 @@ export async function startOperationInTx(
         });
         ctx.emit(
           OPS_EVENTS.allocation.inProgress,
-          { allocationId: moved.id, demandId: moved.demandId, source: moved.source, status: moved.status, productionOrderId: order.id },
-          { caseId: moved.caseId, areaKey: MANUFACTURING_AREA_KEY, objectType: 'demand_allocation', objectId: moved.id }
+          {
+            allocationId: moved.id,
+            demandId: moved.demandId,
+            source: moved.source,
+            status: moved.status,
+            productionOrderId: order.id,
+          },
+          {
+            caseId: moved.caseId,
+            areaKey: MANUFACTURING_AREA_KEY,
+            objectType: 'demand_allocation',
+            objectId: moved.id,
+          }
         );
       }
     }
@@ -320,7 +372,8 @@ export async function pauseOperationInTx(
   if (error) throw new OperationsError('invalid_state', error);
   const op = await loadOrderOperation(tx, order, input.operationId);
   const pauseError = operationPauseError(op);
-  if (pauseError || !op) throw new OperationsError('invalid_state', pauseError ?? 'Operación inválida');
+  if (pauseError || !op)
+    throw new OperationsError('invalid_state', pauseError ?? 'Operación inválida');
   const at = instantOf(cmd, ctx.now);
   const minutes = accumulatedMinutes(op.actualMinutes, await segmentStartOf(tx, op), at);
   const updatedOp = await tx.productionOperation.update({
@@ -329,7 +382,15 @@ export async function pauseOperationInTx(
   });
   ctx.emit(
     MANUFACTURING_EVENTS.operationPaused,
-    { productionOrderId: order.id, number: order.number, operationId: op.id, seq: op.seq, actualMinutes: minutes, reason: input.reason ?? null, at: at.toISOString() },
+    {
+      productionOrderId: order.id,
+      number: order.number,
+      operationId: op.id,
+      seq: op.seq,
+      actualMinutes: minutes,
+      reason: input.reason ?? null,
+      at: at.toISOString(),
+    },
     operationEventOptions(order, op)
   );
   publishOrderChange(ctx, order, { operationId: op.id, operationStatus: 'paused' });
@@ -353,7 +414,8 @@ export async function finishOperationInTx(
   if (error) throw new OperationsError('invalid_state', error);
   const op = await loadOrderOperation(tx, order, input.operationId);
   const finishError = operationFinishError(op);
-  if (finishError || !op) throw new OperationsError('invalid_state', finishError ?? 'Operación inválida');
+  if (finishError || !op)
+    throw new OperationsError('invalid_state', finishError ?? 'Operación inválida');
   const at = instantOf(cmd, ctx.now);
   const measured =
     op.status === 'running'
@@ -389,7 +451,11 @@ export async function finishOperationInTx(
   );
   let inspectionWorkItemId: string | null = null;
   if (nextStatus === 'inspection') {
-    ctx.emit(MANUFACTURING_EVENTS.inspectionReady, { productionOrderId: order.id, number: order.number }, orderEventOptions(order));
+    ctx.emit(
+      MANUFACTURING_EVENTS.inspectionReady,
+      { productionOrderId: order.id, number: order.number },
+      orderEventOptions(order)
+    );
     const open = await openWorkItemsFor(tx, MANUFACTURING_OBJECT_TYPES.productionOrder, order.id, {
       areaKey: MANUFACTURING_AREA_KEY,
       kind: 'verification',
@@ -410,10 +476,15 @@ export async function finishOperationInTx(
   } else {
     const facts = await operationFacts(tx, order, operations);
     if (facts.find((candidate) => candidate.id === op.id)?.qcRequired) {
-      const open = await openWorkItemsFor(tx, MANUFACTURING_OBJECT_TYPES.productionOperation, op.id, {
-        areaKey: MANUFACTURING_AREA_KEY,
-        kind: 'verification',
-      });
+      const open = await openWorkItemsFor(
+        tx,
+        MANUFACTURING_OBJECT_TYPES.productionOperation,
+        op.id,
+        {
+          areaKey: MANUFACTURING_AREA_KEY,
+          kind: 'verification',
+        }
+      );
       inspectionWorkItemId =
         open[0]?.id ??
         (
@@ -462,7 +533,11 @@ export interface ConsumptionResult {
   lines: ConsumptionLineResult[];
 }
 
-function valueOf(products: Map<string, ProductInfo>, zohoItemId: string, quantity: Prisma.Decimal): Prisma.Decimal {
+function valueOf(
+  products: Map<string, ProductInfo>,
+  zohoItemId: string,
+  quantity: Prisma.Decimal
+): Prisma.Decimal {
   const rate = products.get(zohoItemId)?.purchaseRate;
   return rate ? quantity.times(rate).toDecimalPlaces(4) : new Prisma.Decimal(0);
 }
@@ -489,7 +564,8 @@ export async function recordConsumptionInTx(
   for (const line of input.lines) {
     const role = classifyConsumption(recipe.lines, line.zohoItemId, line.substituteFor);
     const label = itemLabel(products, line.zohoItemId);
-    if (role.role === 'invalid') throw new OperationsError('invalid_payload', `${label}: ${role.message}`);
+    if (role.role === 'invalid')
+      throw new OperationsError('invalid_payload', `${label}: ${role.message}`);
     if (line.operationId && !operationIds.has(line.operationId)) {
       throw new OperationsError('invalid_payload', 'La operación indicada no pertenece a la orden');
     }
@@ -547,14 +623,26 @@ export async function recordConsumptionInTx(
         note: input.note ?? `Sustituto permitido en ${order.number}`,
         label,
       });
-      results.push({ ...base, posted, overAssignment: '0', approvalRequestId: null, approvalStatus: null });
+      results.push({
+        ...base,
+        posted,
+        overAssignment: '0',
+        approvalRequestId: null,
+        approvalStatus: null,
+      });
       continue;
     }
     // Outside the BOM: recorded as pending, an incident and a business approval BEFORE posting.
     if (line.stockItemId) {
-      const stock = await tx.stockItem.findUnique({ where: { id: line.stockItemId }, select: { zohoItemId: true } });
+      const stock = await tx.stockItem.findUnique({
+        where: { id: line.stockItemId },
+        select: { zohoItemId: true },
+      });
       if (!stock || stock.zohoItemId !== line.zohoItemId) {
-        throw new OperationsError('invalid_payload', 'La existencia indicada no es de ese material');
+        throw new OperationsError(
+          'invalid_payload',
+          'La existencia indicada no es de ese material'
+        );
       }
     }
     const row = await tx.materialConsumption.create({
@@ -575,7 +663,10 @@ export async function recordConsumptionInTx(
     const { incident } = await ctx.openIncident({
       kind: 'production_substitution',
       areaKey: MANUFACTURING_AREA_KEY,
-      title: `Sustitución fuera de lista en ${order.number}: ${label} por ${originalLabel}`.slice(0, 200),
+      title: `Sustitución fuera de lista en ${order.number}: ${label} por ${originalLabel}`.slice(
+        0,
+        200
+      ),
       dedupeKey: `mfg:substitution:${row.id}`,
       severity: 'medium',
       caseId: order.caseId,
@@ -597,8 +688,13 @@ export async function recordConsumptionInTx(
       caseId: order.caseId,
       areaKey: MANUFACTURING_AREA_KEY,
       requestedByUserId: ctx.actor.id,
-      title: `Sustitución en ${order.number}: ${qtyText(quantity)} ${item.baseUnit} de ${label} en lugar de ${originalLabel}`.slice(0, 200),
-      description: 'Material fuera de la lista de materiales; se descuenta del inventario al aprobarse.',
+      title:
+        `Sustitución en ${order.number}: ${qtyText(quantity)} ${item.baseUnit} de ${label} en lugar de ${originalLabel}`.slice(
+          0,
+          200
+        ),
+      description:
+        'Material fuera de la lista de materiales; se descuenta del inventario al aprobarse.',
     });
     await tx.materialConsumption.update({
       where: { id: row.id },
@@ -651,14 +747,22 @@ export async function recordConsumptionInTx(
 }
 
 /** Reaction to the decision on a substitution outside the BOM (inside the deciding transaction). */
-export async function handleSubstitutionDecision(tx: Db, event: ApprovalDecidedEvent): Promise<void> {
-  const row = await tx.materialConsumption.findUnique({ where: { id: event.approvalRequest.targetId } });
+export async function handleSubstitutionDecision(
+  tx: Db,
+  event: ApprovalDecidedEvent
+): Promise<void> {
+  const row = await tx.materialConsumption.findUnique({
+    where: { id: event.approvalRequest.targetId },
+  });
   if (!row || row.kind !== 'substitution' || row.stockMovementId) return;
   const order = await tx.productionOrder.findUnique({ where: { id: row.productionOrderId } });
   if (!order) return;
   const ctx = event.ctx;
   if (!event.auto) await touchOrder(tx, order.id);
-  await tx.materialConsumption.update({ where: { id: row.id }, data: { approvalRequestId: event.approvalRequest.id } });
+  await tx.materialConsumption.update({
+    where: { id: row.id },
+    data: { approvalRequestId: event.approvalRequest.id },
+  });
   const payload = {
     productionOrderId: order.id,
     number: order.number,
@@ -671,12 +775,20 @@ export async function handleSubstitutionDecision(tx: Db, event: ApprovalDecidedE
     decidedByUserId: event.decidedByUserId,
   };
   if (event.status === 'rejected') {
-    ctx.emit(MANUFACTURING_EVENTS.substitutionRejected, { ...payload, reason: 'rejected' }, orderEventOptions(order));
+    ctx.emit(
+      MANUFACTURING_EVENTS.substitutionRejected,
+      { ...payload, reason: 'rejected' },
+      orderEventOptions(order)
+    );
     publishOrderChange(ctx, order, { substitution: 'rejected' });
     return;
   }
   if (!isOpenOrderStatus(order.status)) {
-    ctx.emit(MANUFACTURING_EVENTS.substitutionRejected, { ...payload, reason: 'order_closed' }, orderEventOptions(order));
+    ctx.emit(
+      MANUFACTURING_EVENTS.substitutionRejected,
+      { ...payload, reason: 'order_closed' },
+      orderEventOptions(order)
+    );
     return;
   }
   const center = order.workCenterId ? await loadWorkCenter(tx, order.workCenterId) : null;
@@ -714,7 +826,11 @@ export async function handleSubstitutionDecision(tx: Db, event: ApprovalDecidedE
       caseId: order.caseId,
       detail: { ...payload, error: err.message },
     });
-    ctx.emit(MANUFACTURING_EVENTS.substitutionRejected, { ...payload, reason: 'posting_failed', error: err.message }, orderEventOptions(order));
+    ctx.emit(
+      MANUFACTURING_EVENTS.substitutionRejected,
+      { ...payload, reason: 'posting_failed', error: err.message },
+      orderEventOptions(order)
+    );
   }
 }
 
@@ -740,16 +856,25 @@ export async function inspectInTx(
   const error = orderActionError('inspect', order.status);
   if (error) throw new OperationsError('invalid_state', error);
   const operations = await loadOperations(tx, order.id);
-  const op = input.operationId ? operations.find((candidate) => candidate.id === input.operationId) : null;
+  const op = input.operationId
+    ? operations.find((candidate) => candidate.id === input.operationId)
+    : null;
   if (input.operationId) {
     if (!op) throw new OperationsError('not_found', 'La operación no pertenece a la orden');
-    if (op.status !== 'done') throw new OperationsError('invalid_state', 'Inspecciona la operación cuando esté terminada');
+    if (op.status !== 'done')
+      throw new OperationsError('invalid_state', 'Inspecciona la operación cuando esté terminada');
   } else if (order.status !== 'inspection') {
-    throw new OperationsError('invalid_state', 'La orden se inspecciona cuando todas sus operaciones terminaron');
+    throw new OperationsError(
+      'invalid_state',
+      'La orden se inspecciona cuando todas sus operaciones terminaron'
+    );
   }
   const evidence = [...new Set(input.evidenceObjectIds ?? [])];
   if (evidence.length > 0) {
-    const found = await tx.storageObject.findMany({ where: { id: { in: evidence } }, select: { id: true } });
+    const found = await tx.storageObject.findMany({
+      where: { id: { in: evidence } },
+      select: { id: true },
+    });
     if (found.length !== evidence.length) {
       throw new OperationsError('evidence_invalid', 'Alguna evidencia de la inspección no existe');
     }
@@ -767,7 +892,9 @@ export async function inspectInTx(
     },
   });
   const pendingChecks = op
-    ? await openWorkItemsFor(tx, MANUFACTURING_OBJECT_TYPES.productionOperation, op.id, { kind: 'verification' })
+    ? await openWorkItemsFor(tx, MANUFACTURING_OBJECT_TYPES.productionOperation, op.id, {
+        kind: 'verification',
+      })
     : await openWorkItemsFor(tx, MANUFACTURING_OBJECT_TYPES.productionOrder, order.id, {
         areaKey: MANUFACTURING_AREA_KEY,
         kind: 'verification',
@@ -782,11 +909,20 @@ export async function inspectInTx(
     const { incident } = await ctx.openIncident({
       kind: 'quality_failure',
       areaKey: MANUFACTURING_AREA_KEY,
-      title: `Falla de calidad en ${order.number}${op ? ` (operación ${op.seq})` : ''}`.slice(0, 200),
+      title: `Falla de calidad en ${order.number}${op ? ` (operación ${op.seq})` : ''}`.slice(
+        0,
+        200
+      ),
       dedupeKey: `mfg:qc:${check.id}`,
       severity: 'high',
       caseId: order.caseId,
-      detail: { productionOrderId: order.id, qualityCheckId: check.id, operationId: op?.id ?? null, notes: input.notes ?? null, failed },
+      detail: {
+        productionOrderId: order.id,
+        qualityCheckId: check.id,
+        operationId: op?.id ?? null,
+        notes: input.notes ?? null,
+        failed,
+      },
     });
     incidentId = incident.id;
     const placement = reworkPlacement(operations, op?.id ?? null);
@@ -812,7 +948,14 @@ export async function inspectInTx(
     }
     ctx.emit(
       MANUFACTURING_EVENTS.reworkAdded,
-      { productionOrderId: order.id, number: order.number, reworkOperationId: rework.id, seq: rework.seq, qualityCheckId: check.id, incidentId },
+      {
+        productionOrderId: order.id,
+        number: order.number,
+        reworkOperationId: rework.id,
+        seq: rework.seq,
+        qualityCheckId: check.id,
+        incidentId,
+      },
       orderEventOptions(order)
     );
   } else if (!op) {
@@ -837,8 +980,19 @@ export async function inspectInTx(
     },
     orderEventOptions(order)
   );
-  publishOrderChange(ctx, { ...order, status: orderStatus }, { qualityCheckId: check.id, result: input.result });
-  return { productionOrderId: order.id, qualityCheckId: check.id, result: input.result, orderStatus, incidentId, reworkOperationId };
+  publishOrderChange(
+    ctx,
+    { ...order, status: orderStatus },
+    { qualityCheckId: check.id, result: input.result }
+  );
+  return {
+    productionOrderId: order.id,
+    qualityCheckId: check.id,
+    result: input.result,
+    orderStatus,
+    incidentId,
+    reworkOperationId,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -859,24 +1013,46 @@ export async function requestScrapApprovalInTx(
   facts: ProductionFacts,
   note: string | null
 ): Promise<ScrapReviewOutcome> {
-  const products = await productInfo(tx, facts.scrap.lines.map((line) => line.zohoItemId));
+  const products = await productInfo(
+    tx,
+    facts.scrap.lines.map((line) => line.zohoItemId)
+  );
   const exceeded = facts.scrap.lines.filter((line) => line.exceeded);
   const summary = exceeded
-    .map((line) => `${itemLabel(products, line.zohoItemId)}: ${qtyText(line.scrap)} de ${qtyText(line.basis)} (${line.pct ?? '—'} %)`)
+    .map(
+      (line) =>
+        `${itemLabel(products, line.zohoItemId)}: ${qtyText(line.scrap)} de ${qtyText(line.basis)} (${line.pct ?? '—'} %)`
+    )
     .join('; ');
   const amount = facts.scrap.lines.reduce(
     (sum, line) => sum.plus(valueOf(products, line.zohoItemId, new Prisma.Decimal(line.scrap))),
     new Prisma.Decimal(0)
   );
   const maxPct = facts.scrap.maxPct ?? 0;
+  // Plan 6.6: "merma fuera de tolerancia" avisa a quien espera la orden; los
+  // aprobadores reciben aparte su `approval_requested`.
+  await notifyProductionUpdate(ctx, order, {
+    type: 'production_scrap_exceeded',
+    title: `Merma fuera de tolerancia en ${order.number}: ${maxPct} %`,
+    body: `Tolerancia ${facts.scrap.allowancePct} %. ${summary || 'La liberación queda detenida hasta que se apruebe la merma.'}`,
+  });
   const { incident } = await ctx.openIncident({
     kind: 'excess_scrap',
     areaKey: MANUFACTURING_AREA_KEY,
-    title: `Merma fuera de tolerancia en ${order.number}: ${maxPct} % (tolerancia ${facts.scrap.allowancePct} %)`.slice(0, 200),
+    title:
+      `Merma fuera de tolerancia en ${order.number}: ${maxPct} % (tolerancia ${facts.scrap.allowancePct} %)`.slice(
+        0,
+        200
+      ),
     dedupeKey: `mfg:scrap:${order.id}:${facts.scrapApprovals.length + 1}`,
     severity: 'high',
     caseId: order.caseId,
-    detail: { productionOrderId: order.id, allowancePct: facts.scrap.allowancePct, lines: facts.scrap.lines, note },
+    detail: {
+      productionOrderId: order.id,
+      allowancePct: facts.scrap.allowancePct,
+      lines: facts.scrap.lines,
+      note,
+    },
   });
   try {
     const outcome = await requestApproval(tx, {
@@ -888,7 +1064,11 @@ export async function requestScrapApprovalInTx(
       caseId: order.caseId,
       areaKey: MANUFACTURING_AREA_KEY,
       requestedByUserId: ctx.actor.id,
-      title: `Merma de ${order.number}: ${maxPct} % sobre una tolerancia de ${facts.scrap.allowancePct} %`.slice(0, 200),
+      title:
+        `Merma de ${order.number}: ${maxPct} % sobre una tolerancia de ${facts.scrap.allowancePct} %`.slice(
+          0,
+          200
+        ),
       description: [summary, note].filter(Boolean).join('. ').slice(0, 1000) || null,
     });
     ctx.emit(
@@ -905,13 +1085,26 @@ export async function requestScrapApprovalInTx(
       },
       orderEventOptions(order)
     );
-    return { approvalRequestId: outcome.approvalRequest.id, status: outcome.status, incidentId: incident.id };
+    return {
+      approvalRequestId: outcome.approvalRequest.id,
+      status: outcome.status,
+      incidentId: incident.id,
+    };
   } catch (err) {
     // Nobody can approve: the incident stays open and the release remains blocked.
     if (!isOperationsError(err) || err.code !== 'no_approvers') throw err;
     ctx.emit(
       MANUFACTURING_EVENTS.scrapExceeded,
-      { productionOrderId: order.id, number: order.number, approvalRequestId: null, approvalStatus: 'no_approvers', incidentId: incident.id, maxPct, allowancePct: facts.scrap.allowancePct, lines: exceeded },
+      {
+        productionOrderId: order.id,
+        number: order.number,
+        approvalRequestId: null,
+        approvalStatus: 'no_approvers',
+        incidentId: incident.id,
+        maxPct,
+        allowancePct: facts.scrap.allowancePct,
+        lines: exceeded,
+      },
       orderEventOptions(order)
     );
     return { approvalRequestId: null, status: 'no_approvers', incidentId: incident.id };
@@ -920,7 +1113,9 @@ export async function requestScrapApprovalInTx(
 
 /** Reaction to the decision on excess scrap: the release gate reads the approval itself. */
 export async function handleScrapDecision(tx: Db, event: ApprovalDecidedEvent): Promise<void> {
-  const order = await tx.productionOrder.findUnique({ where: { id: event.approvalRequest.targetId } });
+  const order = await tx.productionOrder.findUnique({
+    where: { id: event.approvalRequest.targetId },
+  });
   if (!order) return;
   if (!event.auto) await touchOrder(tx, order.id);
   const approved = event.status === 'approved';
@@ -951,7 +1146,13 @@ export interface OutputResult {
   producedQty: string;
   scrapQty: string;
   leftoverQty: string;
-  scrap: { exceeded: boolean; pending: boolean; maxPct: number | null; approvalRequestId: string | null; approvalStatus: string | null } | null;
+  scrap: {
+    exceeded: boolean;
+    pending: boolean;
+    maxPct: number | null;
+    approvalRequestId: string | null;
+    approvalStatus: string | null;
+  } | null;
 }
 
 export async function recordOutputInTx(
@@ -961,7 +1162,10 @@ export async function recordOutputInTx(
   input: z.output<typeof recordOutputSchema>
 ): Promise<OutputResult> {
   const finished = input.kind === 'finished';
-  const error = orderActionError(finished ? 'record_finished_output' : 'record_other_output', order.status);
+  const error = orderActionError(
+    finished ? 'record_finished_output' : 'record_other_output',
+    order.status
+  );
   if (error) throw new OperationsError('invalid_state', error);
   const units = unitsResolver(tx, 'write');
   const recipe = await loadRecipe(tx, order, units);
@@ -979,13 +1183,25 @@ export async function recordOutputInTx(
   if (finished) {
     zohoItemId = input.zohoItemId ?? order.outputZohoItemId;
     if (zohoItemId !== order.outputZohoItemId) {
-      throw new OperationsError('invalid_payload', 'El producto terminado debe ser el producto de la orden');
+      throw new OperationsError(
+        'invalid_payload',
+        'El producto terminado debe ser el producto de la orden'
+      );
     }
     warehouseId = order.outputWarehouseId;
-    const demand = order.demandId ? await tx.caseDemand.findUnique({ where: { id: order.demandId }, select: { variantKey: true } }) : null;
+    const demand = order.demandId
+      ? await tx.caseDemand.findUnique({
+          where: { id: order.demandId },
+          select: { variantKey: true },
+        })
+      : null;
     variantKey = demand?.variantKey ?? '';
     const check = await tx.qualityCheck.findFirst({
-      where: { productionOrderId: order.id, operationId: null, result: { in: ['pass', 'conditional'] } },
+      where: {
+        productionOrderId: order.id,
+        operationId: null,
+        result: { in: ['pass', 'conditional'] },
+      },
       orderBy: [{ inspectedAt: 'desc' }],
       select: { id: true },
     });
@@ -993,9 +1209,14 @@ export async function recordOutputInTx(
   } else {
     const fallback = inputIds.length === 1 ? inputIds[0] : null;
     const chosen = input.zohoItemId ?? fallback;
-    if (!chosen) throw new OperationsError('invalid_payload', 'Indica el material del sobrante o la merma');
+    if (!chosen)
+      throw new OperationsError('invalid_payload', 'Indica el material del sobrante o la merma');
     zohoItemId = chosen;
-    const allowed = new Set([...inputIds, ...substituteIds, ...(input.kind === 'scrap' ? [order.outputZohoItemId] : [])]);
+    const allowed = new Set([
+      ...inputIds,
+      ...substituteIds,
+      ...(input.kind === 'scrap' ? [order.outputZohoItemId] : []),
+    ]);
     if (!allowed.has(zohoItemId)) {
       throw new OperationsError(
         'invalid_payload',
@@ -1037,7 +1258,9 @@ export async function recordOutputInTx(
       zohoItemId,
       qty: quantity,
       unit: item.baseUnit,
-      ...(input.kind === 'leftover' && input.dimensions ? { dimensions: toOperationalJson(input.dimensions) } : {}),
+      ...(input.kind === 'leftover' && input.dimensions
+        ? { dimensions: toOperationalJson(input.dimensions) }
+        : {}),
       stockMovementId: movement.movement.id,
       stockItemId: movement.stockItem.id,
       locationId: movement.stockItem.locationId,
@@ -1048,7 +1271,9 @@ export async function recordOutputInTx(
   const data: Prisma.ProductionOrderUpdateInput = {};
   if (finished) {
     const outputUnits = await units(order.outputZohoItemId);
-    data.producedQty = { increment: quantity.dividedBy(unitFactor(order.plannedUnit, outputUnits)).toDecimalPlaces(4) };
+    data.producedQty = {
+      increment: quantity.dividedBy(unitFactor(order.plannedUnit, outputUnits)).toDecimalPlaces(4),
+    };
   } else if (input.kind === 'scrap') data.scrapQty = { increment: quantity };
   else data.leftoverQty = { increment: quantity };
   const updated = await tx.productionOrder.update({ where: { id: order.id }, data });
@@ -1077,7 +1302,10 @@ export async function recordOutputInTx(
     const facts = await loadProductionFacts(tx, updated, units);
     let approvalRequestId: string | null = facts.scrapApprovals.at(-1)?.id ?? null;
     let approvalStatus: string | null = facts.scrapApprovals.at(-1)?.status ?? null;
-    if (facts.scrap.exceeded && (facts.scrapApproval === 'none' || facts.scrapApproval === 'stale')) {
+    if (
+      facts.scrap.exceeded &&
+      (facts.scrapApproval === 'none' || facts.scrapApproval === 'stale')
+    ) {
       const outcome = await requestScrapApprovalInTx(tx, ctx, updated, facts, input.reason ?? null);
       approvalRequestId = outcome.approvalRequestId;
       approvalStatus = outcome.status;
@@ -1128,7 +1356,10 @@ export async function requestScrapReviewInTx(
   }
   const outcome = await requestScrapApprovalInTx(tx, ctx, order, facts, input.reason);
   if (outcome.status === 'no_approvers') {
-    throw new OperationsError('no_approvers', 'No hay quién pueda aprobar incidencias de producción');
+    throw new OperationsError(
+      'no_approvers',
+      'No hay quién pueda aprobar incidencias de producción'
+    );
   }
   publishOrderChange(ctx, order, { scrapApprovalRequestId: outcome.approvalRequestId });
   return outcome;

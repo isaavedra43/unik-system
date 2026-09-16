@@ -14,6 +14,8 @@ import '@/modules/comms/comms-jobs';
 import '@/modules/ai/ai-jobs';
 import '@/modules/notifications/notification-jobs';
 import '@/modules/operations/operations-jobs';
+// Área: refresco de los paneles (DashboardSnapshot) cada 5 minutos y bajo demanda.
+import '@/modules/areas/areas-jobs';
 import '@/modules/logistics/logistics-jobs';
 import '@/modules/purchases/purchases-jobs';
 import '@/modules/manufacturing/manufacturing-jobs';
@@ -23,3 +25,5 @@ import '@/modules/sales/close-tickets-jobs';
 // Coordinated AI layer: agents.dispatch / stuck_scan / control_tower_digest handlers, and the
 // dispatcher subscription to operational events, new cases and @mentions of bot users.
 import '@/modules/agents/agents-jobs';
+// Control Tower: ct.projections_refresh (process mining) + the control_tower dashboard snapshot.
+import '@/modules/control-tower/control-tower-jobs';

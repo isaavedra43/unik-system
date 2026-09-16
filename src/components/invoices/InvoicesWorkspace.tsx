@@ -21,7 +21,7 @@ import {
 } from '@/modules/invoices/invoices-helpers';
 import { getSalesOrderStatusConfig } from '@/modules/sales/sales-orders-helpers';
 import { InvoicePreviewDrawer } from './InvoicePreviewDrawer';
-import { CurrentUser } from '@/modules/auth/authorization';
+import type { CurrentUser } from '@/modules/auth/authorization';
 import type {
   EntityColumnDefinition,
   EntityListResult,
@@ -128,6 +128,8 @@ export function InvoicesWorkspace(props: InvoicesWorkspaceProps) {
       tableKey={props.tableKey}
       entityLabel={props.entityLabel}
       entityLabelPlural={props.entityLabelPlural}
+      // Factura, Cotización, Orden de compra: femeninas.
+      entityGender="f"
       basePath={props.basePath}
       permissionView={props.permissionView}
       permissionExport={props.permissionExport}
@@ -135,7 +137,9 @@ export function InvoicesWorkspace(props: InvoicesWorkspaceProps) {
       permissionShareViews={props.permissionShareViews}
       initialData={props.initialData as unknown as EntityListResult<InvoiceListRow>}
       initialQuery={initialQuery}
-      preference={props.preference as unknown as import('@/modules/shared/entity-workspace-types').TablePreferenceConfig}
+      preference={
+        props.preference as unknown as import('@/modules/shared/entity-workspace-types').TablePreferenceConfig
+      }
       views={props.views}
       defaultViewId={props.defaultViewId}
       watchedIds={props.watchedIds}

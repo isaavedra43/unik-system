@@ -89,6 +89,19 @@ interface CreateTableViewInput {
   visibility: 'private' | 'shared';
   config: unknown;
   isDefault?: boolean;
+  /**
+   * Schema that validates `config` for tables that are not the sales orders
+   * one (their filterable fields are different). Defaults to the sales order
+   * view schema, so existing callers behave exactly as before.
+   */
+  configSchema?: { parse: (value: unknown) => unknown };
+  /**
+   * Permission that allows sharing a view of this table. Defaults to
+   * `sales_orders.share_views` (the historical rule). A list means "any of
+   * these", which is what an area needs: its right to act is a set of keys
+   * (`crm.manage`, `purchases.manage_orders`, …), not a single one.
+   */
+  sharePermission?: string | readonly string[];
 }
 
 export async function createTableView(
@@ -96,14 +109,16 @@ export async function createTableView(
   input: CreateTableViewInput
 ): Promise<TableViewRow> {
   if (input.visibility === 'shared') {
-    // Caller must have sales_orders.share_views — checked at action layer.
-    // Double-check here for defense in depth.
-    if (!user.isSuperAdmin && !user.permissionKeys.includes('sales_orders.share_views')) {
+    // Caller must hold the share permission of the table — checked at action
+    // layer. Double-check here for defense in depth.
+    const required = input.sharePermission ?? 'sales_orders.share_views';
+    const candidates = typeof required === 'string' ? [required] : required;
+    if (!user.isSuperAdmin && !candidates.some((key) => user.permissionKeys.includes(key))) {
       throw new AuthorizationError('No puedes compartir vistas');
     }
   }
 
-  const validatedConfig = salesOrderViewConfigSchema.parse(input.config);
+  const validatedConfig = (input.configSchema ?? salesOrderViewConfigSchema).parse(input.config);
 
   const row = await prisma.tableView.create({
     data: {

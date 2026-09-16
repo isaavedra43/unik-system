@@ -35,6 +35,7 @@ import { getFleetAvailability } from './fleet-service';
 import {
   arriveStopCommand,
   buildTripCommand,
+  cancelTripCommand,
   closeTripCommand,
   completeStopCommand,
   createDeliveryOrderCommand,
@@ -275,6 +276,82 @@ describe('trip execution', () => {
     expect(eventsOf('trip.closed')).toHaveLength(1);
   });
 
+  /**
+   * Plan 6.6: la categoría `delivery_update` del catálogo tiene que producir
+   * avisos de verdad. El dueño del expediente (Ventas) se entera de que su
+   * entrega salió, de que se entregó y de que una parada falló; el chofer que
+   * ejecuta la acción nunca se avisa a sí mismo (lo resuelve `notifyUser` con
+   * el `actorUserId` que el motor le pasa).
+   */
+  it('avisa al dueño del expediente cuando la entrega sale, se entrega y falla', async () => {
+    const built = await build();
+    const tripId = built.data!.tripId;
+    const [nearStop, farStop] = built.data!.stops;
+    const notices = (type: string) =>
+      (mocks.notifyUser.mock.calls as unknown as Array<[Record<string, unknown>]>)
+        .map(([input]) => input)
+        .filter((input) => input.type === type);
+
+    expect(
+      (await startTripCommand(scenario.driverUser, { tripId }, { commandId: 'cmd-n-start' })).status
+    ).toBe('completed');
+    const dispatched = notices('delivery_dispatched');
+    expect(dispatched).toHaveLength(2);
+    expect(dispatched[0]).toMatchObject({
+      userId: 'u_sales',
+      actorUserId: 'u_driver',
+      category: 'delivery_update',
+      title: 'Salió a ruta la entrega de EXP-000001 · SO-00001',
+      url: `/app/operations/cases/${scenario.caseId}`,
+      entityType: 'delivery_order',
+    });
+
+    seedEvidence(fake, nearOrderId, { objectId: 'obj_notice' });
+    expect(
+      (
+        await completeStopCommand(
+          scenario.driverUser,
+          {
+            tripId,
+            stopId: nearStop.stopId,
+            lines: [{ allocationId: 'alloc_2', deliveredQty: 20 }],
+            receivedBy: 'Juan Pérez',
+            evidenceObjectIds: ['obj_notice'],
+          },
+          { commandId: 'cmd-n-complete' }
+        )
+      ).status
+    ).toBe('pending_external');
+    expect(notices('delivery_confirmed')).toEqual([
+      expect.objectContaining({
+        userId: 'u_sales',
+        category: 'delivery_update',
+        title: 'Entregada la entrega de EXP-000001 · SO-00001',
+        body: 'Recibió Juan Pérez',
+        entityId: nearOrderId,
+      }),
+    ]);
+
+    expect(
+      (
+        await failStopCommand(
+          scenario.driverUser,
+          { tripId, stopId: farStop.stopId, reason: 'Cliente ausente' },
+          { commandId: 'cmd-n-fail' }
+        )
+      ).status
+    ).toBe('completed');
+    expect(notices('delivery_failed')).toEqual([
+      expect.objectContaining({
+        userId: 'u_sales',
+        category: 'delivery_update',
+        title: 'No se pudo entregar EXP-000001 · SO-00001',
+        body: expect.stringContaining('Cliente ausente'),
+        entityId: farOrderId,
+      }),
+    ]);
+  });
+
   it('a shipping delivery without its Zoho package never leaves', async () => {
     const built = await build();
     row('deliveryOrder', farOrderId).packageId = null;
@@ -310,6 +387,156 @@ describe('trip execution', () => {
       { commandId: 'cmd-reorder-ok' }
     );
     expect(same.status).toBe('completed');
+  });
+});
+
+/**
+ * Plan §4: `Trip.status = cancelled`. El viaje que no va a salir (se descompuso
+ * la unidad, se cayó la ruta) se cancela: sus entregas regresan a Despacho SIN
+ * marcarse como fallidas, que es justo lo que obligaba a hacer `trip.close`
+ * («quedan N paradas sin entregar ni marcar como fallidas») e inventaba
+ * incidencias de entrega que nunca ocurrieron.
+ */
+describe('cancelTrip', () => {
+  it('libera las entregas de un viaje planeado sin marcar ninguna parada como fallida', async () => {
+    const built = await build();
+    const tripId = built.data!.tripId;
+    const before = row('deliveryOrder', nearOrderId).status;
+
+    const cancelled = await cancelTripCommand(
+      scenario.dispatcher,
+      { tripId, reason: 'Se descompuso la unidad' },
+      { commandId: 'cmd-cancel' }
+    );
+    expect(cancelled.status).toBe('completed');
+    expect(cancelled.data).toMatchObject({ status: 'cancelled', alreadyCancelled: false });
+    expect([...cancelled.data!.releasedDeliveryOrderIds].sort()).toStrictEqual(
+      [farOrderId, nearOrderId].sort()
+    );
+
+    expect(row('trip', tripId)).toMatchObject({ status: 'cancelled' });
+    expect(row('trip', tripId).endedAt).not.toBeNull();
+    // Ninguna parada se marca fallida: nadie intentó entregar.
+    expect(fake.rows('tripStop').map((stop) => stop.status)).toStrictEqual(['pending', 'pending']);
+    expect(eventsOf('trip.stop_failed')).toHaveLength(0);
+    // Ni incidencias ni avisos al cliente inventados.
+    expect(fake.rows('areaRequest').filter((r) => r.kind === 'customer_notice')).toHaveLength(0);
+
+    expect(row('deliveryOrder', nearOrderId)).toMatchObject({ tripId: null, status: before });
+    expect(row('deliveryOrder', farOrderId)).toMatchObject({ tripId: null, status: before });
+    expect(eventsOf('trip.cancelled')).toHaveLength(1);
+    expect(eventsOf('delivery.released_from_trip')).toHaveLength(2);
+
+    // La unidad y el chofer quedan libres ese día y el viaje sale de la PWA.
+    const availability = await getFleetAvailability('2026-09-16');
+    expect(availability.vehicles[0]).toMatchObject({ code: 'CAM-01', available: true });
+    expect((await getDriverToday(scenario.driverUser, { date: '2026-09-16' })).trips).toHaveLength(
+      0
+    );
+  });
+
+  it('regresa una entrega en camino al estado que describe su espejo de Zoho', async () => {
+    const built = await build();
+    const tripId = built.data!.tripId;
+    expect(
+      (await startTripCommand(scenario.dispatcher, { tripId }, { commandId: 'cmd-c-start' })).status
+    ).toBe('completed');
+    // Zoho ya confirmó el embarque de una de las dos y por eso salió «En camino».
+    const confirmed = row('deliveryOrder', nearOrderId);
+    confirmed.status = 'dispatched';
+    confirmed.zohoSyncState = 'readback_ok';
+
+    const cancelled = await cancelTripCommand(
+      scenario.dispatcher,
+      { tripId, reason: 'Se ponchó la unidad a media ruta' },
+      { commandId: 'cmd-cancel-route' }
+    );
+    expect(cancelled.status).toBe('completed');
+    expect(row('deliveryOrder', nearOrderId)).toMatchObject({
+      status: 'assigned',
+      tripId: null,
+      // El transporte escrito en Zoho sobrevive: sólo se cayó el viaje.
+      vehicleId: 'veh_1',
+      driverId: 'drv_1',
+    });
+    // La otra seguía esperando a Zoho: conserva su estado.
+    expect(row('deliveryOrder', farOrderId)).toMatchObject({
+      status: 'pending_external',
+      tripId: null,
+    });
+    const returned = (mocks.notifyUser.mock.calls as unknown as Array<[Record<string, unknown>]>)
+      .map(([input]) => input)
+      .filter((input) => input.type === 'delivery_returned');
+    expect(returned).toHaveLength(1);
+    expect(returned[0]).toMatchObject({ userId: 'u_sales', entityId: nearOrderId });
+  });
+
+  it('un viaje que ya entregó algo se cierra, no se cancela', async () => {
+    const built = await build();
+    const tripId = built.data!.tripId;
+    const [nearStop] = built.data!.stops;
+    await startTripCommand(scenario.dispatcher, { tripId }, { commandId: 'cmd-c-start-2' });
+    seedEvidence(fake, nearOrderId, { objectId: 'obj_cancel' });
+    expect(
+      (
+        await completeStopCommand(
+          scenario.driverUser,
+          {
+            tripId,
+            stopId: nearStop.stopId,
+            lines: [{ allocationId: 'alloc_2', deliveredQty: 20 }],
+            receivedBy: 'Juan Pérez',
+            evidenceObjectIds: ['obj_cancel'],
+          },
+          { commandId: 'cmd-c-complete' }
+        )
+      ).status
+    ).toBe('pending_external');
+
+    const rejected = await cancelTripCommand(
+      scenario.dispatcher,
+      { tripId, reason: 'Ya no' },
+      { commandId: 'cmd-cancel-late' }
+    );
+    expect(rejected).toMatchObject({ status: 'rejected', errorCode: 'trip_has_deliveries' });
+    expect(row('trip', tripId)).toMatchObject({ status: 'en_route' });
+  });
+
+  it('cancelar es decisión de despacho y es idempotente', async () => {
+    const built = await build();
+    const tripId = built.data!.tripId;
+    const driverTried = await cancelTripCommand(
+      scenario.driverUser,
+      { tripId, reason: 'No quiero salir' },
+      { commandId: 'cmd-cancel-driver' }
+    );
+    expect(driverTried).toMatchObject({ status: 'rejected', errorCode: 'forbidden' });
+    expect(row('trip', tripId)).toMatchObject({ status: 'planned' });
+
+    const empty = await cancelTripCommand(
+      scenario.dispatcher,
+      { tripId, reason: '  ' },
+      { commandId: 'cmd-cancel-empty' }
+    );
+    expect(empty).toMatchObject({ status: 'rejected', errorCode: 'invalid_payload' });
+
+    expect(
+      (
+        await cancelTripCommand(
+          scenario.dispatcher,
+          { tripId, reason: 'Se canceló la ruta' },
+          { commandId: 'cmd-cancel-once' }
+        )
+      ).status
+    ).toBe('completed');
+    const again = await cancelTripCommand(
+      scenario.dispatcher,
+      { tripId, reason: 'Se canceló la ruta' },
+      { commandId: 'cmd-cancel-twice' }
+    );
+    expect(again.status).toBe('completed');
+    expect(again.data).toMatchObject({ alreadyCancelled: true, releasedDeliveryOrderIds: [] });
+    expect(eventsOf('trip.cancelled')).toHaveLength(1);
   });
 });
 

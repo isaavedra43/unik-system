@@ -1,0 +1,504 @@
+/*
+ * Área operativa: shell, centro de trabajo, panel y comunicaciones.
+ * Sólo tokens (--unik-*): ningún color literal. Se importa desde
+ * src/app/app/areas/[areaKey]/layout.tsx (Next permite CSS global en el layout).
+ */
+
+/* ---------------------------------------------------------------- Shell */
+
+.area-shell {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--unik-space-4);
+  min-width: 0;
+}
+
+.area-shell-heading {
+  display: flex;
+  align-items: center;
+  gap: var(--unik-space-3);
+  min-width: 0;
+}
+
+.area-shell-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: var(--unik-radius-md);
+  background: var(--unik-brand-subtle, var(--unik-surface-hover));
+  color: var(--unik-brand);
+  flex: 0 0 auto;
+}
+
+.area-shell-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--unik-space-2) var(--unik-space-4);
+  font-size: var(--unik-text-xs);
+  color: var(--unik-text-secondary);
+}
+
+.area-shell-meta strong {
+  color: var(--unik-text);
+  font-weight: 600;
+}
+
+/* Chip de tiempo real */
+.area-live {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--unik-space-2);
+  padding: 0.2rem 0.55rem;
+  border: 1px solid var(--unik-border);
+  border-radius: var(--unik-radius-full);
+  background: var(--unik-surface);
+  font-size: var(--unik-text-xs);
+  color: var(--unik-text-secondary);
+  white-space: nowrap;
+}
+
+.area-live-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: var(--unik-radius-full);
+  background: var(--unik-success);
+  flex: 0 0 auto;
+}
+
+.area-live-idle .area-live-dot {
+  background: var(--unik-text-muted);
+}
+
+.area-live-pulse .area-live-dot {
+  animation: area-live-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes area-live-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .area-live-pulse .area-live-dot {
+    animation: none;
+  }
+}
+
+/* --------------------------------------------------------------- Espacios */
+
+.area-space {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--unik-space-4);
+  min-width: 0;
+}
+
+.area-space-description {
+  font-size: var(--unik-text-sm);
+  color: var(--unik-text-secondary);
+  margin: 0;
+}
+
+.area-empty {
+  display: grid;
+  gap: var(--unik-space-2);
+  padding: var(--unik-space-6);
+  border: 1px dashed var(--unik-border);
+  border-radius: var(--unik-radius-md);
+  background: var(--unik-surface);
+  text-align: center;
+  color: var(--unik-text-secondary);
+  font-size: var(--unik-text-sm);
+}
+
+.area-empty strong {
+  color: var(--unik-text);
+  font-size: var(--unik-text-base);
+}
+
+/* --------------------------------------------------- Centro de trabajo */
+
+.area-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 360px;
+  gap: var(--unik-space-4);
+  align-items: start;
+  min-width: 0;
+  min-height: 0;
+}
+
+.area-workspace-main {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--unik-space-3);
+  /* Own stacking context: the sticky `thead` of the table carries z-index 10 and
+     would otherwise paint its headers on top of the copilot panel. */
+  position: relative;
+  z-index: 0;
+}
+
+.area-workspace-aside {
+  position: sticky;
+  z-index: 1;
+  top: var(--unik-space-4);
+  height: calc(100vh - var(--unik-topbar-height, 60px) - var(--unik-space-8));
+  min-height: 24rem;
+  border: 1px solid var(--unik-border);
+  border-radius: var(--unik-radius-md);
+  background: var(--unik-surface);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.area-workspace-aside > * {
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+/* Chips de la barra de herramientas */
+.area-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--unik-space-3);
+  align-items: center;
+  padding: var(--unik-space-2) var(--unik-space-3);
+  border-bottom: 1px solid var(--unik-border-subtle, var(--unik-border));
+}
+
+.area-chip-group {
+  display: flex;
+  gap: var(--unik-space-1);
+  flex-wrap: wrap;
+  align-items: center;
+  min-width: 0;
+}
+
+.area-chip-group-label {
+  font-size: var(--unik-text-xs);
+  color: var(--unik-text-muted);
+  margin-right: var(--unik-space-1);
+  white-space: nowrap;
+}
+
+.area-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--unik-space-1);
+  padding: 0.25rem 0.7rem;
+  border: 1px solid var(--unik-border);
+  border-radius: var(--unik-radius-full);
+  background: var(--unik-surface);
+  color: var(--unik-text-secondary);
+  font-size: var(--unik-text-xs);
+  line-height: 1.6;
+  white-space: nowrap;
+  text-decoration: none;
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.area-chip:hover {
+  background: var(--unik-surface-hover);
+  color: var(--unik-text);
+}
+
+.area-chip:focus-visible {
+  outline: 2px solid var(--unik-brand);
+  outline-offset: 2px;
+}
+
+.area-chip-active {
+  background: var(--unik-brand-subtle, var(--unik-surface-hover));
+  border-color: var(--unik-brand);
+  color: var(--unik-brand);
+  font-weight: 600;
+}
+
+/* Celdas de la tabla */
+.area-row-kind {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--unik-space-1);
+  font-size: var(--unik-text-xs);
+  color: var(--unik-text-secondary);
+  white-space: nowrap;
+}
+
+.area-row-title {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.1rem;
+  min-width: 0;
+}
+
+.area-row-title-main {
+  font-weight: 500;
+  color: var(--unik-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.area-row-sub {
+  font-size: var(--unik-text-xs);
+  color: var(--unik-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.area-row-due-danger {
+  color: var(--unik-danger);
+  font-weight: 500;
+}
+
+.area-row-due-warning {
+  color: var(--unik-warning);
+  font-weight: 500;
+}
+
+.area-row-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* Copiloto en móvil / tablet */
+.area-copilot-sheet {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.area-copilot-sheet > * {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* ------------------------------------------------------------- Cajón */
+
+.area-drawer-body {
+  display: grid;
+  gap: var(--unik-space-5);
+}
+
+.area-drawer-section {
+  display: grid;
+  gap: var(--unik-space-2);
+}
+
+.area-drawer-section-title {
+  font-size: var(--unik-text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--unik-text-muted);
+  font-weight: 600;
+  margin: 0;
+}
+
+.area-drawer-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--unik-space-3);
+}
+
+.area-drawer-field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.area-drawer-field dt {
+  font-size: var(--unik-text-xs);
+  color: var(--unik-text-muted);
+}
+
+.area-drawer-field dd {
+  margin: 0;
+  font-size: var(--unik-text-sm);
+  color: var(--unik-text);
+  overflow-wrap: anywhere;
+}
+
+.area-drawer-quote {
+  margin: 0;
+  padding: var(--unik-space-3);
+  border-left: 3px solid var(--unik-border);
+  background: var(--unik-surface-hover);
+  border-radius: var(--unik-radius-sm);
+  font-size: var(--unik-text-sm);
+  color: var(--unik-text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.area-timeline {
+  display: grid;
+  gap: var(--unik-space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: 16rem;
+  overflow-y: auto;
+}
+
+.area-timeline li {
+  font-size: var(--unik-text-xs);
+  color: var(--unik-text-secondary);
+  font-variant-numeric: tabular-nums;
+  padding: 0.2rem 0;
+  border-bottom: 1px solid var(--unik-border-subtle, var(--unik-border));
+}
+
+.area-timeline li:last-child {
+  border-bottom: 0;
+}
+
+.area-evidence-list {
+  display: grid;
+  gap: var(--unik-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.area-evidence-item {
+  display: flex;
+  align-items: center;
+  gap: var(--unik-space-2);
+  font-size: var(--unik-text-sm);
+  color: var(--unik-text-secondary);
+}
+
+.area-drawer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--unik-space-2);
+}
+
+/* ------------------------------------------------------------ Panel */
+
+.area-dashboard {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--unik-space-4);
+  min-width: 0;
+}
+
+.area-dashboard-charts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--unik-space-4);
+}
+
+.area-dashboard-freshness {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--unik-space-2);
+  font-size: var(--unik-text-xs);
+  color: var(--unik-text-muted);
+}
+
+/* --------------------------------------------------- Comunicaciones */
+
+.area-comms {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--unik-space-4);
+  align-items: start;
+}
+
+.area-comms-list {
+  display: grid;
+  gap: var(--unik-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.area-comms-item {
+  display: grid;
+  gap: 0.15rem;
+  padding: var(--unik-space-3);
+  border: 1px solid var(--unik-border);
+  border-radius: var(--unik-radius-md);
+  background: var(--unik-surface);
+}
+
+.area-comms-item-title {
+  font-size: var(--unik-text-sm);
+  font-weight: 500;
+  color: var(--unik-text);
+}
+
+.area-comms-item-meta {
+  font-size: var(--unik-text-xs);
+  color: var(--unik-text-muted);
+}
+
+/* -------------------------------------------------------- Responsive */
+
+@media (max-width: 1280px) {
+  .area-workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .area-workspace-aside {
+    display: none;
+  }
+
+  .area-dashboard-charts,
+  .area-comms {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 768px) {
+  .area-chips {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .area-chips::-webkit-scrollbar {
+    display: none;
+  }
+
+  /*
+   * The row scrolls sideways, so nothing inside it may shrink: a flex child
+   * shrinks before it overflows, and the groups were squeezing until the
+   * "Estado" label sat on top of its own chips instead of the bar scrolling.
+   */
+  .area-chip-group {
+    flex-wrap: nowrap;
+    flex: 0 0 auto;
+    min-width: max-content;
+  }
+
+  .area-chip {
+    min-height: 2.25rem;
+    flex: 0 0 auto;
+  }
+
+  .area-drawer-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .area-shell-meta {
+    gap: var(--unik-space-1) var(--unik-space-3);
+  }
+}

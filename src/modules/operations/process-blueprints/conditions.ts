@@ -178,6 +178,32 @@ export function isCustomerPickup(deliveryMethod: string | null | undefined): boo
   return PICKUP_PATTERNS.some((pattern) => pattern.test(text));
 }
 
+/**
+ * Words that only name a third party carrying the goods. Deliberately narrow:
+ * a false positive creates a delivery that cannot be loaded on a trip of the
+ * own fleet, so anything ambiguous («flete», «envío», a city name) is left out
+ * and Logística switches the mode by hand when it has to.
+ */
+const CARRIER_PATTERNS = [
+  /\bpaqueteria\b/,
+  /\bmensajeria\b/,
+  /\btransportista\b/,
+  /\blinea transportista\b/,
+  /\bcarrier\b/,
+];
+
+/**
+ * Whether Zoho's delivery method means an external carrier ships it
+ * (`PAQUETERÍA`, `Mensajería`, `Transportista`), so the delivery is born
+ * `carrier` and never asks for a unit of ours (plan §4 `DeliveryOrder.mode`).
+ * A pickup wins over this: the customer collecting is not a shipment.
+ */
+export function isCarrierDelivery(deliveryMethod: string | null | undefined): boolean {
+  const text = normalizeText(deliveryMethod);
+  if (!text || isCustomerPickup(text)) return false;
+  return CARRIER_PATTERNS.some((pattern) => pattern.test(text));
+}
+
 // ---------------------------------------------------------------------------
 // Catalog
 // ---------------------------------------------------------------------------

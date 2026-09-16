@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   DndContext,
@@ -36,7 +36,7 @@ import {
   X,
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { CurrentUser } from '@/modules/auth/authorization';
+import type { CurrentUser } from '@/modules/auth/authorization';
 import {
   type EntityColumnDefinition,
   type TablePreferenceConfig,
@@ -57,6 +57,7 @@ import {
   DATE_SHORTCUTS,
   DATE_SHORTCUT_LABELS,
 } from '@/modules/shared/entity-workspace-types';
+import { agree, allEntitiesLabel, definiteArticle, definiteArticlePlural } from './entity-labels';
 
 type Density = 'compact' | 'normal' | 'comfortable';
 
@@ -69,6 +70,12 @@ export interface EntityWorkspaceProps<TRow extends { id: string }> {
   tableKey: string;
   entityLabel: string;
   entityLabelPlural: string;
+  /**
+   * Grammatical gender of the entity, for the article of the generated
+   * sentences («Todos los pedidos» vs «Todas las excepciones»). Defaults to
+   * masculine, so no existing table changes.
+   */
+  entityGender?: 'm' | 'f';
   basePath: string;
   permissionView: string;
   permissionExport: string;
@@ -113,6 +120,12 @@ export interface EntityWorkspaceProps<TRow extends { id: string }> {
   toolbarExtra?: React.ReactNode;
   /** Extra URL params preserved when the workspace rewrites the URL (e.g. segment). */
   extraUrlParams?: Record<string, string>;
+  /**
+   * Notified whenever the row selection changes (e.g. so an area copilot knows
+   * which rows the person ticked). Purely observational: the workspace keeps
+   * owning the selection and behaves exactly the same without it.
+   */
+  onSelectionChange?: (selectedIds: string[]) => void;
   // Preview drawer renderer
   renderPreviewDrawer?: (props: {
     entityId: string;
@@ -404,6 +417,7 @@ function SortableHeader({
 export function EntityWorkspace<TRow extends { id: string }>({
   entityLabel,
   entityLabelPlural,
+  entityGender = 'm',
   basePath,
   initialData,
   initialQuery,
@@ -434,6 +448,7 @@ export function EntityWorkspace<TRow extends { id: string }>({
   toolbarExtra,
   extraUrlParams,
   renderPreviewDrawer,
+  onSelectionChange,
 }: EntityWorkspaceProps<TRow>) {
   const router = useRouter();
 
@@ -465,6 +480,11 @@ export function EntityWorkspace<TRow extends { id: string }>({
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prefTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // dnd-kit numbers its accessibility ids from a module-level counter that does not
+  // line up between the server render and the client one, so the generated
+  // `aria-describedby` differed and React threw this whole subtree away and rebuilt
+  // it on every load (hydration error #418). `useId` is stable across both.
+  const dndId = useId();
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
 
   const updateUrl = useCallback(
@@ -496,20 +516,23 @@ export function EntityWorkspace<TRow extends { id: string }>({
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(q),
         });
-        if (!res.ok) throw new Error(`No pudimos cargar los ${entityLabelPlural.toLowerCase()}.`);
+        if (!res.ok)
+          throw new Error(
+            `No pudimos cargar ${definiteArticlePlural(entityGender)} ${entityLabelPlural.toLowerCase()}.`
+          );
         const json = await res.json();
         setData(json);
       } catch (err) {
         setError(
           err instanceof Error
             ? err.message
-            : `No pudimos cargar los ${entityLabelPlural.toLowerCase()}.`
+            : `No pudimos cargar ${definiteArticlePlural(entityGender)} ${entityLabelPlural.toLowerCase()}.`
         );
       } finally {
         setLoading(false);
       }
     },
-    [basePath, entityLabelPlural]
+    [basePath, entityLabelPlural, entityGender]
   );
 
   const handleSearchChange = useCallback(
@@ -754,6 +777,14 @@ export function EntityWorkspace<TRow extends { id: string }>({
 
   const clearSelection = useCallback(() => setSelectedIds(new Set()), []);
 
+  // Latest callback without re-running the effect, so a host that passes an
+  // inline function never loops.
+  const selectionListenerRef = useRef(onSelectionChange);
+  selectionListenerRef.current = onSelectionChange;
+  useEffect(() => {
+    selectionListenerRef.current?.(Array.from(selectedIds));
+  }, [selectedIds]);
+
   const addFilter = useCallback(
     (columnId?: string) => {
       setFilterPanelOpen(true);
@@ -834,12 +865,12 @@ export function EntityWorkspace<TRow extends { id: string }>({
       const result = await watchAction({ error: null, success: false, isWatched: false }, formData);
       if (result.success) {
         setWatchedIds((prev) => new Set(prev).add(entityId));
-        toast.success(`${entityLabel} seguido`);
+        toast.success(`${entityLabel} ${agree('seguido', entityGender)}`);
       } else {
         toast.error(result.error ?? 'Error');
       }
     },
-    [canWatch, watchAction, entityLabel]
+    [canWatch, watchAction, entityLabel, entityGender]
   );
 
   const handleUnwatch = useCallback(
@@ -857,12 +888,14 @@ export function EntityWorkspace<TRow extends { id: string }>({
           next.delete(entityId);
           return next;
         });
-        toast.success(`Dejaste de seguir el ${entityLabel.toLowerCase()}`);
+        toast.success(
+          `Dejaste de seguir ${definiteArticle(entityGender)} ${entityLabel.toLowerCase()}`
+        );
       } else {
         toast.error(result.error ?? 'Error');
       }
     },
-    [canWatch, unwatchAction, entityLabel]
+    [canWatch, unwatchAction, entityLabel, entityGender]
   );
 
   const handleBulkWatch = useCallback(
@@ -884,14 +917,14 @@ export function EntityWorkspace<TRow extends { id: string }>({
         });
         toast.success(
           action === 'watch'
-            ? `${selectedIds.size} ${entityLabelPlural.toLowerCase()} seguidos`
-            : `${selectedIds.size} ${entityLabelPlural.toLowerCase()} dejados de seguir`
+            ? `${selectedIds.size} ${entityLabelPlural.toLowerCase()} ${agree('seguido', entityGender, { plural: true })}`
+            : `${selectedIds.size} ${entityLabelPlural.toLowerCase()} ${agree('dejado', entityGender, { plural: true })} de seguir`
         );
       } else {
         toast.error(result.error ?? 'Error');
       }
     },
-    [canWatch, selectedIds, bulkWatchAction, entityLabelPlural]
+    [canWatch, selectedIds, bulkWatchAction, entityLabelPlural, entityGender]
   );
 
   const handleCopyNames = useCallback(() => {
@@ -1022,7 +1055,7 @@ export function EntityWorkspace<TRow extends { id: string }>({
             toast.error('La sincronización falló. Intenta de nuevo más tarde.');
           } else if (latest?.status === 'COMPLETED') {
             toast.success(
-              `Sincronización completada: ${latest.details_fetched ?? 0} ${entityLabelPlural.toLowerCase()} actualizados`
+              `Sincronización completada: ${latest.details_fetched ?? 0} ${entityLabelPlural.toLowerCase()} ${agree('actualizado', entityGender, { plural: true })}`
             );
           }
           fetchData(query);
@@ -1051,7 +1084,7 @@ export function EntityWorkspace<TRow extends { id: string }>({
           toast.info('Ya hay una sincronización en curso');
         } else if (json?.result) {
           toast.success(
-            `Sincronización completada: ${json.result.details_fetched ?? 0} ${entityLabelPlural.toLowerCase()} actualizados`
+            `Sincronización completada: ${json.result.details_fetched ?? 0} ${entityLabelPlural.toLowerCase()} ${agree('actualizado', entityGender, { plural: true })}`
           );
           fetchData(query);
           router.refresh();
@@ -1082,7 +1115,16 @@ export function EntityWorkspace<TRow extends { id: string }>({
       setSyncTriggering(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [syncTriggering, fetchSyncStatus, fetchData, query, router, basePath, entityLabelPlural]);
+  }, [
+    syncTriggering,
+    fetchSyncStatus,
+    fetchData,
+    query,
+    router,
+    basePath,
+    entityLabelPlural,
+    entityGender,
+  ]);
 
   const lastSyncLabel = useMemo(() => {
     const latest = syncStatus?.latest_run;
@@ -1122,7 +1164,7 @@ export function EntityWorkspace<TRow extends { id: string }>({
               aria-haspopup="true"
               aria-expanded={viewSelectorOpen}
             >
-              <span>Todos los {entityLabelPlural.toLowerCase()}</span>
+              <span>{allEntitiesLabel(entityLabelPlural, entityGender)}</span>
               <ChevronDown size={16} />
             </button>
             {viewSelectorOpen ? (
@@ -1132,7 +1174,7 @@ export function EntityWorkspace<TRow extends { id: string }>({
                   className="so-view-dropdown-item active"
                   onClick={() => setViewSelectorOpen(false)}
                 >
-                  Todos los {entityLabelPlural.toLowerCase()}
+                  {allEntitiesLabel(entityLabelPlural, entityGender)}
                 </div>
                 {views.privateViews.length > 0 ? (
                   <>
@@ -1573,6 +1615,7 @@ export function EntityWorkspace<TRow extends { id: string }>({
           </div>
         ) : (
           <DndContext
+            id={dndId}
             sensors={sensors}
             collisionDetection={closestCenter}
             onDragEnd={handleDragEnd}

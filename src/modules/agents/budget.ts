@@ -7,7 +7,11 @@ import {
   isFlatRateModel,
 } from '@/modules/ai/ai-admin-service';
 import { getAiSettings, providerMonthlyFeeUsd } from '@/modules/ai/ai-admin-config-service';
-import { DEFAULT_AGENT_SETTINGS, normalizeAgentSettings, type AgentSettings } from '@/modules/ai/agent-settings';
+import {
+  DEFAULT_AGENT_SETTINGS,
+  normalizeAgentSettings,
+  type AgentSettings,
+} from '@/modules/ai/agent-settings';
 import { recordUsage } from '@/modules/extensions/usage-meter';
 import { AREA_KEYS, AREA_LABELS, isAreaKey, type AreaKey } from '@/modules/operations/types';
 
@@ -120,9 +124,12 @@ export function evaluateAgentBudget(input: {
 }
 
 /** "IA de Compras" for 'area:compras', "IA administradora" for 'admin'. Pure. */
-export function agentDisplayName(identity: Pick<AgentBudgetIdentity, 'key' | 'displayName' | 'areaKey'>): string {
+export function agentDisplayName(
+  identity: Pick<AgentBudgetIdentity, 'key' | 'displayName' | 'areaKey'>
+): string {
   if (identity.displayName?.trim()) return identity.displayName.trim();
-  const areaKey = identity.areaKey ?? (identity.key.startsWith('area:') ? identity.key.slice(5) : null);
+  const areaKey =
+    identity.areaKey ?? (identity.key.startsWith('area:') ? identity.key.slice(5) : null);
   if (areaKey && isAreaKey(areaKey)) return `IA de ${AREA_LABELS[areaKey]}`;
   return identity.key === 'admin' ? 'IA administradora' : `IA ${identity.key}`;
 }
@@ -137,7 +144,10 @@ async function loadAgentContext(): Promise<{
 }> {
   try {
     const settings = await getAiSettings();
-    return { agents: normalizeAgentSettings(settings.agents), providerConfigs: settings.providerConfigs };
+    return {
+      agents: normalizeAgentSettings(settings.agents),
+      providerConfigs: settings.providerConfigs,
+    };
   } catch {
     return { agents: normalizeAgentSettings(undefined), providerConfigs: undefined };
   }
@@ -177,7 +187,9 @@ export async function recordAgentUsage(input: RecordAgentUsageInput): Promise<Re
   const { day } = budgetPeriod(input.now ?? new Date(), agents.quietHours.tz);
   const flatRate = isFlatRateModel(input.model, { providerConfigs });
   // The budget brakes spending: a flat-rate plan is already paid, so its marginal cost is 0.
-  const usd = flatRate ? 0 : round(estimateCost(prompt, completion, input.model, { providerConfigs }), 6);
+  const usd = flatRate
+    ? 0
+    : round(estimateCost(prompt, completion, input.model, { providerConfigs }), 6);
 
   const meters: RecordedAgentUsage['meters'] = [];
   const areaKey = input.areaKey?.trim();
@@ -194,7 +206,8 @@ export async function recordAgentUsage(input: RecordAgentUsageInput): Promise<Re
   for (const meter of meters) {
     writes.push(recordUsage(meter.dimension, meter.key, AI_USAGE_UNITS.tokens, tokens, day));
     writes.push(recordUsage(meter.dimension, meter.key, AI_USAGE_UNITS.usd, usd, day));
-    if (flatRate) writes.push(recordUsage(meter.dimension, meter.key, AI_USAGE_UNITS.flatTokens, tokens, day));
+    if (flatRate)
+      writes.push(recordUsage(meter.dimension, meter.key, AI_USAGE_UNITS.flatTokens, tokens, day));
   }
   if (input.userId) {
     meters.push({ dimension: 'user', key: input.userId });
@@ -390,7 +403,14 @@ export interface AreaAiUsage {
   areas: AreaAiUsageRow[];
   agents: AgentAiUsageRow[];
   days: Array<{ period: string; tokens: number; usd: number; turns: number }>;
-  totals: { tokens: number; usd: number; flatTokens: number; amortizedUsd: number; turns: number; skipped: number };
+  totals: {
+    tokens: number;
+    usd: number;
+    flatTokens: number;
+    amortizedUsd: number;
+    turns: number;
+    skipped: number;
+  };
 }
 
 const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -402,12 +422,46 @@ function toDay(value: string | Date, tz: string): string {
   return value;
 }
 
+/** Tope de expedientes por consulta de costo: el grafo dibuja 500 nodos como mucho. */
+const MAX_CASE_COST_IDS = 500;
+
+/**
+ * Costo de IA acumulado de cada expediente (medidor `ai_case`, unidad `usd`),
+ * sumando todos los días. Devuelve una entrada SÓLO por el expediente que tiene
+ * medidor: la IA que nunca lo tocó no vale `0`, vale «no aplica», y así el
+ * inspector del grafo no pinta un costo inventado.
+ *
+ * Vive aquí, con `recordAgentUsage`, porque es este módulo el que sabe en qué
+ * dimensión y con qué unidad se escribe el consumo (plan 7.9: el costo de IA es
+ * uno de los tres campos que `maskNode` protege con `operations.admin`).
+ */
+export async function getCaseAiCostUsd(caseIds: readonly string[]): Promise<Map<string, number>> {
+  const ids = [...new Set(caseIds.filter((id) => typeof id === 'string' && id.length > 0))].slice(
+    0,
+    MAX_CASE_COST_IDS
+  );
+  const out = new Map<string, number>();
+  if (ids.length === 0) return out;
+  const rows = await prisma.usageMeter.groupBy({
+    by: ['key'],
+    where: { dimension: 'ai_case', unit: AI_USAGE_UNITS.usd, key: { in: ids } },
+    _sum: { amount: true },
+  });
+  for (const row of rows) {
+    out.set(row.key, round(Number(row._sum.amount ?? 0), 6));
+  }
+  return out;
+}
+
 /**
  * AI consumption per area and per agent between two local days (inclusive). Area-bound
  * usage is counted once in the totals: `ai_area` rows plus agents whose key is not
  * `area:<key>` (their turns have no area meter).
  */
-export async function getAreaAiUsage(input: { from: string | Date; to: string | Date }): Promise<AreaAiUsage> {
+export async function getAreaAiUsage(input: {
+  from: string | Date;
+  to: string | Date;
+}): Promise<AreaAiUsage> {
   const { agents: agentSettings, providerConfigs } = await loadAgentContext();
   const tz = agentSettings.quietHours.tz;
   let from = toDay(input.from, tz);
@@ -415,7 +469,9 @@ export async function getAreaAiUsage(input: { from: string | Date; to: string | 
   if (from > to) [from, to] = [to, from];
   const spanDays = (Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000;
   if (spanDays > MAX_RANGE_DAYS) {
-    from = new Date(Date.parse(`${to}T00:00:00Z`) - MAX_RANGE_DAYS * 86_400_000).toISOString().slice(0, 10);
+    from = new Date(Date.parse(`${to}T00:00:00Z`) - MAX_RANGE_DAYS * 86_400_000)
+      .toISOString()
+      .slice(0, 10);
   }
 
   const rows = await prisma.usageMeter.findMany({
@@ -427,7 +483,15 @@ export async function getAreaAiUsage(input: { from: string | Date; to: string | 
   const areas = new Map<AreaKey, AreaAiUsageRow>(
     AREA_KEYS.map((key) => [
       key,
-      { areaKey: key, label: AREA_LABELS[key], tokens: 0, usd: 0, flatTokens: 0, amortizedUsd: 0, turns: 0 },
+      {
+        areaKey: key,
+        label: AREA_LABELS[key],
+        tokens: 0,
+        usd: 0,
+        flatTokens: 0,
+        amortizedUsd: 0,
+        turns: 0,
+      },
     ])
   );
   const agentRows = new Map<string, AgentAiUsageRow>();
@@ -521,7 +585,12 @@ export async function getAreaAiUsage(input: { from: string | Date; to: string | 
     amortizedUsd: round(a.amortizedUsd, 2),
   }));
   const agentList = [...agentRows.values()]
-    .map((a) => ({ ...a, tokens: Math.round(a.tokens), flatTokens: Math.round(a.flatTokens), usd: round(a.usd, 4) }))
+    .map((a) => ({
+      ...a,
+      tokens: Math.round(a.tokens),
+      flatTokens: Math.round(a.flatTokens),
+      usd: round(a.usd, 4),
+    }))
     .sort((a, b) => b.tokens - a.tokens);
   const nonAreaAgents = agentList.filter((a) => !a.agentKey.startsWith('area:'));
 
@@ -535,13 +604,126 @@ export async function getAreaAiUsage(input: { from: string | Date; to: string | 
       .sort((a, b) => a.period.localeCompare(b.period))
       .map((d) => ({ ...d, tokens: Math.round(d.tokens), usd: round(d.usd, 4) })),
     totals: {
-      tokens: areaList.reduce((s, a) => s + a.tokens, 0) + nonAreaAgents.reduce((s, a) => s + a.tokens, 0),
-      usd: round(areaList.reduce((s, a) => s + a.usd, 0) + nonAreaAgents.reduce((s, a) => s + a.usd, 0), 4),
+      tokens:
+        areaList.reduce((s, a) => s + a.tokens, 0) +
+        nonAreaAgents.reduce((s, a) => s + a.tokens, 0),
+      usd: round(
+        areaList.reduce((s, a) => s + a.usd, 0) + nonAreaAgents.reduce((s, a) => s + a.usd, 0),
+        4
+      ),
       flatTokens:
-        areaList.reduce((s, a) => s + a.flatTokens, 0) + nonAreaAgents.reduce((s, a) => s + a.flatTokens, 0),
-      amortizedUsd: round(areaList.reduce((s, a) => s + a.amortizedUsd, 0), 2),
-      turns: areaList.reduce((s, a) => s + a.turns, 0) + nonAreaAgents.reduce((s, a) => s + a.turns, 0),
+        areaList.reduce((s, a) => s + a.flatTokens, 0) +
+        nonAreaAgents.reduce((s, a) => s + a.flatTokens, 0),
+      amortizedUsd: round(
+        areaList.reduce((s, a) => s + a.amortizedUsd, 0),
+        2
+      ),
+      turns:
+        areaList.reduce((s, a) => s + a.turns, 0) + nonAreaAgents.reduce((s, a) => s + a.turns, 0),
       skipped: agentList.reduce((s, a) => s + a.skipped, 0),
     },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Salud de la capa de IA (alertas de la Torre de Control, plan sección 8 · E8)
+// ---------------------------------------------------------------------------
+
+export interface AgentHealthRow {
+  agentKey: string;
+  label: string;
+  areaKey: string | null;
+  /** active | on_demand | paused */
+  mode: string;
+  state: AgentBudgetState;
+  pct: number;
+  tokensToday: number;
+  usdMonth: number;
+  dailyTokenBudget: number;
+  monthlyCostBudgetUsd: number;
+}
+
+export interface AgentHealth {
+  /** Día y mes locales de la zona horaria de los agentes. */
+  day: string;
+  month: string;
+  /** `agents.enabled` de la configuración de IA: falso = capa apagada. */
+  enabled: boolean;
+  degradeAtPct: number;
+  agents: AgentHealthRow[];
+  paused: AgentHealthRow[];
+  degraded: AgentHealthRow[];
+  exhausted: AgentHealthRow[];
+}
+
+/**
+ * Estado de presupuesto y pausa de TODAS las identidades de agente en tres
+ * consultas (identidades + tokens del día + USD del mes), para que la Torre de
+ * Control pueda alertar sin llamar `checkAgentBudget` una vez por identidad.
+ */
+export async function getAgentHealth(options: { now?: Date } = {}): Promise<AgentHealth> {
+  const { agents } = await loadAgentContext();
+  const { day, month } = budgetPeriod(options.now ?? new Date(), agents.quietHours.tz);
+  const [identities, tokenRows, usdRows] = await Promise.all([
+    prisma.agentIdentity.findMany({
+      select: {
+        key: true,
+        displayName: true,
+        areaKey: true,
+        mode: true,
+        dailyTokenBudget: true,
+        monthlyCostBudgetUsd: true,
+      },
+      orderBy: { key: 'asc' },
+    }),
+    prisma.usageMeter.groupBy({
+      by: ['key'],
+      where: { dimension: 'ai_agent', unit: AI_USAGE_UNITS.tokens, period: day },
+      _sum: { amount: true },
+    }),
+    prisma.usageMeter.groupBy({
+      by: ['key'],
+      where: { dimension: 'ai_agent', unit: AI_USAGE_UNITS.usd, period: monthRange(month) },
+      _sum: { amount: true },
+    }),
+  ]);
+  const tokensByKey = new Map(tokenRows.map((row) => [row.key, toNumber(row._sum.amount)]));
+  const usdByKey = new Map(usdRows.map((row) => [row.key, toNumber(row._sum.amount)]));
+
+  const rows: AgentHealthRow[] = identities.map((identity) => {
+    const tokensToday = Math.round(tokensByKey.get(identity.key) ?? 0);
+    const usdMonth = round(usdByKey.get(identity.key) ?? 0, 4);
+    const dailyTokenBudget = Math.max(0, Math.round(toNumber(identity.dailyTokenBudget)));
+    const monthlyCostBudgetUsd = Math.max(0, toNumber(identity.monthlyCostBudgetUsd));
+    const { state, pct } = evaluateAgentBudget({
+      tokensToday,
+      usdMonth,
+      dailyTokenBudget,
+      monthlyCostBudgetUsd,
+      degradeAtPct: agents.degradeAtPct,
+    });
+    return {
+      agentKey: identity.key,
+      label: agentDisplayName(identity),
+      areaKey: identity.areaKey,
+      mode: identity.mode,
+      state,
+      pct,
+      tokensToday,
+      usdMonth,
+      dailyTokenBudget,
+      monthlyCostBudgetUsd,
+    };
+  });
+
+  return {
+    day,
+    month,
+    enabled: agents.enabled,
+    degradeAtPct: agents.degradeAtPct,
+    agents: rows,
+    paused: rows.filter((row) => row.mode === 'paused'),
+    degraded: rows.filter((row) => row.state === 'degraded'),
+    exhausted: rows.filter((row) => row.state === 'exhausted'),
   };
 }

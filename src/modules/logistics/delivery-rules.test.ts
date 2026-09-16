@@ -5,6 +5,7 @@ import {
   hasPhysicalEvidence,
   roundQuantity,
   summarizeDelivery,
+  statusAfterTripRelease,
   type AllocationExpectation,
   chooseLinkablePackage,
 } from './delivery-rules';
@@ -143,4 +144,32 @@ describe('chooseLinkablePackage', () => {
     expect(chooseLinkablePackage([{ id: 'pkg-a', itemIds: [] }], ['item-1'])).toBe('pkg-a');
     expect(chooseLinkablePackage([], ['item-1'])).toBeNull();
   });
+});
+
+/**
+ * Plan §4: cancelar un viaje no inventa entregas fallidas. La entrega que
+ * venía en él regresa al estado que su espejo de Zoho describe, nunca a
+ * `failed` por el simple hecho de haber salido.
+ */
+describe('statusAfterTripRelease', () => {
+  it.each([
+    ['dispatched', 'readback_ok', 'assigned'],
+    ['dispatched', 'pending_write', 'pending_external'],
+    ['dispatched', 'written', 'pending_external'],
+    ['dispatched', 'readback_mismatch', 'conflict'],
+    ['dispatched', 'failed', 'failed'],
+    ['dispatched', 'not_required', 'planned'],
+    // Un estado de sincronización que esta tabla no conoce nunca deja la
+    // entrega en «En camino»: vuelve a planeación, que siempre es asignable.
+    ['dispatched', 'delivered_written', 'planned'],
+  ])('una entrega %s con Zoho %s regresa a %s', (status, zohoSyncState, expected) => {
+    expect(statusAfterTripRelease({ status, zohoSyncState })).toBe(expected);
+  });
+
+  it.each(['pending', 'planned', 'assigned', 'pending_external', 'conflict', 'failed'])(
+    'una entrega %s conserva su estado (ya es asignable)',
+    (status) => {
+      expect(statusAfterTripRelease({ status, zohoSyncState: 'readback_ok' })).toBe(status);
+    }
+  );
 });

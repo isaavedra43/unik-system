@@ -3,7 +3,6 @@ import type { AgentIdentity } from '@prisma/client';
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import type { CurrentUser } from '@/modules/auth/authorization';
-import { isKnownPermission } from '@/modules/auth/permissions';
 import { estimateCost, isFlatRateModel } from '@/modules/ai/ai-admin-service';
 import { getAiSettings } from '@/modules/ai/ai-admin-config-service';
 import type { OrchestratorAgentContext, OrchestratorContext } from '@/modules/ai/ai-orchestrator';
@@ -13,13 +12,19 @@ import {
   type AutoTrigger,
   type SurfaceRef,
 } from '@/modules/ai/copilot-surfaces';
+import { areaAgentApproverPermissions, getArea } from '@/modules/areas/area-registry';
 import type { ChatMessageDTO, ChatMessageMeta } from '@/modules/chat/chat-events';
 import type { ApproverScope } from '@/modules/extensions/proposals-service';
 import { notifyUser, type NotifyInput } from '@/modules/notifications/notification-service';
 import { resolveAreaAssignee } from '@/modules/operations/commands';
 import { recordOperationalEvents } from '@/modules/operations/events-service';
-import { isAreaKey, OPS_EVENTS, type AreaKey } from '@/modules/operations/types';
-import { ensureAreaChannel, ensureCaseRoom, postAsAgent, type PostAsAgentOptions } from './chat-bridge';
+import { AREA_KEYS, isAreaKey, OPS_EVENTS, type AreaKey } from '@/modules/operations/types';
+import {
+  ensureAreaChannel,
+  ensureCaseRoom,
+  postAsAgent,
+  type PostAsAgentOptions,
+} from './chat-bridge';
 import {
   AgentIdentityError,
   buildBotActor,
@@ -157,7 +162,11 @@ export function parseConclusion(args: unknown): AgentTurnConclusion | null {
  */
 export function isToolChoiceUnsupportedError(err: unknown): boolean {
   const message =
-    err instanceof Error ? err.message : typeof err === 'string' ? err : str(asRecord(err).message) ?? '';
+    err instanceof Error
+      ? err.message
+      : typeof err === 'string'
+        ? err
+        : (str(asRecord(err).message) ?? '');
   const text = message.toLowerCase();
   if (!/tool[_\s-]?choice|function[_\s-]?calling[_\s-]?(mode|config)/.test(text)) return false;
   return /(not\s+supported|unsupported|not\s+support|invalid|not\s+allowed|unknown|not\s+available|only\s+(supports?\s+)?["'`]?auto|must\s+be|does\s+not\s+accept|cannot)/.test(
@@ -166,7 +175,10 @@ export function isToolChoiceUnsupportedError(err: unknown): boolean {
 }
 
 /** Object the turn is about, for the `ai.turn*` event columns. Pure. */
-export function turnObjectRef(detail: TriggerDetail): { objectType: string | null; objectId: string | null } {
+export function turnObjectRef(detail: TriggerDetail): {
+  objectType: string | null;
+  objectId: string | null;
+} {
   if (detail.requestId) return { objectType: 'area_request', objectId: detail.requestId };
   if (detail.incidentId) return { objectType: 'incident', objectId: detail.incidentId };
   if (detail.workItemId) return { objectType: 'work_item', objectId: detail.workItemId };
@@ -209,7 +221,10 @@ export async function caseRoomChannelId(caseId: string): Promise<string> {
 
 /** Chat channel of an area (created when missing). */
 export async function areaChannelId(areaKey: AreaKey): Promise<string> {
-  const row = await prisma.area.findUnique({ where: { key: areaKey }, select: { chatChannelId: true } });
+  const row = await prisma.area.findUnique({
+    where: { key: areaKey },
+    select: { chatChannelId: true },
+  });
   return row?.chatChannelId ?? (await ensureAreaChannel(areaKey)).id;
 }
 
@@ -283,16 +298,15 @@ export async function notifySafely(input: NotifyInput): Promise<void> {
   }
 }
 
-export const chatChannelUrl = (channelId: string) => `/app/chat?channel=${encodeURIComponent(channelId)}`;
+export const chatChannelUrl = (channelId: string) =>
+  `/app/chat?channel=${encodeURIComponent(channelId)}`;
 
 // ---------------------------------------------------------------------------
 // Events
 // ---------------------------------------------------------------------------
 
 export type AgentTurnEventType =
-  | typeof OPS_EVENTS.ai.turn
-  | typeof OPS_EVENTS.ai.turnSkipped
-  | typeof OPS_EVENTS.ai.turnFailed;
+  typeof OPS_EVENTS.ai.turn | typeof OPS_EVENTS.ai.turnSkipped | typeof OPS_EVENTS.ai.turnFailed;
 
 export interface AgentTurnEventInput {
   type: AgentTurnEventType;
@@ -351,25 +365,37 @@ export async function recordAgentTurnEvent(input: AgentTurnEventInput): Promise<
 // ---------------------------------------------------------------------------
 
 /**
- * Module approval permissions that make a person an approver of the area's
- * proposals (first key present in the registry wins). Areas without an approval
- * permission of their own use the key that holds the area's decisions; when no
- * candidate exists the scope is the responsible and backup of the area.
+ * Approval permissions that make a person an approver of the area's proposals.
+ * NOT a second copy of the table: it is DERIVED from `AREA_REGISTRY[...]
+ * .permissions.approve` (the «Aprobar» column that `docs/modules/areas.md` §3
+ * publishes), so the two can no longer drift — Inventario approves with
+ * `inventory.adjust` OR `inventory.manage`, exactly like its business
+ * approvals. Whoever holds ANY of the keys of their area decides.
+ *
+ * `operations.admin` is deliberately NOT added here (unlike
+ * `areaApprovePermissions`): administering operations does not sign the
+ * decisions of the AI. Administración has no workspace and therefore no key:
+ * its scope is the responsible and the backup of the area.
  */
-export const AREA_APPROVER_PERMISSION_CANDIDATES: Readonly<Record<AreaKey, readonly string[]>> = {
-  ventas: ['crm.manage'],
-  compras: ['purchases.approve'],
-  inventario: ['inventory.manage'],
-  manufactura: ['manufacturing.approve_incidents'],
-  logistica: ['logistics.manage_fleet'],
-  contabilidad: ['finance.approve'],
-  administracion: [],
-};
+export const AREA_APPROVER_PERMISSION_CANDIDATES: Readonly<Record<AreaKey, readonly string[]>> =
+  Object.freeze(
+    Object.fromEntries(
+      AREA_KEYS.map((key) => [key, Object.freeze([...(getArea(key)?.permissions.approve ?? [])])])
+    ) as Record<AreaKey, readonly string[]>
+  );
+
+/**
+ * Known keys (an uninstalled module contributes nothing) of the area's approval column: the
+ * same helper the orchestrator uses for its fallback scope, so there is ONE derivation. Pure.
+ */
+export function areaApproverPermissions(areaKey: AreaKey): string[] {
+  return areaAgentApproverPermissions(areaKey);
+}
 
 /**
  * Who approves the proposals of a turn: responsible and backup of the target
- * area (active humans only; a bot is never an approver), plus the area's
- * registered approval permission when one exists.
+ * area (active humans only; a bot is never an approver), plus every registered
+ * approval permission of the area (any of them decides).
  */
 export async function resolveTurnApproverScope(input: {
   areaKey: AreaKey;
@@ -380,8 +406,8 @@ export async function resolveTurnApproverScope(input: {
     areaKey: input.areaKey,
     userIds: [],
   };
-  const permission = AREA_APPROVER_PERMISSION_CANDIDATES[input.areaKey].find((key) => isKnownPermission(key));
-  if (permission) scope.permission = permission;
+  const permissions = areaApproverPermissions(input.areaKey);
+  if (permissions.length > 0) scope.permissions = permissions;
   try {
     const assignee = await resolveAreaAssignee(prisma, input.areaKey);
     const candidates = [assignee.ownerUserId, assignee.backupUserId].filter(
@@ -459,7 +485,11 @@ interface CostSettings {
   providerConfigs?: Awaited<ReturnType<typeof getAiSettings>>['providerConfigs'];
 }
 
-async function costOf(model: string, promptTokens: number, completionTokens: number): Promise<{ usd: number; flatRate: boolean }> {
+async function costOf(
+  model: string,
+  promptTokens: number,
+  completionTokens: number
+): Promise<{ usd: number; flatRate: boolean }> {
   let ctx: CostSettings = {};
   try {
     ctx = { providerConfigs: (await getAiSettings()).providerConfigs };
@@ -467,7 +497,9 @@ async function costOf(model: string, promptTokens: number, completionTokens: num
     ctx = {};
   }
   const flatRate = isFlatRateModel(model, ctx);
-  const usd = flatRate ? 0 : Math.round(estimateCost(promptTokens, completionTokens, model, ctx) * 1e6) / 1e6;
+  const usd = flatRate
+    ? 0
+    : Math.round(estimateCost(promptTokens, completionTokens, model, ctx) * 1e6) / 1e6;
   return { usd, flatRate };
 }
 
@@ -475,7 +507,8 @@ export async function runAgentTurn(input: AgentTurnInput): Promise<AgentTurnResu
   const now = input.now ?? new Date();
   const detail: TriggerDetail = { ...input.detail };
   const triggerHash =
-    input.triggerHash ?? triggerHashOf(`llm:${input.trigger}:${input.agentKey}:${input.eventId ?? now.toISOString()}`);
+    input.triggerHash ??
+    triggerHashOf(`llm:${input.trigger}:${input.agentKey}:${input.eventId ?? now.toISOString()}`);
   const result: AgentTurnResult = {
     status: 'failed',
     outcome: null,
@@ -501,7 +534,12 @@ export async function runAgentTurn(input: AgentTurnInput): Promise<AgentTurnResu
     occurredAt: now,
   };
 
-  const fail = async (errorCode: string, error: string, botUserId: string | null, extra: Record<string, unknown> = {}) => {
+  const fail = async (
+    errorCode: string,
+    error: string,
+    botUserId: string | null,
+    extra: Record<string, unknown> = {}
+  ) => {
     result.status = 'failed';
     result.errorCode = errorCode;
     result.error = error;
@@ -524,12 +562,19 @@ export async function runAgentTurn(input: AgentTurnInput): Promise<AgentTurnResu
         ...extra,
       },
     });
-    log('turn_failed', { agentKey: input.agentKey, trigger: input.trigger, errorCode, error: oneLine(error, 300) });
+    log('turn_failed', {
+      agentKey: input.agentKey,
+      trigger: input.trigger,
+      errorCode,
+      error: oneLine(error, 300),
+    });
     return result;
   };
 
-  if (!isAgentKey(input.agentKey)) return fail('unknown_agent', `Agente desconocido: ${input.agentKey}`, null);
-  if (!isAgentTurnTrigger(input.trigger)) return fail('invalid_trigger', `Disparo inválido: ${String(input.trigger)}`, null);
+  if (!isAgentKey(input.agentKey))
+    return fail('unknown_agent', `Agente desconocido: ${input.agentKey}`, null);
+  if (!isAgentTurnTrigger(input.trigger))
+    return fail('invalid_trigger', `Disparo inválido: ${String(input.trigger)}`, null);
   const agentKey = input.agentKey;
   const identity = input.identity ?? (await getAgentIdentity(agentKey));
   if (!identity) return fail('identity_missing', `No existe la identidad ${agentKey}`, null);
@@ -549,9 +594,14 @@ export async function runAgentTurn(input: AgentTurnInput): Promise<AgentTurnResu
   const surface = surfaceRef.kind;
 
   try {
-    result.conversationId = input.conversationId ?? (await getOrCreateSurfaceConversation(actor, surfaceRef)).id;
+    result.conversationId =
+      input.conversationId ?? (await getOrCreateSurfaceConversation(actor, surfaceRef)).id;
   } catch (err) {
-    return fail('conversation_failed', err instanceof Error ? err.message : String(err), identity.botUserId);
+    return fail(
+      'conversation_failed',
+      err instanceof Error ? err.message : String(err),
+      identity.botUserId
+    );
   }
   const conversationId = result.conversationId;
 
@@ -585,8 +635,14 @@ export async function runAgentTurn(input: AgentTurnInput): Promise<AgentTurnResu
 
   let channelPromise: Promise<string> | null = null;
   const channel = () =>
-    (channelPromise ??= resolveTurnChannel({ surface, caseId, areaKey: targetArea, channelId: detail.channelId }));
-  let casePromise: Promise<{ caseNumber: string; salesOrderNumber: string | null } | null> | null = null;
+    (channelPromise ??= resolveTurnChannel({
+      surface,
+      caseId,
+      areaKey: targetArea,
+      channelId: detail.channelId,
+    }));
+  let casePromise: Promise<{ caseNumber: string; salesOrderNumber: string | null } | null> | null =
+    null;
   const caseRef = () =>
     (casePromise ??= caseId
       ? prisma.operationalCase.findUnique({
@@ -607,14 +663,20 @@ export async function runAgentTurn(input: AgentTurnInput): Promise<AgentTurnResu
     if (!proposalId || result.proposalIds.includes(proposalId)) return;
     result.proposalIds.push(proposalId);
     try {
-      const [channelId, ref, names] = await Promise.all([channel(), caseRef(), userNames(approverScope.userIds)]);
+      const [channelId, ref, names] = await Promise.all([
+        channel(),
+        caseRef(),
+        userNames(approverScope.userIds),
+      ]);
       const approverName = approverScope.userIds
         .map((id) => names.get(id))
         .filter((name): name is string => Boolean(name))
         .join(' o ');
       const summary = oneLine(data.summary, 400);
       const toolName = str(data.toolName);
-      const expiresAt = str(data.expiresAt) ?? (data.expiresAt instanceof Date ? data.expiresAt.toISOString() : null);
+      const expiresAt =
+        str(data.expiresAt) ??
+        (data.expiresAt instanceof Date ? data.expiresAt.toISOString() : null);
       const rendered = renderAgentMessage('proposal.created', {
         now,
         agentName: identity.displayName,
@@ -649,18 +711,32 @@ export async function runAgentTurn(input: AgentTurnInput): Promise<AgentTurnResu
             objectType: 'ai_proposal',
             objectId: proposalId,
             occurredAt: new Date(),
-            payload: { agentKey, toolName, summary, chatMessageId: dto.id, approverUserIds: approverScope.userIds, trigger: input.trigger },
+            payload: {
+              agentKey,
+              toolName,
+              summary,
+              chatMessageId: dto.id,
+              approverUserIds: approverScope.userIds,
+              trigger: input.trigger,
+            },
           },
         ]);
       } catch (err) {
-        warn('proposal_event_failed', { agentKey, proposalId, message: err instanceof Error ? err.message : String(err) });
+        warn('proposal_event_failed', {
+          agentKey,
+          proposalId,
+          message: err instanceof Error ? err.message : String(err),
+        });
       }
       for (const userId of approverScope.userIds) {
         await notifySafely({
           userId,
           category: 'agent_proposal',
           type: 'agent_proposal_created',
-          title: `${identity.displayName} propone: ${summary || toolName || 'una acción'}`.slice(0, 200),
+          title: `${identity.displayName} propone: ${summary || toolName || 'una acción'}`.slice(
+            0,
+            200
+          ),
           body: rendered.text,
           url: chatChannelUrl(channelId),
           entityType: 'ai_proposal',
@@ -689,7 +765,8 @@ export async function runAgentTurn(input: AgentTurnInput): Promise<AgentTurnResu
         if (!name || UI_CHIP_TOOLS.has(name)) break;
         toolCalls += 1;
         if (!toolsUsed.includes(name)) toolsUsed.push(name);
-        if (name === CONCLUDE_TOOL && data.success === true && pendingConclusion) conclusion = pendingConclusion;
+        if (name === CONCLUDE_TOOL && data.success === true && pendingConclusion)
+          conclusion = pendingConclusion;
         break;
       }
       case 'proposal':
@@ -711,9 +788,16 @@ export async function runAgentTurn(input: AgentTurnInput): Promise<AgentTurnResu
   for (let attempt = 0; attempt < 2; attempt++) {
     // The retry reuses the directive the failed attempt already wrote in the bot thread.
     const agent: AgentContextWithForcedTool =
-      attempt === 0 ? agentContext : { ...agentContext, forceToolName: CONCLUDE_TOOL, reuseUserMessage: true };
+      attempt === 0
+        ? agentContext
+        : { ...agentContext, forceToolName: CONCLUDE_TOOL, reuseUserMessage: true };
     try {
-      for await (const event of runAssistant({ conversationId, message, actor, context: contextFor(agent) })) {
+      for await (const event of runAssistant({
+        conversationId,
+        message,
+        actor,
+        context: contextFor(agent),
+      })) {
         await handle(event as StreamEvent);
       }
       thrown = null;
@@ -739,12 +823,17 @@ export async function runAgentTurn(input: AgentTurnInput): Promise<AgentTurnResu
   }
   const concluded = conclusion as AgentTurnConclusion | null;
   if (thrown && !concluded) {
-    return fail('provider_error', thrown instanceof Error ? thrown.message : String(thrown), identity.botUserId);
+    return fail(
+      'provider_error',
+      thrown instanceof Error ? thrown.message : String(thrown),
+      identity.botUserId
+    );
   }
   // A turn that already concluded is finished even if the stream ended with an error afterwards
   // (e.g. a provider cut): its proposals and conclusion are real and must be published and counted.
   if (streamError && !concluded) return fail('turn_error', streamError, identity.botUserId);
-  if (!finished && !concluded) return fail('no_result', 'El turno terminó sin respuesta', identity.botUserId);
+  if (!finished && !concluded)
+    return fail('no_result', 'El turno terminó sin respuesta', identity.botUserId);
 
   if (result.model) {
     const cost = await costOf(result.model, result.promptTokens, result.completionTokens);
@@ -755,7 +844,8 @@ export async function runAgentTurn(input: AgentTurnInput): Promise<AgentTurnResu
   let line: string | null = null;
   if (concluded && concluded.outcome !== 'no_action') line = concluded.message;
   // A person mentioned the bot and expects an answer even if the model forgot to conclude.
-  if (!concluded && input.trigger === 'mention' && finished) line = oneLine(finished.content) || null;
+  if (!concluded && input.trigger === 'mention' && finished)
+    line = oneLine(finished.content) || null;
   // Model-written text never resolves @mentions of the room (no pings nor pushes to its members).
   if (line) line = neutralizeMentions(line);
   if (line) {
@@ -778,7 +868,10 @@ export async function runAgentTurn(input: AgentTurnInput): Promise<AgentTurnResu
       result.message = line;
       result.postedMessageId = dto.id;
     } catch (err) {
-      warn('conclusion_post_failed', { agentKey, message: err instanceof Error ? err.message : String(err) });
+      warn('conclusion_post_failed', {
+        agentKey,
+        message: err instanceof Error ? err.message : String(err),
+      });
     }
   }
 

@@ -1,6 +1,6 @@
 import { Prisma } from '@prisma/client';
 import { hasPermission, type CurrentUser } from '@/modules/auth/authorization';
-import { NOTIFICATION_CATEGORIES, type NotificationCategory } from '@/modules/notifications/catalog';
+import { isNotificationCategory, type NotificationCategory } from '@/modules/notifications/catalog';
 import type { CommandContext } from '@/modules/operations/commands';
 import { OperationsError } from '@/modules/operations/errors';
 import { isOpsFlagEnabled } from '@/modules/operations/operations-config';
@@ -67,12 +67,16 @@ export function addDays(date: Date, days: number): Date {
 }
 
 export function truncate(text: string | null | undefined, max: number): string {
-  const clean = String(text ?? '').replace(/\s+/g, ' ').trim();
+  const clean = String(text ?? '')
+    .replace(/\s+/g, ' ')
+    .trim();
   return clean.length > max ? `${clean.slice(0, max - 1)}…` : clean;
 }
 
 export function asRecord(value: unknown): Record<string, unknown> {
-  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
 }
 
 export async function assertPurchasesEnabled(): Promise<void> {
@@ -83,12 +87,16 @@ export async function assertPurchasesEnabled(): Promise<void> {
 
 /** Session user of a user/ai command. */
 export function commandUser(ctx: Pick<CommandContext, 'user'>): CurrentUser {
-  if (!ctx.user) throw new OperationsError('unauthenticated', 'Tu sesión expiró; vuelve a iniciar sesión');
+  if (!ctx.user)
+    throw new OperationsError('unauthenticated', 'Tu sesión expiró; vuelve a iniciar sesión');
   return ctx.user;
 }
 
 /** System and Zoho actors are trusted; people and AI identities need one of the keys. */
-export function actorHasAny(ctx: Pick<CommandContext, 'actor' | 'user'>, keys: readonly string[]): boolean {
+export function actorHasAny(
+  ctx: Pick<CommandContext, 'actor' | 'user'>,
+  keys: readonly string[]
+): boolean {
   if (ctx.actor.type === 'system' || ctx.actor.type === 'zoho') return true;
   const user = ctx.user;
   if (!user) return false;
@@ -105,7 +113,9 @@ export function assertActorHasAny(
 
 /** User id to store in `createdByUserId`-like columns: the person or bot, `system:{id}` otherwise. */
 export function recordActorId(ctx: Pick<CommandContext, 'actor'>): string {
-  return ctx.actor.type === 'user' || ctx.actor.type === 'ai' ? ctx.actor.id : `system:${ctx.actor.id}`.slice(0, 120);
+  return ctx.actor.type === 'user' || ctx.actor.type === 'ai'
+    ? ctx.actor.id
+    : `system:${ctx.actor.id}`.slice(0, 120);
 }
 
 /** Human (or bot) user id of the actor, null for system/Zoho. */
@@ -118,11 +128,13 @@ export async function nextFolio(tx: Db, kind: keyof typeof PURCHASES_SEQUENCES):
   return nextNumber(tx, sequence.key, sequence.prefix);
 }
 
-/** `purchase_update` once the notification catalog registers it; operational work item category until then. */
+/**
+ * Category every Compras notification uses, so a person turns purchases on or
+ * off apart from the rest of the engine (plan 6.6). The catalogue is the source
+ * of truth; the fallback only survives a catalogue that dropped the key.
+ */
 export function purchaseNotificationCategory(): NotificationCategory {
-  return (NOTIFICATION_CATEGORIES as readonly string[]).includes('purchase_update')
-    ? ('purchase_update' as NotificationCategory)
-    : 'ops_workitem';
+  return isNotificationCategory('purchase_update') ? 'purchase_update' : 'ops_workitem';
 }
 
 export interface PurchasesEventOptions {
@@ -167,7 +179,12 @@ export function parseChannels(value: unknown): SupplierChannel[] {
     const row = asRecord(entry);
     const type = row.type;
     const text = typeof row.value === 'string' ? row.value.trim() : '';
-    if (typeof type !== 'string' || !(SUPPLIER_CHANNEL_TYPES as readonly string[]).includes(type) || !text) continue;
+    if (
+      typeof type !== 'string' ||
+      !(SUPPLIER_CHANNEL_TYPES as readonly string[]).includes(type) ||
+      !text
+    )
+      continue;
     if (out.some((c) => c.type === type && c.value === text)) continue;
     out.push({ type: type as SupplierChannelType, value: text.slice(0, 300) });
   }
@@ -179,6 +196,8 @@ export function assertFoundRow<T>(row: T | null | undefined, message: string): T
   return row;
 }
 
-export function throwCheck(check: { ok: true } | { ok: false; code: string; message: string }): void {
+export function throwCheck(
+  check: { ok: true } | { ok: false; code: string; message: string }
+): void {
   if (!check.ok) throw new OperationsError(check.code, check.message);
 }

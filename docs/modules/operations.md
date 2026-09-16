@@ -144,10 +144,15 @@ Cambiar `sales-fulfillment.ts` exige publicar otra versión: la misma versión c
 - **Escalera** (config `escalation`): nivel 0 avisa a dueño y suplente (reemplaza a un dueño inactivo), 1 pasa al
   líder de área, 2 a Administración, 3 abre `sla_breach` crítica. Reasignar con nueva fecha la reinicia.
 - **Solicitudes entre áreas** (`request-kinds.ts`, `area-requests-service.ts`): catálogo `availability_check`,
-  `purchase_shortfall`, `payment_authorization`, `vendor_pickup`, `transformation`, `material_shortfall`,
-  `finished_goods`, `delivery_update`, `create_package_in_zoho`, `resolve_difference`, `customer_notice`, `cancel`,
-  `escalation`, `info`, con payload validado por Zod y pares origen→destino. `freeText` ≤ 800 (mostrar escapado).
-  Acuse automático; aceptar/bloquear/resolver/rechazar sólo por el responsable humano del área destino.
+  `purchase_shortfall`, `direct_delivery`, `payment_authorization`, `vendor_pickup`, `transformation`,
+  `material_shortfall`, `finished_goods`, `delivery_update`, `create_package_in_zoho`, `resolve_difference`,
+  `customer_notice`, `cancel`, `escalation`, `info`, con payload validado por Zod y pares origen→destino.
+  `freeText` ≤ 800 (mostrar escapado). Acuse automático; aceptar/bloquear/resolver/rechazar sólo por el responsable
+  humano del área destino.
+  - `direct_delivery` es un tipo propio (inventario→compras), no un `purchase_shortfall` con texto: lo emite el paso
+    `coordinar_entrega_directa` (`case-service.ts`, motor `request_direct_delivery`) y Compras lo reconoce en
+    `SHORTFALL_REQUEST_KINDS`. Una orden creada desde él sale con `deliveryMode = 'direct_to_customer'`, no toca
+    existencia y se confirma con `confirmDirectDelivery` (ver `docs/modules/purchases.md`).
 - **Incidencias** (`incidents-service.ts`): tipos `sla_breach`, `orphan_case`, `stock_conflict`, `count_dispute`,
   `zoho_conflict`, `zoho_failure`, `partial_delivery`, `owner_absent`, `order_change_conflict`,
   `cancellation_compensation`, `ai_failure`, `purchase_difference`, `excess_scrap`, `quality_failure`,
@@ -155,9 +160,12 @@ Cambiar `sales-fulfillment.ts` exige publicar otra versión: la misma versión c
   seguimientos; descartar los cancela.
 - **Evidencias** (`evidence-service.ts`, `operations-storage.ts`): destino de subida `operations_evidence`
   (propósito de almacenamiento `evidence`, imagen/PDF/audio, 15 MB, descarga restringida).
-- **Aprobaciones** (`approvals-service.ts`): sin filas de política se derivan de `approvalThresholds` (compras y
-  pagos: 1 firma, 2 desde 50 000 MXN; gastos autoaprobados bajo 2 000 MXN; nómina 2). Un rechazo rechaza. Las
-  solicitudes pendientes con `expiresAt` vencido las marca `expired` el supervisor (regla 8).
+- **Aprobaciones** (`approvals-service.ts`): las reglas vigentes son las filas de `ApprovalPolicy` en la base; los
+  valores derivados de `approvalThresholds` (compras y pagos: 1 firma, 2 desde 50 000 MXN; gastos autoaprobados bajo
+  2 000 MXN; nómina 2) **sólo** se usan cuando ese alcance no tiene ninguna fila. Se editan desde la Torre de Control
+  (`/app/admin/control-tower/configuracion` → `ApprovalPolicyEditor.tsx` y sus server actions) con `operations.admin`;
+  `/app/admin/control-tower/aprobaciones` es la bandeja de aprobaciones pendientes, no el editor de políticas.
+  Un rechazo rechaza. Las solicitudes pendientes con `expiresAt` vencido las marca `expired` el supervisor (regla 8).
 
 ## Supervisor (`supervisor.ts`, `supervisor-rules.ts`)
 
@@ -211,6 +219,29 @@ no las pierde. `onOperationalEvents` queda para lo que puede perderse sin daño 
 | `ops.supervisor`            | cada 4 min (1 intento, 3.5 min)                    | tick del supervisor                                 |
 | `ops.relations_rebuild`     | bajo demanda (`operations.admin`)                  | reconstruye `ObjectRelation` sin duplicar ni borrar |
 
+### Reconstrucción del grafo (`ObjectRelation`)
+
+El plan (§2.1) declara `ObjectRelation` como «proyección reconstruible para el grafo». Se pide desde
+**Torre de Control → Configuración → Grafo de relaciones**, que encola `ops.relations_rebuild`
+(`rebuildRelationsAction`, que vuelve a exigir `operations.admin` y deja evento de auditoría
+`operations.relations.rebuild_requested`). El trabajo deduplica por tipo: dos administradores que lo
+pidan a la vez comparten la misma corrida, y se puede limitar a algunas fuentes.
+
+Cada fuente vive en `src/modules/operations/relations-rebuild.ts` — todas en ese archivo a propósito,
+para que el registro sea alcanzable con un solo import y una reconstrucción nunca se salte un área en
+silencio porque su módulo no estaba cargado en el worker. Hoy son 17: expedientes, asignaciones de
+demanda, solicitudes entre áreas, órdenes de entrega, viajes, reservas de inventario, reclamos
+previos, órdenes de compra (con sus renglones y asignaciones), solicitudes de compra, proveedores,
+renglones e invitaciones de RFQ, recepciones, oportunidades y órdenes de producción.
+
+La reconstrucción **nunca borra ni cierra** una arista: inserta las que faltan (`createMany …
+skipDuplicates`) y reabre las que se habían cerrado, así que pedirla de más es inofensivo. Por eso
+hay relaciones que sobreviven aunque ninguna fuente pueda derivarlas — las que sólo conoce el comando
+que las escribió y no tienen columna detrás: `legacy_claim converted_to stock_reservation`,
+`caused_by` (quién causó un turno de IA es un argumento del turno, no un campo),
+`goods_receipt confirmed_delivery delivery_order`, `fulfilled_by` de faltantes y el `answers` de una
+orden de producción cuando la solicitud apuntaba a un `case_demand` en vez de a una asignación.
+
 Los rechazos de negocio completan el job (son resultados); los de concurrencia lanzan para que la cola reintente. En
 el ledger un `concurrency_conflict` queda `failed` (el mismo `commandId` se vuelve a ejecutar) y un `commandId` de otro
 actor se rechaza con `command_id_conflict`. La configuración se carga antes de abrir la transacción y queda fija en
@@ -220,11 +251,11 @@ ella; responsables y preferencias se leen con la conexión de la transacción (f
 
 ## Permisos
 
-| Permiso             | Uso                                                                      |
-| ------------------- | ------------------------------------------------------------------------ |
-| `operations.view`   | Ver expedientes, trabajo de áreas, incidencias y canales `case:`/`area:` |
-| `operations.manage` | Iniciar seguimiento, avanzar, replanear, cancelar, reasignar, escalar    |
-| `operations.admin`  | Configuración, reconstrucción de relaciones, aprobador de respaldo       |
+| Permiso             | Uso                                                                                                                                             |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `operations.view`   | Ver expedientes, trabajo de áreas, incidencias y canales `case:`/`area:`                                                                        |
+| `operations.manage` | Iniciar seguimiento, avanzar, replanear, cancelar, reasignar, escalar                                                                           |
+| `operations.admin`  | Configuración, reconstrucción de relaciones, aprobador de respaldo y **operar el núcleo** como `operations.manage` (Torre de Control, plan 7.7) |
 
 Categorías de notificación (grupo «Operaciones»): `ops_workitem`, `ops_escalation`, `ops_incident`, `ops_request`,
 `approval_requested`, `approval_decided`.
@@ -284,6 +315,12 @@ motor (`case_not_eligible`, `step_condition_pending`, `process_version_mismatch`
   (FOR UPDATE); comando repetido (offline y en paralelo); entrega con cantidad distinta; Zoho falla al asignar
   transportista; Zoho devuelve otro valor; responsable ausente; supervisor idempotente. Sólo se simulan las
   escrituras a Zoho y el push.
+- **Una corrida a la vez.** Todas las suites del proyecto comparten esa base y la limpian con `TRUNCATE` + `DELETE`
+  por prefijo, así que dos `npm run test:integration` simultáneos se borran las filas entre sí y fallan con errores
+  que parecen del producto (`deadlock detected` 40P01, `Notification_userId_fkey`, unicidad de `Responsible.area`).
+  `tests/integration/global-setup.ts` toma un candado de aviso de PostgreSQL y hace **esperar** a la segunda
+  corrida; `tests/integration/integration-lock.int.test.ts` falla si ese candado no se tomó. Detalle y medición en
+  `docs/pilot-runbook.md` §11.14.
 
 ## Cómo operar
 
@@ -298,8 +335,6 @@ motor (`case_not_eligible`, `step_condition_pending`, `process_version_mismatch`
 
 ## Limitaciones conocidas
 
-- Las políticas de aprobación por defecto viven en memoria (derivadas de la config); falta la UI para editarlas.
-- No hay kind `direct_delivery`: la entrega directa usa `purchase_shortfall` con texto explicativo.
 - El vendedor de Zoho se asigna como dueño sólo si su nombre coincide exactamente con un usuario activo.
 - Un conteo que deja existencia `PROVISIONAL` no avanza solo el expediente: se cierra el work item de verificación.
 - La replaneación detecta cambios de dirección sólo con el evento de cambio de la OV (`changes.fields`).

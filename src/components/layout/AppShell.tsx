@@ -212,6 +212,10 @@ function AccountMenu({ user }: { user: CurrentUser }) {
             label: 'Cerrar sesión',
             icon: <LogOut size={16} />,
             onClick: () => {
+              // El Service Worker guarda el HTML de las páginas visitadas: en un
+              // teléfono compartido el siguiente turno no debe recibir del caché
+              // las paradas ni los expedientes de quien cierra sesión.
+              navigator.serviceWorker?.controller?.postMessage('clear-private-cache');
               const submit = document.getElementById('logout-submit') as HTMLButtonElement | null;
               submit?.click();
             },

@@ -103,8 +103,21 @@ function isDedupeKeyConflict(err: unknown): boolean {
 
 type EnqueueResult = { id: string; status: JobStatus; deduplicated: boolean };
 
+/**
+ * Cross-instance brand: Next.js compiles a server module once per webpack
+ * layer, so this file (and therefore the class below) exists several times in
+ * the same process. A plain `instanceof` then returns false for an error thrown
+ * by another copy — and the command engine would stop retrying the command,
+ * turning an expected transient rejection into an unexpected HTTP 500 that the
+ * offline queue retries forever. `Symbol.for` is process-wide, so the brand is
+ * the same object in every copy. Same pattern as `OperationsError`,
+ * `AuthorizationError` and `ConcurrencyConflict`.
+ */
+const JOB_DEDUPE_CONFLICT_BRAND: unique symbol = Symbol.for('unik.jobs.dedupeConflict');
+
 /** Inside a transaction the dedupe key kept conflicting; the caller should retry its command. */
 export class JobDedupeConflictError extends Error {
+  readonly [JOB_DEDUPE_CONFLICT_BRAND] = true;
   readonly dedupeKey: string;
 
   constructor(dedupeKey: string) {
@@ -112,6 +125,21 @@ export class JobDedupeConflictError extends Error {
     this.name = 'JobDedupeConflictError';
     this.dedupeKey = dedupeKey;
   }
+}
+
+/**
+ * Use this instead of `instanceof JobDedupeConflictError`: it also recognises
+ * the error when it was thrown by another compiled copy of this module (for
+ * example an `enqueueJob({ tx })` inside a domain handler registered from a
+ * different webpack layer).
+ */
+export function isJobDedupeConflictError(err: unknown): err is JobDedupeConflictError {
+  if (err instanceof JobDedupeConflictError) return true;
+  return (
+    typeof err === 'object' &&
+    err !== null &&
+    (err as Record<symbol, unknown>)[JOB_DEDUPE_CONFLICT_BRAND] === true
+  );
 }
 
 const TX_DEDUPE_ATTEMPTS = 2;

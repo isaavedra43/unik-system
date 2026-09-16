@@ -1,15 +1,19 @@
 # Zoho (Inventory + Books) - Integración
 
-Verificado contra el código el 2026-09-15 (commit `6e24501`). Lo que ocurre en producción no se verifica desde
-el repositorio.
+Verificado contra el código el 2026-09-16 en el árbol de trabajo (la escritura de órdenes de venta llegó con el plan
+de Operaciones y todavía no está en un commit). Lo que ocurre en producción no se verifica desde el repositorio.
 
 ## Resumen
 
 - **Lectura:** 10 entidades de Zoho se sincronizan por polling a PostgreSQL (snapshot RAW + tablas normalizadas).
-- **Escritura:** sólo dos flujos escriben en Zoho desde UNIK:
+- **Escritura:** tres flujos escriben en Zoho desde UNIK:
   1. Paquetes y órdenes de envío (Zoho Inventory) — `src/modules/packages/packages-shipping-service.ts`.
   2. Cotizaciones (Zoho Books) — `src/modules/quotes/quotes-write-service.ts`.
-- **`ZOHO_BOOKS_MOCK=true`** simula esas dos escrituras sin llamar a Zoho.
+  3. Órdenes de venta desde una cotización aceptada (Zoho Inventory) —
+     `src/modules/crm/sales-order-write-service.ts`. **Apagada por omisión**: exige el permiso
+     `crm.create_sales_order` y el indicador `crmSalesOrderWrite` de `IntegrationConfig('operations')`, que arranca en
+     `false` porque el conjunto de campos de `POST /salesorders` no se ha validado contra la organización real.
+- **`ZOHO_BOOKS_MOCK=true`** simula las tres escrituras sin llamar a Zoho.
 
 ## Estructura
 
@@ -28,7 +32,8 @@ src/modules/integrations/
     ├── <entidad>-scheduler.ts       # scheduler de la entidad
     ├── packages-shipment-sweep.ts   # relectura de paquetes (barrido y bajo demanda)
     ├── shipments.ts                 # ESCRITURA Inventory: órdenes de envío y edición de paquete
-    └── estimates.ts                 # lectura + ESCRITURA Books: cotizaciones
+    ├── estimates.ts                 # lectura + ESCRITURA Books: cotizaciones
+    └── sales-orders.ts              # lectura + ESCRITURA Inventory: createSalesOrder (POST /salesorders)
 ```
 
 Todas las peticiones agregan `organization_id` (Books usa `ZOHO_BOOKS_ORGANIZATION_ID` si existe) y el header
@@ -141,7 +146,7 @@ datos de negocio ni snapshots.
 
 ## Escrituras hacia Zoho
 
-Ambos flujos siguen la misma regla: **Zoho es la fuente de verdad**. Se escribe en Zoho primero y lo que UNIK guarda
+Los tres flujos siguen la misma regla: **Zoho es la fuente de verdad**. Se escribe en Zoho primero y lo que UNIK guarda
 es lo que Zoho devuelve o lo que se relee de Zoho, nunca un cálculo local (salvo el modo simulado).
 
 ### Paquetes y órdenes de envío (Zoho Inventory)
@@ -210,17 +215,69 @@ Reglas del servicio:
 
 Pruebas: `src/modules/quotes/quotes-write-service.test.ts`.
 
+### Órdenes de venta desde una cotización aceptada (Zoho Inventory)
+
+Entregado por la Entrega 5 del plan de Operaciones. **Apagado por omisión**: con credenciales reales hacen falta el
+permiso `crm.create_sales_order` y el indicador `crmSalesOrderWrite` de `IntegrationConfig('operations')` (arranca en
+`false`; ver `src/modules/operations/operations-config.ts`). Con `ZOHO_BOOKS_MOCK=true` el indicador no se exige: el
+permiso sí.
+
+| Operación                              | Llamada a Zoho (`sales-orders.ts`)                      | Función (`sales-order-write-service.ts`)                 | Ruta UNIK                                                           | Permiso                  |
+| -------------------------------------- | ------------------------------------------------------- | -------------------------------------------------------- | ------------------------------------------------------------------- | ------------------------ |
+| Crear la orden de una cotización       | `POST /salesorders?ignore_auto_number_generation=false` | `createSalesOrderFromQuote`                              | `POST /app/areas/{areaKey}/api/ventas/quotes/{quoteId}/sales-order` | `crm.create_sales_order` |
+| Relectura y conciliación (5 s después) | `GET /salesorders/{id}`                                 | `runSalesOrderReadback` (job `crm.sales_order_readback`) | —                                                                   | — (job del sistema)      |
+
+La misma escritura la ejecuta la tool de IA `createSalesOrderFromQuote` (`src/modules/ai/tools/crm-tools.ts`), que es
+`enabledByDefault: false`, tiene `effect: 'business_write'` y nunca la corre un agente automático
+(`src/modules/agents/permissions.ts` excluye `crm.create_sales_order` a propósito: crear la orden es decisión de una
+persona).
+
+Reglas del servicio:
+
+- **Folios:** nunca se envía `salesorder_number`; Zoho asigna el folio. El folio de la cotización viaja como
+  `reference_number` (`buildSalesOrderPayload` en `sales-order-rules.ts`: `customer_id`, `date`, `line_items`,
+  `discount_type` y, si existen, `reference_number`, `salesperson_id`/`salesperson_name`, `notes`, `terms`,
+  `is_discount_before_tax`, `discount`, `shipping_charge`).
+- **La cotización debe estar `accepted`** y se relee de Zoho antes de convertirla (Zoho es la fuente de verdad).
+- **Nunca dos órdenes para una cotización:** se rechaza (`quote_already_converted`, 409) si ya hay una solicitud
+  completada para esa cotización o una orden sincronizada que lleve su folio como referencia.
+- **Persistencia única:** la respuesta se guarda como `IntegrationSnapshot` y se normaliza con el normalizador de
+  órdenes de venta existente — el mismo camino que la sincronización —, así que la fila `SalesOrder` dispara el gancho
+  que abre el expediente operativo. La oportunidad queda ligada y ganada, con actividad `order_created`.
+- **Errores:** `CrmError(message, code, status)` — `invalid_payload` 400, `forbidden` 403, `not_found` 404,
+  `quote_not_accepted` / `quote_already_converted` / `request_key_conflict` 409, `module_disabled` 503,
+  `zoho_shape` 502.
+
+**Ledger de idempotencia `SalesOrderWriteRequest`** (`requestKey @unique`), el segundo usuario del ledger genérico
+`src/modules/integrations/zoho/write-request-ledger.ts` (mismas reglas que `QuoteWriteRequest`: replay de una llave
+completada, 409 mientras está en vuelo, reintento de una fallida o vencida, y la llave no se reutiliza para otra
+cotización ni otra persona). La ruta de UI arma la llave como `ui:so:{quoteId}:{userId}` — por cotización y persona,
+nunca por día, así que un reintento cualquier día es la misma solicitud. En cuanto Zoho devuelve el id, éste se
+escribe en el ledger **antes** de cualquier otro paso: un reintento tras una falla local relee esa orden en vez de
+crear otra.
+
+**Relectura (`crm.sales_order_readback`)**: 5 segundos después compara la copia de Zoho con la cotización (cliente,
+referencia, conceptos, cantidades y total ±1). Si difieren o la orden no está, abre la incidencia
+`sales_order_readback_mismatch` ("Orden de venta distinta en Zoho") para Ventas; con Zoho real además re-normaliza la
+copia fresca.
+
+Pruebas: `src/modules/crm/sales-order-write-service.test.ts` (permiso, cotización no aceptada, replay de la llave,
+reintento tras falla local, conversión doble rechazada, con Zoho simulado y con el cliente de Zoho mockeado) y
+`src/modules/crm/sales-order-rules.test.ts` (`buildSalesOrderPayload`, `buildMockSalesOrderResponse` y la comparación
+de la relectura).
+
 ## Modo simulado `ZOHO_BOOKS_MOCK`
 
 `isZohoBooksMockEnabled()` (`config.ts`). Cuando está activo:
 
-| Área                                            | Comportamiento                                                                                                                                                                                                                                                                                                                                                                  |
-| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Cotizaciones (`quotes-write-service.ts`)        | `mockEstimateResponse` arma localmente una respuesta con forma de Zoho (folio `MOCK-00001` a partir del conteo de `Quote`, totales calculados localmente) y la persiste por el mismo camino; los cambios de estado parten del último snapshot; `refreshQuoteFromZoho` devuelve lo local; el PDF no está disponible (`MOCK_NO_PDF`, 503). El ledger `requestKey` funciona igual. |
-| Sync de cotizaciones (`estimates-sync.ts`)      | `listPage` devuelve una lista vacía: no se lee nada de Zoho Books.                                                                                                                                                                                                                                                                                                              |
-| Vendedores (`quotes-salespersons.ts`)           | No consulta la lista de vendedores de Zoho.                                                                                                                                                                                                                                                                                                                                     |
-| Tools de IA de cotizaciones (`quotes-tools.ts`) | Respetan el modo (sin envío real ni PDF de Zoho).                                                                                                                                                                                                                                                                                                                               |
-| Paquetes (`packages-shipping-service.ts`)       | Las cuatro operaciones escriben el cambio directo en la BD, sin relectura; ids simulados `mock-<timestamp>` y `NE-MOCK-<paquete>`; auditoría con `source: 'mock'`.                                                                                                                                                                                                              |
+| Área                                              | Comportamiento                                                                                                                                                                                                                                                                                                                                                                  |
+| ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Cotizaciones (`quotes-write-service.ts`)          | `mockEstimateResponse` arma localmente una respuesta con forma de Zoho (folio `MOCK-00001` a partir del conteo de `Quote`, totales calculados localmente) y la persiste por el mismo camino; los cambios de estado parten del último snapshot; `refreshQuoteFromZoho` devuelve lo local; el PDF no está disponible (`MOCK_NO_PDF`, 503). El ledger `requestKey` funciona igual. |
+| Sync de cotizaciones (`estimates-sync.ts`)        | `listPage` devuelve una lista vacía: no se lee nada de Zoho Books.                                                                                                                                                                                                                                                                                                              |
+| Vendedores (`quotes-salespersons.ts`)             | No consulta la lista de vendedores de Zoho.                                                                                                                                                                                                                                                                                                                                     |
+| Tools de IA de cotizaciones (`quotes-tools.ts`)   | Respetan el modo (sin envío real ni PDF de Zoho).                                                                                                                                                                                                                                                                                                                               |
+| Paquetes (`packages-shipping-service.ts`)         | Las cuatro operaciones escriben el cambio directo en la BD, sin relectura; ids simulados `mock-<timestamp>` y `NE-MOCK-<paquete>`; auditoría con `source: 'mock'`.                                                                                                                                                                                                              |
+| Órdenes de venta (`sales-order-write-service.ts`) | `buildMockSalesOrderResponse` arma localmente una respuesta con forma de Zoho (folio `SO-MOCK-00001` a partir del conteo de `SalesOrder` con ese prefijo) y la persiste por el mismo camino; el indicador `crmSalesOrderWrite` no se exige (el permiso sí); la relectura compara contra el último snapshot y no re-normaliza. El ledger `requestKey` funciona igual.            |
 
 El modo **no** detiene la sincronización de lectura de las entidades de Inventory: si el scheduler está encendido y
 hay credenciales, sigue llamando a Zoho.
@@ -230,8 +287,10 @@ hay credenciales, sigue llamando a Zoho.
 - Webhooks de Zoho (los webhooks de `src/app/api/webhooks/` son de voz, Telegram y Twilio).
 - Detección de eliminaciones: nada se marca borrado por no aparecer en el listado (el barrido de paquetes sólo marca
   como leído un paquete que responde 404).
-- Escritura hacia Zoho de órdenes de venta, facturas, contactos, productos, pagos, órdenes de compra, facturas de
-  proveedor y notas de crédito; en particular, crear una orden de venta desde una cotización.
+- Escritura hacia Zoho de facturas, contactos, productos, pagos, órdenes de compra, facturas de proveedor y notas de
+  crédito. (Crear una orden de venta desde una cotización **sí** existe desde la Entrega 5, pero sólo se ha ejercido
+  con `ZOHO_BOOKS_MOCK=true`: el conjunto de campos que acepta la organización real está sin validar y por eso el
+  indicador `crmSalesOrderWrite` arranca apagado.)
 - Borrar cotizaciones desde UNIK (`deleteEstimate` sin uso).
 - Lock y presupuesto de llamadas compartidos entre réplicas.
 - Estado en producción (scheduler encendido, migraciones, credenciales): no verificable desde el repositorio.

@@ -29,16 +29,27 @@ import {
   type SupplierProductDTO,
 } from './purchases-dto';
 import { decText, num, parseChannels } from './purchases-helpers';
-import { PURCHASE_REQUEST_OPEN_STATUSES, RFQ_OPEN_STATUSES, labelOf, RFQ_STATUS_LABELS } from './purchases-types';
+import { PURCHASE_REQUEST_OPEN_STATUSES, labelOf, RFQ_STATUS_LABELS } from './purchases-types';
 import { loadRfqScoringInputs, rankingFromInputs, type RfqRankingEntry } from './rfq-service';
 import { matchVendorContact } from './sourcing-dedupe';
 
 /**
- * Read side of Compras for the UI (next phase), the AI tools and routes.
- * Every function takes the session user and checks the permission on the
- * server; lists are paginated (`page` from 1, `pageSize` ≤ 200) and return
- * JSON-safe DTOs. Expected supply is always reported apart from stock: it is
- * never available.
+ * Read side of Compras for its surfaces, the AI tools and the routes. Every
+ * function takes the session user and checks the permission on the server;
+ * lists are paginated (`page` from 1, `pageSize` ≤ 200) and return JSON-safe
+ * DTOs. Expected supply is always reported apart from stock: it is never
+ * available.
+ *
+ * ONE implementation per datum: the lists of the work centre (requests, RFQs,
+ * orders, receipts and suppliers as rows) are the SQL union of
+ * `areas/compras/compras-rows.ts`, the panel counters live in
+ * `compras-dashboard.ts` and the CSV/XLSX export is the one of the area
+ * (`exportAreaRowsAction`, gated by `purchases.export`). The parallel
+ * `listRfqs` / `listProcurementOrders` / `listGoodsReceipts` /
+ * `getPurchasesBoard` / `exportProcurementOrdersCsv` that nothing called were
+ * removed instead of kept as a second answer to the same question; what is
+ * left here is what a real surface or tool reads: the DETAIL of one thing and
+ * the reads Compras has no row for (expected supply, sourcing).
  */
 
 const VIEW = 'purchases.view';
@@ -53,23 +64,33 @@ function pageOf<T>(rows: T[], total: number, page: number, pageSize: number): Pa
   return { rows, total, page, pageSize, pageCount: Math.max(1, Math.ceil(total / pageSize)) };
 }
 
-function statusFilter(value: string | readonly string[] | null | undefined): Prisma.StringFilter | string | undefined {
+function statusFilter(
+  value: string | readonly string[] | null | undefined
+): Prisma.StringFilter | string | undefined {
   if (!value) return undefined;
   if (typeof value === 'string') return value;
   return value.length > 0 ? { in: [...value] } : undefined;
 }
 
 async function userNames(ids: Array<string | null | undefined>): Promise<Map<string, string>> {
-  const unique = [...new Set(ids.filter((id): id is string => Boolean(id) && !String(id).includes(':')))];
+  const unique = [
+    ...new Set(ids.filter((id): id is string => Boolean(id) && !String(id).includes(':'))),
+  ];
   if (unique.length === 0) return new Map();
-  const rows = await prisma.user.findMany({ where: { id: { in: unique } }, select: { id: true, name: true } });
+  const rows = await prisma.user.findMany({
+    where: { id: { in: unique } },
+    select: { id: true, name: true },
+  });
   return new Map(rows.map((row) => [row.id, row.name]));
 }
 
 async function caseNumbers(ids: Array<string | null | undefined>): Promise<Map<string, string>> {
   const unique = [...new Set(ids.filter((id): id is string => Boolean(id)))];
   if (unique.length === 0) return new Map();
-  const rows = await prisma.operationalCase.findMany({ where: { id: { in: unique } }, select: { id: true, caseNumber: true } });
+  const rows = await prisma.operationalCase.findMany({
+    where: { id: { in: unique } },
+    select: { id: true, caseNumber: true },
+  });
   return new Map(rows.map((row) => [row.id, row.caseNumber]));
 }
 
@@ -85,7 +106,10 @@ export interface PurchaseRequestFilters extends PageInput {
   search?: string | null;
 }
 
-export async function listPurchaseRequests(actor: CurrentUser, filters: PurchaseRequestFilters = {}): Promise<Page<PurchaseRequestDTO>> {
+export async function listPurchaseRequests(
+  actor: CurrentUser,
+  filters: PurchaseRequestFilters = {}
+): Promise<Page<PurchaseRequestDTO>> {
   assertAny(actor, [VIEW, 'purchases.request']);
   const { page, pageSize, skip } = normalizePage(filters);
   const where: Prisma.PurchaseRequestWhereInput = {
@@ -98,16 +122,29 @@ export async function listPurchaseRequests(actor: CurrentUser, filters: Purchase
           OR: [
             { number: { contains: filters.search.trim(), mode: 'insensitive' } },
             { reason: { contains: filters.search.trim(), mode: 'insensitive' } },
-            { lines: { some: { description: { contains: filters.search.trim(), mode: 'insensitive' } } } },
+            {
+              lines: {
+                some: { description: { contains: filters.search.trim(), mode: 'insensitive' } },
+              },
+            },
           ],
         }
       : {}),
   };
   const [total, rows] = await Promise.all([
     prisma.purchaseRequest.count({ where }),
-    prisma.purchaseRequest.findMany({ where, orderBy: [{ createdAt: 'desc' }, { id: 'asc' }], skip, take: pageSize, include: { lines: true } }),
+    prisma.purchaseRequest.findMany({
+      where,
+      orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
+      skip,
+      take: pageSize,
+      include: { lines: true },
+    }),
   ]);
-  const [cases, names] = await Promise.all([caseNumbers(rows.map((r) => r.caseId)), userNames(rows.map((r) => r.requestedByUserId))]);
+  const [cases, names] = await Promise.all([
+    caseNumbers(rows.map((r) => r.caseId)),
+    userNames(rows.map((r) => r.requestedByUserId)),
+  ]);
   return pageOf(
     rows.map((row) =>
       toPurchaseRequestDTO(row, row.lines, {
@@ -127,27 +164,48 @@ export interface PurchaseRequestDetail extends PurchaseRequestDTO {
   areaRequestIds: string[];
 }
 
-export async function getPurchaseRequest(actor: CurrentUser, requestId: string): Promise<PurchaseRequestDetail> {
+export async function getPurchaseRequest(
+  actor: CurrentUser,
+  requestId: string
+): Promise<PurchaseRequestDetail> {
   assertAny(actor, [VIEW, 'purchases.request']);
-  const row = await prisma.purchaseRequest.findUnique({ where: { id: requestId }, include: { lines: true } });
+  const row = await prisma.purchaseRequest.findUnique({
+    where: { id: requestId },
+    include: { lines: true },
+  });
   if (!row) throw new OperationsError('not_found', 'No se encontró la solicitud de compra');
   const relations = await prisma.objectRelation.findMany({
-    where: { fromType: 'purchase_request', fromId: row.id, validTo: null, toType: { in: ['procurement_order', 'rfq'] } },
+    where: {
+      fromType: 'purchase_request',
+      fromId: row.id,
+      validTo: null,
+      toType: { in: ['procurement_order', 'rfq'] },
+    },
     select: { toType: true, toId: true },
   });
   const lineIds = row.lines.map((l) => l.id);
   const areaRelations = lineIds.length
     ? await prisma.objectRelation.findMany({
-        where: { fromType: 'area_request', toType: 'purchase_request_line', toId: { in: lineIds }, validTo: null },
+        where: {
+          fromType: 'area_request',
+          toType: 'purchase_request_line',
+          toId: { in: lineIds },
+          validTo: null,
+        },
         select: { fromId: true },
       })
     : [];
   const [orders, rfqs, cases, names] = await Promise.all([
     prisma.procurementOrder.findMany({
-      where: { id: { in: relations.filter((r) => r.toType === 'procurement_order').map((r) => r.toId) } },
+      where: {
+        id: { in: relations.filter((r) => r.toType === 'procurement_order').map((r) => r.toId) },
+      },
       select: { id: true, number: true, status: true },
     }),
-    prisma.rfq.findMany({ where: { id: { in: relations.filter((r) => r.toType === 'rfq').map((r) => r.toId) } }, select: { id: true, number: true, status: true } }),
+    prisma.rfq.findMany({
+      where: { id: { in: relations.filter((r) => r.toType === 'rfq').map((r) => r.toId) } },
+      select: { id: true, number: true, status: true },
+    }),
     caseNumbers([row.caseId]),
     userNames([row.requestedByUserId]),
   ]);
@@ -166,94 +224,64 @@ export async function getPurchaseRequest(actor: CurrentUser, requestId: string):
 // RFQ
 // ---------------------------------------------------------------------------
 
-export interface RfqSummary {
-  id: string;
-  number: string;
-  title: string;
-  status: string;
-  statusLabel: string;
-  dueAt: string | null;
-  lines: number;
-  invitations: number;
-  responses: number;
-  needsReview: number;
-  bestLandedTotal: string | null;
-  createdAt: string;
-}
-
-export async function listRfqs(
-  actor: CurrentUser,
-  filters: PageInput & { status?: string | string[]; onlyOpen?: boolean; search?: string | null } = {}
-): Promise<Page<RfqSummary>> {
-  assertAny(actor, [VIEW, 'purchases.sourcing']);
-  const { page, pageSize, skip } = normalizePage(filters);
-  const where: Prisma.RfqWhereInput = {
-    ...(filters.onlyOpen ? { status: { in: [...RFQ_OPEN_STATUSES] } } : {}),
-    ...(filters.status ? { status: statusFilter(filters.status) } : {}),
-    ...(filters.search?.trim()
-      ? { OR: [{ number: { contains: filters.search.trim(), mode: 'insensitive' } }, { title: { contains: filters.search.trim(), mode: 'insensitive' } }] }
-      : {}),
-  };
-  const [total, rows] = await Promise.all([
-    prisma.rfq.count({ where }),
-    prisma.rfq.findMany({
-      where,
-      orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
-      skip,
-      take: pageSize,
-      include: { lines: { select: { id: true } }, invitations: { select: { id: true } }, responses: { select: { status: true, landedTotal: true } } },
-    }),
-  ]);
-  return pageOf(
-    rows.map((row) => {
-      const totals = row.responses
-        .filter((r) => r.status !== 'rejected' && r.landedTotal !== null)
-        .map((r) => num(r.landedTotal));
-      return {
-        id: row.id,
-        number: row.number,
-        title: row.title,
-        status: row.status,
-        statusLabel: labelOf(RFQ_STATUS_LABELS, row.status),
-        dueAt: row.dueAt?.toISOString() ?? null,
-        lines: row.lines.length,
-        invitations: row.invitations.length,
-        responses: row.responses.filter((r) => r.status !== 'rejected').length,
-        needsReview: row.responses.filter((r) => r.status === 'needs_review').length,
-        bestLandedTotal: totals.length ? decText(Math.min(...totals)) : null,
-        createdAt: row.createdAt.toISOString(),
-      };
-    }),
-    total,
-    page,
-    pageSize
-  );
-}
-
 export interface RfqDetail extends RfqDTO {
   comparison: RfqRankingEntry[];
 }
 
-export async function getRfq(actor: CurrentUser, rfqId: string, now: Date = new Date()): Promise<RfqDetail> {
+export async function getRfq(
+  actor: CurrentUser,
+  rfqId: string,
+  now: Date = new Date()
+): Promise<RfqDetail> {
   assertAny(actor, [VIEW, 'purchases.sourcing']);
   const inputs = await loadRfqScoringInputs(prisma, rfqId);
-  const invitations = await prisma.rfqInvitation.findMany({ where: { rfqId }, orderBy: { createdAt: 'asc' } });
-  const allResponses = await prisma.rfqResponse.findMany({ where: { rfqId }, orderBy: { createdAt: 'asc' } });
+  const invitations = await prisma.rfqInvitation.findMany({
+    where: { rfqId },
+    orderBy: { createdAt: 'asc' },
+  });
+  const allResponses = await prisma.rfqResponse.findMany({
+    where: { rfqId },
+    orderBy: { createdAt: 'asc' },
+  });
   const responseLines = allResponses.length
-    ? await prisma.rfqResponseLine.findMany({ where: { responseId: { in: allResponses.map((r) => r.id) } } })
+    ? await prisma.rfqResponseLine.findMany({
+        where: { responseId: { in: allResponses.map((r) => r.id) } },
+      })
     : [];
-  const supplierIds = [...new Set([...invitations, ...allResponses].map((r) => r.supplierId).filter((id): id is string => Boolean(id)))];
-  const candidateIds = [...new Set([...invitations, ...allResponses].map((r) => r.candidateId).filter((id): id is string => Boolean(id)))];
+  const supplierIds = [
+    ...new Set(
+      [...invitations, ...allResponses]
+        .map((r) => r.supplierId)
+        .filter((id): id is string => Boolean(id))
+    ),
+  ];
+  const candidateIds = [
+    ...new Set(
+      [...invitations, ...allResponses]
+        .map((r) => r.candidateId)
+        .filter((id): id is string => Boolean(id))
+    ),
+  ];
   const [suppliers, candidates] = await Promise.all([
-    prisma.supplier.findMany({ where: { id: { in: supplierIds } }, select: { id: true, name: true } }),
-    prisma.sourcingCandidate.findMany({ where: { id: { in: candidateIds } }, select: { id: true, name: true } }),
+    prisma.supplier.findMany({
+      where: { id: { in: supplierIds } },
+      select: { id: true, name: true },
+    }),
+    prisma.sourcingCandidate.findMany({
+      where: { id: { in: candidateIds } },
+      select: { id: true, name: true },
+    }),
   ]);
   const nameOf = (supplierId: string | null, candidateId: string | null) =>
-    suppliers.find((s) => s.id === supplierId)?.name ?? candidates.find((c) => c.id === candidateId)?.name ?? null;
+    suppliers.find((s) => s.id === supplierId)?.name ??
+    candidates.find((c) => c.id === candidateId)?.name ??
+    null;
   return {
     ...toRfqDTO(inputs.rfq, {
       lines: inputs.lines,
-      invitations: invitations.map((i) => toRfqInvitationDTO(i, nameOf(i.supplierId, i.candidateId))),
+      invitations: invitations.map((i) =>
+        toRfqInvitationDTO(i, nameOf(i.supplierId, i.candidateId))
+      ),
       responses: allResponses.map((r) =>
         toRfqResponseDTO(
           r,
@@ -266,117 +294,94 @@ export async function getRfq(actor: CurrentUser, rfqId: string, now: Date = new 
   };
 }
 
-export async function getRfqComparison(actor: CurrentUser, rfqId: string, now: Date = new Date()): Promise<{ rfqId: string; number: string; ranking: RfqRankingEntry[] }> {
+export async function getRfqComparison(
+  actor: CurrentUser,
+  rfqId: string,
+  now: Date = new Date()
+): Promise<{ rfqId: string; number: string; ranking: RfqRankingEntry[] }> {
   assertAny(actor, [VIEW, 'purchases.sourcing']);
   const inputs = await loadRfqScoringInputs(prisma, rfqId);
-  return { rfqId, number: inputs.rfq.number, ranking: inputs.responses.length ? rankingFromInputs(inputs, now) : [] };
+  return {
+    rfqId,
+    number: inputs.rfq.number,
+    ranking: inputs.responses.length ? rankingFromInputs(inputs, now) : [],
+  };
 }
 
 // ---------------------------------------------------------------------------
 // Procurement orders
 // ---------------------------------------------------------------------------
 
-export interface ProcurementOrderFilters extends PageInput {
-  status?: string | string[];
-  onlyOpen?: boolean;
-  supplierId?: string | null;
-  caseId?: string | null;
-  paymentStatus?: string | null;
-  /** Committed orders whose expected date already passed. */
-  overdue?: boolean;
-  search?: string | null;
-  now?: Date;
-}
-
-async function orderWhere(filters: ProcurementOrderFilters): Promise<Prisma.ProcurementOrderWhereInput> {
-  const where: Prisma.ProcurementOrderWhereInput = {
-    ...(filters.onlyOpen ? { status: { in: [...ORDER_OPEN_STATUSES] } } : {}),
-    ...(filters.status ? { status: statusFilter(filters.status) } : {}),
-    ...(filters.supplierId ? { supplierId: filters.supplierId } : {}),
-    ...(filters.paymentStatus ? { paymentStatus: filters.paymentStatus } : {}),
-    ...(filters.overdue
-      ? { status: { in: [...ORDER_COMMITTED_STATUSES] }, expectedAt: { lt: filters.now ?? new Date() } }
-      : {}),
-    ...(filters.search?.trim()
-      ? {
-          OR: [
-            { number: { contains: filters.search.trim(), mode: 'insensitive' } },
-            { notes: { contains: filters.search.trim(), mode: 'insensitive' } },
-            { lines: { some: { description: { contains: filters.search.trim(), mode: 'insensitive' } } } },
-          ],
-        }
-      : {}),
-  };
-  if (filters.caseId) {
-    const demands = await prisma.caseDemand.findMany({ where: { caseId: filters.caseId }, select: { id: true } });
-    const allocations = demands.length
-      ? await prisma.procurementAllocation.findMany({ where: { demandId: { in: demands.map((d) => d.id) } }, select: { orderLineId: true } })
-      : [];
-    const lines = allocations.length
-      ? await prisma.procurementOrderLine.findMany({ where: { id: { in: allocations.map((a) => a.orderLineId) } }, select: { orderId: true } })
-      : [];
-    where.AND = [
-      { OR: [{ directDeliveryCaseId: filters.caseId }, { id: { in: [...new Set(lines.map((l) => l.orderId))] } }] },
-    ];
-  }
-  return where;
-}
-
-export async function listProcurementOrders(actor: CurrentUser, filters: ProcurementOrderFilters = {}): Promise<Page<ProcurementOrderDTO>> {
-  assertAny(actor, [VIEW]);
-  const { page, pageSize, skip } = normalizePage(filters);
-  const where = await orderWhere(filters);
-  const [total, rows] = await Promise.all([
-    prisma.procurementOrder.count({ where }),
-    prisma.procurementOrder.findMany({ where, orderBy: [{ createdAt: 'desc' }, { id: 'asc' }], skip, take: pageSize }),
-  ]);
-  const suppliers = await prisma.supplier.findMany({
-    where: { id: { in: [...new Set(rows.map((r) => r.supplierId))] } },
-    select: { id: true, name: true },
-  });
-  return pageOf(
-    rows.map((row) => toOrderDTO(row, [], { supplierName: suppliers.find((s) => s.id === row.supplierId)?.name ?? null })),
-    total,
-    page,
-    pageSize
-  );
-}
-
 export interface ProcurementOrderDetail extends ProcurementOrderDTO {
   receipts: GoodsReceiptDTO[];
-  approval: { id: string; status: string; requiredApprovals: number; approvals: number; expiresAt: string | null } | null;
-  obligation: { id: string; number: string; status: string; expectedAmount: string; settledAmount: string; dueAt: string | null } | null;
+  approval: {
+    id: string;
+    status: string;
+    requiredApprovals: number;
+    approvals: number;
+    expiresAt: string | null;
+  } | null;
+  obligation: {
+    id: string;
+    number: string;
+    status: string;
+    expectedAmount: string;
+    settledAmount: string;
+    dueAt: string | null;
+  } | null;
   caseIds: string[];
   openIncidents: Array<{ id: string; kind: string; severity: string; title: string }>;
 }
 
-export async function getProcurementOrder(actor: CurrentUser, orderId: string): Promise<ProcurementOrderDetail> {
+export async function getProcurementOrder(
+  actor: CurrentUser,
+  orderId: string
+): Promise<ProcurementOrderDetail> {
   assertAny(actor, [VIEW]);
   const order = await prisma.procurementOrder.findUnique({ where: { id: orderId } });
   if (!order) throw new OperationsError('not_found', 'No se encontró la orden de compra');
   const [supplier, lines, receipts] = await Promise.all([
     prisma.supplier.findUnique({ where: { id: order.supplierId }, select: { name: true } }),
     prisma.procurementOrderLine.findMany({ where: { orderId }, orderBy: { sortOrder: 'asc' } }),
-    prisma.goodsReceipt.findMany({ where: { orderId }, orderBy: { receivedAt: 'asc' }, include: { lines: true } }),
+    prisma.goodsReceipt.findMany({
+      where: { orderId },
+      orderBy: { receivedAt: 'asc' },
+      include: { lines: true },
+    }),
   ]);
   const allocations = lines.length
-    ? await prisma.procurementAllocation.findMany({ where: { orderLineId: { in: lines.map((l) => l.id) } } })
+    ? await prisma.procurementAllocation.findMany({
+        where: { orderLineId: { in: lines.map((l) => l.id) } },
+      })
     : [];
   const demands = allocations.length
-    ? await prisma.caseDemand.findMany({ where: { id: { in: allocations.map((a) => a.demandId) } }, select: { id: true, caseId: true, name: true } })
+    ? await prisma.caseDemand.findMany({
+        where: { id: { in: allocations.map((a) => a.demandId) } },
+        select: { id: true, caseId: true, name: true },
+      })
     : [];
   const demandAllocations = allocations.some((a) => a.demandAllocationId)
     ? await prisma.demandAllocation.findMany({
-        where: { id: { in: allocations.map((a) => a.demandAllocationId).filter((id): id is string => Boolean(id)) } },
+        where: {
+          id: {
+            in: allocations
+              .map((a) => a.demandAllocationId)
+              .filter((id): id is string => Boolean(id)),
+          },
+        },
         select: { id: true, status: true },
       })
     : [];
   const cases = await caseNumbers([order.directDeliveryCaseId, ...demands.map((d) => d.caseId)]);
   const [approval, obligation] = await Promise.all([
-    order.approvalRequestId ? prisma.approvalRequest.findUnique({ where: { id: order.approvalRequestId } }) : null,
+    order.approvalRequestId
+      ? prisma.approvalRequest.findUnique({ where: { id: order.approvalRequestId } })
+      : null,
     order.obligationId ? prisma.obligation.findUnique({ where: { id: order.obligationId } }) : null,
   ]);
-  const incidentIds = receipts.flatMap((r) => r.lines.map((l) => l.incidentId)).filter((id): id is string => Boolean(id));
+  const incidentIds = receipts
+    .flatMap((r) => r.lines.map((l) => l.incidentId))
+    .filter((id): id is string => Boolean(id));
   const incidents = incidentIds.length
     ? await prisma.incident.findMany({
         where: { id: { in: incidentIds }, status: { in: ['open', 'acknowledged'] } },
@@ -384,7 +389,8 @@ export async function getProcurementOrder(actor: CurrentUser, orderId: string): 
       })
     : [];
   const approvals = Array.isArray(approval?.decisions)
-    ? (approval!.decisions as Array<{ decision?: string }>).filter((d) => d?.decision === 'approve').length
+    ? (approval!.decisions as Array<{ decision?: string }>).filter((d) => d?.decision === 'approve')
+        .length
     : 0;
   const lineDtos = lines.map((line) =>
     toOrderLineDTO(
@@ -397,7 +403,8 @@ export async function getProcurementOrder(actor: CurrentUser, orderId: string): 
             caseId: demand?.caseId ?? null,
             caseNumber: demand ? (cases.get(demand.caseId) ?? null) : null,
             demandName: demand?.name ?? null,
-            allocationStatus: demandAllocations.find((d) => d.id === a.demandAllocationId)?.status ?? null,
+            allocationStatus:
+              demandAllocations.find((d) => d.id === a.demandAllocationId)?.status ?? null,
           });
         })
     )
@@ -424,26 +431,15 @@ export async function getProcurementOrder(actor: CurrentUser, orderId: string): 
           dueAt: obligation.dueAt?.toISOString() ?? null,
         }
       : null,
-    caseIds: [...new Set([order.directDeliveryCaseId, ...demands.map((d) => d.caseId)].filter((id): id is string => Boolean(id)))],
+    caseIds: [
+      ...new Set(
+        [order.directDeliveryCaseId, ...demands.map((d) => d.caseId)].filter((id): id is string =>
+          Boolean(id)
+        )
+      ),
+    ],
     openIncidents: incidents,
   };
-}
-
-export async function listGoodsReceipts(
-  actor: CurrentUser,
-  filters: PageInput & { orderId?: string | null; status?: string | string[] } = {}
-): Promise<Page<GoodsReceiptDTO>> {
-  assertAny(actor, [VIEW, 'purchases.receive']);
-  const { page, pageSize, skip } = normalizePage(filters);
-  const where: Prisma.GoodsReceiptWhereInput = {
-    ...(filters.orderId ? { orderId: filters.orderId } : {}),
-    ...(filters.status ? { status: statusFilter(filters.status) } : {}),
-  };
-  const [total, rows] = await Promise.all([
-    prisma.goodsReceipt.count({ where }),
-    prisma.goodsReceipt.findMany({ where, orderBy: [{ receivedAt: 'desc' }, { id: 'asc' }], skip, take: pageSize, include: { lines: true } }),
-  ]);
-  return pageOf(rows.map((r) => toReceiptDTO(r, r.lines)), total, page, pageSize);
 }
 
 export interface ExpectedSupplyRow {
@@ -461,22 +457,37 @@ export interface ExpectedSupplyRow {
   overdue: boolean;
 }
 
-/** What committed orders will bring, listed apart from the inventory (expected is never available). */
+/**
+ * What committed orders will bring, listed apart from the inventory (expected
+ * is never available). `zohoItemIds` reads a whole page of Existencias in one
+ * query; `zohoItemId` reads a single article.
+ */
 export async function listExpectedSupply(
   actor: CurrentUser,
-  filters: { zohoItemId?: string | null; now?: Date } = {}
+  filters: { zohoItemId?: string | null; zohoItemIds?: readonly string[]; now?: Date } = {}
 ): Promise<ExpectedSupplyRow[]> {
-  if (!hasPermission(actor, VIEW) && !hasPermission(actor, 'inventory.view') && !hasPermission(actor, 'operations.view')) {
+  if (
+    !hasPermission(actor, VIEW) &&
+    !hasPermission(actor, 'inventory.view') &&
+    !hasPermission(actor, 'operations.view')
+  ) {
     throw new AuthorizationError('No tienes permisos para consultar compras');
   }
   const now = filters.now ?? new Date();
+  const wanted = filters.zohoItemIds ? [...new Set(filters.zohoItemIds.filter(Boolean))] : null;
+  if (wanted && wanted.length === 0) return [];
   const lines = await prisma.procurementOrderLine.findMany({
     where: {
       ...(filters.zohoItemId ? { zohoItemId: filters.zohoItemId } : {}),
+      ...(wanted ? { zohoItemId: { in: wanted } } : {}),
       status: { in: ['open', 'partial'] },
       order: { status: { in: [...ORDER_COMMITTED_STATUSES] } },
     },
-    include: { order: { select: { id: true, number: true, status: true, supplierId: true, expectedAt: true } } },
+    include: {
+      order: {
+        select: { id: true, number: true, status: true, supplierId: true, expectedAt: true },
+      },
+    },
     orderBy: { createdAt: 'asc' },
     take: 500,
   });
@@ -508,7 +519,11 @@ export async function listExpectedSupply(
 
 export async function listSuppliers(
   actor: CurrentUser,
-  filters: PageInput & { search?: string | null; status?: string | string[]; zohoItemId?: string | null } = {}
+  filters: PageInput & {
+    search?: string | null;
+    status?: string | string[];
+    zohoItemId?: string | null;
+  } = {}
 ): Promise<Page<SupplierDTO & { productsCount: number }>> {
   assertAny(actor, [VIEW, 'purchases.manage_suppliers']);
   const { page, pageSize, skip } = normalizePage(filters);
@@ -551,7 +566,15 @@ export interface SupplierDetail {
   supplier: SupplierDTO;
   products: SupplierProductDTO[];
   evaluations: SupplierEvaluationDTO[];
-  recentOrders: Array<{ id: string; number: string; status: string; statusLabel: string; total: string; currency: string; createdAt: string }>;
+  recentOrders: Array<{
+    id: string;
+    number: string;
+    status: string;
+    statusLabel: string;
+    total: string;
+    currency: string;
+    createdAt: string;
+  }>;
   openOrders: number;
   sourceCandidate: { id: string; name: string } | null;
 }
@@ -561,12 +584,29 @@ export async function getSupplier(actor: CurrentUser, supplierId: string): Promi
   const supplier = await prisma.supplier.findUnique({ where: { id: supplierId } });
   if (!supplier) throw new OperationsError('not_found', 'No se encontró el proveedor');
   const [products, evaluations, orders, openOrders, candidate] = await Promise.all([
-    prisma.supplierProduct.findMany({ where: { supplierId }, orderBy: [{ lastQuotedAt: 'desc' }, { description: 'asc' }], take: 200 }),
-    prisma.supplierEvaluation.findMany({ where: { supplierId }, orderBy: { createdAt: 'desc' }, take: 50 }),
-    prisma.procurementOrder.findMany({ where: { supplierId }, orderBy: { createdAt: 'desc' }, take: 20 }),
-    prisma.procurementOrder.count({ where: { supplierId, status: { in: [...ORDER_OPEN_STATUSES] } } }),
+    prisma.supplierProduct.findMany({
+      where: { supplierId },
+      orderBy: [{ lastQuotedAt: 'desc' }, { description: 'asc' }],
+      take: 200,
+    }),
+    prisma.supplierEvaluation.findMany({
+      where: { supplierId },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+    }),
+    prisma.procurementOrder.findMany({
+      where: { supplierId },
+      orderBy: { createdAt: 'desc' },
+      take: 20,
+    }),
+    prisma.procurementOrder.count({
+      where: { supplierId, status: { in: [...ORDER_OPEN_STATUSES] } },
+    }),
     supplier.sourceCandidateId
-      ? prisma.sourcingCandidate.findUnique({ where: { id: supplier.sourceCandidateId }, select: { id: true, name: true } })
+      ? prisma.sourcingCandidate.findUnique({
+          where: { id: supplier.sourceCandidateId },
+          select: { id: true, name: true },
+        })
       : null,
   ]);
   return {
@@ -603,14 +643,24 @@ export async function listSourcingSearches(
   };
   const [total, rows] = await Promise.all([
     prisma.sourcingSearch.count({ where }),
-    prisma.sourcingSearch.findMany({ where, orderBy: [{ createdAt: 'desc' }, { id: 'asc' }], skip, take: pageSize }),
+    prisma.sourcingSearch.findMany({
+      where,
+      orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
+      skip,
+      take: pageSize,
+    }),
   ]);
   return pageOf(rows.map(toSearchDTO), total, page, pageSize);
 }
 
 export async function listSourcingCandidates(
   actor: CurrentUser,
-  filters: PageInput & { searchId?: string | null; status?: string | string[]; search?: string | null; excludeKnown?: boolean } = {}
+  filters: PageInput & {
+    searchId?: string | null;
+    status?: string | string[];
+    search?: string | null;
+    excludeKnown?: boolean;
+  } = {}
 ): Promise<Page<SourcingCandidateDTO>> {
   assertAny(actor, [VIEW, 'purchases.sourcing']);
   const { page, pageSize, skip } = normalizePage(filters);
@@ -631,7 +681,12 @@ export async function listSourcingCandidates(
   };
   const [total, rows] = await Promise.all([
     prisma.sourcingCandidate.count({ where }),
-    prisma.sourcingCandidate.findMany({ where, orderBy: [{ confidence: 'desc' }, { updatedAt: 'desc' }], skip, take: pageSize }),
+    prisma.sourcingCandidate.findMany({
+      where,
+      orderBy: [{ confidence: 'desc' }, { updatedAt: 'desc' }],
+      skip,
+      take: pageSize,
+    }),
   ]);
   return pageOf(rows.map(toCandidateDTO), total, page, pageSize);
 }
@@ -641,7 +696,10 @@ export interface SourcingCandidateDetail extends SourcingCandidateDTO {
   invitations: Array<{ rfqId: string; rfqNumber: string | null; status: string; channel: string }>;
 }
 
-export async function getSourcingCandidate(actor: CurrentUser, candidateId: string): Promise<SourcingCandidateDetail> {
+export async function getSourcingCandidate(
+  actor: CurrentUser,
+  candidateId: string
+): Promise<SourcingCandidateDetail> {
   assertAny(actor, [VIEW, 'purchases.sourcing']);
   const candidate = await prisma.sourcingCandidate.findUnique({ where: { id: candidateId } });
   if (!candidate) throw new OperationsError('not_found', 'No se encontró el candidato');
@@ -650,23 +708,45 @@ export async function getSourcingCandidate(actor: CurrentUser, candidateId: stri
   const digits = candidate.phone?.replace(/\D/g, '').slice(-8);
   if (digits) or.push({ primaryPhone: { contains: digits } }, { mobile: { contains: digits } });
   const firstWord = candidate.name.split(/\s+/)[0];
-  if (firstWord && firstWord.length >= 3) or.push({ companyName: { contains: firstWord, mode: 'insensitive' } });
+  if (firstWord && firstWord.length >= 3)
+    or.push({ companyName: { contains: firstWord, mode: 'insensitive' } });
   const vendors = or.length
     ? await prisma.contact.findMany({
         where: { contactType: 'vendor', OR: or },
         take: 50,
-        select: { zohoContactId: true, contactName: true, companyName: true, website: true, primaryPhone: true, mobile: true, primaryEmail: true },
+        select: {
+          zohoContactId: true,
+          contactName: true,
+          companyName: true,
+          website: true,
+          primaryPhone: true,
+          mobile: true,
+          primaryEmail: true,
+        },
       })
     : [];
   const match = matchVendorContact(candidate, vendors);
   const vendor = match ? vendors.find((v) => v.zohoContactId === match.zohoContactId) : null;
-  const invitations = await prisma.rfqInvitation.findMany({ where: { candidateId }, orderBy: { createdAt: 'desc' }, take: 20 });
+  const invitations = await prisma.rfqInvitation.findMany({
+    where: { candidateId },
+    orderBy: { createdAt: 'desc' },
+    take: 20,
+  });
   const rfqs = invitations.length
-    ? await prisma.rfq.findMany({ where: { id: { in: invitations.map((i) => i.rfqId) } }, select: { id: true, number: true } })
+    ? await prisma.rfq.findMany({
+        where: { id: { in: invitations.map((i) => i.rfqId) } },
+        select: { id: true, number: true },
+      })
     : [];
   return {
     ...toCandidateDTO(candidate),
-    zohoVendor: match ? { zohoContactId: match.zohoContactId, name: vendor?.companyName ?? vendor?.contactName ?? null, reason: match.reason } : null,
+    zohoVendor: match
+      ? {
+          zohoContactId: match.zohoContactId,
+          name: vendor?.companyName ?? vendor?.contactName ?? null,
+          reason: match.reason,
+        }
+      : null,
     invitations: invitations.map((i) => ({
       rfqId: i.rfqId,
       rfqNumber: rfqs.find((r) => r.id === i.rfqId)?.number ?? null,
@@ -674,100 +754,6 @@ export async function getSourcingCandidate(actor: CurrentUser, candidateId: stri
       channel: i.channel,
     })),
   };
-}
-
-// ---------------------------------------------------------------------------
-// Board and export
-// ---------------------------------------------------------------------------
-
-export interface PurchasesBoard {
-  openRequests: number;
-  requestsWithoutOrder: number;
-  rfqsCollecting: number;
-  responsesToReview: number;
-  ordersPendingApproval: number;
-  ordersPendingPayment: number;
-  ordersAwaitingReceipt: number;
-  ordersOverdue: number;
-  ordersDisputed: number;
-  sourcingCandidatesNew: number;
-}
-
-export async function getPurchasesBoard(actor: CurrentUser, now: Date = new Date()): Promise<PurchasesBoard> {
-  assertAny(actor, [VIEW]);
-  const [
-    openRequests,
-    requestsWithoutOrder,
-    rfqsCollecting,
-    responsesToReview,
-    ordersPendingApproval,
-    ordersPendingPayment,
-    ordersAwaitingReceipt,
-    ordersOverdue,
-    ordersDisputed,
-    sourcingCandidatesNew,
-  ] = await Promise.all([
-    prisma.purchaseRequest.count({ where: { status: { in: [...PURCHASE_REQUEST_OPEN_STATUSES] } } }),
-    prisma.purchaseRequest.count({ where: { status: { in: ['open', 'consolidated'] } } }),
-    prisma.rfq.count({ where: { status: { in: ['sent', 'collecting'] } } }),
-    prisma.rfqResponse.count({ where: { status: 'needs_review' } }),
-    prisma.procurementOrder.count({ where: { status: 'pending_approval' } }),
-    prisma.procurementOrder.count({ where: { status: 'pending_payment' } }),
-    prisma.procurementOrder.count({ where: { status: { in: ['awaiting_receipt', 'partially_received'] } } }),
-    prisma.procurementOrder.count({ where: { status: { in: [...ORDER_COMMITTED_STATUSES] }, expectedAt: { lt: now } } }),
-    prisma.procurementOrder.count({ where: { status: 'disputed' } }),
-    prisma.sourcingCandidate.count({ where: { status: 'new', supplierId: null } }),
-  ]);
-  return {
-    openRequests,
-    requestsWithoutOrder,
-    rfqsCollecting,
-    responsesToReview,
-    ordersPendingApproval,
-    ordersPendingPayment,
-    ordersAwaitingReceipt,
-    ordersOverdue,
-    ordersDisputed,
-    sourcingCandidatesNew,
-  };
-}
-
-function csvCell(value: unknown): string {
-  const text = value === null || value === undefined ? '' : String(value);
-  const safe = /^[=+\-@]/.test(text) ? `'${text}` : text;
-  return /[",\n;]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
-}
-
-/** CSV of procurement orders (formula injection neutralized). Requires `purchases.export`. */
-export async function exportProcurementOrdersCsv(actor: CurrentUser, filters: ProcurementOrderFilters = {}): Promise<string> {
-  if (!hasPermission(actor, 'purchases.export')) throw new AuthorizationError('No tienes permisos para exportar compras');
-  const where = await orderWhere(filters);
-  const rows = await prisma.procurementOrder.findMany({ where, orderBy: { createdAt: 'desc' }, take: 5000 });
-  const suppliers = await prisma.supplier.findMany({
-    where: { id: { in: [...new Set(rows.map((r) => r.supplierId))] } },
-    select: { id: true, name: true, number: true },
-  });
-  const header = ['Folio', 'Proveedor', 'Estado', 'Pago', 'Moneda', 'Subtotal', 'IVA', 'Flete', 'Total', 'Entrega', 'Fecha estimada', 'Creada'];
-  const body = rows.map((row) => {
-    const supplier = suppliers.find((s) => s.id === row.supplierId);
-    return [
-      row.number,
-      supplier ? `${supplier.number} ${supplier.name}` : row.supplierId,
-      orderStatusLabel(row.status),
-      row.paymentStatus,
-      row.currency,
-      decText(row.subtotal),
-      decText(row.taxTotal),
-      decText(row.freight),
-      decText(row.total),
-      row.deliveryMode,
-      row.expectedAt ? row.expectedAt.toISOString().slice(0, 10) : '',
-      row.createdAt.toISOString().slice(0, 10),
-    ]
-      .map(csvCell)
-      .join(',');
-  });
-  return [header.join(','), ...body].join('\n');
 }
 
 export { parseChannels as parseSupplierChannels };

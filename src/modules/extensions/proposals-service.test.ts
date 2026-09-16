@@ -85,19 +85,12 @@ vi.mock('@/lib/prisma', () => ({
         const row = rows.get(where.id);
         return row ? { ...row } : null;
       }),
-      findMany: vi.fn(
-        async ({
-          where,
-          take,
-        }: {
-          where: Record<string, unknown>;
-          take?: number;
-        }) =>
-          [...rows.values()]
-            .filter((row) => matches(row, where))
-            .sort((a, b) => (b.createdAt as Date).getTime() - (a.createdAt as Date).getTime())
-            .slice(0, take ?? 1000)
-            .map((row) => ({ ...row }))
+      findMany: vi.fn(async ({ where, take }: { where: Record<string, unknown>; take?: number }) =>
+        [...rows.values()]
+          .filter((row) => matches(row, where))
+          .sort((a, b) => (b.createdAt as Date).getTime() - (a.createdAt as Date).getTime())
+          .slice(0, take ?? 1000)
+          .map((row) => ({ ...row }))
       ),
       create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
         const row = {
@@ -127,7 +120,13 @@ vi.mock('@/lib/prisma', () => ({
         }
       ),
       updateMany: vi.fn(
-        async ({ where, data }: { where: Record<string, unknown>; data: Record<string, unknown> }) => {
+        async ({
+          where,
+          data,
+        }: {
+          where: Record<string, unknown>;
+          data: Record<string, unknown>;
+        }) => {
           let count = 0;
           for (const row of rows.values()) {
             if (!matches(row, where)) continue;
@@ -139,7 +138,9 @@ vi.mock('@/lib/prisma', () => ({
       ),
     },
     user: {
-      findUnique: vi.fn(async ({ where }: { where: { id: string } }) => users.get(where.id) ?? null),
+      findUnique: vi.fn(
+        async ({ where }: { where: { id: string } }) => users.get(where.id) ?? null
+      ),
     },
     agentIdentity: {
       findUnique: vi.fn(async ({ where }: { where: { botUserId: string } }) => {
@@ -149,7 +150,9 @@ vi.mock('@/lib/prisma', () => ({
     },
   },
 }));
-vi.mock('@/modules/agents/dispatcher', () => ({ enqueueProposalFailed: agents.enqueueProposalFailed }));
+vi.mock('@/modules/agents/dispatcher', () => ({
+  enqueueProposalFailed: agents.enqueueProposalFailed,
+}));
 vi.mock('@/modules/ai/tools/registry', () => ({
   getToolDefinition: (name: string) => registry.tools.get(name),
   executeTool: registry.executeTool,
@@ -169,7 +172,7 @@ import {
   listProposalsForScope,
   normalizeApproverScope,
   rejectProposal,
-  secondApprovalPermissionFor,
+  secondApprovalPermissionsFor,
   type ApproverScope,
 } from './proposals-service';
 
@@ -192,12 +195,27 @@ const perms = (...keys: string[]) => keys as CurrentUser['permissionKeys'];
 const actor = makeActor('user-1', { username: 'ventas', name: 'Ventas', roleKeys: ['ventas'] });
 const responsible = makeActor('resp-1', { username: 'ana' });
 const backup = makeActor('backup-1', { username: 'luis' });
-const manager = makeActor('mgr-1', { username: 'marta', permissionKeys: perms('operations.manage') });
+const manager = makeActor('mgr-1', {
+  username: 'marta',
+  permissionKeys: perms('operations.manage'),
+});
 const director = makeActor('dir-1', {
   username: 'dora',
   permissionKeys: perms('operations.manage', 'operations.admin'),
 });
-const stranger = makeActor('stranger-1', { username: 'otro', permissionKeys: perms('operations.view') });
+const stranger = makeActor('stranger-1', {
+  username: 'otro',
+  permissionKeys: perms('operations.view'),
+});
+// Inventario aprueba con CUALQUIERA de sus dos llaves: una persona por llave.
+const adjuster = makeActor('inv-adjust', {
+  username: 'ines',
+  permissionKeys: perms('inventory.adjust'),
+});
+const stockManager = makeActor('inv-manage', {
+  username: 'ivan',
+  permissionKeys: perms('inventory.manage'),
+});
 const areaBot = makeActor('bot-compras', { username: 'ia_compras', roleKeys: ['agent_compras'] });
 const flaggedBot = makeActor('bot-flag', { username: 'ia_flag' });
 
@@ -207,7 +225,7 @@ const SCOPE: ApproverScope = {
   caseId: 'case-1',
   areaKey: 'compras',
   userIds: ['resp-1', 'backup-1'],
-  permission: 'operations.manage',
+  permissions: ['operations.manage'],
 };
 
 function seedProposal(overrides: Partial<ProposalRow> = {}): ProposalRow {
@@ -259,7 +277,17 @@ function seedProposal(overrides: Partial<ProposalRow> = {}): ProposalRow {
 beforeEach(() => {
   rows.clear();
   users.clear();
-  for (const u of [actor, responsible, backup, manager, director, stranger, areaBot]) {
+  for (const u of [
+    actor,
+    responsible,
+    backup,
+    manager,
+    director,
+    stranger,
+    adjuster,
+    stockManager,
+    areaBot,
+  ]) {
     users.set(u.id, { isBot: u.id.startsWith('bot-'), isActive: true });
   }
   users.set(flaggedBot.id, { isBot: true, isActive: true });
@@ -444,7 +472,11 @@ describe('approver scope', () => {
     const { proposal, execution } = await approveProposal(responsible, 'prop-1');
 
     expect(execution.success).toBe(true);
-    expect(proposal).toMatchObject({ status: 'executed', decisionBy: 'resp-1', proposedBy: 'bot-compras' });
+    expect(proposal).toMatchObject({
+      status: 'executed',
+      decisionBy: 'resp-1',
+      proposedBy: 'bot-compras',
+    });
     expect(registry.executeTool).toHaveBeenCalledWith(
       'reserveStock',
       responsible,
@@ -476,7 +508,12 @@ describe('approver scope', () => {
 
   it('an approved agent proposal that fails to run wakes its proposer once (action_failed)', async () => {
     seedAgentProposal();
-    registry.executeTool.mockResolvedValueOnce({ success: false, error: 'Sin existencia controlada', errorCode: 'error', durationMs: 3 });
+    registry.executeTool.mockResolvedValueOnce({
+      success: false,
+      error: 'Sin existencia controlada',
+      errorCode: 'error',
+      durationMs: 3,
+    });
     const { proposal, execution } = await approveProposal(responsible, 'prop-1');
     expect(execution.success).toBe(false);
     expect(proposal.status).toBe('failed');
@@ -493,11 +530,22 @@ describe('approver scope', () => {
 
   it('a failed proposal of a person, or an uncertain one, never enqueues an agent turn', async () => {
     seedProposal({ approverScope: SCOPE });
-    registry.executeTool.mockResolvedValueOnce({ success: false, error: 'Zoho caído', errorCode: 'error', durationMs: 3 });
+    registry.executeTool.mockResolvedValueOnce({
+      success: false,
+      error: 'Zoho caído',
+      errorCode: 'error',
+      durationMs: 3,
+    });
     await approveProposal(actor, 'prop-1');
     rows.clear();
     seedAgentProposal();
-    registry.executeTool.mockResolvedValueOnce({ success: false, uncertain: true, error: 'timeout', errorCode: 'timeout', durationMs: 3 });
+    registry.executeTool.mockResolvedValueOnce({
+      success: false,
+      uncertain: true,
+      error: 'timeout',
+      errorCode: 'timeout',
+      durationMs: 3,
+    });
     await approveProposal(responsible, 'prop-1');
     expect(agents.enqueueProposalFailed).not.toHaveBeenCalled();
   });
@@ -506,6 +554,44 @@ describe('approver scope', () => {
     seedAgentProposal();
     const { proposal } = await approveProposal(manager, 'prop-1');
     expect(proposal).toMatchObject({ status: 'executed', decisionBy: 'mgr-1' });
+  });
+
+  // Inventario aprueba con `inventory.adjust` O `inventory.manage` (columna «Aprobar» del
+  // registro de áreas): quien tenga CUALQUIERA de las dos decide, no sólo la primera.
+  it('an area with two approval keys: a holder of either one decides', async () => {
+    const inventoryScope = {
+      ...SCOPE,
+      areaKey: 'inventario',
+      permissions: ['inventory.adjust', 'inventory.manage'],
+    };
+    seedAgentProposal({ approverScope: inventoryScope });
+    expect(await approveProposal(adjuster, 'prop-1')).toMatchObject({
+      proposal: { status: 'executed', decisionBy: 'inv-adjust' },
+    });
+
+    rows.clear();
+    seedAgentProposal({ approverScope: inventoryScope });
+    expect(await approveProposal(stockManager, 'prop-1')).toMatchObject({
+      proposal: { status: 'executed', decisionBy: 'inv-manage' },
+    });
+  });
+
+  // Filas guardadas antes del campo plural: traían `permission` (singular) y siguen decidiéndose.
+  it('a stored scope with the legacy singular permission still grants the decision', async () => {
+    seedAgentProposal({
+      approverScope: {
+        caseId: 'case-1',
+        areaKey: 'compras',
+        userIds: [],
+        permission: 'operations.manage',
+      },
+    });
+    const { proposal } = await approveProposal(manager, 'prop-1');
+    expect(proposal).toMatchObject({ status: 'executed', decisionBy: 'mgr-1' });
+    expect(normalizeApproverScope({ userIds: [], permission: 'operations.manage' })).toEqual({
+      userIds: [],
+      permissions: ['operations.manage'],
+    });
   });
 
   it('a stranger (not listed, without the permission) gets not found and nothing runs', async () => {
@@ -517,7 +603,7 @@ describe('approver scope', () => {
   });
 
   it('a scope naming an unknown permission grants nothing by permission', async () => {
-    seedAgentProposal({ approverScope: { ...SCOPE, permission: 'operations.compras.approve' } });
+    seedAgentProposal({ approverScope: { ...SCOPE, permissions: ['operations.compras.approve'] } });
     await expect(approveProposal(manager, 'prop-1')).rejects.toMatchObject({ status: 404 });
     expect(registry.executeTool).not.toHaveBeenCalled();
   });
@@ -542,7 +628,11 @@ describe('approver scope', () => {
   it('the responsible rejects: the decision is recorded and the thread learns it', async () => {
     seedAgentProposal();
     const dto = await rejectProposal(responsible, 'prop-1', 'No hay espacio en bodega');
-    expect(dto).toMatchObject({ status: 'rejected', decisionBy: 'resp-1', error: 'No hay espacio en bodega' });
+    expect(dto).toMatchObject({
+      status: 'rejected',
+      decisionBy: 'resp-1',
+      error: 'No hay espacio en bodega',
+    });
     expect(sessions.addMessage).toHaveBeenCalledWith(
       'conv-1',
       'system',
@@ -566,7 +656,13 @@ describe('approver scope', () => {
     });
     expect(withScope.approverScope).toEqual(SCOPE);
 
-    const without = await createProposal({ actor, tool, args: ARGS, summary: 'Reservar', approverScope: null });
+    const without = await createProposal({
+      actor,
+      tool,
+      args: ARGS,
+      summary: 'Reservar',
+      approverScope: null,
+    });
     expect(without.approverScope).toBeNull();
     expect(normalizeApproverScope({ userIds: [] })).toBeNull();
   });
@@ -592,7 +688,11 @@ describe('double signature', () => {
       decisionBy: 'resp-1',
       awaitingSecondApproval: true,
     });
-    expect(execution).toMatchObject({ success: false, needsApproval: true, errorCode: 'awaiting_second_approval' });
+    expect(execution).toMatchObject({
+      success: false,
+      needsApproval: true,
+      errorCode: 'awaiting_second_approval',
+    });
     expect(registry.executeTool).not.toHaveBeenCalled();
     expect(sessions.addMessage).toHaveBeenCalledWith(
       'conv-1',
@@ -628,15 +728,43 @@ describe('double signature', () => {
     expect(registry.executeTool).not.toHaveBeenCalled();
   });
 
+  it('with two approval keys either one signs second, and the message names both', async () => {
+    const permissions = ['inventory.adjust', 'inventory.manage'];
+    seedPayment({ approverScope: { ...SCOPE, areaKey: 'inventario', permissions } });
+    await approveProposal(responsible, 'prop-1');
+    expect(sessions.addMessage).toHaveBeenCalledWith(
+      'conv-1',
+      'system',
+      expect.stringContaining('permiso inventory.adjust o inventory.manage'),
+      null,
+      0,
+      0,
+      0
+    );
+
+    const { proposal } = await approveProposal(adjuster, 'prop-1');
+    expect(proposal).toMatchObject({ status: 'executed', secondDecisionBy: 'inv-adjust' });
+    expect(registry.executeTool).toHaveBeenCalledTimes(1);
+  });
+
   it('a distinct user holding the permission signs second and the tool runs once as that user', async () => {
     seedPayment();
     await approveProposal(responsible, 'prop-1');
     const { proposal, execution } = await approveProposal(manager, 'prop-1');
 
     expect(execution.success).toBe(true);
-    expect(proposal).toMatchObject({ status: 'executed', decisionBy: 'resp-1', secondDecisionBy: 'mgr-1' });
+    expect(proposal).toMatchObject({
+      status: 'executed',
+      decisionBy: 'resp-1',
+      secondDecisionBy: 'mgr-1',
+    });
     expect(registry.executeTool).toHaveBeenCalledTimes(1);
-    expect(registry.executeTool).toHaveBeenCalledWith('authorizePayment', manager, ARGS, expect.anything());
+    expect(registry.executeTool).toHaveBeenCalledWith(
+      'authorizePayment',
+      manager,
+      ARGS,
+      expect.anything()
+    );
     expect(sessions.addMessage).toHaveBeenLastCalledWith(
       'conv-1',
       'system',
@@ -663,7 +791,11 @@ describe('double signature', () => {
 
     await expect(approveProposal(manager, 'prop-1')).rejects.toMatchObject({ status: 404 });
     const { proposal } = await approveProposal(director, 'prop-1');
-    expect(proposal).toMatchObject({ status: 'executed', decisionBy: 'user-1', secondDecisionBy: 'dir-1' });
+    expect(proposal).toMatchObject({
+      status: 'executed',
+      decisionBy: 'user-1',
+      secondDecisionBy: 'dir-1',
+    });
   });
 
   it('the second signer may reject instead: the first signature is kept', async () => {
@@ -671,31 +803,49 @@ describe('double signature', () => {
     await approveProposal(responsible, 'prop-1');
     const dto = await rejectProposal(manager, 'prop-1', 'Falta la factura');
 
-    expect(dto).toMatchObject({ status: 'rejected', decisionBy: 'resp-1', secondDecisionBy: 'mgr-1' });
+    expect(dto).toMatchObject({
+      status: 'rejected',
+      decisionBy: 'resp-1',
+      secondDecisionBy: 'mgr-1',
+    });
     expect(registry.executeTool).not.toHaveBeenCalled();
   });
 
   it('a proposal waiting for the second signature expires like a pending one', async () => {
-    seedPayment({ status: 'awaiting_second_approval', decisionBy: 'resp-1', expiresAt: new Date(Date.now() - 1000) });
+    seedPayment({
+      status: 'awaiting_second_approval',
+      decisionBy: 'resp-1',
+      expiresAt: new Date(Date.now() - 1000),
+    });
     await expect(approveProposal(manager, 'prop-1')).rejects.toMatchObject({ status: 410 });
     expect(rows.get('prop-1')?.status).toBe('expired');
 
-    seedPayment({ id: 'prop-2', status: 'awaiting_second_approval', expiresAt: new Date(Date.now() - 1000) });
+    seedPayment({
+      id: 'prop-2',
+      status: 'awaiting_second_approval',
+      expiresAt: new Date(Date.now() - 1000),
+    });
     expect(await expireProposals()).toBe(1);
     expect(rows.get('prop-2')?.status).toBe('expired');
   });
 
   it('pure rules: second permission falls back scope → tool → operations.admin', () => {
-    expect(secondApprovalPermissionFor(SCOPE, { requiredPermission: 'operations.admin' })).toBe('operations.manage');
-    expect(secondApprovalPermissionFor(null, { requiredPermission: 'operations.view' })).toBe('operations.view');
-    expect(secondApprovalPermissionFor({ userIds: ['a'], permission: 'nope.x' }, undefined)).toBe('operations.admin');
+    expect(secondApprovalPermissionsFor(SCOPE, { requiredPermission: 'operations.admin' })).toEqual(
+      ['operations.manage']
+    );
+    expect(secondApprovalPermissionsFor(null, { requiredPermission: 'operations.view' })).toEqual([
+      'operations.view',
+    ]);
+    expect(
+      secondApprovalPermissionsFor({ userIds: ['a'], permissions: ['nope.x'] }, undefined)
+    ).toEqual(['operations.admin']);
     expect(
       evaluateProposalDecision({
         actor: responsible,
         proposal: { userId: 'bot-compras', status: 'executed', approverScope: SCOPE },
         decision: 'approve',
         requiresSecondApproval: false,
-        secondApprovalPermission: 'operations.manage',
+        secondApprovalPermissions: ['operations.manage'],
       })
     ).toEqual({ ok: false, status: 409, message: 'La propuesta ya está executed' });
   });
@@ -706,7 +856,12 @@ describe('listing', () => {
 
   function seedListing() {
     seedProposal({ id: 'p-own', createdAt: new Date(Date.now() - 1000) });
-    seedProposal({ id: 'p-scope', userId: areaBot.id, approverScope: SCOPE, createdAt: new Date(Date.now() - 2000) });
+    seedProposal({
+      id: 'p-scope',
+      userId: areaBot.id,
+      approverScope: SCOPE,
+      createdAt: new Date(Date.now() - 2000),
+    });
     seedProposal({
       id: 'p-case2',
       userId: areaBot.id,
@@ -720,7 +875,7 @@ describe('listing', () => {
       toolName: 'authorizePayment',
       status: 'awaiting_second_approval',
       decisionBy: 'z',
-      approverScope: { caseId: 'case-1', userIds: ['z'], permission: 'operations.manage' },
+      approverScope: { caseId: 'case-1', userIds: ['z'], permissions: ['operations.manage'] },
       createdAt: new Date(Date.now() - 4000),
     });
     seedProposal({ id: 'p-expired', userId: areaBot.id, approverScope: SCOPE, expiresAt: past });
@@ -742,22 +897,142 @@ describe('listing', () => {
 
   it('listPendingProposals(actor) returns what the actor can decide across surfaces', async () => {
     seedListing();
-    expect((await listPendingProposals(responsible)).map((p) => p.id)).toEqual(['p-scope', 'p-case2']);
-    expect((await listPendingProposals(manager)).map((p) => p.id)).toEqual(['p-scope', 'p-case2', 'p-await']);
+    expect((await listPendingProposals(responsible)).map((p) => p.id)).toEqual([
+      'p-scope',
+      'p-case2',
+    ]);
+    expect((await listPendingProposals(manager)).map((p) => p.id)).toEqual([
+      'p-scope',
+      'p-case2',
+      'p-await',
+    ]);
     expect((await listPendingProposals(actor)).map((p) => p.id)).toEqual(['p-own']);
     expect(await listPendingProposals(stranger)).toEqual([]);
   });
 
   it('listProposalsForScope filters by case and respects visibility', async () => {
     seedListing();
-    expect((await listProposalsForScope(responsible, { caseId: 'case-1' })).map((p) => p.id)).toEqual(['p-scope']);
+    expect(
+      (await listProposalsForScope(responsible, { caseId: 'case-1' })).map((p) => p.id)
+    ).toEqual(['p-scope']);
     expect((await listProposalsForScope(manager, { caseId: 'case-1' })).map((p) => p.id)).toEqual([
       'p-scope',
       'p-await',
     ]);
     expect(
-      (await listProposalsForScope(responsible, { caseId: 'case-1', includeDecided: true })).map((p) => p.id)
+      (await listProposalsForScope(responsible, { caseId: 'case-1', includeDecided: true })).map(
+        (p) => p.id
+      )
     ).toEqual(['p-expired', 'p-scope', 'p-done']);
-    expect(await listProposalsForScope(stranger, { caseId: 'case-1', includeDecided: true })).toEqual([]);
+    expect(
+      await listProposalsForScope(stranger, { caseId: 'case-1', includeDecided: true })
+    ).toEqual([]);
+  });
+});
+
+/**
+ * Contrato de los argumentos de una propuesta (plan §5.3 / §6.6, «la IA propone, la persona
+ * aprueba»): la fila guarda los argumentos CRUDOS —son los que se hashean y los que se
+ * ejecutan— y la redacción ocurre sólo a la salida, en `toProposalDTO`.
+ *
+ * Redactar al guardar rompía las dos mitades a la vez: `createProposal` hasheaba los crudos y
+ * `approveProposal` recalculaba el hash sobre los redactados, así que la propuesta quedaba
+ * `invalidated` («cambio material») sin que nadie hubiera cambiado nada; y, sin esa guardia, la
+ * herramienta se habría ejecutado con un id mutilado. Estas pruebas recorren el camino real
+ * crudo → almacenado → aprobado, que es el que ninguna prueba anterior ejercía (todas construían
+ * el `argsHash` sobre los MISMOS argumentos que guardaban).
+ */
+describe('argumentos de la propuesta: crudos al guardar y ejecutar, redactados al mostrar', () => {
+  const quoteTool = { name: 'createQuote', version: '1', effect: 'business_write' } as never;
+  // `ca7owrkix9xsjh43hbtrhj7lf` es la forma de un cuid real y lleva «rk» seguido de 18
+  // caracteres: exactamente lo que el patrón de credenciales mordía (1.7 % de los ids).
+  // `note` sí parece una credencial, así que la redacción la reescribe siempre.
+  const RAW_ARGS = {
+    requestId: 'ca7owrkix9xsjh43hbtrhj7lf',
+    note: 'Bearer abcdefghijklmnopqrstuvwxyz',
+    action: 'accept',
+  };
+
+  it('la aprobación no invalida y ejecuta los argumentos EXACTOS que se propusieron', async () => {
+    const created = await createProposal({
+      actor,
+      tool: quoteTool,
+      args: RAW_ARGS,
+      summary: 'Aceptar la solicitud',
+    });
+    expect(rows.get(created.id)?.args).toEqual(RAW_ARGS);
+
+    const { proposal: decided, execution } = await approveProposal(actor, created.id);
+
+    expect(execution.success).toBe(true);
+    expect(decided.status).toBe('executed');
+    expect(registry.executeTool).toHaveBeenCalledWith(
+      'createQuote',
+      actor,
+      RAW_ARGS,
+      expect.objectContaining({ approvedProposalId: created.id, skipApproval: true })
+    );
+  });
+
+  it('lo que sale hacia la UI, las APIs y el modelo sí va redactado', async () => {
+    const created = await createProposal({
+      actor,
+      tool: quoteTool,
+      args: RAW_ARGS,
+      summary: 'Aceptar la solicitud',
+    });
+    const { toProposalDTO } = await import('./proposals-service');
+    const dto = toProposalDTO(rows.get(created.id) as never);
+
+    expect(dto.args).toEqual({ ...RAW_ARGS, note: '[REDACTED]' });
+  });
+});
+
+/**
+ * Plan 5.4: la ejecución de una propuesta aprobada corre con la firma de quien la aprobó, para
+ * que `requestApproval` (sección 6.0) la registre como PRIMERA FIRMA de la aprobación de negocio
+ * que ese mismo clic abre y no le pida dos veces lo mismo.
+ */
+describe('firma de negocio heredada de la decisión', () => {
+  it('la herramienta se ejecuta con la firma de quien aprobó (y sólo dentro de esa ejecución)', async () => {
+    const seen: Array<{ userId: string; proposalId: string; toolName: string } | null> = [];
+    registry.executeTool.mockImplementation(async () => {
+      const { peekApprovalFirstSignature } =
+        await import('@/modules/operations/approval-first-signature');
+      const current = peekApprovalFirstSignature();
+      seen.push(
+        current
+          ? { userId: current.userId, proposalId: current.proposalId, toolName: current.toolName }
+          : null
+      );
+      return { success: true, result: { ok: true }, durationMs: 1 };
+    });
+    seedProposal({ userId: actor.id, approverScope: SCOPE });
+
+    const { peekApprovalFirstSignature } =
+      await import('@/modules/operations/approval-first-signature');
+    expect(peekApprovalFirstSignature()).toBeNull();
+
+    await approveProposal(responsible, 'prop-1');
+
+    expect(seen).toEqual([
+      { userId: responsible.id, proposalId: 'prop-1', toolName: 'createQuote' },
+    ]);
+    // El contexto no se filtra fuera de la ejecución de la herramienta.
+    expect(peekApprovalFirstSignature()).toBeNull();
+  });
+
+  it('la primera de dos firmas no ejecuta nada, así que no hereda firma de negocio', async () => {
+    const seen: unknown[] = [];
+    registry.executeTool.mockImplementation(async () => {
+      seen.push('ran');
+      return { success: true, result: {}, durationMs: 1 };
+    });
+    seedProposal({ toolName: 'authorizePayment', approverScope: SCOPE, userId: areaBot.id });
+
+    const { execution } = await approveProposal(director, 'prop-1');
+
+    expect(execution.errorCode).toBe('awaiting_second_approval');
+    expect(seen).toEqual([]);
   });
 });

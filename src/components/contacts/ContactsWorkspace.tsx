@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   DndContext,
@@ -36,7 +36,7 @@ import {
   X,
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { CurrentUser } from '@/modules/auth/authorization';
+import type { CurrentUser } from '@/modules/auth/authorization';
 import {
   CONTACT_COLUMNS,
   CONTACT_COLUMN_MAP,
@@ -103,7 +103,9 @@ export interface ContactsWorkspaceProps {
   canWatch: boolean;
   canShareViews: boolean;
   initialSyncStatus?: SyncStatus | null;
-  savePreferenceAction: (config: TablePreferenceConfig) => Promise<{ error: string | null; success: boolean }>;
+  savePreferenceAction: (
+    config: TablePreferenceConfig
+  ) => Promise<{ error: string | null; success: boolean }>;
   resetPreferenceAction: () => Promise<{ error: string | null; success: boolean }>;
   createViewAction: (
     prevState: { error: string | null; success: boolean; viewId: string | null },
@@ -122,9 +124,21 @@ export interface ContactsWorkspaceProps {
     formData: FormData
   ) => Promise<{ error: string | null; success: boolean; isWatched: boolean }>;
   exportAction: (
-    prevState: { error: string | null; success: boolean; content: string | null; filename: string | null; format: string | null },
+    prevState: {
+      error: string | null;
+      success: boolean;
+      content: string | null;
+      filename: string | null;
+      format: string | null;
+    },
     formData: FormData
-  ) => Promise<{ error: string | null; success: boolean; content: string | null; filename: string | null; format: string | null }>;
+  ) => Promise<{
+    error: string | null;
+    success: boolean;
+    content: string | null;
+    filename: string | null;
+    format: string | null;
+  }>;
 }
 
 type Density = 'compact' | 'normal' | 'comfortable';
@@ -133,9 +147,7 @@ function normalizeTablePreference(p: TablePreferenceConfig): TablePreferenceConf
   const defaultVisibility = Object.fromEntries(
     CONTACT_COLUMNS.map((c) => [c.id, c.defaultVisible])
   );
-  const defaultWidths = Object.fromEntries(
-    CONTACT_COLUMNS.map((c) => [c.id, c.defaultWidth])
-  );
+  const defaultWidths = Object.fromEntries(CONTACT_COLUMNS.map((c) => [c.id, c.defaultWidth]));
   const savedOrder = p.columnOrder.length > 0 ? p.columnOrder : CONTACT_DEFAULT_COLUMN_ORDER;
   const missing = CONTACT_DEFAULT_COLUMN_ORDER.filter((id) => !savedOrder.includes(id));
   return {
@@ -444,7 +456,9 @@ export function ContactsWorkspace({
   const [data, setData] = useState<ContactsListResult>(initialData);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [pref, setPref] = useState<TablePreferenceConfig>(() => normalizeTablePreference(preference));
+  const [pref, setPref] = useState<TablePreferenceConfig>(() =>
+    normalizeTablePreference(preference)
+  );
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [previewId, setPreviewId] = useState<string | null>(null);
   const [fullscreen, setFullscreen] = useState(false);
@@ -466,6 +480,11 @@ export function ContactsWorkspace({
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prefTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // dnd-kit numbers its accessibility ids from a module-level counter that does not
+  // line up between the server render and the client one, so the generated
+  // `aria-describedby` differed and React threw this whole subtree away and rebuilt
+  // it on every load (hydration error #418). `useId` is stable across both.
+  const dndId = useId();
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
 
   const updateUrl = useCallback(
@@ -482,24 +501,31 @@ export function ContactsWorkspace({
     [router, basePath]
   );
 
-  const fetchData = useCallback(async (q: ContactQueryState) => {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await fetch(`${basePath}/api`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(q),
-      });
-      if (!res.ok) throw new Error(`No pudimos cargar los ${entityLabelPlural.toLowerCase()}.`);
-      const json = await res.json();
-      setData(json);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : `No pudimos cargar los ${entityLabelPlural.toLowerCase()}.`);
-    } finally {
-      setLoading(false);
-    }
-  }, [basePath, entityLabelPlural]);
+  const fetchData = useCallback(
+    async (q: ContactQueryState) => {
+      setLoading(true);
+      setError(null);
+      try {
+        const res = await fetch(`${basePath}/api`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(q),
+        });
+        if (!res.ok) throw new Error(`No pudimos cargar los ${entityLabelPlural.toLowerCase()}.`);
+        const json = await res.json();
+        setData(json);
+      } catch (err) {
+        setError(
+          err instanceof Error
+            ? err.message
+            : `No pudimos cargar los ${entityLabelPlural.toLowerCase()}.`
+        );
+      } finally {
+        setLoading(false);
+      }
+    },
+    [basePath, entityLabelPlural]
+  );
 
   const handleSearchChange = useCallback(
     (value: string) => {
@@ -514,15 +540,18 @@ export function ContactsWorkspace({
     [fetchData, updateUrl]
   );
 
-  const savePreference = useCallback((newPref: TablePreferenceConfig) => {
-    setPref(newPref);
-    if (prefTimerRef.current) clearTimeout(prefTimerRef.current);
-    prefTimerRef.current = setTimeout(() => {
-      savePreferenceAction(newPref).catch(() => {
-        toast.error('No se pudo guardar la preferencia');
-      });
-    }, 800);
-  }, [savePreferenceAction]);
+  const savePreference = useCallback(
+    (newPref: TablePreferenceConfig) => {
+      setPref(newPref);
+      if (prefTimerRef.current) clearTimeout(prefTimerRef.current);
+      prefTimerRef.current = setTimeout(() => {
+        savePreferenceAction(newPref).catch(() => {
+          toast.error('No se pudo guardar la preferencia');
+        });
+      }, 800);
+    },
+    [savePreferenceAction]
+  );
 
   const handleSort = useCallback(
     (columnId: string, shiftKey: boolean) => {
@@ -554,8 +583,7 @@ export function ContactsWorkspace({
   );
 
   const visibleColumns = useMemo(() => {
-    const order =
-      pref.columnOrder.length > 0 ? pref.columnOrder : CONTACT_COLUMNS.map((c) => c.id);
+    const order = pref.columnOrder.length > 0 ? pref.columnOrder : CONTACT_COLUMNS.map((c) => c.id);
     return order
       .filter((id) => pref.columnVisibility[id] !== false && CONTACT_COLUMN_MAP[id])
       .map((id) => CONTACT_COLUMN_MAP[id])
@@ -708,9 +736,7 @@ export function ContactsWorkspace({
     const defaultPref: TablePreferenceConfig = {
       version: 1,
       columnOrder: CONTACT_COLUMNS.sort((a, b) => a.priority - b.priority).map((c) => c.id),
-      columnVisibility: Object.fromEntries(
-        CONTACT_COLUMNS.map((c) => [c.id, c.defaultVisible])
-      ),
+      columnVisibility: Object.fromEntries(CONTACT_COLUMNS.map((c) => [c.id, c.defaultVisible])),
       columnWidths: Object.fromEntries(CONTACT_COLUMNS.map((c) => [c.id, c.defaultWidth])),
       columnPinning: { left: [], right: [] },
       density: 'normal',
@@ -822,10 +848,7 @@ export function ContactsWorkspace({
       if (!canWatch) return;
       const formData = new FormData();
       formData.set('entityId', contactId);
-      const result = await watchAction(
-        { error: null, success: false, isWatched: false },
-        formData
-      );
+      const result = await watchAction({ error: null, success: false, isWatched: false }, formData);
       if (result.success) {
         setWatchedIds((prev) => new Set(prev).add(contactId));
         toast.success(`${entityLabel} seguido`);
@@ -1319,7 +1342,8 @@ export function ContactsWorkspace({
               const col = CONTACT_COLUMNS.find((c) => c.field === rule.field);
               if (!col) return null;
               const displayValue = (() => {
-                if (!('value' in rule) || rule.value === undefined || rule.value === null) return '';
+                if (!('value' in rule) || rule.value === undefined || rule.value === null)
+                  return '';
                 if (col.type === 'boolean') return rule.value === true ? 'Sí' : 'No';
                 if (col.type === 'status') {
                   return getContactStatusLabel(String(rule.value));
@@ -1398,9 +1422,7 @@ export function ContactsWorkspace({
                         </select>
                       ) : col?.type === 'boolean' ? (
                         <select
-                          value={
-                            rule.value === true ? 'true' : rule.value === false ? 'false' : ''
-                          }
+                          value={rule.value === true ? 'true' : rule.value === false ? 'false' : ''}
                           onChange={(e) => {
                             const boolValue =
                               e.target.value === 'true'
@@ -1430,12 +1452,12 @@ export function ContactsWorkspace({
                         />
                       )}
                       {rule.operator === 'between' &&
-                      (col?.type === 'number' || col?.type === 'currency' || col?.type === 'date') ? (
+                      (col?.type === 'number' ||
+                        col?.type === 'currency' ||
+                        col?.type === 'date') ? (
                         <input
                           type={
-                            col?.type === 'number' || col?.type === 'currency'
-                              ? 'number'
-                              : 'date'
+                            col?.type === 'number' || col?.type === 'currency' ? 'number' : 'date'
                           }
                           value={'valueTo' in rule ? String(rule.valueTo ?? '') : ''}
                           onChange={(e) => updateFilter(i, { valueTo: e.target.value })}
@@ -1548,6 +1570,7 @@ export function ContactsWorkspace({
           </div>
         ) : (
           <DndContext
+            id={dndId}
             sensors={sensors}
             collisionDetection={closestCenter}
             onDragEnd={handleDragEnd}
@@ -1690,7 +1713,9 @@ export function ContactsWorkspace({
                               onClick={() =>
                                 isWatched ? handleUnwatch(item.id) : handleWatch(item.id)
                               }
-                              aria-label={isWatched ? 'Dejar de seguir' : `Segir ${entityLabel.toLowerCase()}`}
+                              aria-label={
+                                isWatched ? 'Dejar de seguir' : `Segir ${entityLabel.toLowerCase()}`
+                              }
                             >
                               {isWatched ? (
                                 <BellRing size={14} className="so-watch-indicator" />

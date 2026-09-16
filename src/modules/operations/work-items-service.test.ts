@@ -231,6 +231,36 @@ describe('workitem.start and workitem.wait', () => {
     expect(row('wi4')).toMatchObject({ status: 'open' });
   });
 
+  /**
+   * Plan 7.7: la Torre de Control se abre con `operations.admin` y su espacio
+   * `excepciones` ofrece reasignar / escalar / cerrar. Mientras el motor sólo
+   * aceptó `operations.manage`, ese botón contestaba 403 — y `work-actions.ts`
+   * ya se lo pintaba a un `operations.admin` en el centro de trabajo del área.
+   */
+  it('accepts operations.admin: the Control Tower is gated with that key', async () => {
+    const opsAdmin = seedUser(fake, {
+      id: 'opsAdmin',
+      permissions: ['operations.admin'],
+    }).currentUser;
+    seedWorkItem({ id: 'wi5' });
+    seedWorkItem({ id: 'wi6' });
+    expect((await run(opsAdmin, WORK_ITEM_COMMANDS.start, {}, { id: 'wi5' })).status).toBe(
+      'completed'
+    );
+    expect(
+      (await run(opsAdmin, WORK_ITEM_COMMANDS.reassign, { ownerUserId: 'stranger' }, { id: 'wi6' }))
+        .status
+    ).toBe('completed');
+    expect(row('wi6')).toMatchObject({ ownerUserId: 'stranger' });
+
+    // Ver operaciones sigue siendo mirar: no abre ninguna acción.
+    seedWorkItem({ id: 'wi7' });
+    expect(await run(users.viewer, WORK_ITEM_COMMANDS.start, {}, { id: 'wi7' })).toMatchObject({
+      status: 'rejected',
+      errorCode: 'forbidden',
+    });
+  });
+
   it('puts a work item on hold with a reason and a future date, and resumes it', async () => {
     const until = '2026-09-17T15:00:00.000Z';
     const waited = await run(users.manager, WORK_ITEM_COMMANDS.wait, {
@@ -678,10 +708,17 @@ describe('missingEvidenceForWorkItems', () => {
       status: 'open',
       ...fields,
     });
-    fake.seed('evidenceLink', { workItemId: 'wi_a', kind: 'photo', createdAt: new Date('2026-09-14T11:00:00.000Z') });
+    fake.seed('evidenceLink', {
+      workItemId: 'wi_a',
+      kind: 'photo',
+      createdAt: new Date('2026-09-14T11:00:00.000Z'),
+    });
     const result = await missingEvidenceForWorkItems([
       dto('wi_a', { requiredEvidence: ['photo', 'signature'] }),
-      dto('wi_b', { requiredEvidence: ['availability_result'], result: { availability_result: { ok: true } } }),
+      dto('wi_b', {
+        requiredEvidence: ['availability_result'],
+        result: { availability_result: { ok: true } },
+      }),
       dto('wi_c', { requiredEvidence: ['availability_result'] }),
       dto('wi_d', {}),
       dto('wi_e', { requiredEvidence: ['photo'], status: 'done' }),

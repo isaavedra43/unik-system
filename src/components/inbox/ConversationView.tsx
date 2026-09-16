@@ -17,6 +17,8 @@ import {
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { useCallDock } from '@/components/calls/CallDockProvider';
+// Panel CRM del área Ventas: aditivo y silencioso si la persona no tiene CRM.
+import { ConversationCrmPanel } from '@/components/areas/ventas/ConversationCrmPanel';
 import { MessageComposer, type ComposerAttachment } from './MessageComposer';
 import {
   apiJson,
@@ -148,7 +150,10 @@ export function ConversationView({
   onConversationChanged,
   onBack,
   onToggleAi,
-  aiOpen, insertAttachment, onInsertAttachmentConsumed }: Props) {
+  aiOpen,
+  insertAttachment,
+  onInsertAttachmentConsumed,
+}: Props) {
   const [messages, setMessages] = useState<CommMessageDTO[]>([]);
   const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -334,9 +339,19 @@ export function ConversationView({
             <button
               type="button"
               className="btn btn-sm btn-secondary"
-              onClick={() => callDock.dial({ toNumber: contact.phone as string, contactId: contact.id, label: contact.displayName })}
+              onClick={() =>
+                callDock.dial({
+                  toNumber: contact.phone as string,
+                  contactId: contact.id,
+                  label: contact.displayName,
+                })
+              }
               disabled={callDock.active !== null && !callDock.active.ended}
-              title={callDock.active && !callDock.active.ended ? 'Ya hay una llamada en curso' : `Llamar a ${contact.displayName} desde UNIK`}
+              title={
+                callDock.active && !callDock.active.ended
+                  ? 'Ya hay una llamada en curso'
+                  : `Llamar a ${contact.displayName} desde UNIK`
+              }
               aria-label={`Llamar a ${contact.displayName}`}
             >
               <Phone size={14} /> Llamar
@@ -403,6 +418,8 @@ export function ConversationView({
           </button>
         </div>
       </header>
+
+      <ConversationCrmPanel conversationId={conversation.id} userId={user.id} />
 
       {conversation.tags.length > 0 && (
         <div style={{ padding: '4px 16px', display: 'flex', gap: 6, flexWrap: 'wrap' }}>

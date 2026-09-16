@@ -1,6 +1,7 @@
 import type { Prisma, Rfq, RfqLine, RfqResponse, RfqResponseLine } from '@prisma/client';
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
+import { rfqLink } from '@/modules/areas/area-links';
 import { getAiSettings } from '@/modules/ai/ai-admin-config-service';
 import { chatCompletion } from '@/modules/ai/ai-client';
 import { wrapUntrusted } from '@/modules/ai/ai-guardrails';
@@ -9,7 +10,11 @@ import type { CurrentUser } from '@/modules/auth/authorization';
 import { startConversation } from '@/modules/comms/comms-service';
 import { toUnitProfile } from '@/modules/inventory/profiles-service';
 import { enqueueJob, JOB_PRIORITY } from '@/modules/jobs/job-queue';
-import { executeCommand, type CommandContext, type CommandResult } from '@/modules/operations/commands';
+import {
+  executeCommand,
+  type CommandContext,
+  type CommandResult,
+} from '@/modules/operations/commands';
 import { OperationsError } from '@/modules/operations/errors';
 import { WORK_ITEM_OPEN_STATUSES } from '@/modules/operations/types';
 import { completeWorkItemInTx } from '@/modules/operations/work-items-service';
@@ -51,13 +56,21 @@ import {
   PURCHASES_EVENTS,
   PURCHASES_JOB_TYPES,
   PURCHASES_OBJECT_TYPES,
-  RFQ_CONVERSATION_TAG_PREFIX,
   RFQ_RESPONSE_STATUS_LABELS,
   SUPPLIER_CHANNEL_LABELS,
+  rfqConversationTag,
+  rfqIdsFromConversationTags,
   type MessagingChannelType,
 } from './purchases-types';
 import { markRequestsStage, recomputeRequestStatuses } from './requests-service';
-import { DEFAULT_TAX_RATE, computeLandedCosts, scoreRfqResponses, type ResponseScore, type ScoringResponse, type ScoringRfqLine } from './rfq-scoring';
+import {
+  DEFAULT_TAX_RATE,
+  computeLandedCosts,
+  scoreRfqResponses,
+  type ResponseScore,
+  type ScoringResponse,
+  type ScoringRfqLine,
+} from './rfq-scoring';
 import {
   buildRfqInterpretationPrompt,
   decideResponseStatus,
@@ -71,7 +84,12 @@ import {
 } from './rfq-rules';
 import { loadSourcingConfig } from './sourcing-config';
 import { promoteCandidateToSupplierInTx, touchSupplierProductPrice } from './suppliers-service';
-import { baseUnitsPer, canonicalUnit, resolveUnitFactor, type UnitProfileLike } from './unit-normalizer';
+import {
+  baseUnitsPer,
+  canonicalUnit,
+  resolveUnitFactor,
+  type UnitProfileLike,
+} from './unit-normalizer';
 
 /**
  * RFQ by messaging (plan 6.1, flow "RFQ por WhatsApp").
@@ -108,7 +126,10 @@ export const rfqLineInputSchema = z.object({
   unit: optionalText(40),
   specs: z.record(z.union([z.string().max(200), z.number(), z.boolean()])).nullish(),
   /** Request lines consolidated in this line (each keeps its demand when the order is created). */
-  sources: z.array(z.object({ requestLineId: idText, qty: positiveQty })).max(100).optional(),
+  sources: z
+    .array(z.object({ requestLineId: idText, qty: positiveQty }))
+    .max(100)
+    .optional(),
 });
 
 export const createRfqSchema = z.object({
@@ -242,7 +263,10 @@ export const cancelRfqSchema = z.object({
 // Units of a response line
 // ---------------------------------------------------------------------------
 
-async function profilesFor(db: Db, zohoItemIds: Iterable<string | null>): Promise<Map<string, UnitProfileLike>> {
+async function profilesFor(
+  db: Db,
+  zohoItemIds: Iterable<string | null>
+): Promise<Map<string, UnitProfileLike>> {
   const ids = [...new Set([...zohoItemIds].filter((id): id is string => Boolean(id)))];
   if (ids.length === 0) return new Map();
   const rows = await db.productInventoryProfile.findMany({ where: { zohoItemId: { in: ids } } });
@@ -254,7 +278,10 @@ async function profilesFor(db: Db, zohoItemIds: Iterable<string | null>): Promis
  * to it, else the RFQ line unit itself. `RfqResponseLine.unitFactorToBase` is
  * always "base units per quoted unit" in that base.
  */
-export function rfqLineBase(line: Pick<RfqLine, 'unit'>, profile: UnitProfileLike | null): { unit: string; perRfqUnit: number } {
+export function rfqLineBase(
+  line: Pick<RfqLine, 'unit'>,
+  profile: UnitProfileLike | null
+): { unit: string; perRfqUnit: number } {
   if (profile) {
     const factor = baseUnitsPer(line.unit, profile);
     if (factor !== null) return { unit: profile.baseUnit, perRfqUnit: factor };
@@ -263,14 +290,22 @@ export function rfqLineBase(line: Pick<RfqLine, 'unit'>, profile: UnitProfileLik
 }
 
 /** Quoted units per RFQ unit from the stored factor. */
-export function unitsPerRfqUnitOf(line: Pick<RfqLine, 'unit'>, responseLine: Pick<RfqResponseLine, 'unitFactorToBase'>, profile: UnitProfileLike | null): number | null {
+export function unitsPerRfqUnitOf(
+  line: Pick<RfqLine, 'unit'>,
+  responseLine: Pick<RfqResponseLine, 'unitFactorToBase'>,
+  profile: UnitProfileLike | null
+): number | null {
   const factor = num(responseLine.unitFactorToBase);
   if (!(factor > 0)) return null;
   return rfqLineBase(line, profile).perRfqUnit / factor;
 }
 
 /** Quoted units per RFQ unit from the unit names (null when they do not convert). */
-export function resolveQuotedUnits(rfqLine: Pick<RfqLine, 'unit'>, quotedUnit: string | null, profile: UnitProfileLike | null): number | null {
+export function resolveQuotedUnits(
+  rfqLine: Pick<RfqLine, 'unit'>,
+  quotedUnit: string | null,
+  profile: UnitProfileLike | null
+): number | null {
   if (!quotedUnit || canonicalUnit(quotedUnit) === canonicalUnit(rfqLine.unit)) return 1;
   return resolveUnitFactor(rfqLine.unit, quotedUnit, profile);
 }
@@ -292,8 +327,13 @@ function prepareResponseLines(
   const seen = new Set<string>();
   return inputs.map((input) => {
     const rfqLine = rfqLines.find((l) => l.id === input.rfqLineId);
-    if (!rfqLine) throw new OperationsError('invalid_payload', 'Algún precio es de una línea que no está en la cotización');
-    if (seen.has(rfqLine.id)) throw new OperationsError('invalid_payload', 'Una línea tiene dos precios');
+    if (!rfqLine)
+      throw new OperationsError(
+        'invalid_payload',
+        'Algún precio es de una línea que no está en la cotización'
+      );
+    if (seen.has(rfqLine.id))
+      throw new OperationsError('invalid_payload', 'Una línea tiene dos precios');
     seen.add(rfqLine.id);
     const profile = rfqLine.zohoItemId ? (profiles.get(rfqLine.zohoItemId) ?? null) : null;
     const unit = input.unit ?? rfqLine.unit;
@@ -324,13 +364,24 @@ export interface RfqScoringInputs {
   rfq: Rfq;
   lines: RfqLine[];
   scoringLines: ScoringRfqLine[];
-  responses: Array<{ row: RfqResponse; lines: RfqResponseLine[]; name: string | null; scoring: ScoringResponse }>;
+  responses: Array<{
+    row: RfqResponse;
+    lines: RfqResponseLine[];
+    name: string | null;
+    scoring: ScoringResponse;
+  }>;
 }
 
 export async function loadRfqScoringInputs(db: Db, rfqId: string): Promise<RfqScoringInputs> {
-  const rfq = assertFoundRow(await db.rfq.findUnique({ where: { id: rfqId } }), 'No se encontró la cotización');
+  const rfq = assertFoundRow(
+    await db.rfq.findUnique({ where: { id: rfqId } }),
+    'No se encontró la cotización'
+  );
   const lines = await db.rfqLine.findMany({ where: { rfqId }, orderBy: { sortOrder: 'asc' } });
-  const rows = await db.rfqResponse.findMany({ where: { rfqId, status: { not: 'rejected' } }, orderBy: { createdAt: 'asc' } });
+  const rows = await db.rfqResponse.findMany({
+    where: { rfqId, status: { not: 'rejected' } },
+    orderBy: { createdAt: 'asc' },
+  });
   const responseLines = rows.length
     ? await db.rfqResponseLine.findMany({ where: { responseId: { in: rows.map((r) => r.id) } } })
     : [];
@@ -342,11 +393,19 @@ export async function loadRfqScoringInputs(db: Db, rfqId: string): Promise<RfqSc
     where: { id: { in: rows.map((r) => r.candidateId).filter((id): id is string => Boolean(id)) } },
     select: { id: true, name: true, supplierId: true },
   });
-  const profiles = await profilesFor(db, lines.map((l) => l.zohoItemId));
+  const profiles = await profilesFor(
+    db,
+    lines.map((l) => l.zohoItemId)
+  );
   return {
     rfq,
     lines,
-    scoringLines: lines.map((line) => ({ id: line.id, qty: num(line.qty), unit: line.unit, description: line.description })),
+    scoringLines: lines.map((line) => ({
+      id: line.id,
+      qty: num(line.qty),
+      unit: line.unit,
+      description: line.description,
+    })),
     responses: rows.map((row) => {
       const supplier = suppliers.find((s) => s.id === row.supplierId);
       const candidate = candidates.find((c) => c.id === row.candidateId);
@@ -365,7 +424,10 @@ export async function loadRfqScoringInputs(db: Db, rfqId: string): Promise<RfqSc
           otherCosts: num(row.otherCosts),
           leadTimeDays: row.leadTimeDays,
           validUntil: row.validUntil,
-          confidence: row.status === 'confirmed' || row.receivedVia === 'manual' ? null : numOrNull(row.confidence),
+          confidence:
+            row.status === 'confirmed' || row.receivedVia === 'manual'
+              ? null
+              : numOrNull(row.confidence),
           supplierRating: numOrNull(supplier?.ratingOverall),
           evaluationsCount: supplier?.evaluationsCount ?? 0,
           isCandidate: !row.supplierId && !candidate?.supplierId,
@@ -390,40 +452,81 @@ export async function loadRfqScoringInputs(db: Db, rfqId: string): Promise<RfqSc
 // Create
 // ---------------------------------------------------------------------------
 
-export async function createRfqInTx(tx: Db, input: CreateRfqInput, ctx: CommandContext): Promise<{ rfq: Rfq; lines: RfqLine[] }> {
+export async function createRfqInTx(
+  tx: Db,
+  input: CreateRfqInput,
+  ctx: CommandContext
+): Promise<{ rfq: Rfq; lines: RfqLine[] }> {
   if (input.sourcingSearchId) {
-    assertFoundRow(await tx.sourcingSearch.findUnique({ where: { id: input.sourcingSearchId }, select: { id: true } }), 'No se encontró la búsqueda del laboratorio');
+    assertFoundRow(
+      await tx.sourcingSearch.findUnique({
+        where: { id: input.sourcingSearchId },
+        select: { id: true },
+      }),
+      'No se encontró la búsqueda del laboratorio'
+    );
   }
   const config = await loadSourcingConfig(tx);
-  const prepared: Array<{ requestLineId: string | null; zohoItemId: string | null; description: string; qty: number; unit: string; specs: Record<string, unknown> | null }> = [];
+  const prepared: Array<{
+    requestLineId: string | null;
+    zohoItemId: string | null;
+    description: string;
+    qty: number;
+    unit: string;
+    specs: Record<string, unknown> | null;
+  }> = [];
   const requestIds = new Set<string>();
   for (const line of input.lines) {
     const sources = [];
     for (const source of line.sources ?? []) {
-      const sourceLine = await tx.purchaseRequestLine.findUnique({ where: { id: source.requestLineId } });
+      const sourceLine = await tx.purchaseRequestLine.findUnique({
+        where: { id: source.requestLineId },
+      });
       if (!sourceLine || sourceLine.status === 'cancelled' || sourceLine.status === 'received') {
-        throw new OperationsError('invalid_state', 'Alguna partida consolidada ya no está pendiente');
+        throw new OperationsError(
+          'invalid_state',
+          'Alguna partida consolidada ya no está pendiente'
+        );
       }
       requestIds.add(sourceLine.requestId);
       sources.push({ line: sourceLine, qty: source.qty });
     }
     if (line.requestLineId && sources.length > 0) {
-      throw new OperationsError('invalid_payload', 'Una línea viene de una solicitud o de varias consolidadas, no de ambas');
+      throw new OperationsError(
+        'invalid_payload',
+        'Una línea viene de una solicitud o de varias consolidadas, no de ambas'
+      );
     }
-    const requestLine = line.requestLineId ? await tx.purchaseRequestLine.findUnique({ where: { id: line.requestLineId } }) : sources[0]?.line ?? null;
+    const requestLine = line.requestLineId
+      ? await tx.purchaseRequestLine.findUnique({ where: { id: line.requestLineId } })
+      : (sources[0]?.line ?? null);
     if (line.requestLineId) {
       if (!requestLine || requestLine.status === 'cancelled' || requestLine.status === 'received') {
-        throw new OperationsError('invalid_state', 'Alguna partida de solicitud ya no está pendiente');
+        throw new OperationsError(
+          'invalid_state',
+          'Alguna partida de solicitud ya no está pendiente'
+        );
       }
       requestIds.add(requestLine.requestId);
     }
-    const remaining = requestLine ? Math.max(0, num(requestLine.qty) - num(requestLine.qtyOrdered)) : 0;
+    const remaining = requestLine
+      ? Math.max(0, num(requestLine.qty) - num(requestLine.qtyOrdered))
+      : 0;
     const description = line.description ?? requestLine?.description ?? null;
     const unit = line.unit ?? requestLine?.unit ?? null;
     const qty = line.qty ?? (remaining > 0 ? remaining : requestLine ? num(requestLine.qty) : null);
-    if (!description) throw new OperationsError('invalid_payload', 'Describe cada línea de la cotización');
-    if (!unit) throw new OperationsError('invalid_payload', `Indica la unidad de "${truncate(description, 60)}"`);
-    if (!qty || qty <= 0) throw new OperationsError('invalid_payload', `Indica la cantidad de "${truncate(description, 60)}"`);
+    if (!description)
+      throw new OperationsError('invalid_payload', 'Describe cada línea de la cotización');
+    if (!unit)
+      throw new OperationsError(
+        'invalid_payload',
+        `Indica la unidad de "${truncate(description, 60)}"`
+      );
+    if (!qty || qty <= 0)
+      throw new OperationsError(
+        'invalid_payload',
+        `Indica la cantidad de "${truncate(description, 60)}"`
+      );
     const sourceTotal = sources.reduce((sum, source) => sum + source.qty, 0);
     prepared.push({
       requestLineId: sources.length > 0 ? null : (requestLine?.id ?? null),
@@ -433,12 +536,19 @@ export async function createRfqInTx(tx: Db, input: CreateRfqInput, ctx: CommandC
       unit,
       specs:
         sources.length > 0
-          ? { ...(line.specs ?? {}), requestSources: sources.map((source) => ({ requestLineId: source.line.id, qty: source.qty })) }
+          ? {
+              ...(line.specs ?? {}),
+              requestSources: sources.map((source) => ({
+                requestLineId: source.line.id,
+                qty: source.qty,
+              })),
+            }
           : (line.specs ?? null),
     });
   }
   const dueAt = toDate(input.dueAt ?? null) ?? addDays(ctx.now, config.rfqDefaultDueDays);
-  if (dueAt.getTime() <= ctx.now.getTime()) throw new OperationsError('invalid_payload', 'La fecha límite debe ser futura');
+  if (dueAt.getTime() <= ctx.now.getTime())
+    throw new OperationsError('invalid_payload', 'La fecha límite debe ser futura');
   const number = await nextFolio(tx, 'rfq');
   const rfq = await tx.rfq.create({
     data: {
@@ -469,12 +579,23 @@ export async function createRfqInTx(tx: Db, input: CreateRfqInput, ctx: CommandC
   }
   await markRequestsStage(tx, requestIds, 'sourcing', ctx);
   for (const requestId of requestIds) {
-    await ctx.relate({ type: OBJ.request, id: requestId }, { type: OBJ.rfq, id: rfq.id }, 'quoted_in');
+    await ctx.relate(
+      { type: OBJ.request, id: requestId },
+      { type: OBJ.rfq, id: rfq.id },
+      'quoted_in'
+    );
   }
   emitPurchases(
     ctx,
     EV.created,
-    { rfqId: rfq.id, number, title: rfq.title, lines: lines.length, dueAt: dueAt.toISOString(), requestIds: [...requestIds] },
+    {
+      rfqId: rfq.id,
+      number,
+      title: rfq.title,
+      lines: lines.length,
+      dueAt: dueAt.toISOString(),
+      requestIds: [...requestIds],
+    },
     { objectType: OBJ.rfq, objectId: rfq.id }
   );
   publishBoard(ctx, { rfqId: rfq.id });
@@ -526,21 +647,42 @@ async function accountFor(tx: Db, configuredId: string | null, channel: Messagin
   const provider = CHANNEL_PROVIDER[channel];
   if (configuredId) {
     const configured = await tx.commAccount.findUnique({ where: { id: configuredId } });
-    if (configured && configured.provider === provider && configured.status === 'active') return configured;
+    if (configured && configured.provider === provider && configured.status === 'active')
+      return configured;
   }
-  return tx.commAccount.findFirst({ where: { provider, status: 'active' }, orderBy: { createdAt: 'asc' } });
+  return tx.commAccount.findFirst({
+    where: { provider, status: 'active' },
+    orderBy: { createdAt: 'asc' },
+  });
 }
 
-export async function inviteSuppliersInTx(tx: Db, input: InviteSuppliersInput, ctx: CommandContext): Promise<InviteSuppliersData> {
-  const rfq = assertFoundRow(await tx.rfq.findUnique({ where: { id: input.rfqId } }), 'No se encontró la cotización');
+export async function inviteSuppliersInTx(
+  tx: Db,
+  input: InviteSuppliersInput,
+  ctx: CommandContext
+): Promise<InviteSuppliersData> {
+  const rfq = assertFoundRow(
+    await tx.rfq.findUnique({ where: { id: input.rfqId } }),
+    'No se encontró la cotización'
+  );
   if (!['draft', 'sent', 'collecting'].includes(rfq.status)) {
     throw new OperationsError('invalid_state', 'La cotización ya no recibe proveedores');
   }
-  const lines = await tx.rfqLine.findMany({ where: { rfqId: rfq.id }, orderBy: { sortOrder: 'asc' } });
-  if (lines.length === 0) throw new OperationsError('invalid_state', 'La cotización no tiene líneas');
+  const lines = await tx.rfqLine.findMany({
+    where: { rfqId: rfq.id },
+    orderBy: { sortOrder: 'asc' },
+  });
+  if (lines.length === 0)
+    throw new OperationsError('invalid_state', 'La cotización no tiene líneas');
   const config = await loadSourcingConfig(tx);
   const existing = await tx.rfqInvitation.findMany({ where: { rfqId: rfq.id } });
-  const data: InviteSuppliersData = { rfqId: rfq.id, number: rfq.number, toSend: [], failed: [], skipped: [] };
+  const data: InviteSuppliersData = {
+    rfqId: rfq.id,
+    number: rfq.number,
+    toSend: [],
+    failed: [],
+    skipped: [],
+  };
 
   for (const invitee of input.invitees) {
     let name: string;
@@ -549,24 +691,42 @@ export async function inviteSuppliersInTx(tx: Db, input: InviteSuppliersInput, c
     if (invitee.supplierId) {
       const supplier = await tx.supplier.findUnique({ where: { id: invitee.supplierId } });
       if (!supplier) {
-        data.skipped.push({ supplierId: invitee.supplierId, candidateId: null, reason: 'No se encontró el proveedor' });
+        data.skipped.push({
+          supplierId: invitee.supplierId,
+          candidateId: null,
+          reason: 'No se encontró el proveedor',
+        });
         continue;
       }
       if (supplier.status !== 'active') {
-        data.skipped.push({ supplierId: supplier.id, candidateId: null, reason: `${supplier.name} está bloqueado o archivado` });
+        data.skipped.push({
+          supplierId: supplier.id,
+          candidateId: null,
+          reason: `${supplier.name} está bloqueado o archivado`,
+        });
         continue;
       }
       name = supplier.name;
       channels = parseChannels(supplier.channels);
       phone = supplier.primaryPhone;
     } else {
-      const candidate = await tx.sourcingCandidate.findUnique({ where: { id: invitee.candidateId! } });
+      const candidate = await tx.sourcingCandidate.findUnique({
+        where: { id: invitee.candidateId! },
+      });
       if (!candidate) {
-        data.skipped.push({ supplierId: null, candidateId: invitee.candidateId ?? null, reason: 'No se encontró el candidato' });
+        data.skipped.push({
+          supplierId: null,
+          candidateId: invitee.candidateId ?? null,
+          reason: 'No se encontró el candidato',
+        });
         continue;
       }
       if (candidate.status === 'rejected') {
-        data.skipped.push({ supplierId: null, candidateId: candidate.id, reason: `${candidate.name} fue descartado` });
+        data.skipped.push({
+          supplierId: null,
+          candidateId: candidate.id,
+          reason: `${candidate.name} fue descartado`,
+        });
         continue;
       }
       name = candidate.name;
@@ -584,15 +744,25 @@ export async function inviteSuppliersInTx(tx: Db, input: InviteSuppliersInput, c
     const duplicate = existing.find(
       (row) =>
         row.channel === destination.channel &&
-        (invitee.supplierId ? row.supplierId === invitee.supplierId : row.candidateId === invitee.candidateId) &&
+        (invitee.supplierId
+          ? row.supplierId === invitee.supplierId
+          : row.candidateId === invitee.candidateId) &&
         !['failed', 'expired'].includes(row.status)
     );
     if (duplicate) {
-      data.skipped.push({ supplierId: invitee.supplierId ?? null, candidateId: invitee.candidateId ?? null, reason: `${name} ya fue invitado` });
+      data.skipped.push({
+        supplierId: invitee.supplierId ?? null,
+        candidateId: invitee.candidateId ?? null,
+        reason: `${name} ya fue invitado`,
+      });
       continue;
     }
     const account = await accountFor(tx, config.rfqAccountId, destination.channel);
-    if (account && invitee.candidateId && !(await hasMessagingConsent(tx, { channel: destination.channel, to: destination.to }))) {
+    if (
+      account &&
+      invitee.candidateId &&
+      !(await hasMessagingConsent(tx, { channel: destination.channel, to: destination.to }))
+    ) {
       // Found on the web: never messaged cold. Contact it by phone or e-mail, record its consent or promote it.
       data.skipped.push({
         supplierId: null,
@@ -615,7 +785,9 @@ export async function inviteSuppliersInTx(tx: Db, input: InviteSuppliersInput, c
       });
       continue;
     }
-    const error = account ? null : `No hay una cuenta de ${SUPPLIER_CHANNEL_LABELS[destination.channel]} activa en la bandeja`;
+    const error = account
+      ? null
+      : `No hay una cuenta de ${SUPPLIER_CHANNEL_LABELS[destination.channel]} activa en la bandeja`;
     const invitation = await tx.rfqInvitation.create({
       data: {
         rfqId: rfq.id,
@@ -642,7 +814,10 @@ export async function inviteSuppliersInTx(tx: Db, input: InviteSuppliersInput, c
         description: line.description,
         qty: num(line.qty),
         unit: line.unit,
-        specs: line.specs && typeof line.specs === 'object' && !Array.isArray(line.specs) ? (line.specs as Record<string, unknown>) : null,
+        specs:
+          line.specs && typeof line.specs === 'object' && !Array.isArray(line.specs)
+            ? (line.specs as Record<string, unknown>)
+            : null,
       })),
       dueAt: rfq.dueAt,
     };
@@ -670,11 +845,17 @@ export async function inviteSuppliersInTx(tx: Db, input: InviteSuppliersInput, c
  * interpretation of the invitation.
  */
 async function tagRfqConversation(tx: Db, conversationId: string, rfqId: string): Promise<void> {
-  const conversation = await tx.commConversation.findUnique({ where: { id: conversationId }, select: { tags: true } });
+  const conversation = await tx.commConversation.findUnique({
+    where: { id: conversationId },
+    select: { tags: true },
+  });
   if (!conversation) return;
-  const tag = `${RFQ_CONVERSATION_TAG_PREFIX}${rfqId}`;
+  const tag = rfqConversationTag(rfqId);
   if (conversation.tags.includes(tag)) return;
-  await tx.commConversation.update({ where: { id: conversationId }, data: { tags: [...conversation.tags, tag].slice(-30) } });
+  await tx.commConversation.update({
+    where: { id: conversationId },
+    data: { tags: [...conversation.tags, tag].slice(-30) },
+  });
 }
 
 /** Invitations claimed for sending (`sentAt`) that never got their result recorded after this long are reconciled. */
@@ -705,35 +886,68 @@ export async function reconcileStaleInvitationsInTx(
     let to: string | null = null;
     if (invitation.supplierId) {
       const supplier = await tx.supplier.findUnique({ where: { id: invitation.supplierId } });
-      if (supplier) to = destinationFor(parseChannels(supplier.channels), supplier.primaryPhone, invitation.channel as MessagingChannelType)?.to ?? null;
+      if (supplier)
+        to =
+          destinationFor(
+            parseChannels(supplier.channels),
+            supplier.primaryPhone,
+            invitation.channel as MessagingChannelType
+          )?.to ?? null;
     } else if (invitation.candidateId) {
-      const candidate = await tx.sourcingCandidate.findUnique({ where: { id: invitation.candidateId } });
-      if (candidate) to = destinationFor([], candidate.phone, invitation.channel as MessagingChannelType)?.to ?? null;
+      const candidate = await tx.sourcingCandidate.findUnique({
+        where: { id: invitation.candidateId },
+      });
+      if (candidate)
+        to =
+          destinationFor([], candidate.phone, invitation.channel as MessagingChannelType)?.to ??
+          null;
     }
     const contact =
       to && invitation.accountId
-        ? await (await import('./messaging-eligibility')).contactForAddress(tx, invitation.channel as MessagingChannelType, to)
+        ? await (
+            await import('./messaging-eligibility')
+          ).contactForAddress(tx, invitation.channel as MessagingChannelType, to)
         : null;
     const conversation =
       contact && invitation.accountId
-        ? await tx.commConversation.findFirst({ where: { accountId: invitation.accountId, contactId: contact.id }, orderBy: { lastMessageAt: 'desc' } })
+        ? await tx.commConversation.findFirst({
+            where: { accountId: invitation.accountId, contactId: contact.id },
+            orderBy: { lastMessageAt: 'desc' },
+          })
         : null;
     const message =
       conversation && invitation.sentAt
         ? await tx.commMessage.findFirst({
-            where: { conversationId: conversation.id, direction: 'outbound', createdAt: { gte: new Date(invitation.sentAt.getTime() - 60_000) } },
+            where: {
+              conversationId: conversation.id,
+              direction: 'outbound',
+              createdAt: { gte: new Date(invitation.sentAt.getTime() - 60_000) },
+            },
             orderBy: { createdAt: 'asc' },
           })
         : null;
-    if (conversation && message && message.status !== 'failed' && message.status !== 'undelivered') {
-      results.push({ invitationId: invitation.id, status: 'sent', conversationId: conversation.id, messageId: message.id, error: null });
+    if (
+      conversation &&
+      message &&
+      message.status !== 'failed' &&
+      message.status !== 'undelivered'
+    ) {
+      results.push({
+        invitationId: invitation.id,
+        status: 'sent',
+        conversationId: conversation.id,
+        messageId: message.id,
+        error: null,
+      });
     } else {
       results.push({
         invitationId: invitation.id,
         status: 'failed',
         conversationId: conversation?.id ?? null,
         messageId: message?.id ?? null,
-        error: message?.error ?? 'No se confirmó el envío de la invitación: vuelve a invitar al proveedor',
+        error:
+          message?.error ??
+          'No se confirmó el envío de la invitación: vuelve a invitar al proveedor',
       });
     }
   }
@@ -745,7 +959,10 @@ export async function recordSendsInTx(
   input: z.output<typeof recordSendsSchema>,
   ctx: CommandContext
 ): Promise<{ sent: number; failed: number }> {
-  const rfq = assertFoundRow(await tx.rfq.findUnique({ where: { id: input.rfqId } }), 'No se encontró la cotización');
+  const rfq = assertFoundRow(
+    await tx.rfq.findUnique({ where: { id: input.rfqId } }),
+    'No se encontró la cotización'
+  );
   let sent = 0;
   let failed = 0;
   for (const result of input.results) {
@@ -770,18 +987,29 @@ export async function recordSendsInTx(
         });
       }
       if (result.conversationId) {
-        await ctx.relate({ type: OBJ.rfq, id: rfq.id }, { type: 'comm_conversation', id: result.conversationId }, 'negotiated_in');
+        await ctx.relate(
+          { type: OBJ.rfq, id: rfq.id },
+          { type: 'comm_conversation', id: result.conversationId },
+          'negotiated_in'
+        );
       }
     } else {
       failed += 1;
     }
     if (result.conversationId) await tagRfqConversation(tx, result.conversationId, rfq.id);
   }
-  if (rfq.status === 'draft' && sent > 0) await tx.rfq.update({ where: { id: rfq.id }, data: { status: 'sent' } });
+  if (rfq.status === 'draft' && sent > 0)
+    await tx.rfq.update({ where: { id: rfq.id }, data: { status: 'sent' } });
   emitPurchases(
     ctx,
     EV.sent,
-    { rfqId: rfq.id, number: rfq.number, sent, failed, invitationIds: input.results.map((r) => r.invitationId) },
+    {
+      rfqId: rfq.id,
+      number: rfq.number,
+      sent,
+      failed,
+      invitationIds: input.results.map((r) => r.invitationId),
+    },
     { objectType: OBJ.rfq, objectId: rfq.id }
   );
   publishBoard(ctx, { rfqId: rfq.id });
@@ -798,7 +1026,11 @@ export async function sendRfqInvitations(
   rfqId: string,
   toSend: readonly InvitationToSend[],
   options: { actorType?: 'user' | 'ai'; commandId?: string; now?: Date } = {}
-): Promise<{ sent: number; failed: number; results: Array<{ invitationId: string; status: 'sent' | 'failed'; error: string | null }> }> {
+): Promise<{
+  sent: number;
+  failed: number;
+  results: Array<{ invitationId: string; status: 'sent' | 'failed'; error: string | null }>;
+}> {
   const results: Array<z.input<typeof recordSendsSchema>['results'][number]> = [];
   for (const item of toSend) {
     const claim = await prisma.rfqInvitation.updateMany({
@@ -812,7 +1044,12 @@ export async function sendRfqInvitations(
         to: item.to,
         contactName: item.name.slice(0, 120),
         body: item.body,
-        ...(item.templateKey ? { templateKey: item.templateKey, templateVariables: item.templateVariables ?? undefined } : {}),
+        ...(item.templateKey
+          ? {
+              templateKey: item.templateKey,
+              templateVariables: item.templateVariables ?? undefined,
+            }
+          : {}),
       });
       // The `rfq:{id}` tag is written by the record_sends command (system write inside the transaction).
       const ok = Boolean(message) && message!.status !== 'failed';
@@ -835,7 +1072,12 @@ export async function sendRfqInvitations(
   await import('./purchases-commands');
   const recorded = await executeCommand<{ sent: number; failed: number }>(
     {
-      commandId: options.commandId ?? `purchases:rfq_sends:${rfqId}:${results.map((r) => r.invitationId).join(',')}`.slice(0, 160),
+      commandId:
+        options.commandId ??
+        `purchases:rfq_sends:${rfqId}:${results.map((r) => r.invitationId).join(',')}`.slice(
+          0,
+          160
+        ),
       type: PURCHASES_COMMANDS.rfqRecordSends,
       actor: { type: options.actorType ?? 'user', id: actor.id },
       aggregate: { type: OBJ.rfq, id: rfqId },
@@ -844,11 +1086,20 @@ export async function sendRfqInvitations(
     actor,
     { now: options.now }
   );
-  if (recorded.status === 'rejected') log('record_sends_rejected', { rfqId, errorCode: recorded.errorCode, message: recorded.message });
+  if (recorded.status === 'rejected')
+    log('record_sends_rejected', {
+      rfqId,
+      errorCode: recorded.errorCode,
+      message: recorded.message,
+    });
   return {
     sent: results.filter((r) => r.status === 'sent').length,
     failed: results.filter((r) => r.status === 'failed').length,
-    results: results.map((r) => ({ invitationId: r.invitationId, status: r.status, error: r.error ?? null })),
+    results: results.map((r) => ({
+      invitationId: r.invitationId,
+      status: r.status,
+      error: r.error ?? null,
+    })),
   };
 }
 
@@ -867,18 +1118,25 @@ export async function interpretRfqReplyIfTagged(messageId: string): Promise<{ en
     select: { id: true, direction: true, conversationId: true },
   });
   if (!message || message.direction !== 'inbound') return { enqueued: 0 };
-  const conversation = await prisma.commConversation.findUnique({ where: { id: message.conversationId }, select: { tags: true } });
-  const rfqIds = (conversation?.tags ?? [])
-    .filter((tag) => tag.startsWith(RFQ_CONVERSATION_TAG_PREFIX))
-    .map((tag) => tag.slice(RFQ_CONVERSATION_TAG_PREFIX.length))
-    .filter(Boolean);
+  const conversation = await prisma.commConversation.findUnique({
+    where: { id: message.conversationId },
+    select: { tags: true },
+  });
+  const rfqIds = rfqIdsFromConversationTags(conversation?.tags ?? []);
   if (rfqIds.length === 0) return { enqueued: 0 };
   const invitations = await prisma.rfqInvitation.findMany({
-    where: { conversationId: message.conversationId, rfqId: { in: rfqIds }, status: { in: ['sent', 'replied'] } },
+    where: {
+      conversationId: message.conversationId,
+      rfqId: { in: rfqIds },
+      status: { in: ['sent', 'replied'] },
+    },
     select: { id: true, rfqId: true },
   });
   const openRfqs = await prisma.rfq.findMany({
-    where: { id: { in: [...new Set(invitations.map((i) => i.rfqId))] }, status: { in: ['sent', 'collecting', 'compared'] } },
+    where: {
+      id: { in: [...new Set(invitations.map((i) => i.rfqId))] },
+      status: { in: ['sent', 'collecting', 'compared'] },
+    },
     select: { id: true },
   });
   const open = new Set(openRfqs.map((r) => r.id));
@@ -910,7 +1168,8 @@ export async function runRfqInterpretation(
   const invitation = await prisma.rfqInvitation.findUnique({ where: { id: invitationId } });
   if (!invitation?.conversationId) return { status: 'skipped', reason: 'no_conversation' };
   const rfq = await prisma.rfq.findUnique({ where: { id: invitation.rfqId } });
-  if (!rfq || !['sent', 'collecting', 'compared'].includes(rfq.status)) return { status: 'skipped', reason: 'rfq_closed' };
+  if (!rfq || !['sent', 'collecting', 'compared'].includes(rfq.status))
+    return { status: 'skipped', reason: 'rfq_closed' };
   const since = new Date((invitation.sentAt ?? rfq.createdAt).getTime() - 60_000);
   const messages = await prisma.commMessage.findMany({
     where: { conversationId: invitation.conversationId, createdAt: { gte: since } },
@@ -923,11 +1182,25 @@ export async function runRfqInterpretation(
   if (options.messageId) {
     const index = inbound.findIndex((m) => m.id === options.messageId);
     // A newer reply has its own job, which reads the whole conversation again.
-    if (index >= 0 && index < inbound.length - 1) return { status: 'skipped', reason: 'superseded' };
+    if (index >= 0 && index < inbound.length - 1)
+      return { status: 'skipped', reason: 'superseded' };
   }
-  const lines = await prisma.rfqLine.findMany({ where: { rfqId: rfq.id }, orderBy: { sortOrder: 'asc' } });
-  const supplier = invitation.supplierId ? await prisma.supplier.findUnique({ where: { id: invitation.supplierId }, select: { name: true } }) : null;
-  const candidate = invitation.candidateId ? await prisma.sourcingCandidate.findUnique({ where: { id: invitation.candidateId }, select: { name: true } }) : null;
+  const lines = await prisma.rfqLine.findMany({
+    where: { rfqId: rfq.id },
+    orderBy: { sortOrder: 'asc' },
+  });
+  const supplier = invitation.supplierId
+    ? await prisma.supplier.findUnique({
+        where: { id: invitation.supplierId },
+        select: { name: true },
+      })
+    : null;
+  const candidate = invitation.candidateId
+    ? await prisma.sourcingCandidate.findUnique({
+        where: { id: invitation.candidateId },
+        select: { name: true },
+      })
+    : null;
   const name = supplier?.name ?? candidate?.name ?? 'Proveedor';
   const transcriptText = messages
     .map((m) => {
@@ -937,7 +1210,10 @@ export async function runRfqInterpretation(
       return `[${when}] ${who}: ${body}`;
     })
     .join('\n');
-  const transcript = wrapUntrusted(transcriptText.slice(-TRANSCRIPT_MAX_CHARS), 'respuesta_proveedor');
+  const transcript = wrapUntrusted(
+    transcriptText.slice(-TRANSCRIPT_MAX_CHARS),
+    'respuesta_proveedor'
+  );
   const prompt = buildRfqInterpretationPrompt({
     rfqNumber: rfq.number,
     supplierName: name,
@@ -946,7 +1222,10 @@ export async function runRfqInterpretation(
       description: line.description,
       qty: num(line.qty),
       unit: line.unit,
-      specs: line.specs && typeof line.specs === 'object' && !Array.isArray(line.specs) ? (line.specs as Record<string, unknown>) : null,
+      specs:
+        line.specs && typeof line.specs === 'object' && !Array.isArray(line.specs)
+          ? (line.specs as Record<string, unknown>)
+          : null,
     })),
     transcript,
   });
@@ -968,7 +1247,10 @@ export async function runRfqInterpretation(
     if (parsed.success) interpretation = parsed.data;
     else error = 'La IA devolvió una interpretación inválida';
   } catch (err) {
-    error = truncate(`No se pudo interpretar con IA: ${err instanceof Error ? err.message : String(err)}`, 500);
+    error = truncate(
+      `No se pudo interpretar con IA: ${err instanceof Error ? err.message : String(err)}`,
+      500
+    );
   }
   await import('./purchases-commands');
   const lastInbound = inbound[inbound.length - 1];
@@ -998,14 +1280,28 @@ export interface RecordInterpretationData {
   unchanged: boolean;
 }
 
-async function closeReviewItems(tx: Db, responseId: string, result: Record<string, unknown>): Promise<void> {
+async function closeReviewItems(
+  tx: Db,
+  responseId: string,
+  result: Record<string, unknown>
+): Promise<void> {
   const items = await tx.workItem.findMany({
-    where: { objectType: RFQ_REVIEW_OBJECT, objectId: responseId, status: { in: [...WORK_ITEM_OPEN_STATUSES] } },
+    where: {
+      objectType: RFQ_REVIEW_OBJECT,
+      objectId: responseId,
+      status: { in: [...WORK_ITEM_OPEN_STATUSES] },
+    },
   });
-  for (const item of items) await completeWorkItemInTx(tx, item, { result, skipEvidenceCheck: true });
+  for (const item of items)
+    await completeWorkItemInTx(tx, item, { result, skipEvidenceCheck: true });
 }
 
-async function writeResponseLines(tx: Db, responseId: string, lines: readonly PreparedResponseLine[], landed: Map<string, number | null>): Promise<void> {
+async function writeResponseLines(
+  tx: Db,
+  responseId: string,
+  lines: readonly PreparedResponseLine[],
+  landed: Map<string, number | null>
+): Promise<void> {
   await tx.rfqResponseLine.deleteMany({ where: { responseId } });
   for (const line of lines) {
     const cost = landed.get(line.rfqLineId);
@@ -1023,7 +1319,20 @@ async function writeResponseLines(tx: Db, responseId: string, lines: readonly Pr
   }
 }
 
-function landedFor(rfqLines: readonly RfqLine[], terms: Omit<ScoringResponse, 'id' | 'lines' | 'supplierRating' | 'evaluationsCount' | 'isCandidate' | 'confidence' | 'validUntil'> & { validUntil: Date | null }, lines: readonly PreparedResponseLine[]) {
+function landedFor(
+  rfqLines: readonly RfqLine[],
+  terms: Omit<
+    ScoringResponse,
+    | 'id'
+    | 'lines'
+    | 'supplierRating'
+    | 'evaluationsCount'
+    | 'isCandidate'
+    | 'confidence'
+    | 'validUntil'
+  > & { validUntil: Date | null },
+  lines: readonly PreparedResponseLine[]
+) {
   return computeLandedCosts(
     rfqLines.map((l) => ({ id: l.id, qty: num(l.qty), unit: l.unit })),
     {
@@ -1033,7 +1342,13 @@ function landedFor(rfqLines: readonly RfqLine[], terms: Omit<ScoringResponse, 'i
       supplierRating: null,
       evaluationsCount: 0,
       isCandidate: false,
-      lines: lines.map((l) => ({ rfqLineId: l.rfqLineId, unitPrice: l.unitPrice, qty: l.qty, unit: l.unit, unitsPerRfqUnit: l.unitsPerRfqUnit })),
+      lines: lines.map((l) => ({
+        rfqLineId: l.rfqLineId,
+        unitPrice: l.unitPrice,
+        qty: l.qty,
+        unit: l.unit,
+        unitsPerRfqUnit: l.unitsPerRfqUnit,
+      })),
     }
   );
 }
@@ -1043,22 +1358,49 @@ export async function recordInterpretationInTx(
   input: z.output<typeof recordInterpretationSchema>,
   ctx: CommandContext
 ): Promise<RecordInterpretationData> {
-  const invitation = assertFoundRow(await tx.rfqInvitation.findUnique({ where: { id: input.invitationId } }), 'No se encontró la invitación');
-  const rfq = assertFoundRow(await tx.rfq.findUnique({ where: { id: invitation.rfqId } }), 'No se encontró la cotización');
+  const invitation = assertFoundRow(
+    await tx.rfqInvitation.findUnique({ where: { id: input.invitationId } }),
+    'No se encontró la invitación'
+  );
+  const rfq = assertFoundRow(
+    await tx.rfq.findUnique({ where: { id: invitation.rfqId } }),
+    'No se encontró la cotización'
+  );
   if (!['sent', 'collecting', 'compared'].includes(rfq.status)) {
-    return { responseId: null, status: 'skipped', reasons: ['La cotización ya está cerrada'], unchanged: true };
+    return {
+      responseId: null,
+      status: 'skipped',
+      reasons: ['La cotización ya está cerrada'],
+      unchanged: true,
+    };
   }
-  const existing = await tx.rfqResponse.findFirst({ where: { invitationId: invitation.id }, orderBy: { createdAt: 'desc' } });
+  const existing = await tx.rfqResponse.findFirst({
+    where: { invitationId: invitation.id },
+    orderBy: { createdAt: 'desc' },
+  });
   if (existing && ['confirmed', 'selected', 'rejected'].includes(existing.status)) {
     const merged = [...new Set([...existing.sourceMessageIds, ...input.messageIds])];
     if (merged.length !== existing.sourceMessageIds.length) {
-      await tx.rfqResponse.update({ where: { id: existing.id }, data: { sourceMessageIds: merged } });
+      await tx.rfqResponse.update({
+        where: { id: existing.id },
+        data: { sourceMessageIds: merged },
+      });
     }
     return { responseId: existing.id, status: existing.status, reasons: [], unchanged: true };
   }
-  const rfqLines = await tx.rfqLine.findMany({ where: { rfqId: rfq.id }, orderBy: { sortOrder: 'asc' } });
-  const refs = rfqLines.map((line, index) => ({ id: line.id, ref: rfqLineRef(index), unit: line.unit, qty: num(line.qty) }));
-  const parsed = input.interpretation ? rfqInterpretationSchema.safeParse(input.interpretation) : null;
+  const rfqLines = await tx.rfqLine.findMany({
+    where: { rfqId: rfq.id },
+    orderBy: { sortOrder: 'asc' },
+  });
+  const refs = rfqLines.map((line, index) => ({
+    id: line.id,
+    ref: rfqLineRef(index),
+    unit: line.unit,
+    qty: num(line.qty),
+  }));
+  const parsed = input.interpretation
+    ? rfqInterpretationSchema.safeParse(input.interpretation)
+    : null;
 
   let status: 'parsed' | 'needs_review' = 'needs_review';
   let reasons: string[];
@@ -1080,20 +1422,33 @@ export async function recordInterpretationInTx(
       currency: 'MXN',
       taxIncluded: false,
       confidence: D(0),
-      interpretation: { error: input.error ?? 'invalid_interpretation', reviewReasons: reasons, model: input.model ?? null },
+      interpretation: {
+        error: input.error ?? 'invalid_interpretation',
+        reviewReasons: reasons,
+        model: input.model ?? null,
+      },
       status,
     };
   } else {
     const interpretation = parsed.data;
     const mapped = mapInterpretationLines(interpretation, refs);
-    const profiles = await profilesFor(tx, rfqLines.map((l) => l.zohoItemId));
+    const profiles = await profilesFor(
+      tx,
+      rfqLines.map((l) => l.zohoItemId)
+    );
     const unitsPerRfqUnit = new Map<string, number | null>();
     for (const line of mapped.lines) {
       const rfqLine = rfqLines.find((l) => l.id === line.rfqLineId)!;
       const profile = rfqLine.zohoItemId ? (profiles.get(rfqLine.zohoItemId) ?? null) : null;
       unitsPerRfqUnit.set(line.rfqLineId, resolveQuotedUnits(rfqLine, line.unit, profile));
     }
-    const decision = decideResponseStatus({ interpretation, rfqLines: refs, mapped: mapped.lines, unknownRefs: mapped.unknownRefs, unitsPerRfqUnit });
+    const decision = decideResponseStatus({
+      interpretation,
+      rfqLines: refs,
+      mapped: mapped.lines,
+      unknownRefs: mapped.unknownRefs,
+      unitsPerRfqUnit,
+    });
     status = decision.status;
     reasons = decision.reasons;
     prepared = mapped.lines.flatMap((line) => {
@@ -1125,7 +1480,10 @@ export async function recordInterpretationInTx(
     const landed = landedFor(
       rfqLines,
       terms,
-      prepared.map((p) => ({ ...p, unitsPerRfqUnit: p.unitsPerRfqUnit > 0 ? p.unitsPerRfqUnit : (null as unknown as number) }))
+      prepared.map((p) => ({
+        ...p,
+        unitsPerRfqUnit: p.unitsPerRfqUnit > 0 ? p.unitsPerRfqUnit : (null as unknown as number),
+      }))
     );
     landedCosts = new Map(landed.lines.map((l) => [l.rfqLineId, l.landedUnitCost]));
     data = {
@@ -1141,7 +1499,11 @@ export async function recordInterpretationInTx(
       paymentTerms: interpretation.paymentTerms,
       landedTotal: landed.landedTotal === null ? null : D(landed.landedTotal),
       confidence: D(interpretation.confidence),
-      interpretation: { ...interpretation, reviewReasons: reasons, model: input.model ?? null } as unknown as Prisma.InputJsonValue,
+      interpretation: {
+        ...interpretation,
+        reviewReasons: reasons,
+        model: input.model ?? null,
+      } as unknown as Prisma.InputJsonValue,
       status,
     };
     await tx.rfqInvitation.update({
@@ -1150,16 +1512,26 @@ export async function recordInterpretationInTx(
     });
   }
   if (!parsed?.success && invitation.status === 'sent') {
-    await tx.rfqInvitation.update({ where: { id: invitation.id }, data: { status: 'replied', repliedAt: ctx.now } });
+    await tx.rfqInvitation.update({
+      where: { id: invitation.id },
+      data: { status: 'replied', repliedAt: ctx.now },
+    });
   }
   const { rfqId: _rfqId, invitationId: _invitationId, ...updatable } = data;
   void _rfqId;
   void _invitationId;
   const response = existing
-    ? await tx.rfqResponse.update({ where: { id: existing.id }, data: { ...updatable, version: { increment: 1 } } })
+    ? await tx.rfqResponse.update({
+        where: { id: existing.id },
+        data: { ...updatable, version: { increment: 1 } },
+      })
     : await tx.rfqResponse.create({ data });
   await writeResponseLines(tx, response.id, prepared, landedCosts);
-  if (rfq.status === 'sent') await tx.rfq.update({ where: { id: rfq.id }, data: { status: 'collecting', version: { increment: 1 } } });
+  if (rfq.status === 'sent')
+    await tx.rfq.update({
+      where: { id: rfq.id },
+      data: { status: 'collecting', version: { increment: 1 } },
+    });
   if (invitation.candidateId) {
     await tx.sourcingCandidate.updateMany({
       where: { id: invitation.candidateId, status: { in: ['new', 'contacted', 'rfq_sent'] } },
@@ -1169,14 +1541,21 @@ export async function recordInterpretationInTx(
   const creator = rfq.createdByUserId.includes(':') ? null : rfq.createdByUserId;
   if (status === 'needs_review') {
     const open = await tx.workItem.findFirst({
-      where: { objectType: RFQ_REVIEW_OBJECT, objectId: response.id, status: { in: [...WORK_ITEM_OPEN_STATUSES] } },
+      where: {
+        objectType: RFQ_REVIEW_OBJECT,
+        objectId: response.id,
+        status: { in: [...WORK_ITEM_OPEN_STATUSES] },
+      },
       select: { id: true },
     });
     if (!open) {
       await ctx.createWorkItem({
         areaKey: 'compras',
         kind: 'verification',
-        title: truncate(`Revisar la respuesta de ${invitation.supplierId || invitation.candidateId ? 'proveedor' : 'la cotización'} a ${rfq.number}`, 200),
+        title: truncate(
+          `Revisar la respuesta de ${invitation.supplierId || invitation.candidateId ? 'proveedor' : 'la cotización'} a ${rfq.number}`,
+          200
+        ),
         description: truncate(reasons.join(' · '), 1000),
         objectType: RFQ_REVIEW_OBJECT,
         objectId: response.id,
@@ -1190,7 +1569,15 @@ export async function recordInterpretationInTx(
   emitPurchases(
     ctx,
     EV.responseParsed,
-    { rfqId: rfq.id, number: rfq.number, responseId: response.id, invitationId: invitation.id, status, reasons, confidence: response.confidence?.toString() ?? null },
+    {
+      rfqId: rfq.id,
+      number: rfq.number,
+      responseId: response.id,
+      invitationId: invitation.id,
+      status,
+      reasons,
+      confidence: response.confidence?.toString() ?? null,
+    },
     { objectType: OBJ.rfqResponse, objectId: response.id }
   );
   if (creator) {
@@ -1200,7 +1587,7 @@ export async function recordInterpretationInTx(
       type: 'purchase_rfq_response',
       title: `Respuesta a ${rfq.number}: ${RFQ_RESPONSE_STATUS_LABELS[status]}`,
       body: truncate(reasons.join(' · ') || 'Lista para comparar', 300),
-      url: `/app/purchases/rfqs/${rfq.id}`,
+      url: rfqLink(rfq.id),
       entityType: OBJ.rfqResponse,
       entityId: response.id,
     });
@@ -1209,16 +1596,44 @@ export async function recordInterpretationInTx(
   return { responseId: response.id, status, reasons, unchanged: false };
 }
 
-export async function recordManualResponseInTx(tx: Db, input: ManualResponseInput, ctx: CommandContext): Promise<RfqResponse> {
-  const rfq = assertFoundRow(await tx.rfq.findUnique({ where: { id: input.rfqId } }), 'No se encontró la cotización');
-  if (rfq.status === 'closed' || rfq.status === 'cancelled') throw new OperationsError('invalid_state', 'La cotización ya está cerrada');
-  if (input.supplierId) assertFoundRow(await tx.supplier.findUnique({ where: { id: input.supplierId }, select: { id: true } }), 'No se encontró el proveedor');
-  if (input.candidateId) assertFoundRow(await tx.sourcingCandidate.findUnique({ where: { id: input.candidateId }, select: { id: true } }), 'No se encontró el candidato');
+export async function recordManualResponseInTx(
+  tx: Db,
+  input: ManualResponseInput,
+  ctx: CommandContext
+): Promise<RfqResponse> {
+  const rfq = assertFoundRow(
+    await tx.rfq.findUnique({ where: { id: input.rfqId } }),
+    'No se encontró la cotización'
+  );
+  if (rfq.status === 'closed' || rfq.status === 'cancelled')
+    throw new OperationsError('invalid_state', 'La cotización ya está cerrada');
+  if (input.supplierId)
+    assertFoundRow(
+      await tx.supplier.findUnique({ where: { id: input.supplierId }, select: { id: true } }),
+      'No se encontró el proveedor'
+    );
+  if (input.candidateId)
+    assertFoundRow(
+      await tx.sourcingCandidate.findUnique({
+        where: { id: input.candidateId },
+        select: { id: true },
+      }),
+      'No se encontró el candidato'
+    );
   if (input.currency !== 'MXN' && !input.exchangeRate) {
-    throw new OperationsError('invalid_payload', `Indica el tipo de cambio de ${input.currency} a MXN`);
+    throw new OperationsError(
+      'invalid_payload',
+      `Indica el tipo de cambio de ${input.currency} a MXN`
+    );
   }
-  const rfqLines = await tx.rfqLine.findMany({ where: { rfqId: rfq.id }, orderBy: { sortOrder: 'asc' } });
-  const profiles = await profilesFor(tx, rfqLines.map((l) => l.zohoItemId));
+  const rfqLines = await tx.rfqLine.findMany({
+    where: { rfqId: rfq.id },
+    orderBy: { sortOrder: 'asc' },
+  });
+  const profiles = await profilesFor(
+    tx,
+    rfqLines.map((l) => l.zohoItemId)
+  );
   const prepared = prepareResponseLines(rfqLines, input.lines, profiles);
   const terms = {
     currency: input.currency,
@@ -1232,7 +1647,10 @@ export async function recordManualResponseInTx(tx: Db, input: ManualResponseInpu
   };
   const landed = landedFor(rfqLines, terms, prepared);
   const invitation = await tx.rfqInvitation.findFirst({
-    where: { rfqId: rfq.id, ...(input.supplierId ? { supplierId: input.supplierId } : { candidateId: input.candidateId }) },
+    where: {
+      rfqId: rfq.id,
+      ...(input.supplierId ? { supplierId: input.supplierId } : { candidateId: input.candidateId }),
+    },
     orderBy: { createdAt: 'desc' },
   });
   const response = await tx.rfqResponse.create({
@@ -1256,11 +1674,23 @@ export async function recordManualResponseInTx(tx: Db, input: ManualResponseInpu
       reviewedByUserId: recordActorId(ctx),
     },
   });
-  await writeResponseLines(tx, response.id, prepared, new Map(landed.lines.map((l) => [l.rfqLineId, l.landedUnitCost])));
+  await writeResponseLines(
+    tx,
+    response.id,
+    prepared,
+    new Map(landed.lines.map((l) => [l.rfqLineId, l.landedUnitCost]))
+  );
   if (invitation && ['pending', 'sent'].includes(invitation.status)) {
-    await tx.rfqInvitation.update({ where: { id: invitation.id }, data: { status: 'replied', repliedAt: ctx.now } });
+    await tx.rfqInvitation.update({
+      where: { id: invitation.id },
+      data: { status: 'replied', repliedAt: ctx.now },
+    });
   }
-  if (['draft', 'sent'].includes(rfq.status)) await tx.rfq.update({ where: { id: rfq.id }, data: { status: 'collecting', version: { increment: 1 } } });
+  if (['draft', 'sent'].includes(rfq.status))
+    await tx.rfq.update({
+      where: { id: rfq.id },
+      data: { status: 'collecting', version: { increment: 1 } },
+    });
   if (input.candidateId) {
     await tx.sourcingCandidate.updateMany({
       where: { id: input.candidateId, status: { in: ['new', 'contacted', 'rfq_sent'] } },
@@ -1270,22 +1700,48 @@ export async function recordManualResponseInTx(tx: Db, input: ManualResponseInpu
   emitPurchases(
     ctx,
     EV.responseConfirmed,
-    { rfqId: rfq.id, number: rfq.number, responseId: response.id, manual: true, landedTotal: response.landedTotal?.toString() ?? null },
+    {
+      rfqId: rfq.id,
+      number: rfq.number,
+      responseId: response.id,
+      manual: true,
+      landedTotal: response.landedTotal?.toString() ?? null,
+    },
     { objectType: OBJ.rfqResponse, objectId: response.id }
   );
   publishBoard(ctx, { rfqId: rfq.id, responseId: response.id });
   return response;
 }
 
-export async function confirmResponseInTx(tx: Db, input: ConfirmResponseInput, ctx: CommandContext): Promise<RfqResponse> {
-  const response = assertFoundRow(await tx.rfqResponse.findUnique({ where: { id: input.responseId } }), 'No se encontró la respuesta');
+export async function confirmResponseInTx(
+  tx: Db,
+  input: ConfirmResponseInput,
+  ctx: CommandContext
+): Promise<RfqResponse> {
+  const response = assertFoundRow(
+    await tx.rfqResponse.findUnique({ where: { id: input.responseId } }),
+    'No se encontró la respuesta'
+  );
   if (!['parsed', 'needs_review', 'confirmed'].includes(response.status)) {
-    throw new OperationsError('invalid_state', `La respuesta ya está ${RFQ_RESPONSE_STATUS_LABELS[response.status as keyof typeof RFQ_RESPONSE_STATUS_LABELS]?.toLowerCase() ?? response.status}`);
+    throw new OperationsError(
+      'invalid_state',
+      `La respuesta ya está ${RFQ_RESPONSE_STATUS_LABELS[response.status as keyof typeof RFQ_RESPONSE_STATUS_LABELS]?.toLowerCase() ?? response.status}`
+    );
   }
-  const rfq = assertFoundRow(await tx.rfq.findUnique({ where: { id: response.rfqId } }), 'No se encontró la cotización');
-  if (rfq.status === 'closed' || rfq.status === 'cancelled') throw new OperationsError('invalid_state', 'La cotización ya está cerrada');
-  const rfqLines = await tx.rfqLine.findMany({ where: { rfqId: rfq.id }, orderBy: { sortOrder: 'asc' } });
-  const profiles = await profilesFor(tx, rfqLines.map((l) => l.zohoItemId));
+  const rfq = assertFoundRow(
+    await tx.rfq.findUnique({ where: { id: response.rfqId } }),
+    'No se encontró la cotización'
+  );
+  if (rfq.status === 'closed' || rfq.status === 'cancelled')
+    throw new OperationsError('invalid_state', 'La cotización ya está cerrada');
+  const rfqLines = await tx.rfqLine.findMany({
+    where: { rfqId: rfq.id },
+    orderBy: { sortOrder: 'asc' },
+  });
+  const profiles = await profilesFor(
+    tx,
+    rfqLines.map((l) => l.zohoItemId)
+  );
   const currentLines = await tx.rfqResponseLine.findMany({ where: { responseId: response.id } });
   const lineInputs: ResponseLineInput[] =
     input.lines ??
@@ -1300,11 +1756,16 @@ export async function confirmResponseInTx(tx: Db, input: ConfirmResponseInput, c
         unitsPerRfqUnit: rfqLine ? unitsPerRfqUnitOf(rfqLine, line, profile) : null,
       };
     });
-  if (lineInputs.length === 0) throw new OperationsError('invalid_payload', 'La respuesta no tiene precios: captúralos para confirmarla');
+  if (lineInputs.length === 0)
+    throw new OperationsError(
+      'invalid_payload',
+      'La respuesta no tiene precios: captúralos para confirmarla'
+    );
   const prepared = prepareResponseLines(rfqLines, lineInputs, profiles);
   const terms = {
     currency: input.currency ?? response.currency,
-    exchangeRate: input.exchangeRate === undefined ? numOrNull(response.exchangeRate) : input.exchangeRate,
+    exchangeRate:
+      input.exchangeRate === undefined ? numOrNull(response.exchangeRate) : input.exchangeRate,
     taxIncluded: input.taxIncluded ?? response.taxIncluded,
     taxRate: input.taxRate === undefined ? numOrNull(response.taxRate) : input.taxRate,
     freight: input.freight ?? num(response.freight),
@@ -1313,17 +1774,26 @@ export async function confirmResponseInTx(tx: Db, input: ConfirmResponseInput, c
     validUntil: input.validUntil === undefined ? response.validUntil : toDate(input.validUntil),
   };
   if (terms.currency !== 'MXN' && !terms.exchangeRate) {
-    throw new OperationsError('invalid_payload', `Indica el tipo de cambio de ${terms.currency} a MXN`);
+    throw new OperationsError(
+      'invalid_payload',
+      `Indica el tipo de cambio de ${terms.currency} a MXN`
+    );
   }
   const landed = landedFor(rfqLines, terms, prepared);
-  const interpretation = response.interpretation && typeof response.interpretation === 'object' && !Array.isArray(response.interpretation)
-    ? { ...(response.interpretation as Record<string, unknown>), reviewReasons: [] }
-    : undefined;
+  const interpretation =
+    response.interpretation &&
+    typeof response.interpretation === 'object' &&
+    !Array.isArray(response.interpretation)
+      ? { ...(response.interpretation as Record<string, unknown>), reviewReasons: [] }
+      : undefined;
   const updated = await tx.rfqResponse.update({
     where: { id: response.id },
     data: {
       currency: terms.currency,
-      exchangeRate: terms.exchangeRate === null || terms.exchangeRate === undefined ? null : D(terms.exchangeRate),
+      exchangeRate:
+        terms.exchangeRate === null || terms.exchangeRate === undefined
+          ? null
+          : D(terms.exchangeRate),
       taxIncluded: terms.taxIncluded,
       taxRate: terms.taxRate === null || terms.taxRate === undefined ? null : D(terms.taxRate),
       freight: D(terms.freight),
@@ -1337,21 +1807,40 @@ export async function confirmResponseInTx(tx: Db, input: ConfirmResponseInput, c
       ...(interpretation ? { interpretation: interpretation as Prisma.InputJsonValue } : {}),
     },
   });
-  await writeResponseLines(tx, response.id, prepared, new Map(landed.lines.map((l) => [l.rfqLineId, l.landedUnitCost])));
+  await writeResponseLines(
+    tx,
+    response.id,
+    prepared,
+    new Map(landed.lines.map((l) => [l.rfqLineId, l.landedUnitCost]))
+  );
   await closeReviewItems(tx, response.id, { status: 'confirmed' });
   emitPurchases(
     ctx,
     EV.responseConfirmed,
-    { rfqId: rfq.id, number: rfq.number, responseId: response.id, previousStatus: response.status, landedTotal: updated.landedTotal?.toString() ?? null },
+    {
+      rfqId: rfq.id,
+      number: rfq.number,
+      responseId: response.id,
+      previousStatus: response.status,
+      landedTotal: updated.landedTotal?.toString() ?? null,
+    },
     { objectType: OBJ.rfqResponse, objectId: response.id }
   );
   publishBoard(ctx, { rfqId: rfq.id, responseId: response.id });
   return updated;
 }
 
-export async function rejectResponseInTx(tx: Db, input: z.output<typeof rejectResponseSchema>, ctx: CommandContext): Promise<RfqResponse> {
-  const response = assertFoundRow(await tx.rfqResponse.findUnique({ where: { id: input.responseId } }), 'No se encontró la respuesta');
-  if (response.status === 'selected') throw new OperationsError('invalid_state', 'La respuesta ya se seleccionó para una orden');
+export async function rejectResponseInTx(
+  tx: Db,
+  input: z.output<typeof rejectResponseSchema>,
+  ctx: CommandContext
+): Promise<RfqResponse> {
+  const response = assertFoundRow(
+    await tx.rfqResponse.findUnique({ where: { id: input.responseId } }),
+    'No se encontró la respuesta'
+  );
+  if (response.status === 'selected')
+    throw new OperationsError('invalid_state', 'La respuesta ya se seleccionó para una orden');
   if (response.status === 'rejected') return response;
   const updated = await tx.rfqResponse.update({
     where: { id: response.id },
@@ -1361,7 +1850,12 @@ export async function rejectResponseInTx(tx: Db, input: z.output<typeof rejectRe
   emitPurchases(
     ctx,
     EV.responseRejected,
-    { rfqId: response.rfqId, responseId: response.id, reason: input.reason, previousStatus: response.status },
+    {
+      rfqId: response.rfqId,
+      responseId: response.id,
+      reason: input.reason,
+      previousStatus: response.status,
+    },
     { objectType: OBJ.rfqResponse, objectId: response.id }
   );
   publishBoard(ctx, { rfqId: response.rfqId, responseId: response.id });
@@ -1375,11 +1869,20 @@ export async function rejectResponseInTx(tx: Db, input: z.output<typeof rejectRe
 export interface RfqRankingEntry extends Omit<ResponseScore, 'landed'> {
   name: string | null;
   status: string;
-  lines: Array<{ rfqLineId: string; landedUnitCost: number | null; pricePerRfqUnit: number | null; issues: string[] }>;
+  lines: Array<{
+    rfqLineId: string;
+    landedUnitCost: number | null;
+    pricePerRfqUnit: number | null;
+    issues: string[];
+  }>;
 }
 
 export function rankingFromInputs(inputs: RfqScoringInputs, now: Date): RfqRankingEntry[] {
-  const scores = scoreRfqResponses(inputs.scoringLines, inputs.responses.map((r) => r.scoring), { now });
+  const scores = scoreRfqResponses(
+    inputs.scoringLines,
+    inputs.responses.map((r) => r.scoring),
+    { now }
+  );
   return scores.map((score) => {
     const entry = inputs.responses.find((r) => r.row.id === score.responseId)!;
     const { landed, ...rest } = score;
@@ -1387,15 +1890,26 @@ export function rankingFromInputs(inputs: RfqScoringInputs, now: Date): RfqRanki
       ...rest,
       name: entry.name,
       status: entry.row.status,
-      lines: landed.lines.map((l) => ({ rfqLineId: l.rfqLineId, landedUnitCost: l.landedUnitCost, pricePerRfqUnit: l.pricePerRfqUnit, issues: l.issues })),
+      lines: landed.lines.map((l) => ({
+        rfqLineId: l.rfqLineId,
+        landedUnitCost: l.landedUnitCost,
+        pricePerRfqUnit: l.pricePerRfqUnit,
+        issues: l.issues,
+      })),
     };
   });
 }
 
-export async function compareRfqInTx(tx: Db, input: z.output<typeof rfqIdSchema>, ctx: CommandContext): Promise<{ rfqId: string; ranking: RfqRankingEntry[] }> {
+export async function compareRfqInTx(
+  tx: Db,
+  input: z.output<typeof rfqIdSchema>,
+  ctx: CommandContext
+): Promise<{ rfqId: string; ranking: RfqRankingEntry[] }> {
   const inputs = await loadRfqScoringInputs(tx, input.rfqId);
-  if (['closed', 'cancelled'].includes(inputs.rfq.status)) throw new OperationsError('invalid_state', 'La cotización ya está cerrada');
-  if (inputs.responses.length === 0) throw new OperationsError('invalid_state', 'Aún no hay respuestas que comparar');
+  if (['closed', 'cancelled'].includes(inputs.rfq.status))
+    throw new OperationsError('invalid_state', 'La cotización ya está cerrada');
+  if (inputs.responses.length === 0)
+    throw new OperationsError('invalid_state', 'Aún no hay respuestas que comparar');
   const ranking = rankingFromInputs(inputs, ctx.now);
   for (const entry of ranking) {
     await tx.rfqResponse.update({
@@ -1410,7 +1924,10 @@ export async function compareRfqInTx(tx: Db, input: z.output<typeof rfqIdSchema>
     const responseLines = inputs.responses.find((r) => r.row.id === entry.responseId)!.lines;
     for (const line of responseLines) {
       const cost = entry.lines.find((l) => l.rfqLineId === line.rfqLineId)?.landedUnitCost ?? null;
-      await tx.rfqResponseLine.update({ where: { id: line.id }, data: { landedUnitCost: cost === null ? null : D(cost) } });
+      await tx.rfqResponseLine.update({
+        where: { id: line.id },
+        data: { landedUnitCost: cost === null ? null : D(cost) },
+      });
     }
   }
   if (['sent', 'collecting'].includes(inputs.rfq.status)) {
@@ -1422,7 +1939,13 @@ export async function compareRfqInTx(tx: Db, input: z.output<typeof rfqIdSchema>
     {
       rfqId: inputs.rfq.id,
       number: inputs.rfq.number,
-      ranking: ranking.map((r) => ({ responseId: r.responseId, rank: r.rank, score: r.score, landedTotal: r.landedTotal, recommended: r.recommended })),
+      ranking: ranking.map((r) => ({
+        responseId: r.responseId,
+        rank: r.rank,
+        score: r.score,
+        landedTotal: r.landedTotal,
+        recommended: r.recommended,
+      })),
     },
     { objectType: OBJ.rfq, objectId: inputs.rfq.id }
   );
@@ -1434,14 +1957,30 @@ export async function selectResponseInTx(
   tx: Db,
   input: z.output<typeof selectResponseSchema>,
   ctx: CommandContext
-): Promise<{ responseId: string; rfqId: string; orderId: string; orderNumber: string; supplierId: string; quantityWarnings: string[] }> {
-  const response = assertFoundRow(await tx.rfqResponse.findUnique({ where: { id: input.responseId } }), 'No se encontró la respuesta');
+): Promise<{
+  responseId: string;
+  rfqId: string;
+  orderId: string;
+  orderNumber: string;
+  supplierId: string;
+  quantityWarnings: string[];
+}> {
+  const response = assertFoundRow(
+    await tx.rfqResponse.findUnique({ where: { id: input.responseId } }),
+    'No se encontró la respuesta'
+  );
   if (response.status === 'rejected' || response.status === 'selected') {
-    throw new OperationsError('invalid_state', `La respuesta ya está ${response.status === 'rejected' ? 'descartada' : 'seleccionada'}`);
+    throw new OperationsError(
+      'invalid_state',
+      `La respuesta ya está ${response.status === 'rejected' ? 'descartada' : 'seleccionada'}`
+    );
   }
   // Prices, tax, freight and lead time read by the AI become an order only after a person confirms them.
   if (response.status !== 'confirmed') {
-    throw new OperationsError('invalid_state', 'Revisa y confirma la respuesta antes de seleccionarla');
+    throw new OperationsError(
+      'invalid_state',
+      'Revisa y confirma la respuesta antes de seleccionarla'
+    );
   }
   if (response.validUntil && response.validUntil.getTime() < ctx.now.getTime()) {
     throw new OperationsError(
@@ -1449,18 +1988,35 @@ export async function selectResponseInTx(
       `La cotización venció el ${isoDay(response.validUntil)}: reconfírmala con el proveedor y actualiza su vigencia`
     );
   }
-  const rfq = assertFoundRow(await tx.rfq.findUnique({ where: { id: response.rfqId } }), 'No se encontró la cotización');
-  if (rfq.status === 'closed' || rfq.status === 'cancelled') throw new OperationsError('invalid_state', 'La cotización ya está cerrada');
-  const rfqLines = await tx.rfqLine.findMany({ where: { rfqId: rfq.id }, orderBy: { sortOrder: 'asc' } });
+  const rfq = assertFoundRow(
+    await tx.rfq.findUnique({ where: { id: response.rfqId } }),
+    'No se encontró la cotización'
+  );
+  if (rfq.status === 'closed' || rfq.status === 'cancelled')
+    throw new OperationsError('invalid_state', 'La cotización ya está cerrada');
+  const rfqLines = await tx.rfqLine.findMany({
+    where: { rfqId: rfq.id },
+    orderBy: { sortOrder: 'asc' },
+  });
   const lines = await tx.rfqResponseLine.findMany({ where: { responseId: response.id } });
-  if (lines.length === 0) throw new OperationsError('invalid_state', 'La respuesta no tiene precios');
+  if (lines.length === 0)
+    throw new OperationsError('invalid_state', 'La respuesta no tiene precios');
   let supplierId = response.supplierId;
   if (!supplierId) {
-    if (!response.candidateId) throw new OperationsError('invalid_state', 'La respuesta no tiene proveedor');
-    const promoted = await promoteCandidateToSupplierInTx(tx, { candidateId: response.candidateId }, ctx, { bumpCandidateVersion: true });
+    if (!response.candidateId)
+      throw new OperationsError('invalid_state', 'La respuesta no tiene proveedor');
+    const promoted = await promoteCandidateToSupplierInTx(
+      tx,
+      { candidateId: response.candidateId },
+      ctx,
+      { bumpCandidateVersion: true }
+    );
     supplierId = promoted.supplier.id;
   }
-  const profiles = await profilesFor(tx, rfqLines.map((l) => l.zohoItemId));
+  const profiles = await profilesFor(
+    tx,
+    rfqLines.map((l) => l.zohoItemId)
+  );
   const taxRate = numOrNull(response.taxRate) ?? DEFAULT_TAX_RATE;
   const orderLines = lines.flatMap((line) => {
     const rfqLine = rfqLines.find((l) => l.id === line.rfqLineId);
@@ -1469,11 +2025,16 @@ export async function selectResponseInTx(
     const units = unitsPerRfqUnitOf(rfqLine, line, profile) ?? 1;
     let price = num(line.unitPrice) * units;
     if (response.taxIncluded) price = price / (1 + taxRate);
-    const specs = rfqLine.specs && typeof rfqLine.specs === 'object' && !Array.isArray(rfqLine.specs) ? (rfqLine.specs as Record<string, unknown>) : {};
+    const specs =
+      rfqLine.specs && typeof rfqLine.specs === 'object' && !Array.isArray(rfqLine.specs)
+        ? (rfqLine.specs as Record<string, unknown>)
+        : {};
     const sources = Array.isArray(specs.requestSources)
       ? specs.requestSources.flatMap((entry) => {
           const row = entry as { requestLineId?: unknown; qty?: unknown };
-          return typeof row.requestLineId === 'string' && Number(row.qty) > 0 ? [{ requestLineId: row.requestLineId, qty: Number(row.qty) }] : [];
+          return typeof row.requestLineId === 'string' && Number(row.qty) > 0
+            ? [{ requestLineId: row.requestLineId, qty: Number(row.qty) }]
+            : [];
         })
       : [];
     return [
@@ -1497,11 +2058,14 @@ export async function selectResponseInTx(
     const units = unitsPerRfqUnitOf(rfqLine, line, profile) ?? 1;
     const quotedInRfqUnits = units > 0 ? num(line.qty) / units : num(line.qty);
     return Math.abs(quotedInRfqUnits - num(rfqLine.qty)) > 0.0001
-      ? [`${rfqLine.description}: el proveedor cotizó ${round4(quotedInRfqUnits)} ${rfqLine.unit} y la orden pide ${num(rfqLine.qty)}`]
+      ? [
+          `${rfqLine.description}: el proveedor cotizó ${round4(quotedInRfqUnits)} ${rfqLine.unit} y la orden pide ${num(rfqLine.qty)}`,
+        ]
       : [];
   });
   const expectedAt =
-    input.expectedAt ?? (response.leadTimeDays !== null ? isoDay(addDays(ctx.now, response.leadTimeDays)) : null);
+    input.expectedAt ??
+    (response.leadTimeDays !== null ? isoDay(addDays(ctx.now, response.leadTimeDays)) : null);
   const { order } = await createOrderInTx(
     tx,
     {
@@ -1518,8 +2082,14 @@ export async function selectResponseInTx(
     },
     ctx
   );
-  await tx.rfqResponse.update({ where: { id: response.id }, data: { status: 'selected', supplierId, reviewedByUserId: recordActorId(ctx) } });
-  await tx.rfq.update({ where: { id: rfq.id }, data: { status: 'closed', version: { increment: 1 } } });
+  await tx.rfqResponse.update({
+    where: { id: response.id },
+    data: { status: 'selected', supplierId, reviewedByUserId: recordActorId(ctx) },
+  });
+  await tx.rfq.update({
+    where: { id: rfq.id },
+    data: { status: 'closed', version: { increment: 1 } },
+  });
   for (const line of lines) {
     const rfqLine = rfqLines.find((l) => l.id === line.rfqLineId);
     if (!rfqLine) continue;
@@ -1539,16 +2109,34 @@ export async function selectResponseInTx(
   emitPurchases(
     ctx,
     EV.responseSelected,
-    { rfqId: rfq.id, number: rfq.number, responseId: response.id, supplierId, orderId: order.id, orderNumber: order.number, quantityWarnings },
+    {
+      rfqId: rfq.id,
+      number: rfq.number,
+      responseId: response.id,
+      supplierId,
+      orderId: order.id,
+      orderNumber: order.number,
+      quantityWarnings,
+    },
     { objectType: OBJ.rfqResponse, objectId: response.id }
   );
   await ctx.relate({ type: OBJ.rfq, id: rfq.id }, { type: OBJ.order, id: order.id }, 'awarded_as');
   publishBoard(ctx, { rfqId: rfq.id, orderId: order.id });
-  return { responseId: response.id, rfqId: rfq.id, orderId: order.id, orderNumber: order.number, supplierId, quantityWarnings };
+  return {
+    responseId: response.id,
+    rfqId: rfq.id,
+    orderId: order.id,
+    orderNumber: order.number,
+    supplierId,
+    quantityWarnings,
+  };
 }
 
 async function reopenSourcingRequests(tx: Db, rfqId: string, ctx: CommandContext): Promise<void> {
-  const lines = await tx.rfqLine.findMany({ where: { rfqId, requestLineId: { not: null } }, select: { requestLineId: true } });
+  const lines = await tx.rfqLine.findMany({
+    where: { rfqId, requestLineId: { not: null } },
+    select: { requestLineId: true },
+  });
   if (lines.length === 0) return;
   const requestLines = await tx.purchaseRequestLine.findMany({
     where: { id: { in: lines.map((l) => l.requestLineId!) } },
@@ -1556,33 +2144,65 @@ async function reopenSourcingRequests(tx: Db, rfqId: string, ctx: CommandContext
   });
   const requestIds = [...new Set(requestLines.map((l) => l.requestId))];
   for (const requestId of requestIds) {
-    await tx.purchaseRequest.updateMany({ where: { id: requestId, status: 'sourcing' }, data: { status: 'open', version: { increment: 1 } } });
+    await tx.purchaseRequest.updateMany({
+      where: { id: requestId, status: 'sourcing' },
+      data: { status: 'open', version: { increment: 1 } },
+    });
   }
   await recomputeRequestStatuses(tx, requestIds, ctx);
 }
 
-export async function cancelRfqInTx(tx: Db, input: z.output<typeof cancelRfqSchema>, ctx: CommandContext): Promise<Rfq> {
-  const rfq = assertFoundRow(await tx.rfq.findUnique({ where: { id: input.rfqId } }), 'No se encontró la cotización');
-  if (rfq.status === 'closed' || rfq.status === 'cancelled') throw new OperationsError('invalid_state', 'La cotización ya está cerrada');
-  await tx.rfqInvitation.updateMany({ where: { rfqId: rfq.id, status: { in: ['pending', 'sent'] } }, data: { status: 'expired' } });
+export async function cancelRfqInTx(
+  tx: Db,
+  input: z.output<typeof cancelRfqSchema>,
+  ctx: CommandContext
+): Promise<Rfq> {
+  const rfq = assertFoundRow(
+    await tx.rfq.findUnique({ where: { id: input.rfqId } }),
+    'No se encontró la cotización'
+  );
+  if (rfq.status === 'closed' || rfq.status === 'cancelled')
+    throw new OperationsError('invalid_state', 'La cotización ya está cerrada');
+  await tx.rfqInvitation.updateMany({
+    where: { rfqId: rfq.id, status: { in: ['pending', 'sent'] } },
+    data: { status: 'expired' },
+  });
   const updated = await tx.rfq.update({ where: { id: rfq.id }, data: { status: 'cancelled' } });
   await reopenSourcingRequests(tx, rfq.id, ctx);
-  emitPurchases(ctx, EV.cancelled, { rfqId: rfq.id, number: rfq.number, reason: input.reason, previousStatus: rfq.status }, { objectType: OBJ.rfq, objectId: rfq.id });
+  emitPurchases(
+    ctx,
+    EV.cancelled,
+    { rfqId: rfq.id, number: rfq.number, reason: input.reason, previousStatus: rfq.status },
+    { objectType: OBJ.rfq, objectId: rfq.id }
+  );
   publishBoard(ctx, { rfqId: rfq.id });
   return updated;
 }
 
 /** System command of `purchases.rfq_expire`: the due date passed. */
-export async function expireRfqInTx(tx: Db, input: z.output<typeof rfqIdSchema>, ctx: CommandContext): Promise<{ expired: boolean; invitations: number; responses: number; status: string }> {
-  const rfq = assertFoundRow(await tx.rfq.findUnique({ where: { id: input.rfqId } }), 'No se encontró la cotización');
-  if (!['sent', 'collecting'].includes(rfq.status) || !rfq.dueAt || rfq.dueAt.getTime() > ctx.now.getTime()) {
+export async function expireRfqInTx(
+  tx: Db,
+  input: z.output<typeof rfqIdSchema>,
+  ctx: CommandContext
+): Promise<{ expired: boolean; invitations: number; responses: number; status: string }> {
+  const rfq = assertFoundRow(
+    await tx.rfq.findUnique({ where: { id: input.rfqId } }),
+    'No se encontró la cotización'
+  );
+  if (
+    !['sent', 'collecting'].includes(rfq.status) ||
+    !rfq.dueAt ||
+    rfq.dueAt.getTime() > ctx.now.getTime()
+  ) {
     return { expired: false, invitations: 0, responses: 0, status: rfq.status };
   }
   const { count } = await tx.rfqInvitation.updateMany({
     where: { rfqId: rfq.id, status: { in: ['pending', 'sent'] } },
     data: { status: 'expired' },
   });
-  const responses = await tx.rfqResponse.count({ where: { rfqId: rfq.id, status: { not: 'rejected' } } });
+  const responses = await tx.rfqResponse.count({
+    where: { rfqId: rfq.id, status: { not: 'rejected' } },
+  });
   let status = rfq.status;
   if (responses === 0) {
     status = 'closed';
@@ -1590,7 +2210,12 @@ export async function expireRfqInTx(tx: Db, input: z.output<typeof rfqIdSchema>,
     await reopenSourcingRequests(tx, rfq.id, ctx);
   }
   if (count === 0 && responses > 0) return { expired: false, invitations: 0, responses, status };
-  emitPurchases(ctx, EV.expired, { rfqId: rfq.id, number: rfq.number, expiredInvitations: count, responses, status }, { objectType: OBJ.rfq, objectId: rfq.id });
+  emitPurchases(
+    ctx,
+    EV.expired,
+    { rfqId: rfq.id, number: rfq.number, expiredInvitations: count, responses, status },
+    { objectType: OBJ.rfq, objectId: rfq.id }
+  );
   const creator = rfq.createdByUserId.includes(':') ? null : rfq.createdByUserId;
   if (creator) {
     ctx.notify({
@@ -1598,8 +2223,11 @@ export async function expireRfqInTx(tx: Db, input: z.output<typeof rfqIdSchema>,
       category: purchaseNotificationCategory(),
       type: 'purchase_rfq_expired',
       title: `Venció la cotización ${rfq.number}`,
-      body: responses > 0 ? `${responses} respuesta(s): compáralas y elige` : 'Nadie respondió; la cotización se cerró',
-      url: `/app/purchases/rfqs/${rfq.id}`,
+      body:
+        responses > 0
+          ? `${responses} respuesta(s): compáralas y elige`
+          : 'Nadie respondió; la cotización se cerró',
+      url: rfqLink(rfq.id),
       entityType: OBJ.rfq,
       entityId: rfq.id,
     });

@@ -65,7 +65,6 @@ function errorText(err: unknown): string {
   return err instanceof Error && err.message ? err.message : 'No se pudo completar la acción';
 }
 
-
 function StatusChip({ status }: { status: string }) {
   const tone =
     status === 'accepted' || status === 'resolved'
@@ -75,7 +74,10 @@ function StatusChip({ status }: { status: string }) {
         : 'bg-muted text-muted-foreground';
   return (
     <span
-      className={cn('inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium', tone)}
+      className={cn(
+        'inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium',
+        tone
+      )}
     >
       {REQUEST_STATUS_LABELS[status] ?? status}
     </span>
@@ -129,7 +131,8 @@ export function ChatAgentActions({ meta, currentUserId }: ChatAgentActionsProps)
   const closed = status !== null && REQUEST_CLOSED_STATUSES.has(status);
   const showAccept =
     canAct && !closed && status !== 'accepted' && meta.quickActions.includes('accept');
-  const showBlock = canAct && !closed && status !== 'blocked' && meta.quickActions.includes('block');
+  const showBlock =
+    canAct && !closed && status !== 'blocked' && meta.quickActions.includes('block');
   const caseLink = meta.quickActions.includes('open_case') ? operationsCaseHref(meta.caseId) : null;
   const respondUrl = `${requestUrl}/respond`;
 
@@ -178,7 +181,11 @@ export function ChatAgentActions({ meta, currentUserId }: ChatAgentActionsProps)
       <div className="flex flex-wrap items-center gap-1.5">
         {showAccept && (
           <Button type="button" size="sm" onClick={accept} disabled={busy !== null}>
-            {busy === 'accept' ? <Loader2 className="animate-spin" aria-hidden="true" /> : <Check aria-hidden="true" />}
+            {busy === 'accept' ? (
+              <Loader2 className="animate-spin" aria-hidden="true" />
+            ) : (
+              <Check aria-hidden="true" />
+            )}
             Aceptar
           </Button>
         )}
@@ -228,8 +235,8 @@ export function ChatAgentActions({ meta, currentUserId }: ChatAgentActionsProps)
           <DialogHeader>
             <DialogTitle>Bloquear solicitud</DialogTitle>
             <DialogDescription>
-              Explica qué impide atenderla. El motivo queda en el expediente y lo verá el área que la
-              pidió.
+              Explica qué impide atenderla. El motivo queda en el expediente y lo verá el área que
+              la pidió.
             </DialogDescription>
           </DialogHeader>
           <form
@@ -280,7 +287,11 @@ export function ChatAgentActions({ meta, currentUserId }: ChatAgentActionsProps)
                 variant="destructive"
                 disabled={busy !== null || reason.trim().length < BLOCK_REASON_MIN}
               >
-                {busy === 'block' ? <Loader2 className="animate-spin" aria-hidden="true" /> : <Ban aria-hidden="true" />}
+                {busy === 'block' ? (
+                  <Loader2 className="animate-spin" aria-hidden="true" />
+                ) : (
+                  <Ban aria-hidden="true" />
+                )}
                 Bloquear
               </Button>
             </DialogFooter>
@@ -317,7 +328,12 @@ export interface ChatAgentProposalProps {
   currentUserId: string;
 }
 
-export function ChatAgentProposal({ meta, fallbackSummary, createdAt, currentUserId }: ChatAgentProposalProps) {
+export function ChatAgentProposal({
+  meta,
+  fallbackSummary,
+  createdAt,
+  currentUserId,
+}: ChatAgentProposalProps) {
   const [decided, setDecided] = useState<{ status: string; detail: string | null } | null>(null);
   const responseStatus = useRef<string | null>(null);
 
@@ -336,12 +352,14 @@ export function ChatAgentProposal({ meta, fallbackSummary, createdAt, currentUse
     [meta, fallbackSummary, createdAt]
   );
 
-  const initialStatus = meta.status && !PROPOSAL_OPEN_STATUSES.has(meta.status) ? meta.status : null;
+  const initialStatus =
+    meta.status && !PROPOSAL_OPEN_STATUSES.has(meta.status) ? meta.status : null;
   const closedStatus = decided?.status ?? initialStatus;
 
   if (closedStatus) {
     const ok = closedStatus === 'approved' || closedStatus === 'executed';
-    const failed = closedStatus === 'failed' || closedStatus === 'rejected' || closedStatus === 'expired';
+    const failed =
+      closedStatus === 'failed' || closedStatus === 'rejected' || closedStatus === 'expired';
     return (
       <div
         role="status"
@@ -366,9 +384,12 @@ export function ChatAgentProposal({ meta, fallbackSummary, createdAt, currentUse
   }
 
   const decide = async (decision: 'approve' | 'reject'): Promise<ProposalDecisionResult> => {
-    const data = await postJson(`/app/operations/api/proposals/${encodeURIComponent(meta.proposalId)}`, {
-      decision,
-    });
+    const data = await postJson(
+      `/app/operations/api/proposals/${encodeURIComponent(meta.proposalId)}`,
+      {
+        decision,
+      }
+    );
     const returned = data.proposal as { status?: unknown } | undefined;
     responseStatus.current = typeof returned?.status === 'string' ? returned.status : null;
     const execution = data.execution as ProposalDecisionResult | undefined;
@@ -410,7 +431,10 @@ export function ChatAgentProposal({ meta, fallbackSummary, createdAt, currentUse
           onDecided={onDecided}
           readOnlyNotice="Espera la aprobación del responsable o suplente del área"
         />
-        <Link href="/app/mywork#aprobaciones" className="text-xs text-muted-foreground underline-offset-2 hover:underline">
+        <Link
+          href="/app/mywork#aprobaciones"
+          className="text-xs text-muted-foreground underline-offset-2 hover:underline"
+        >
           Si te toca decidirla por permiso, aparece en Mi trabajo
         </Link>
       </div>

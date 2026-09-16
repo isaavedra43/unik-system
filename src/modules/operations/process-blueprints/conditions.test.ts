@@ -4,6 +4,7 @@ import {
   CONDITION_LABELS,
   evaluateCondition,
   isConditionKey,
+  isCarrierDelivery,
   isCustomerPickup,
   uncoveredQuantity,
   type AllocationFacts,
@@ -394,5 +395,27 @@ describe('catálogo', () => {
     [null, false],
   ])('isCustomerPickup(%s) = %s', (value, expected) => {
     expect(isCustomerPickup(value)).toBe(expected);
+  });
+
+  /**
+   * Plan §4: el método de entrega de Zoho decide si la entrega nace `carrier`
+   * (paquetería) en vez de `own_fleet`. La lista es corta a propósito: un falso
+   * positivo crea una entrega que no se puede cargar en un viaje de la
+   * flotilla, así que lo ambiguo («flete», «envío») se deja fuera.
+   */
+  it.each([
+    ['PAQUETERÍA', true],
+    ['Paqueteria DHL', true],
+    ['Mensajería', true],
+    ['Transportista externo', true],
+    ['Entrega a domicilio', false],
+    ['Flete pagado', false],
+    ['Envío', false],
+    // Si el cliente recoge, recoge: no es un envío por paquetería.
+    ['Recoge en paquetería', false],
+    [null, false],
+    ['', false],
+  ])('isCarrierDelivery(%s) = %s', (value, expected) => {
+    expect(isCarrierDelivery(value)).toBe(expected);
   });
 });

@@ -1,5 +1,6 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
+import { backgroundWorkDisabled } from '@/modules/jobs/background-tasks';
 import { getCategoryDefinition, type NotificationCategory } from './catalog';
 import { decideDelivery, getNotificationSettings } from './preferences-service';
 import type { PushPayload } from './push-service';
@@ -159,6 +160,13 @@ const pendingWakeTimers = new Set<ReturnType<typeof setTimeout>>();
 
 /** Delivers transaction-created rows shortly after they become visible. */
 function wakeDispatcher(delayMs = 1500): void {
+  // Un proceso sin trabajador de fondo no abre trabajo asíncrono por su cuenta,
+  // igual que `startJobWorker()` y `startRecurringScheduler()`. Sin esto el
+  // temporizador escribe en `Notification` y `RealtimeEvent` 1,5 s después, ya
+  // fuera de la prueba que lo provocó, y bloquea el `TRUNCATE` de la siguiente.
+  // No se pierde nada: quien sí tiene trabajador corre además
+  // `startNotificationDispatcher()` cada 20 s.
+  if (backgroundWorkDisabled()) return;
   if (pendingWakeTimers.size >= 3) return;
   const timer = setTimeout(() => {
     pendingWakeTimers.delete(timer);

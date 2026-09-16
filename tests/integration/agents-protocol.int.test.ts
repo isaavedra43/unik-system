@@ -40,7 +40,8 @@ const ai = vi.hoisted(() => ({
   calls: [] as ScriptedCall[],
   /** Request the scripted `unblock` turn proposes to accept. */
   requestId: null as string | null,
-  mentionReply: 'Tienes una solicitud abierta de Inventario por el faltante; la reviso con Compras hoy.',
+  mentionReply:
+    'Tienes una solicitud abierta de Inventario por el faltante; la reviso con Compras hoy.',
   utilityCalls: 0,
 }));
 
@@ -152,41 +153,11 @@ import { runSupervisorTick } from '@/modules/operations/supervisor';
 import { AREA_KEYS, AREA_LABELS, type AreaKey } from '@/modules/operations/types';
 import { completeWorkItem } from '@/modules/operations/work-items-service';
 
+import { assertDisposableDatabase, truncateTables } from './integration-db';
+
 // ---------------------------------------------------------------------------
 // Safety and cleanup
 // ---------------------------------------------------------------------------
-
-const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
-const DISPOSABLE_NAME = /(check|test|integration|scratch|ci)/i;
-
-async function assertDisposableDatabase(): Promise<void> {
-  if (process.env.DATABASE_URL !== integrationUrl) {
-    throw new Error(
-      '[integration] DATABASE_URL no coincide con UNIK_INTEGRATION_DATABASE_URL; ejecuta con `npm run test:integration`'
-    );
-  }
-  const url = new URL(integrationUrl);
-  if (!LOCAL_HOSTS.has(url.hostname)) {
-    throw new Error(`[integration] Sólo se permite una base local (host recibido: ${url.hostname})`);
-  }
-  const [{ name }] = await prisma.$queryRaw<Array<{ name: string }>>`SELECT current_database() AS name`;
-  const allowed = process.env.UNIK_INTEGRATION_ALLOW_DATABASE?.trim();
-  if (name === 'unik_system' || (!DISPOSABLE_NAME.test(name) && allowed !== name)) {
-    throw new Error(
-      `[integration] La base "${name}" no parece desechable. Usa una base de prueba (p. ej. unik_schema_check) ` +
-        'o confírmala con UNIK_INTEGRATION_ALLOW_DATABASE=<nombre>.'
-    );
-  }
-  const [{ ready }] = await prisma.$queryRaw<Array<{ ready: boolean }>>`
-    SELECT to_regclass('"OperationalCase"') IS NOT NULL
-       AND to_regclass('"AgentIdentity"') IS NOT NULL
-       AND to_regclass('internal_chat_channel') IS NOT NULL AS ready`;
-  if (!ready) {
-    throw new Error(
-      `[integration] La base "${name}" no tiene las migraciones de operaciones y agentes; aplica \`prisma migrate deploy\` a esa base desechable`
-    );
-  }
-}
 
 /** Operations, agents, chat and AI tables this suite writes (disposable database only). */
 const RESET_TABLES = [
@@ -244,9 +215,7 @@ const RESET_TABLES = [
 ];
 
 async function resetDatabase(): Promise<void> {
-  await prisma.$executeRawUnsafe(
-    `TRUNCATE TABLE ${RESET_TABLES.map((table) => `"${table}"`).join(', ')} RESTART IDENTITY CASCADE`
-  );
+  await truncateTables(RESET_TABLES, { cascade: true });
   await prisma.$executeRaw`DELETE FROM "SalesOrder" WHERE left("zohoSalesOrderId", 3) = 'it-'`;
   await prisma.$executeRaw`DELETE FROM "Product" WHERE left("zohoItemId", 3) = 'it-'`;
   await prisma.$executeRaw`DELETE FROM "Responsible" WHERE left("userId", 3) = 'it_'`;
@@ -286,7 +255,9 @@ async function seedUser(id: string, name: string, permissions: string[]): Promis
   await prisma.user.create({
     data: { id, username: id, name, passwordHash: 'integration', mustChangePassword: false },
   });
-  const role = await prisma.role.create({ data: { key: `${id}_permisos`, name: `Permisos ${name}` } });
+  const role = await prisma.role.create({
+    data: { key: `${id}_permisos`, name: `Permisos ${name}` },
+  });
   await prisma.rolePermission.createMany({
     data: permissions.map((permissionKey) => ({ roleId: role.id, permissionKey })),
   });
@@ -334,9 +305,16 @@ async function configureAi(): Promise<void> {
 async function seedBase(): Promise<void> {
   const byArea = {} as Record<AreaKey, CurrentUser>;
   for (const area of AREA_KEYS) {
-    byArea[area] = await seedUser(`it_${area}`, `Responsable ${AREA_LABELS[area]}`, AREA_PERMISSIONS[area]);
+    byArea[area] = await seedUser(
+      `it_${area}`,
+      `Responsable ${AREA_LABELS[area]}`,
+      AREA_PERMISSIONS[area]
+    );
   }
-  const inventoryBackup = await seedUser('it_inventario_suplente', 'Suplente Inventario', [...VIEW, ...INVENTORY]);
+  const inventoryBackup = await seedUser('it_inventario_suplente', 'Suplente Inventario', [
+    ...VIEW,
+    ...INVENTORY,
+  ]);
   const purchasesBackup = await seedUser('it_compras_suplente', 'Suplente Compras', VIEW);
   const manager = await seedUser('it_direccion', 'Dirección de operaciones', [
     ...VIEW,
@@ -350,12 +328,21 @@ async function seedBase(): Promise<void> {
         label: AREA_LABELS[area],
         userId: `it_${area}`,
         backupUserId:
-          area === 'inventario' ? inventoryBackup.id : area === 'compras' ? purchasesBackup.id : null,
+          area === 'inventario'
+            ? inventoryBackup.id
+            : area === 'compras'
+              ? purchasesBackup.id
+              : null,
       },
     });
   }
   await prisma.integrationConfig.create({
-    data: { source: 'operations', displayName: 'Operaciones', isEnabled: true, settings: { cutoverDate: CUTOVER } },
+    data: {
+      source: 'operations',
+      displayName: 'Operaciones',
+      isEnabled: true,
+      settings: { cutoverDate: CUTOVER },
+    },
   });
   invalidateOperationsConfigCache();
   clearProcessBlueprintCache();
@@ -520,8 +507,20 @@ async function drainJobs(maxRuns = 80): Promise<JobRun[]> {
       await prisma.backgroundJob.update({
         where: { id: job.id },
         data: exhausted
-          ? { status: 'failed', lastError: message.slice(0, 2000), completedAt: new Date(), lockedAt: null, lockedBy: null, dedupeKey: null }
-          : { status: 'pending', lastError: message.slice(0, 2000), lockedAt: null, lockedBy: null },
+          ? {
+              status: 'failed',
+              lastError: message.slice(0, 2000),
+              completedAt: new Date(),
+              lockedAt: null,
+              lockedBy: null,
+              dedupeKey: null,
+            }
+          : {
+              status: 'pending',
+              lastError: message.slice(0, 2000),
+              lockedAt: null,
+              lockedBy: null,
+            },
       });
       runs.push({ type: job.type, outcome: exhausted ? 'failed' : 'retry', error: message });
     }
@@ -536,10 +535,14 @@ async function drainAll(): Promise<JobRun[]> {
 }
 
 /** Decisions reported by the `agents.dispatch` jobs of a drain. */
-function dispatchDecisions(runs: JobRun[]): Array<{ trigger: string; agent: string; mode: string; outcome: string; reason: string | null }> {
+function dispatchDecisions(
+  runs: JobRun[]
+): Array<{ trigger: string; agent: string; mode: string; outcome: string; reason: string | null }> {
   return runs
     .filter((run) => run.type === 'agents.dispatch')
-    .flatMap((run) => ((run.result as { decisions?: unknown[] } | undefined)?.decisions ?? []) as never[]);
+    .flatMap(
+      (run) => ((run.result as { decisions?: unknown[] } | undefined)?.decisions ?? []) as never[]
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -548,16 +551,22 @@ function dispatchDecisions(runs: JobRun[]): Array<{ trigger: string; agent: stri
 
 function expectCompleted(result: Pick<CommandResult, 'status' | 'errorCode' | 'message'>): void {
   if (result.status !== 'completed') {
-    throw new Error(`Se esperaba completed y llegó ${result.status} (${result.errorCode ?? ''}: ${result.message ?? ''})`);
+    throw new Error(
+      `Se esperaba completed y llegó ${result.status} (${result.errorCode ?? ''}: ${result.message ?? ''})`
+    );
   }
 }
 
 async function openWorkItemOfStep(caseId: string, stepKey: string, scopeKey: string) {
   const step = await prisma.caseStep.findFirstOrThrow({ where: { caseId, stepKey, scopeKey } });
-  return prisma.workItem.findFirstOrThrow({ where: { stepId: step.id, status: { in: OPEN_WORK } } });
+  return prisma.workItem.findFirstOrThrow({
+    where: { stepId: step.id, status: { in: OPEN_WORK } },
+  });
 }
 
-const metaOf = (message: { meta: Prisma.JsonValue | null } | null | undefined): Record<string, unknown> =>
+const metaOf = (
+  message: { meta: Prisma.JsonValue | null } | null | undefined
+): Record<string, unknown> =>
   message?.meta && typeof message.meta === 'object' && !Array.isArray(message.meta)
     ? (message.meta as Record<string, unknown>)
     : {};
@@ -571,16 +580,25 @@ async function botUserId(username: string): Promise<string> {
   return (await prisma.user.findUniqueOrThrow({ where: { username } })).id;
 }
 
-async function activeMembers(channelId: string): Promise<Array<{ userId: string; username: string; isBot: boolean }>> {
+async function activeMembers(
+  channelId: string
+): Promise<Array<{ userId: string; username: string; isBot: boolean }>> {
   const rows = await prisma.internalChatMember.findMany({
     where: { channelId, leftAt: null },
     include: { user: { select: { username: true, isBot: true } } },
   });
-  return rows.map((row) => ({ userId: row.userId, username: row.user.username, isBot: row.user.isBot }));
+  return rows.map((row) => ({
+    userId: row.userId,
+    username: row.user.username,
+    isBot: row.user.isBot,
+  }));
 }
 
 async function channelMessages(channelId: string) {
-  return prisma.internalChatMessage.findMany({ where: { channelId }, orderBy: { createdAt: 'asc' } });
+  return prisma.internalChatMessage.findMany({
+    where: { channelId },
+    orderBy: { createdAt: 'asc' },
+  });
 }
 
 /** A sales order opens its case through the start job (the dispatcher reacts after the commit). */
@@ -611,11 +629,15 @@ async function startShortfallCase() {
   const [demand] = await prisma.caseDemand.findMany({ where: { caseId: opCase.id } });
   const verify = await openWorkItemOfStep(opCase.id, 'verificar_disponibilidad', demand.id);
   expectCompleted(
-    await completeWorkItem(team.byArea.inventario, verify.id, { result: { availability_result: { counted: 6 } } })
+    await completeWorkItem(team.byArea.inventario, verify.id, {
+      result: { availability_result: { counted: 6 } },
+    })
   );
   const plan = await openWorkItemOfStep(opCase.id, 'plan_abastecimiento', demand.id);
   expectCompleted(
-    await completeWorkItem(team.byArea.ventas, plan.id, { result: { allocation_plan: { acceptProposal: true } } })
+    await completeWorkItem(team.byArea.ventas, plan.id, {
+      result: { allocation_plan: { acceptProposal: true } },
+    })
   );
   const runs = await drainAll();
   const request = await prisma.areaRequest.findFirstOrThrow({
@@ -650,12 +672,17 @@ describeDb('protocolo de la IA coordinada contra PostgreSQL real', () => {
       vi.spyOn(console, 'info').mockImplementation(() => {});
       vi.spyOn(console, 'log').mockImplementation(() => {});
     }
-    await assertDisposableDatabase();
+    await assertDisposableDatabase({
+      requiredTables: ['OperationalCase', 'AgentIdentity', 'internal_chat_channel'],
+      missingLabel: 'operaciones y agentes',
+    });
     await resetDatabase();
   });
 
   afterAll(async () => {
-    const scope = globalThis as typeof globalThis & { __unikAgentsDispatcherUnsubscribe?: Array<() => void> };
+    const scope = globalThis as typeof globalThis & {
+      __unikAgentsDispatcherUnsubscribe?: Array<() => void>;
+    };
     for (const unsubscribe of scope.__unikAgentsDispatcherUnsubscribe ?? []) unsubscribe();
     try {
       await resetDatabase();
@@ -676,7 +703,9 @@ describeDb('protocolo de la IA coordinada contra PostgreSQL real', () => {
   it('case.started: la sala del expediente nace con bots y responsables de las áreas involucradas, sin modelo e idempotente', async () => {
     const { opCase, runs } = await startCase();
     expect(dispatchDecisions(runs)).toEqual(
-      expect.arrayContaining([expect.objectContaining({ trigger: 'ensure_case_room', mode: 'rule', outcome: 'done' })])
+      expect.arrayContaining([
+        expect.objectContaining({ trigger: 'ensure_case_room', mode: 'rule', outcome: 'done' }),
+      ])
     );
     expect(opCase.chatChannelId).toBeTruthy();
     const roomId = opCase.chatChannelId!;
@@ -699,18 +728,30 @@ describeDb('protocolo de la IA coordinada contra PostgreSQL real', () => {
     );
     expect(humans).not.toContain(team.byArea.compras.id);
 
-    const started = (await channelMessages(roomId)).filter((m) => metaOf(m).eventType === 'case.started');
+    const started = (await channelMessages(roomId)).filter(
+      (m) => metaOf(m).eventType === 'case.started'
+    );
     expect(started).toHaveLength(1);
     expect(started[0].senderId).toBe(await botUserId('ia_admin'));
     expect(metaOf(started[0])).toMatchObject({ kind: 'agent_update', caseId: opCase.id });
 
     // The same event delivered again (a re-delivered job) neither creates another room nor posts twice.
-    const created = await prisma.operationalEvent.findFirstOrThrow({ where: { caseId: opCase.id, type: 'case.created' } });
-    await enqueueJob({ type: 'agents.dispatch', payload: { kind: 'event', eventId: created.id.toString() }, maxAttempts: 1 });
+    const created = await prisma.operationalEvent.findFirstOrThrow({
+      where: { caseId: opCase.id, type: 'case.created' },
+    });
+    await enqueueJob({
+      type: 'agents.dispatch',
+      payload: { kind: 'event', eventId: created.id.toString() },
+      maxAttempts: 1,
+    });
     await drainAll();
-    expect((await prisma.operationalCase.findUniqueOrThrow({ where: { id: opCase.id } })).chatChannelId).toBe(roomId);
+    expect(
+      (await prisma.operationalCase.findUniqueOrThrow({ where: { id: opCase.id } })).chatChannelId
+    ).toBe(roomId);
     expect(await prisma.internalChatChannel.count({ where: { type: 'case' } })).toBe(1);
-    expect((await channelMessages(roomId)).filter((m) => metaOf(m).eventType === 'case.started')).toHaveLength(1);
+    expect(
+      (await channelMessages(roomId)).filter((m) => metaOf(m).eventType === 'case.started')
+    ).toHaveLength(1);
 
     expect(ai.calls).toEqual([]);
     expect(ai.utilityCalls).toBe(0);
@@ -720,7 +761,9 @@ describeDb('protocolo de la IA coordinada contra PostgreSQL real', () => {
     const { opCase, demandId, request, runs } = await startShortfallCase();
 
     // One purchase request for the shortfall: the engine asked Compras and the rule did not duplicate it.
-    expect(await prisma.areaRequest.count({ where: { caseId: opCase.id, kind: 'purchase_shortfall' } })).toBe(1);
+    expect(
+      await prisma.areaRequest.count({ where: { caseId: opCase.id, kind: 'purchase_shortfall' } })
+    ).toBe(1);
     expect(request).toMatchObject({
       fromAreaKey: 'inventario',
       toAreaKey: 'compras',
@@ -732,13 +775,17 @@ describeDb('protocolo de la IA coordinada contra PostgreSQL real', () => {
     expect(shortfall.length).toBeGreaterThan(0);
     expect(shortfall.every((d) => d.mode === 'rule' && d.outcome !== 'failed')).toBe(true);
     expect(
-      await prisma.operationalEvent.count({ where: { type: 'demand.shortfall_confirmed', objectId: demandId } })
+      await prisma.operationalEvent.count({
+        where: { type: 'demand.shortfall_confirmed', objectId: demandId },
+      })
     ).toBe(1);
 
     // Card in the case room, posted by the origin agent, linked to the request.
     const roomId = opCase.chatChannelId!;
     expect(request.chatMessageId).toBeTruthy();
-    const card = await prisma.internalChatMessage.findUniqueOrThrow({ where: { id: request.chatMessageId! } });
+    const card = await prisma.internalChatMessage.findUniqueOrThrow({
+      where: { id: request.chatMessageId! },
+    });
     expect(card.channelId).toBe(roomId);
     expect(card.senderId).toBe(await botUserId('ia_inventario'));
     expect(metaOf(card)).toMatchObject({
@@ -753,7 +800,11 @@ describeDb('protocolo de la IA coordinada contra PostgreSQL real', () => {
     // The room now includes the destination area (responsible, backup and bot).
     const members = await activeMembers(roomId);
     expect(members.map((m) => m.userId)).toEqual(
-      expect.arrayContaining([team.byArea.compras.id, team.purchasesBackup.id, await botUserId('ia_compras')])
+      expect.arrayContaining([
+        team.byArea.compras.id,
+        team.purchasesBackup.id,
+        await botUserId('ia_compras'),
+      ])
     );
 
     // Short copy in the Compras channel, posted by the IA de Compras.
@@ -773,11 +824,19 @@ describeDb('protocolo de la IA coordinada contra PostgreSQL real', () => {
     });
     expect(notices).toHaveLength(1);
     expect(notices[0]).toMatchObject({ category: 'ops_request' });
-    expect(await prisma.notification.count({ where: { userId: team.byArea.compras.id, category: 'agent_request' } })).toBe(0);
+    expect(
+      await prisma.notification.count({
+        where: { userId: team.byArea.compras.id, category: 'agent_request' },
+      })
+    ).toBe(0);
 
     // The automatic acknowledgement is not announced again (the card already names the responsible).
-    expect((await prisma.areaRequest.findUniqueOrThrow({ where: { id: request.id } })).status).toBe('acknowledged');
-    expect((await channelMessages(roomId)).filter((m) => metaOf(m).eventType === 'request.acknowledged')).toEqual([]);
+    expect((await prisma.areaRequest.findUniqueOrThrow({ where: { id: request.id } })).status).toBe(
+      'acknowledged'
+    );
+    expect(
+      (await channelMessages(roomId)).filter((m) => metaOf(m).eventType === 'request.acknowledged')
+    ).toEqual([]);
 
     expect(ai.calls).toEqual([]);
     expect(ai.utilityCalls).toBe(0);
@@ -787,12 +846,18 @@ describeDb('protocolo de la IA coordinada contra PostgreSQL real', () => {
     const { opCase, request } = await overdueTurn();
     const comprasBot = await botUserId('ia_compras');
 
-    expect(await prisma.operationalEvent.count({ where: { type: 'request.overdue', objectId: request.id } })).toBe(1);
+    expect(
+      await prisma.operationalEvent.count({
+        where: { type: 'request.overdue', objectId: request.id },
+      })
+    ).toBe(1);
 
     // Only the unblock turn reached the model, as the bot, forced to act through tools on the first call.
     // The turn proposed and concluded in the same call: concludeAgentTurn ends it (ONE model call).
     expect(ai.calls).toHaveLength(1);
-    expect(ai.calls.every((call) => call.trigger === 'unblock' && call.userId === comprasBot)).toBe(true);
+    expect(ai.calls.every((call) => call.trigger === 'unblock' && call.userId === comprasBot)).toBe(
+      true
+    );
     const [first, ...rest] = ai.calls;
     expect(first).toMatchObject({ afterTools: false, toolChoice: 'required' });
     expect(rest.every((call) => call.toolChoice === undefined)).toBe(true);
@@ -801,7 +866,9 @@ describeDb('protocolo de la IA coordinada contra PostgreSQL real', () => {
       expect(call.toolNames.filter((name) => !allowlist.has(name))).toEqual([]);
       expect(call.toolNames.length).toBeLessThanOrEqual(20);
     }
-    expect(first.toolNames).toEqual(expect.arrayContaining(['respondAreaRequest', 'concludeAgentTurn']));
+    expect(first.toolNames).toEqual(
+      expect.arrayContaining(['respondAreaRequest', 'concludeAgentTurn'])
+    );
     expect(first.toolNames).not.toContain('loadMoreTools');
 
     // The business write became a proposal with the approver scope of the destination area.
@@ -812,22 +879,37 @@ describeDb('protocolo de la IA coordinada contra PostgreSQL real', () => {
     expect(proposal.args).toMatchObject({ requestId: request.id, action: 'accept' });
     expect(proposal.approverScope).toMatchObject({ caseId: opCase.id, areaKey: 'compras' });
     const scopeUsers = (proposal.approverScope as { userIds: string[] }).userIds;
-    expect([...scopeUsers].sort()).toEqual([team.byArea.compras.id, team.purchasesBackup.id].sort());
+    expect([...scopeUsers].sort()).toEqual(
+      [team.byArea.compras.id, team.purchasesBackup.id].sort()
+    );
 
     // Card in the case room and notice to every approver.
     const messages = await channelMessages(opCase.chatChannelId!);
-    const proposalCard = messages.find((m) => metaOf(m).kind === 'agent_proposal' && metaOf(m).proposalId === proposal.id);
+    const proposalCard = messages.find(
+      (m) => metaOf(m).kind === 'agent_proposal' && metaOf(m).proposalId === proposal.id
+    );
     expect(proposalCard?.senderId).toBe(comprasBot);
-    expect(metaOf(proposalCard)).toMatchObject({ caseId: opCase.id, areaKey: 'compras', status: 'pending', toolName: 'respondAreaRequest' });
+    expect(metaOf(proposalCard)).toMatchObject({
+      caseId: opCase.id,
+      areaKey: 'compras',
+      status: 'pending',
+      toolName: 'respondAreaRequest',
+    });
     expect(metaOf(proposalCard)).not.toHaveProperty('args');
     for (const userId of scopeUsers) {
-      expect(await prisma.notification.count({ where: { userId, category: 'agent_proposal' } })).toBe(1);
+      expect(
+        await prisma.notification.count({ where: { userId, category: 'agent_proposal' } })
+      ).toBe(1);
     }
 
     // The conclusion line (needs_human) and the ai.turn audit event with tokens.
-    const line = messages.find((m) => metaOf(m).kind === 'agent_reply' && m.senderId === comprasBot);
+    const line = messages.find(
+      (m) => metaOf(m).kind === 'agent_reply' && m.senderId === comprasBot
+    );
     expect(line?.content).toContain('Propuse aceptar la solicitud');
-    const turn = await prisma.operationalEvent.findFirstOrThrow({ where: { type: 'ai.turn', actorId: comprasBot } });
+    const turn = await prisma.operationalEvent.findFirstOrThrow({
+      where: { type: 'ai.turn', actorId: comprasBot },
+    });
     expect(payloadOf(turn)).toMatchObject({
       agentKey: 'area:compras',
       trigger: 'unblock',
@@ -838,26 +920,47 @@ describeDb('protocolo de la IA coordinada contra PostgreSQL real', () => {
     });
 
     // Nothing changed yet: a person decides.
-    expect((await prisma.areaRequest.findUniqueOrThrow({ where: { id: request.id } })).status).toBe('acknowledged');
+    expect((await prisma.areaRequest.findUniqueOrThrow({ where: { id: request.id } })).status).toBe(
+      'acknowledged'
+    );
   });
 
   it('la aprobación de la responsable ejecuta la propuesta; el bot y una persona ajena son rechazados', async () => {
     const { opCase, request } = await overdueTurn();
     const comprasBot = await botUserId('ia_compras');
-    const proposal = await prisma.aiProposal.findFirstOrThrow({ where: { userId: comprasBot, toolName: 'respondAreaRequest' } });
+    const proposal = await prisma.aiProposal.findFirstOrThrow({
+      where: { userId: comprasBot, toolName: 'respondAreaRequest' },
+    });
 
     const bot = await buildBotActor('area:compras');
     await expect(approveProposal(bot, proposal.id)).rejects.toMatchObject({ status: 403 });
     const otherBot = await buildBotActor('area:inventario');
-    await expect(approveProposal(otherBot, proposal.id)).rejects.toMatchObject({ status: expect.any(Number) });
-    await expect(approveProposal(team.byArea.logistica, proposal.id)).rejects.toMatchObject({ status: 404 });
-    expect((await prisma.aiProposal.findUniqueOrThrow({ where: { id: proposal.id } })).status).toBe('pending');
-    expect((await prisma.areaRequest.findUniqueOrThrow({ where: { id: request.id } })).status).toBe('acknowledged');
+    await expect(approveProposal(otherBot, proposal.id)).rejects.toMatchObject({
+      status: expect.any(Number),
+    });
+    await expect(approveProposal(team.byArea.logistica, proposal.id)).rejects.toMatchObject({
+      status: 404,
+    });
+    expect((await prisma.aiProposal.findUniqueOrThrow({ where: { id: proposal.id } })).status).toBe(
+      'pending'
+    );
+    expect((await prisma.areaRequest.findUniqueOrThrow({ where: { id: request.id } })).status).toBe(
+      'acknowledged'
+    );
 
-    const { proposal: decided, execution } = await approveProposal(team.byArea.compras, proposal.id);
+    const { proposal: decided, execution } = await approveProposal(
+      team.byArea.compras,
+      proposal.id
+    );
     expect(execution.success).toBe(true);
-    expect(decided).toMatchObject({ status: 'executed', decisionBy: team.byArea.compras.id, proposedBy: comprasBot });
-    expect((await prisma.areaRequest.findUniqueOrThrow({ where: { id: request.id } })).status).toBe('accepted');
+    expect(decided).toMatchObject({
+      status: 'executed',
+      decisionBy: team.byArea.compras.id,
+      proposedBy: comprasBot,
+    });
+    expect((await prisma.areaRequest.findUniqueOrThrow({ where: { id: request.id } })).status).toBe(
+      'accepted'
+    );
     expect(
       await prisma.operationalEvent.count({
         where: { type: 'request.accepted', objectId: request.id, actorId: team.byArea.compras.id },
@@ -865,7 +968,9 @@ describeDb('protocolo de la IA coordinada contra PostgreSQL real', () => {
     ).toBe(1);
 
     // A second click (the backup) never runs it again.
-    await expect(approveProposal(team.purchasesBackup, proposal.id)).rejects.toMatchObject({ status: 409 });
+    await expect(approveProposal(team.purchasesBackup, proposal.id)).rejects.toMatchObject({
+      status: 409,
+    });
 
     // The decision by a person is announced in the room by rule.
     await drainAll();
@@ -884,45 +989,85 @@ describeDb('protocolo de la IA coordinada contra PostgreSQL real', () => {
       data: { dailyTokenBudget: 10_000 },
     });
     const bot = identity.botUserId;
-    await recordAgentUsage({ agentKey: 'area:compras', areaKey: 'compras', userId: bot, promptTokens: 8_500, completionTokens: 0, model: 'gpt-4o-mini' });
+    await recordAgentUsage({
+      agentKey: 'area:compras',
+      areaKey: 'compras',
+      userId: bot,
+      promptTokens: 8_500,
+      completionTokens: 0,
+      model: 'gpt-4o-mini',
+    });
 
     // Degraded (85 %): the automatic unblock is skipped without calling the model.
-    await prisma.areaRequest.update({ where: { id: request.id }, data: { dueAt: new Date(Date.now() - 30 * 60_000) } });
+    await prisma.areaRequest.update({
+      where: { id: request.id },
+      data: { dueAt: new Date(Date.now() - 30 * 60_000) },
+    });
     await runSupervisorTick();
     await drainAll();
     expect(ai.calls).toEqual([]);
-    const skipped = await prisma.operationalEvent.findMany({ where: { type: 'ai.turn_skipped', actorId: bot } });
-    expect(skipped.map(payloadOf)).toEqual([expect.objectContaining({ trigger: 'unblock', reason: 'budget_degraded' })]);
-    expect(await prisma.notification.count({ where: { userId: team.manager.id, category: 'agent_budget' } })).toBe(1);
+    const skipped = await prisma.operationalEvent.findMany({
+      where: { type: 'ai.turn_skipped', actorId: bot },
+    });
+    expect(skipped.map(payloadOf)).toEqual([
+      expect.objectContaining({ trigger: 'unblock', reason: 'budget_degraded' }),
+    ]);
+    expect(
+      await prisma.notification.count({
+        where: { userId: team.manager.id, category: 'agent_budget' },
+      })
+    ).toBe(1);
 
     // Degraded = on demand: a person mentioning the bot still gets an answer.
     const channel = await ensureAreaChannel('compras');
     const human = team.byArea.compras;
-    await sendMessage(human, { channelId: channel.id, content: '@ia_compras ¿qué solicitudes tengo abiertas?' });
+    await sendMessage(human, {
+      channelId: channel.id,
+      content: '@ia_compras ¿qué solicitudes tengo abiertas?',
+    });
     await drainAll();
     expect(ai.calls.filter((call) => call.trigger === 'mention').length).toBeGreaterThan(0);
-    const repliesBefore = (await channelMessages(channel.id)).filter((m) => m.senderId === bot && metaOf(m).kind === 'agent_reply');
+    const repliesBefore = (await channelMessages(channel.id)).filter(
+      (m) => m.senderId === bot && metaOf(m).kind === 'agent_reply'
+    );
     expect(repliesBefore).toHaveLength(1);
 
     // Exhausted: even a mention pauses, with ONE pause template and a second (exhausted) notice.
-    await recordAgentUsage({ agentKey: 'area:compras', areaKey: 'compras', userId: bot, promptTokens: 5_000, completionTokens: 0, model: 'gpt-4o-mini' });
+    await recordAgentUsage({
+      agentKey: 'area:compras',
+      areaKey: 'compras',
+      userId: bot,
+      promptTokens: 5_000,
+      completionTokens: 0,
+      model: 'gpt-4o-mini',
+    });
     const callsBefore = ai.calls.length;
     await sendMessage(human, { channelId: channel.id, content: '@ia_compras ¿sigues ahí?' });
     await drainAll();
     await sendMessage(human, { channelId: channel.id, content: '@ia_compras ¿me respondes?' });
     await drainAll();
     expect(ai.calls.length).toBe(callsBefore);
-    const exhausted = (await prisma.operationalEvent.findMany({ where: { type: 'ai.turn_skipped', actorId: bot } }))
+    const exhausted = (
+      await prisma.operationalEvent.findMany({ where: { type: 'ai.turn_skipped', actorId: bot } })
+    )
       .map(payloadOf)
       .filter((p) => p.reason === 'budget_exhausted');
     expect(exhausted).toHaveLength(2);
-    const pauses = (await channelMessages(channel.id)).filter((m) => metaOf(m).notice === 'budget_exhausted');
+    const pauses = (await channelMessages(channel.id)).filter(
+      (m) => metaOf(m).notice === 'budget_exhausted'
+    );
     expect(pauses).toHaveLength(1);
     expect(pauses[0].senderId).toBe(bot);
     expect(pauses[0].content).toContain('Responsable Compras');
-    expect(await prisma.notification.count({ where: { userId: team.manager.id, category: 'agent_budget' } })).toBe(2);
     expect(
-      (await channelMessages(channel.id)).filter((m) => m.senderId === bot && metaOf(m).kind === 'agent_reply')
+      await prisma.notification.count({
+        where: { userId: team.manager.id, category: 'agent_budget' },
+      })
+    ).toBe(2);
+    expect(
+      (await channelMessages(channel.id)).filter(
+        (m) => m.senderId === bot && metaOf(m).kind === 'agent_reply'
+      )
     ).toHaveLength(1);
   });
 
@@ -939,20 +1084,41 @@ describeDb('protocolo de la IA coordinada contra PostgreSQL real', () => {
     });
     const runs = await drainAll();
     expect(dispatchDecisions(runs)).toEqual([
-      expect.objectContaining({ trigger: 'mention', agent: 'area:compras', mode: 'llm', outcome: 'done' }),
+      expect.objectContaining({
+        trigger: 'mention',
+        agent: 'area:compras',
+        mode: 'llm',
+        outcome: 'done',
+      }),
     ]);
 
     // Concluding ends the turn: one model call, no extra call to write prose.
     expect(ai.calls.length).toBe(1);
-    expect(ai.calls[0]).toMatchObject({ trigger: 'mention', toolChoice: 'required', afterTools: false, userId: bot });
-    expect(ai.calls[0].toolNames.filter((name) => !AGENT_TOOL_ALLOWLIST.compras.includes(name))).toEqual([]);
+    expect(ai.calls[0]).toMatchObject({
+      trigger: 'mention',
+      toolChoice: 'required',
+      afterTools: false,
+      userId: bot,
+    });
+    expect(
+      ai.calls[0].toolNames.filter((name) => !AGENT_TOOL_ALLOWLIST.compras.includes(name))
+    ).toEqual([]);
 
-    const replies = await prisma.internalChatMessage.findMany({ where: { channelId: channel.id, senderId: bot } });
+    const replies = await prisma.internalChatMessage.findMany({
+      where: { channelId: channel.id, senderId: bot },
+    });
     expect(replies).toHaveLength(1);
     expect(replies[0]).toMatchObject({ replyToId: message.id, content: ai.mentionReply });
-    expect(metaOf(replies[0])).toMatchObject({ kind: 'agent_reply', trigger: 'mention', outcome: 'acted', areaKey: 'compras' });
+    expect(metaOf(replies[0])).toMatchObject({
+      kind: 'agent_reply',
+      trigger: 'mention',
+      outcome: 'acted',
+      areaKey: 'compras',
+    });
 
-    const turn = await prisma.operationalEvent.findFirstOrThrow({ where: { type: 'ai.turn', actorId: bot } });
+    const turn = await prisma.operationalEvent.findFirstOrThrow({
+      where: { type: 'ai.turn', actorId: bot },
+    });
     expect(payloadOf(turn)).toMatchObject({
       agentKey: 'area:compras',
       trigger: 'mention',
@@ -979,8 +1145,12 @@ describeDb('protocolo de la IA coordinada contra PostgreSQL real', () => {
     });
     await drainAll();
     expect(ai.calls.length).toBe(1);
-    expect(await prisma.internalChatMessage.count({ where: { channelId: channel.id, senderId: bot } })).toBe(1);
-    const skipped = await prisma.operationalEvent.findMany({ where: { type: 'ai.turn_skipped', actorId: bot } });
+    expect(
+      await prisma.internalChatMessage.count({ where: { channelId: channel.id, senderId: bot } })
+    ).toBe(1);
+    const skipped = await prisma.operationalEvent.findMany({
+      where: { type: 'ai.turn_skipped', actorId: bot },
+    });
     expect(skipped.map((event) => payloadOf(event).reason)).toEqual([
       expect.stringMatching(/^(already_handled|duplicate_trigger)$/),
     ]);

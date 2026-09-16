@@ -1,54 +1,46 @@
-import Link from 'next/link';
-import type { Prisma } from '@prisma/client';
-import { EmptyState, PageHeader, TabNav } from '@/components/ui/composite';
+import { PageHeader } from '@/components/ui/composite';
+import { Alert, Button, FormField, Input } from '@/components/ui/primitives';
+import { CasesWorkspace } from '@/components/operations/case/CasesWorkspace';
 import {
-  Alert,
-  Badge,
-  Button,
-  FormField,
-  Input,
-  type BadgeVariant,
-} from '@/components/ui/primitives';
-import { prisma } from '@/lib/prisma';
+  CASE_COLUMNS,
+  CASE_DEFAULT_COLUMN_ORDER,
+  CASE_ENTITY_TYPE,
+  CASES_TABLE_KEY,
+} from '@/components/operations/case/cases-columns';
+import {
+  CasesQueryError,
+  caseChipsStateFromParams,
+  casesQueryFromSearchParams,
+} from '@/components/operations/case/cases-filters';
 import { hasPermission, requirePermission } from '@/modules/auth/authorization';
+import { getWatchedEntityIds } from '@/modules/sales/entity-watch-service';
+import { getUnreadNotificationCount } from '@/modules/sales/notifications-service';
+import { getUserTablePreference } from '@/modules/sales/table-preferences-service';
+import { getDefaultTableView, listTableViews } from '@/modules/sales/table-views-service';
+import type { TablePreferenceConfig } from '@/modules/shared/entity-workspace-types';
+import { blockingAreaKeys, listCaseRows } from './_cases-data';
 import {
-  CASE_OPEN_STATUSES,
-  CASE_PHASE_LABELS,
-  CASE_STATUS_LABELS,
-  type CasePhase,
-  type CaseStatus,
-} from '@/modules/operations/types';
-import { formatOperationsDate } from '@/modules/operations/work-items-service';
-import { startTrackingAction } from './actions';
+  bulkWatchCasesAction,
+  createCaseViewAction,
+  exportCasesAction,
+  resetCasePreferenceAction,
+  saveCasePreferenceAction,
+  startTrackingAction,
+  unwatchCaseAction,
+  watchCaseAction,
+} from './actions';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 /**
- * Temporary minimal view of the operational cases (plan section 2.7): paginated
- * list with number, customer, phase, status, owner and last activity, plus
- * "Iniciar seguimiento" by sales order number for people with
- * `operations.manage`. The full per-area experience comes in a later phase.
+ * Case list (plan 2.7): the shared `EntityWorkspace` over `OperationalCase`
+ * with the operational chips (scope, phase, risk, blocking area, mine), the
+ * preview drawer and the link to the Expediente 360.
+ *
+ * "Iniciar seguimiento" stays here for orders created before the cutover or
+ * outside the pilot locations; new orders open their case on their own.
  */
-
-const PAGE_SIZE = 25;
-const BASE_PATH = '/app/operations';
-
-const STATUS_FILTERS = {
-  open: [...CASE_OPEN_STATUSES] as string[],
-  closed: ['closed', 'cancelled'],
-  all: null,
-} satisfies Record<string, string[] | null>;
-type StatusFilter = keyof typeof STATUS_FILTERS;
-
-const STATUS_VARIANTS: Record<CaseStatus, BadgeVariant> = {
-  open: 'info',
-  waiting: 'weak',
-  blocked: 'danger',
-  ready_to_close: 'success',
-  closed: 'default',
-  cancelled: 'weak',
-};
 
 const NOTICES: Record<string, { variant: 'error' | 'success' | 'warning' | 'info'; text: string }> =
   {
@@ -85,23 +77,15 @@ const NOTICES: Record<string, { variant: 'error' | 'success' | 'warning' | 'info
     },
   };
 
-interface SearchParams {
-  page?: string;
-  status?: string;
-  notice?: string;
-  case?: string;
-}
+type SearchParams = Record<string, string | string[] | undefined>;
 
-function statusFilterOf(value: string | undefined): StatusFilter {
-  return value === 'closed' || value === 'all' ? value : 'open';
-}
-
-function listHref(status: StatusFilter, page = 1): string {
-  const query = new URLSearchParams();
-  if (status !== 'open') query.set('status', status);
-  if (page > 1) query.set('page', String(page));
-  const text = query.toString();
-  return text ? `${BASE_PATH}?${text}` : BASE_PATH;
+function flatten(params: SearchParams): Record<string, string> {
+  const flat: Record<string, string> = {};
+  for (const [key, value] of Object.entries(params)) {
+    const first = Array.isArray(value) ? value[0] : value;
+    if (typeof first === 'string') flat[key] = first;
+  }
+  return flat;
 }
 
 export default async function OperationsPage({
@@ -110,52 +94,61 @@ export default async function OperationsPage({
   searchParams: Promise<SearchParams>;
 }) {
   const user = await requirePermission('operations.view');
-  const params = await searchParams;
-  const status = statusFilterOf(params.status);
-  const requestedPage = Math.max(1, Number.parseInt(params.page ?? '1', 10) || 1);
-  const statuses = STATUS_FILTERS[status];
-  const where: Prisma.OperationalCaseWhereInput = statuses ? { status: { in: statuses } } : {};
+  const params = flatten(await searchParams);
+  const nowIso = new Date().toISOString();
 
-  const total = await prisma.operationalCase.count({ where });
-  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  const page = Math.min(requestedPage, pageCount);
-  const cases = await prisma.operationalCase.findMany({
-    where,
-    orderBy: [{ lastActivityAt: 'desc' }, { id: 'desc' }],
-    skip: (page - 1) * PAGE_SIZE,
-    take: PAGE_SIZE,
-    select: {
-      id: true,
-      caseNumber: true,
-      customerName: true,
-      salesOrderNumber: true,
-      phase: true,
-      status: true,
-      ownerUserId: true,
-      lastActivityAt: true,
-    },
-  });
-  const ownerIds = [...new Set(cases.map((c) => c.ownerUserId))];
-  const owners =
-    ownerIds.length > 0
-      ? await prisma.user.findMany({
-          where: { id: { in: ownerIds } },
-          select: { id: true, name: true, isActive: true },
-        })
-      : [];
-  const ownerBy = new Map(owners.map((o) => [o.id, o]));
+  let query;
+  let queryError: string | null = null;
+  try {
+    query = casesQueryFromSearchParams(params, { userId: user.id });
+  } catch (error) {
+    queryError =
+      error instanceof CasesQueryError
+        ? error.message
+        : 'El enlace tiene filtros que no reconocemos; te mostramos la lista sin ellos.';
+    query = casesQueryFromSearchParams({}, { userId: user.id });
+  }
+
+  const [result, preference, views, defaultView, unread, areaKeys] = await Promise.all([
+    listCaseRows(user, query),
+    getUserTablePreference(user.id, CASES_TABLE_KEY),
+    listTableViews(user.id, CASES_TABLE_KEY),
+    getDefaultTableView(user.id, CASES_TABLE_KEY),
+    getUnreadNotificationCount(user.id),
+    blockingAreaKeys(),
+  ]);
+  const watchedIds = await getWatchedEntityIds(
+    user.id,
+    CASE_ENTITY_TYPE,
+    result.data.map((row) => row.id)
+  );
 
   const canManage = hasPermission(user, 'operations.manage');
   const notice = params.notice ? NOTICES[params.notice] : undefined;
   const caseNumber = params.case && /^EXP-\d{1,12}$/.test(params.case) ? params.case : null;
 
+  const defaultPreference: TablePreferenceConfig = {
+    version: 1,
+    columnOrder: CASE_DEFAULT_COLUMN_ORDER,
+    columnVisibility: Object.fromEntries(
+      CASE_COLUMNS.map((column) => [column.id, column.defaultVisible])
+    ),
+    columnWidths: Object.fromEntries(
+      CASE_COLUMNS.map((column) => [column.id, column.defaultWidth])
+    ),
+    columnPinning: { left: [], right: [] },
+    density: 'normal',
+    pageSize: query.page_size,
+  };
+
   return (
     <div className="grid gap-4">
       <PageHeader
         title="Expedientes"
-        description="Seguimiento operativo de las órdenes de venta: fase, estado, responsable y última actividad."
-        breadcrumbs={[{ label: 'Inicio', href: '/app' }, { label: 'Operaciones' }]}
+        description="Seguimiento operativo de las órdenes de venta: fase, estado, riesgo, responsable y qué área las detiene."
       />
+
+      {queryError ? <Alert variant="warning">{queryError}</Alert> : null}
 
       {notice ? (
         <Alert variant={notice.variant}>
@@ -175,7 +168,7 @@ export default async function OperationsPage({
               fecha de corte o de una bodega fuera del piloto.
             </p>
           </div>
-          <form action={startTrackingAction} className="flex flex-wrap items-end gap-3">
+          <form action={startTrackingAction} className="case-start-form">
             <FormField label="Número de orden de venta" htmlFor="salesOrder">
               <Input
                 id="salesOrder"
@@ -191,92 +184,31 @@ export default async function OperationsPage({
         </section>
       ) : null}
 
-      <TabNav
-        activeId={status}
-        tabs={[
-          { id: 'open', label: 'Abiertos', href: listHref('open') },
-          { id: 'closed', label: 'Cerrados', href: listHref('closed') },
-          { id: 'all', label: 'Todos', href: listHref('all') },
-        ]}
+      <CasesWorkspace
+        user={user}
+        initialData={result}
+        initialQuery={query}
+        chipState={caseChipsStateFromParams(params)}
+        blockingAreaKeys={areaKeys}
+        preference={preference ?? defaultPreference}
+        views={views}
+        defaultViewId={defaultView?.id ?? null}
+        watchedIds={[...watchedIds]}
+        unreadNotifications={unread}
+        canExport
+        // Seguir un expediente todavía no avisa de nada: ningún productor llama a
+        // `recordEntityChange('operational_case')`. Se ofrecerá cuando lo haga.
+        canWatch={false}
+        canShareViews={canManage}
+        nowIso={nowIso}
+        savePreferenceAction={saveCasePreferenceAction}
+        resetPreferenceAction={resetCasePreferenceAction}
+        createViewAction={createCaseViewAction}
+        watchAction={watchCaseAction}
+        unwatchAction={unwatchCaseAction}
+        bulkWatchAction={bulkWatchCasesAction}
+        exportAction={exportCasesAction}
       />
-
-      {cases.length === 0 ? (
-        <EmptyState
-          icon="layers"
-          title={status === 'open' ? 'Sin expedientes abiertos' : 'Sin expedientes'}
-          message="Aquí aparecerán las órdenes de venta con seguimiento operativo."
-        />
-      ) : (
-        <div className="table-wrap">
-          <table className="table">
-            <caption className="sr-only">Expedientes operativos</caption>
-            <thead>
-              <tr>
-                <th scope="col">Expediente</th>
-                <th scope="col">Cliente</th>
-                <th scope="col">Fase</th>
-                <th scope="col">Estado</th>
-                <th scope="col">Responsable</th>
-                <th scope="col">Última actividad</th>
-              </tr>
-            </thead>
-            <tbody>
-              {cases.map((c) => {
-                const owner = ownerBy.get(c.ownerUserId);
-                const statusLabel = CASE_STATUS_LABELS[c.status as CaseStatus] ?? c.status;
-                return (
-                  <tr key={c.id}>
-                    <td className="whitespace-nowrap font-medium">{c.caseNumber}</td>
-                    <td>
-                      <div>{c.customerName ?? 'Sin cliente'}</div>
-                      {c.salesOrderNumber ? (
-                        <div className="text-muted text-xs">{c.salesOrderNumber}</div>
-                      ) : null}
-                    </td>
-                    <td>{CASE_PHASE_LABELS[c.phase as CasePhase] ?? c.phase}</td>
-                    <td>
-                      <Badge variant={STATUS_VARIANTS[c.status as CaseStatus] ?? 'default'}>
-                        {statusLabel}
-                      </Badge>
-                    </td>
-                    <td>
-                      {owner ? owner.name : 'Sin asignar'}
-                      {owner && !owner.isActive ? (
-                        <div className="text-muted text-xs">Inactivo</div>
-                      ) : null}
-                    </td>
-                    <td className="whitespace-nowrap">
-                      <time dateTime={c.lastActivityAt.toISOString()}>
-                        {formatOperationsDate(c.lastActivityAt)}
-                      </time>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {total > 0 ? (
-        <nav aria-label="Paginación" className="flex flex-wrap items-center justify-between gap-3">
-          <span className="text-muted text-sm">
-            Página {page} de {pageCount} · {total} {total === 1 ? 'expediente' : 'expedientes'}
-          </span>
-          <div className="flex gap-2">
-            {page > 1 ? (
-              <Link className="btn btn-secondary btn-sm" href={listHref(status, page - 1)}>
-                Anterior
-              </Link>
-            ) : null}
-            {page < pageCount ? (
-              <Link className="btn btn-secondary btn-sm" href={listHref(status, page + 1)}>
-                Siguiente
-              </Link>
-            ) : null}
-          </div>
-        </nav>
-      ) : null}
     </div>
   );
 }

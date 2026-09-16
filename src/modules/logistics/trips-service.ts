@@ -9,7 +9,7 @@ import {
 } from '@/modules/operations/commands';
 import { nextNumber } from '@/modules/operations/sequence-service';
 import { OPS_EVENTS } from '@/modules/operations/types';
-import { expectedQuantity } from './delivery-rules';
+import { expectedQuantity, statusAfterTripRelease } from './delivery-rules';
 import {
   deliveryRecordFieldsSchema,
   recordDelivery,
@@ -32,6 +32,7 @@ import {
   loadTrip,
   logisticsError,
   longitude,
+  notifyDeliveryUpdate,
   parseInstant,
   publishDeliveryChange,
   publishTripChange,
@@ -59,8 +60,10 @@ import {
 
 /**
  * Trips of the own fleet (plan section 6.3): build with route rules, add and
- * reorder stops, start, arrive (GPS), complete (records the delivery), fail
- * and close. The aggregate of every trip command except `trip.build` is the
+ * reorder stops, start, arrive (GPS), complete (records the delivery), fail,
+ * close and cancel (plan §4 `Trip.status = cancelled`: the trip that never ran,
+ * which releases its deliveries without inventing failed deliveries). The
+ * aggregate of every trip command except `trip.build` is the
  * trip (its version is bumped by the engine); delivery orders touched from a
  * trip are updated with a version guard.
  */
@@ -116,6 +119,11 @@ export const failStopSchema = z.object({
   lng: longitude.nullable().optional(),
 });
 export type FailStopInput = z.infer<typeof failStopSchema>;
+
+export const cancelTripSchema = z.object({
+  reason: z.string().trim().min(1, 'Indica por qué se cancela el viaje').max(500),
+});
+export type CancelTripInput = z.infer<typeof cancelTripSchema>;
 
 type WithTrip<T> = T & { tripId: string };
 
@@ -593,6 +601,14 @@ export async function startTrip(
       { deliveryOrderId: order.id, tripId: trip.id, zohoSyncState: order.zohoSyncState },
       { caseId: order.caseId, areaKey: 'logistica', objectType: ORDER, objectId: order.id }
     );
+    // Plan 6.6: el dueño del expediente se entera de que su entrega salió.
+    await notifyDeliveryUpdate(ctx, order.caseId, {
+      type: 'delivery_dispatched',
+      title: (ref) => `Salió a ruta la entrega de ${ref}`,
+      body: `Viaje ${trip.number} con ${open.length} parada(s)`,
+      entityId: order.id,
+      dedupeKey: `delivery_dispatched:${order.id}:${trip.id}`,
+    });
   }
   ctx.emit(
     LOGISTICS_EVENTS.trip.started,
@@ -800,6 +816,14 @@ export async function failStop(
     },
     { ...eventOptions, objectType: ORDER, objectId: order.id }
   );
+  // Plan 6.6: el dueño del expediente se entera de que hay que reprogramar.
+  await notifyDeliveryUpdate(ctx, order.caseId, {
+    type: 'delivery_failed',
+    title: (reference) => `No se pudo entregar ${reference}`,
+    body: `Viaje ${trip.number}: ${input.reason}`,
+    entityId: order.id,
+    dedupeKey: `delivery_failed:${order.id}:${stop.id}`,
+  });
   publishDeliveryChange(ctx, { ...updated, tripId: trip.id });
   publishTripChange(ctx, trip, { stopId: stop.id, stopStatus: 'failed' });
   return {
@@ -851,4 +875,127 @@ export async function closeTrip(
   );
   publishTripChange(ctx, updated);
   return { data: { tripId: trip.id, status: updated.status, delivered, failed } };
+}
+
+// ---------------------------------------------------------------------------
+// cancelTrip
+// ---------------------------------------------------------------------------
+
+export interface CancelTripResult {
+  tripId: string;
+  status: string;
+  alreadyCancelled: boolean;
+  /** Deliveries that came off the trip and can be planned again. */
+  releasedDeliveryOrderIds: string[];
+}
+
+/**
+ * Cancels a trip that is not going to run (plan §4: `Trip.status = cancelled`):
+ * the unit broke down, the route was called off, the day changed. Nothing was
+ * attempted, so this is NOT `trip.close`: no stop is marked failed, no failed
+ * delivery incident is opened and no customer notice is raised.
+ *
+ * Its open stops keep their `pending` / `arrived` status as the record of what
+ * was never visited (the trip's own status says it did not run), and every
+ * delivery is released: `tripId` goes back to null — same as `trip.fail_stop`,
+ * the vehicle and driver written to Zoho stay on the order — and the status
+ * returns to the one its Zoho mirror describes (`statusAfterTripRelease`), so
+ * dispatch can put it on another trip or reassign transport.
+ *
+ * A trip that already delivered something has to be closed, not cancelled.
+ */
+export async function cancelTrip(
+  tx: Tx,
+  input: WithTrip<CancelTripInput>
+): Promise<CommandHandlerOutput<CancelTripResult>> {
+  const ctx = requireCommandContext(tx);
+  const trip = await loadTrip(tx, input.tripId);
+  if (trip.status === 'cancelled') {
+    return {
+      data: {
+        tripId: trip.id,
+        status: trip.status,
+        alreadyCancelled: true,
+        releasedDeliveryOrderIds: [],
+      },
+    };
+  }
+  assertTripStatus(trip, TRIP_ACTIVE_STATUSES, 'Sólo se cancela un viaje planeado o en ruta');
+  const stops = await tx.tripStop.findMany({
+    where: { tripId: trip.id },
+    orderBy: { sequence: 'asc' },
+  });
+  const delivered = stops.filter((stop) => stop.status === 'done');
+  if (delivered.length > 0) {
+    throw logisticsError(
+      'trip_has_deliveries',
+      `El viaje ya tiene ${delivered.length} entrega(s) registradas: marca las paradas que faltan y ciérralo en vez de cancelarlo`,
+      { stopIds: delivered.map((stop) => stop.id) }
+    );
+  }
+
+  const openStops = stops.filter((stop) =>
+    (TRIP_STOP_OPEN_STATUSES as readonly string[]).includes(stop.status)
+  );
+  const orders = await ordersOfStops(tx, openStops);
+  const released: string[] = [];
+  for (const order of orders) {
+    const status = statusAfterTripRelease(order);
+    const updated = await bumpDeliveryOrder(
+      tx,
+      order,
+      { status, tripId: null },
+      { tripId: trip.id }
+    );
+    released.push(order.id);
+    ctx.emit(
+      LOGISTICS_EVENTS.delivery.releasedFromTrip,
+      {
+        deliveryOrderId: order.id,
+        tripId: trip.id,
+        tripNumber: trip.number,
+        previousStatus: order.status,
+        status,
+        reason: input.reason,
+      },
+      { caseId: order.caseId, areaKey: 'logistica', objectType: ORDER, objectId: order.id }
+    );
+    // Plan 6.6: al dueño del expediente se le avisó que salió; ahora que volvió.
+    if (order.status === 'dispatched') {
+      await notifyDeliveryUpdate(ctx, order.caseId, {
+        type: 'delivery_returned',
+        title: (ref) => `Regresó sin entregar la entrega de ${ref}`,
+        body: `Se canceló el viaje ${trip.number}: ${input.reason}`,
+        entityId: order.id,
+        dedupeKey: `delivery_returned:${order.id}:${trip.id}`,
+      });
+    }
+    publishDeliveryChange(ctx, { ...updated, tripId: trip.id });
+  }
+
+  const updatedTrip = await tx.trip.update({
+    where: { id: trip.id },
+    data: { status: 'cancelled', endedAt: ctx.now },
+  });
+  ctx.emit(
+    LOGISTICS_EVENTS.trip.cancelled,
+    {
+      tripId: trip.id,
+      number: trip.number,
+      previousStatus: trip.status,
+      reason: input.reason,
+      releasedDeliveryOrderIds: released,
+      stops: stops.length,
+    },
+    { areaKey: 'logistica', objectType: TRIP, objectId: trip.id }
+  );
+  publishTripChange(ctx, updatedTrip);
+  return {
+    data: {
+      tripId: trip.id,
+      status: updatedTrip.status,
+      alreadyCancelled: false,
+      releasedDeliveryOrderIds: released,
+    },
+  };
 }

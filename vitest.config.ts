@@ -55,6 +55,10 @@ export default defineConfig({
           browser: { enabled: false },
           // One file at a time and tests in order: they share one real database.
           fileParallelism: false,
+          // …and one RUN at a time: the global setup takes a PostgreSQL advisory
+          // lock so two concurrent `npm run test:integration` wait for each other
+          // instead of truncating each other's rows (see tests/integration/integration-lock.ts).
+          globalSetup: ['./tests/integration/global-setup.ts'],
           testTimeout: 120_000,
           hookTimeout: 120_000,
           env: integrationDatabaseUrl

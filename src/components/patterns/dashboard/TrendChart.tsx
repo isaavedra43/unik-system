@@ -32,6 +32,12 @@ export interface TrendChartProps<TDatum extends object> {
   xKey: StringKey<TDatum>;
   /** Formats Y values (axis ticks, tooltip and the accessible table). */
   yFormat?: (value: number) => string;
+  /**
+   * The series counts things (expedientes, entregas, conteos): the axis shows
+   * whole numbers only. Without it Recharts offers ticks like `0.25`, and half
+   * an expediente does not exist.
+   */
+  integerY?: boolean;
   /** Formats X values (axis ticks, tooltip label and the accessible table). */
   xFormat?: (value: string | number) => string;
   /** Height in px; defaults to filling the parent (e.g. ChartCard). */
@@ -54,6 +60,7 @@ export function TrendChart<TDatum extends object>({
   kind = 'line',
   xKey,
   yFormat,
+  integerY,
   xFormat,
   height,
   ariaLabel = 'Tendencia',
@@ -92,7 +99,11 @@ export function TrendChart<TDatum extends object>({
     <>
       <CartesianGrid {...theme.grid} />
       <XAxis dataKey={xKey} {...theme.xAxis} tickFormatter={(value) => formatX(value)} />
-      <YAxis {...theme.yAxis} tickFormatter={(value) => formatChartValue(value, yFormat)} />
+      <YAxis
+        {...theme.yAxis}
+        {...(integerY ? { allowDecimals: false, domain: [0, 'auto'] as const } : {})}
+        tickFormatter={(value) => formatChartValue(value, yFormat)}
+      />
       <Tooltip
         contentStyle={theme.tooltip.contentStyle}
         labelStyle={theme.tooltip.labelStyle}

@@ -34,6 +34,7 @@ import {
   loadDeliveryOrder,
   logisticsError,
   longitude,
+  notifyDeliveryUpdate,
   parseInstant,
   publishDeliveryChange,
   readShipmentInput,
@@ -952,6 +953,19 @@ export async function recordDelivery(
     });
     publishDeliveryChange(ctx, child);
   }
+
+  // Plan 6.6: el dueño del expediente se entera de la parada entregada, completa o no.
+  await notifyDeliveryUpdate(ctx, order.caseId, {
+    type: summary.complete ? 'delivery_confirmed' : 'delivery_partial',
+    title: (ref) =>
+      summary.complete ? `Entregada la entrega de ${ref}` : `Entrega parcial de ${ref}`,
+    body: summary.complete
+      ? `Recibió ${input.receivedBy}`
+      : `Recibió ${input.receivedBy}. Se entregó ${summary.totalDelivered} y faltan ${summary.totalShort}` +
+        `${input.partialReason ? ` (motivo: ${input.partialReason})` : ''}`,
+    entityId: order.id,
+    dedupeKey: `delivery_recorded:${order.id}:${ctx.commandId}`,
+  });
 
   for (const listener of [...deliveryListeners()]) {
     await listener(tx, { deliveryOrder: updated, summary, childDeliveryOrderId, ctx });

@@ -92,7 +92,10 @@ export const OPERATIONS_ERROR_HTTP_STATUS: Record<OperationsErrorCode, number> =
   already_voted: 409,
   self_approval: 403,
   not_eligible: 403,
-  outside_command: 500,
+  // A wiring defect, never something the device can fix by retrying: answered
+  // as a rejection (4xx) so the offline queue keeps it instead of retrying it
+  // for ever (`retryable(status)` in `src/lib/offline-commands.ts` retries 5xx).
+  outside_command: 409,
   invalid_state: 409,
   missing_evidence: 422,
   case_not_eligible: 409,
@@ -131,7 +134,20 @@ export const OPERATIONS_ERROR_HTTP_STATUS: Record<OperationsErrorCode, number> =
   stops_pending: 409,
 };
 
+/**
+ * Cross-instance brand.
+ *
+ * Next.js compiles a server module once per webpack layer, so this file (and
+ * therefore the class below) exists several times in the same process. A plain
+ * `instanceof` then returns false for an error thrown by another copy and the
+ * command engine turns an expected business rejection into an HTTP 500 that the
+ * offline queue retries forever. `Symbol.for` is process-wide, so the brand is
+ * the same object in every copy.
+ */
+const OPERATIONS_ERROR_BRAND: unique symbol = Symbol.for('unik.operations.error');
+
 export class OperationsError extends Error {
+  readonly [OPERATIONS_ERROR_BRAND] = true;
   readonly code: string;
   readonly httpStatus: number;
   readonly details?: Record<string, unknown>;
@@ -151,7 +167,13 @@ export class OperationsError extends Error {
 }
 
 export function isOperationsError(err: unknown): err is OperationsError {
-  return err instanceof OperationsError;
+  if (err instanceof OperationsError) return true;
+  // Thrown by another compiled copy of this module (see the brand above).
+  return (
+    typeof err === 'object' &&
+    err !== null &&
+    (err as Record<symbol, unknown>)[OPERATIONS_ERROR_BRAND] === true
+  );
 }
 
 /** HTTP status for a rejection code (unknown codes → 400). */

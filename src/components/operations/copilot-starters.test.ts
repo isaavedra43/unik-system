@@ -32,7 +32,11 @@ describe('arranques del copiloto de operaciones', () => {
 
   it('Mi trabajo incluye los arranques del plan', () => {
     expect(MYWORK_STARTERS).toEqual(
-      expect.arrayContaining(['¿Qué hago primero?', 'Registra un conteo', '¿Qué me falta para cerrar hoy?'])
+      expect.arrayContaining([
+        '¿Qué hago primero?',
+        'Registra un conteo',
+        '¿Qué me falta para cerrar hoy?',
+      ])
     );
     expect(CASE_ROOM_STARTERS.length).toBeGreaterThanOrEqual(3);
     expect(CONTROL_TOWER_STARTERS.length).toBeGreaterThanOrEqual(3);
@@ -46,16 +50,26 @@ describe('arranques del copiloto de operaciones', () => {
     expect(new Set(without).size).toBe(without.length);
   });
 
-  it('no enlaza a páginas que todavía no existen (expediente, centro de trabajo)', () => {
-    expect(operationsCaseHref('case-1')).toBeNull();
-    expect(areaWorkspaceHref('compras')).toBeNull();
+  it('enlaza al expediente y al centro de trabajo, que ya existen', () => {
+    // El Expediente 360 existe desde esta fase (plan 2.7): /app/operations/cases/[id].
+    expect(operationsCaseHref('case-1')).toBe('/app/operations/cases/case-1');
+    expect(operationsCaseHref('a/b')).toBe('/app/operations/cases/a%2Fb');
     expect(operationsCaseHref(null)).toBeNull();
+    // El centro de trabajo del área existe desde la fase de áreas (plan 7.2).
+    expect(areaWorkspaceHref('compras')).toBe('/app/areas/compras/trabajo');
+    expect(areaWorkspaceHref(null)).toBeNull();
   });
 
   it('las rutas codifican los identificadores', () => {
-    expect(OPERATIONS_COPILOT_ENDPOINTS.area('inventario')).toBe('/app/operations/api/areas/inventario/copilot');
-    expect(OPERATIONS_COPILOT_ENDPOINTS.case('a/b')).toBe('/app/operations/api/cases/a%2Fb/copilot');
-    expect(OPERATIONS_COPILOT_ENDPOINTS.proposal('p 1')).toBe('/app/operations/api/proposals/p%201');
+    expect(OPERATIONS_COPILOT_ENDPOINTS.area('inventario')).toBe(
+      '/app/operations/api/areas/inventario/copilot'
+    );
+    expect(OPERATIONS_COPILOT_ENDPOINTS.case('a/b')).toBe(
+      '/app/operations/api/cases/a%2Fb/copilot'
+    );
+    expect(OPERATIONS_COPILOT_ENDPOINTS.proposal('p 1')).toBe(
+      '/app/operations/api/proposals/p%201'
+    );
     expect(OPERATIONS_COPILOT_ENDPOINTS.mywork).toBe('/app/operations/api/mywork/copilot');
     expect(OPERATIONS_COPILOT_ENDPOINTS.controlTower).toBe('/app/admin/control-tower/api/copilot');
   });

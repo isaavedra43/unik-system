@@ -114,46 +114,11 @@ import { AREA_KEYS, AREA_LABELS, type AreaKey } from '@/modules/operations/types
 import { completeWorkItem } from '@/modules/operations/work-items-service';
 import { PackageShippingError } from '@/modules/packages/packages-shipping-service';
 
+import { assertDisposableDatabase, truncateTables } from './integration-db';
+
 // ---------------------------------------------------------------------------
 // Safety and cleanup
 // ---------------------------------------------------------------------------
-
-const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
-const DISPOSABLE_NAME = /(check|test|integration|scratch|ci)/i;
-
-/** Refuses anything that is not a local, disposable database with the operations schema. */
-async function assertDisposableDatabase(): Promise<void> {
-  if (process.env.DATABASE_URL !== integrationUrl) {
-    throw new Error(
-      '[integration] DATABASE_URL no coincide con UNIK_INTEGRATION_DATABASE_URL; ejecuta con `npm run test:integration`'
-    );
-  }
-  const url = new URL(integrationUrl);
-  if (!LOCAL_HOSTS.has(url.hostname)) {
-    throw new Error(
-      `[integration] Sólo se permite una base local (host recibido: ${url.hostname})`
-    );
-  }
-  const [{ name }] = await prisma.$queryRaw<
-    Array<{ name: string }>
-  >`SELECT current_database() AS name`;
-  const allowed = process.env.UNIK_INTEGRATION_ALLOW_DATABASE?.trim();
-  if (name === 'unik_system' || (!DISPOSABLE_NAME.test(name) && allowed !== name)) {
-    throw new Error(
-      `[integration] La base "${name}" no parece desechable. Usa una base de prueba (p. ej. unik_schema_check) ` +
-        'o confírmala con UNIK_INTEGRATION_ALLOW_DATABASE=<nombre>.'
-    );
-  }
-  const [{ ready }] = await prisma.$queryRaw<Array<{ ready: boolean }>>`
-    SELECT to_regclass('"OperationalCase"') IS NOT NULL
-       AND to_regclass('"StockItem"') IS NOT NULL
-       AND to_regclass('"DeliveryOrder"') IS NOT NULL AS ready`;
-  if (!ready) {
-    throw new Error(
-      `[integration] La base "${name}" no tiene las migraciones de operaciones; aplica \`prisma migrate deploy\` a esa base desechable`
-    );
-  }
-}
 
 /** Tables owned by the operations program plus the side tables its commands write. */
 const RESET_TABLES = [
@@ -202,9 +167,7 @@ const RESET_TABLES = [
 ];
 
 async function resetDatabase(): Promise<void> {
-  await prisma.$executeRawUnsafe(
-    `TRUNCATE TABLE ${RESET_TABLES.map((table) => `"${table}"`).join(', ')} RESTART IDENTITY`
-  );
+  await truncateTables(RESET_TABLES);
   await prisma.$executeRaw`DELETE FROM "StorageObject" WHERE left("objectKey", 12) = 'evidence/it-'`;
   await prisma.$executeRaw`DELETE FROM "Package" WHERE left("zohoPackageId", 3) = 'it-'`;
   await prisma.$executeRaw`DELETE FROM "SalesOrder" WHERE left("zohoSalesOrderId", 3) = 'it-'`;
@@ -756,7 +719,10 @@ describeDb('escenarios de operaciones contra PostgreSQL real', () => {
   beforeAll(async () => {
     if (!process.env.UNIK_INTEGRATION_VERBOSE)
       vi.spyOn(console, 'info').mockImplementation(() => {});
-    await assertDisposableDatabase();
+    await assertDisposableDatabase({
+      requiredTables: ['OperationalCase', 'StockItem', 'DeliveryOrder'],
+      missingLabel: 'operaciones',
+    });
     await resetDatabase();
   });
 

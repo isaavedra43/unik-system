@@ -18,8 +18,10 @@ import {
   ClipboardList,
   CreditCard,
   Database,
+  Factory,
   FileSignature,
   FileText,
+  Gauge,
   HardDrive,
   Inbox,
   Megaphone,
@@ -30,6 +32,7 @@ import {
   Plug,
   Radio,
   Receipt,
+  ShoppingBag,
   ShoppingCart,
   SlidersHorizontal,
   Truck,
@@ -42,6 +45,7 @@ import { Home, Shield, Users } from '@/components/ui/icons';
 import type { CurrentUser } from '@/modules/auth/authorization';
 import type { PermissionKey } from '@/modules/auth/permissions';
 import {
+  AREA_NAV,
   BREADCRUMB_RULES,
   FLUSH_ROUTE_PREFIXES,
   NAV_CONFIG,
@@ -53,6 +57,13 @@ import {
   type NavEntry,
   type NavSection,
 } from './nav-config';
+import {
+  AREA_LIST,
+  areaHref,
+  areaSpaces,
+  areaViewPermissions,
+  flushAreaRoutes,
+} from '@/modules/areas/area-registry';
 
 // The unit project does not transform JSX (tsconfig uses "jsx": "preserve"), so UNIK's own
 // icon set (icons.tsx) is replaced by inert components. Both nav-config and the legacy
@@ -99,7 +110,49 @@ function legacyBuildBreadcrumbs(pathname: string): { label: string; href?: strin
   if (pathname.startsWith('/app/admin/extensions')) {
     return [{ label: 'Administración', href: '/app/admin/extensions' }, { label: 'Extensiones' }];
   }
+  // Added after extraction: Control Tower views and Neural Operations (plan 7.7 / 7.8),
+  // written by hand so a typo in the generated rules shows up as a difference.
+  {
+    const towerBase = '/app/admin/control-tower';
+    const tower = { label: 'Control Tower', href: `${towerBase}/resumen` };
+    const neuralBase = `${towerBase}/neural`;
+    const neuralTools: Array<[string, string]> = [
+      ['procesos', 'Procesos'],
+      ['variantes', 'Variantes'],
+      ['grafo', 'Grafo'],
+      ['replay', 'Replay'],
+      ['simulacion', 'Simulación'],
+    ];
+    for (const [slug, label] of neuralTools) {
+      if (pathname.startsWith(`${neuralBase}/${slug}`)) {
+        return [
+          { label: 'Administración' },
+          tower,
+          { label: 'Neural Operations', href: `${neuralBase}/procesos` },
+          { label },
+        ];
+      }
+    }
+    if (pathname.startsWith(neuralBase)) {
+      return [{ label: 'Administración' }, tower, { label: 'Neural Operations' }];
+    }
+    const views: Array<[string, string]> = [
+      ['resumen', 'Resumen'],
+      ['personas', 'Personas'],
+      ['excepciones', 'Excepciones'],
+      ['aprobaciones', 'Aprobaciones'],
+      ['auditoria', 'Auditoría'],
+      ['configuracion', 'Configuración'],
+    ];
+    for (const [slug, label] of views) {
+      if (pathname.startsWith(`${towerBase}/${slug}`)) {
+        return [{ label: 'Administración' }, tower, { label }];
+      }
+    }
+  }
   const simple: Array<[string, string[]]> = [
+    // Added after extraction: Control Tower (plan 7.1).
+    ['/app/admin/control-tower', ['Administración', 'Control Tower']],
     ['/app/admin/knowledge', ['Administración', 'Biblioteca aprobada']],
     ['/app/admin/comms', ['Administración', 'Canales y responsables']],
     ['/app/admin/voice', ['Administración', 'Telefonía']],
@@ -253,11 +306,181 @@ function legacyBuildBreadcrumbs(pathname: string): { label: string; href?: strin
       { label: 'Detalle' },
     ];
   }
+  // Added after verification: management pages that hang from an area but are not
+  // spaces of the registry, plus Expedientes and the Manufactura pages.
+  for (const [areaKey, areaLabel, slug, label, parentSlug, parentLabel] of LEGACY_AREA_EXTRAS) {
+    const path = `/app/areas/${areaKey}/${slug}`;
+    const crumbs = [
+      { label: 'Operaciones' },
+      { label: areaLabel, href: `/app/areas/${areaKey}/dashboard` },
+      { label: parentLabel, href: `/app/areas/${areaKey}/${parentSlug}` },
+    ];
+    if (pathname === path) return [...crumbs, { label }];
+    if (pathname.startsWith(`${path}/`)) return [...crumbs, { label, href: path }];
+  }
+  if (pathname.startsWith('/app/operations/cases/')) {
+    return [{ label: 'Operaciones', href: '/app/operations' }, { label: 'Expediente' }];
+  }
+  if (pathname.startsWith('/app/operations')) {
+    return [{ label: 'Operaciones' }];
+  }
+  {
+    const manufactura = {
+      label: 'Manufactura',
+      href: '/app/areas/manufactura/dashboard',
+    };
+    const orders = { label: 'Órdenes de producción', href: '/app/areas/manufactura/ordenes' };
+    if (pathname === '/app/manufacturing/orders/nueva') {
+      return [{ label: 'Operaciones' }, manufactura, orders, { label: 'Nueva' }];
+    }
+    if (pathname.startsWith('/app/manufacturing/orders')) {
+      return [{ label: 'Operaciones' }, manufactura, orders, { label: 'Orden' }];
+    }
+    if (pathname.startsWith('/app/manufacturing/bom')) {
+      return [{ label: 'Operaciones' }, manufactura, { label: 'Listas de materiales' }];
+    }
+    if (pathname.startsWith('/app/manufacturing/centros')) {
+      return [{ label: 'Operaciones' }, manufactura, { label: 'Centros de trabajo' }];
+    }
+    if (pathname.startsWith('/app/manufacturing/trazabilidad')) {
+      return [{ label: 'Operaciones' }, manufactura, { label: 'Trazabilidad' }];
+    }
+  }
+  // Added after extraction: operational areas (plan 7.1). Written by hand here so a
+  // typo in nav-config's generated rules shows up as a difference.
+  for (const [key, label, spaces] of LEGACY_AREAS) {
+    const home = `/app/areas/${key}/dashboard`;
+    for (const [slug, spaceLabel] of spaces) {
+      const path = `/app/areas/${key}/${slug}`;
+      if (pathname === path) {
+        return [{ label: 'Operaciones' }, { label, href: home }, { label: spaceLabel }];
+      }
+      if (pathname.startsWith(`${path}/`)) {
+        return [
+          { label: 'Operaciones' },
+          { label, href: home },
+          { label: spaceLabel, href: path },
+          { label: 'Detalle' },
+        ];
+      }
+    }
+    if (pathname === `/app/areas/${key}`) {
+      return [{ label: 'Operaciones' }, { label }];
+    }
+  }
   if (pathname === '/app/notifications') {
     return [{ label: 'Notificaciones' }];
   }
   return [];
 }
+
+/** Management pages of an area, listed independently of nav-config. */
+const LEGACY_AREA_EXTRAS: Array<[string, string, string, string, string, string]> = [
+  ['contabilidad', 'Contabilidad', 'obligaciones', 'Obligaciones', 'libro', 'Libro de caja'],
+  ['contabilidad', 'Contabilidad', 'nomina', 'Nómina', 'libro', 'Libro de caja'],
+  ['contabilidad', 'Contabilidad', 'cierre', 'Cierre mensual', 'libro', 'Libro de caja'],
+  ['contabilidad', 'Contabilidad', 'presupuestos', 'Presupuestos', 'libro', 'Libro de caja'],
+  ['contabilidad', 'Contabilidad', 'catalogos', 'Catálogos', 'libro', 'Libro de caja'],
+  ['contabilidad', 'Contabilidad', 'gastos/nuevo', 'Capturar gasto', 'gastos', 'Gastos'],
+  ['logistica', 'Logística', 'flota', 'Flotilla', 'despacho', 'Despacho'],
+  ['logistica', 'Logística', 'chofer', 'Mis entregas', 'despacho', 'Despacho'],
+  ['inventario', 'Inventario', 'perfiles', 'Perfil de producto', 'existencias', 'Existencias'],
+];
+
+/** Areas, their spaces and their crumbs, listed independently of nav-config. */
+const LEGACY_AREAS: Array<[string, string, Array<[string, string]>]> = [
+  [
+    'ventas',
+    'Ventas',
+    [
+      ['dashboard', 'Panel'],
+      ['trabajo', 'Centro de trabajo'],
+      ['comunicaciones', 'Comunicaciones'],
+      ['radar', 'Radar de cierre'],
+      ['oportunidades', 'Oportunidades'],
+      ['pipeline', 'Embudo'],
+    ],
+  ],
+  [
+    'compras',
+    'Compras',
+    [
+      ['dashboard', 'Panel'],
+      ['trabajo', 'Centro de trabajo'],
+      ['comunicaciones', 'Comunicaciones'],
+      ['sourcing', 'Laboratorio de sourcing'],
+      ['ordenes', 'Órdenes de compra'],
+      ['rfq', 'Cotizaciones'],
+      ['proveedores', 'Proveedores'],
+    ],
+  ],
+  [
+    'inventario',
+    'Inventario',
+    [
+      ['dashboard', 'Panel'],
+      ['trabajo', 'Centro de trabajo'],
+      ['comunicaciones', 'Comunicaciones'],
+      ['mapa', 'Mapa de ubicaciones'],
+      ['existencias', 'Existencias'],
+      ['conteos', 'Conteos'],
+      ['movimientos', 'Movimientos'],
+      ['ubicaciones', 'Ubicaciones'],
+    ],
+  ],
+  [
+    'manufactura',
+    'Manufactura',
+    [
+      ['dashboard', 'Panel'],
+      ['trabajo', 'Centro de trabajo'],
+      ['comunicaciones', 'Comunicaciones'],
+      ['tablero', 'Tablero de producción'],
+      ['ordenes', 'Órdenes de producción'],
+    ],
+  ],
+  [
+    'logistica',
+    'Logística',
+    [
+      ['dashboard', 'Panel'],
+      ['trabajo', 'Centro de trabajo'],
+      ['comunicaciones', 'Comunicaciones'],
+      ['despacho', 'Despacho'],
+      ['viajes', 'Viajes'],
+    ],
+  ],
+  [
+    'contabilidad',
+    'Contabilidad',
+    [
+      ['dashboard', 'Panel'],
+      ['trabajo', 'Centro de trabajo'],
+      ['comunicaciones', 'Comunicaciones'],
+      ['libro', 'Libro de caja'],
+      ['gastos', 'Gastos'],
+    ],
+  ],
+];
+
+/** Area routes rendered edge to edge (work centre, communications and boards). */
+const LEGACY_AREA_FLUSH = [
+  '/app/areas/ventas/trabajo',
+  '/app/areas/ventas/comunicaciones',
+  '/app/areas/compras/trabajo',
+  '/app/areas/compras/comunicaciones',
+  '/app/areas/inventario/trabajo',
+  '/app/areas/inventario/comunicaciones',
+  '/app/areas/inventario/mapa',
+  '/app/areas/manufactura/trabajo',
+  '/app/areas/manufactura/comunicaciones',
+  '/app/areas/manufactura/tablero',
+  '/app/areas/logistica/trabajo',
+  '/app/areas/logistica/comunicaciones',
+  '/app/areas/logistica/despacho',
+  '/app/areas/contabilidad/trabajo',
+  '/app/areas/contabilidad/comunicaciones',
+];
 
 function legacyIsFlush(pathname: string): boolean {
   const isWorkspace =
@@ -275,7 +498,18 @@ function legacyIsFlush(pathname: string): boolean {
   const isAssistantPage = pathname.startsWith('/app/assistant');
   const isChatPage = pathname.startsWith('/app/chat');
   const isInboxPage = pathname.startsWith('/app/inbox');
-  return isWorkspace || isAssistantPage || isChatPage || isInboxPage;
+  // Added after extraction: area spaces (plan 7.1).
+  const isAreaSpace =
+    LEGACY_AREA_FLUSH.some((prefix) => pathname.startsWith(prefix)) && !pathname.includes('/api');
+  // Added in the integration pass: operations (case list + 360) and the wide Control Tower surfaces.
+  const isWideOperational =
+    (pathname.startsWith('/app/operations') ||
+      pathname.startsWith('/app/admin/control-tower/excepciones') ||
+      pathname.startsWith('/app/admin/control-tower/neural')) &&
+    !pathname.includes('/api');
+  return (
+    isWorkspace || isAssistantPage || isChatPage || isInboxPage || isAreaSpace || isWideOperational
+  );
 }
 
 function legacySections(user: CurrentUser): NavEntry[] {
@@ -294,10 +528,66 @@ function legacySections(user: CurrentUser): NavEntry[] {
         },
       ],
     },
-    // Added after extraction: operational cases (plan section 2.7).
+    // Added after extraction: operational cases (plan section 2.7) and one item per
+    // operational area (plan 7.1).
     {
       title: 'Operaciones',
       items: [
+        {
+          href: '/app/areas/ventas/dashboard',
+          label: 'Ventas',
+          icon: ShoppingCart,
+          visible:
+            user.permissionKeys.includes('crm.view') ||
+            user.permissionKeys.includes('sales_orders.view') ||
+            user.permissionKeys.includes('operations.admin') ||
+            user.isSuperAdmin,
+        },
+        {
+          href: '/app/areas/compras/dashboard',
+          label: 'Compras',
+          icon: ShoppingBag,
+          visible:
+            user.permissionKeys.includes('purchases.view') ||
+            user.permissionKeys.includes('operations.admin') ||
+            user.isSuperAdmin,
+        },
+        {
+          href: '/app/areas/inventario/dashboard',
+          label: 'Inventario',
+          icon: Boxes,
+          visible:
+            user.permissionKeys.includes('inventory.view') ||
+            user.permissionKeys.includes('operations.admin') ||
+            user.isSuperAdmin,
+        },
+        {
+          href: '/app/areas/manufactura/dashboard',
+          label: 'Manufactura',
+          icon: Factory,
+          visible:
+            user.permissionKeys.includes('manufacturing.view') ||
+            user.permissionKeys.includes('operations.admin') ||
+            user.isSuperAdmin,
+        },
+        {
+          href: '/app/areas/logistica/dashboard',
+          label: 'Logística',
+          icon: Truck,
+          visible:
+            user.permissionKeys.includes('logistics.view') ||
+            user.permissionKeys.includes('operations.admin') ||
+            user.isSuperAdmin,
+        },
+        {
+          href: '/app/areas/contabilidad/dashboard',
+          label: 'Contabilidad',
+          icon: Wallet,
+          visible:
+            user.permissionKeys.includes('finance.view') ||
+            user.permissionKeys.includes('operations.admin') ||
+            user.isSuperAdmin,
+        },
         {
           href: '/app/operations',
           label: 'Expedientes',
@@ -433,6 +723,13 @@ function legacySections(user: CurrentUser): NavEntry[] {
     {
       title: 'Administración',
       items: [
+        // Added after extraction: Control Tower (plan 7.1).
+        {
+          href: '/app/admin/control-tower',
+          label: 'Control Tower',
+          icon: Gauge,
+          visible: user.permissionKeys.includes('operations.admin') || user.isSuperAdmin,
+        },
         {
           href: '/app/admin/access',
           label: 'Usuarios y permisos',
@@ -551,6 +848,13 @@ function makeUser(permissionKeys: PermissionKey[], isSuperAdmin = false): Curren
 const NAV_PERMISSION_KEYS: PermissionKey[] = [
   'assistant.use',
   'operations.view',
+  'operations.admin',
+  'crm.view',
+  'purchases.view',
+  'inventory.view',
+  'manufacturing.view',
+  'logistics.view',
+  'finance.view',
   'chat.use',
   'inbox.use',
   'campaigns.view',
@@ -734,8 +1038,8 @@ describe('buildNavSections', () => {
     );
   });
 
-  it('super admin ve las 31 entradas', () => {
-    expect(NAV_HREFS).toHaveLength(31);
+  it('super admin ve las 38 entradas', () => {
+    expect(NAV_HREFS).toHaveLength(38);
     expect(renderedHrefs(buildNavSections(ALL_KEYS_NOT_ADMIN))).toStrictEqual(NAV_HREFS);
   });
 
@@ -899,5 +1203,93 @@ describe('isFlushRoute', () => {
     expect(isFlushRoute('/app/admin/chat')).toBe(false);
     expect(isFlushRoute('/app/quotes')).toBe(false);
     expect(isFlushRoute('/app')).toBe(false);
+  });
+
+  it('los espacios de área full-bleed excluyen sus APIs', () => {
+    expect(isFlushRoute('/app/areas/compras/trabajo')).toBe(true);
+    expect(isFlushRoute('/app/areas/compras/trabajo/api')).toBe(false);
+    expect(isFlushRoute('/app/areas/compras/dashboard')).toBe(false);
+    expect(isFlushRoute('/app/areas/logistica/despacho')).toBe(true);
+    expect(isFlushRoute('/app/areas/ventas/radar')).toBe(false);
+  });
+});
+
+describe('áreas: navegación y registro no se separan', () => {
+  it('la sección Operaciones lista las mismas áreas que el registro', () => {
+    expect(AREA_NAV.map((area) => area.key)).toStrictEqual(AREA_LIST.map((area) => area.key));
+    expect(AREA_NAV.map((area) => area.label)).toStrictEqual(AREA_LIST.map((area) => area.label));
+    const operations = NAV_CONFIG.find(
+      (entry) => entry.kind !== 'group' && entry.title === 'Operaciones'
+    ) as { items: readonly { href: string }[] };
+    expect(operations.items.map((item) => item.href)).toStrictEqual([
+      ...AREA_LIST.map((area) => areaHref(area.key)),
+      '/app/operations',
+    ]);
+  });
+
+  it('cada área muestra en el menú los permisos que abren su espacio', () => {
+    for (const area of AREA_LIST) {
+      const entry = AREA_NAV.find((candidate) => candidate.key === area.key);
+      expect([...(entry?.anyOf ?? [])], area.key).toStrictEqual(areaViewPermissions(area));
+    }
+  });
+
+  it('los espacios y las migas coinciden con el registro de áreas', () => {
+    for (const area of AREA_LIST) {
+      const entry = AREA_NAV.find((candidate) => candidate.key === area.key);
+      const spaces = areaSpaces(area);
+      expect(
+        entry?.spaces.map((space) => space.slug),
+        area.key
+      ).toStrictEqual(spaces.map((space) => space.slug));
+      expect(
+        entry?.spaces.map((space) => space.label),
+        area.key
+      ).toStrictEqual(spaces.map((space) => space.label));
+      for (const space of spaces) {
+        expect(buildBreadcrumbs(areaHref(area.key, space.slug))).toStrictEqual([
+          { label: 'Operaciones' },
+          { label: area.label, href: areaHref(area.key) },
+          { label: space.label },
+        ]);
+      }
+    }
+  });
+
+  it('las rutas full-bleed son exactamente las que marca el registro', () => {
+    const fromNav = AREA_NAV.flatMap((area) =>
+      area.spaces
+        .filter((space) => space.flush)
+        .map((space) => `/app/areas/${area.key}/${space.slug}`)
+    );
+    expect(fromNav.sort()).toStrictEqual([...flushAreaRoutes()].sort());
+    for (const route of flushAreaRoutes()) expect(isFlushRoute(route), route).toBe(true);
+  });
+
+  it('el detalle de un espacio agrega la miga Detalle', () => {
+    expect(buildBreadcrumbs('/app/areas/compras/ordenes/oc-1')).toStrictEqual([
+      { label: 'Operaciones' },
+      { label: 'Compras', href: '/app/areas/compras/dashboard' },
+      { label: 'Órdenes de compra', href: '/app/areas/compras/ordenes' },
+      { label: 'Detalle' },
+    ]);
+    expect(buildBreadcrumbs('/app/areas/compras')).toStrictEqual([
+      { label: 'Operaciones' },
+      { label: 'Compras' },
+    ]);
+    expect(buildBreadcrumbs('/app/areas/inexistente/dashboard')).toStrictEqual([]);
+  });
+
+  it('Control Tower vive en Administración con operations.admin', () => {
+    expect(buildBreadcrumbs('/app/admin/control-tower/personas')).toStrictEqual([
+      { label: 'Administración' },
+      { label: 'Control Tower', href: '/app/admin/control-tower/resumen' },
+      { label: 'Personas' },
+    ]);
+    const admin = NAV_CONFIG.find(
+      (entry) => entry.kind !== 'group' && entry.title === 'Administración'
+    ) as { items: readonly { href: string; anyOf?: readonly string[] }[] };
+    const item = admin.items.find((candidate) => candidate.href === '/app/admin/control-tower');
+    expect(item?.anyOf).toStrictEqual(['operations.admin']);
   });
 });

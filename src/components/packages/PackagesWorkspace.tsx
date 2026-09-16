@@ -18,7 +18,7 @@ import {
 } from '@/modules/packages/packages-helpers';
 import { getSalesOrderStatusConfig } from '@/modules/sales/sales-orders-helpers';
 import { PackagePreviewDrawer } from './PackagePreviewDrawer';
-import { CurrentUser } from '@/modules/auth/authorization';
+import type { CurrentUser } from '@/modules/auth/authorization';
 import type {
   EntityColumnDefinition,
   EntityListResult,

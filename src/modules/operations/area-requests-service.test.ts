@@ -463,6 +463,23 @@ describe('decisions of the destination area', () => {
     });
   });
 
+  /**
+   * Plan 7.7: la Torre se abre con `operations.admin` y su espacio `excepciones`
+   * ofrece responder y rechazar una solicitud vencida.
+   */
+  it('lets operations.admin decide: it is the key the Control Tower is gated with', async () => {
+    const opsAdmin = seedUser(fake, {
+      id: 'opsAdmin',
+      permissions: ['operations.admin'],
+    }).currentUser;
+    const { requestId } = await createRequest();
+    expect((await act(opsAdmin, 'accept', requestId)).status).toBe('completed');
+    expect(
+      (await act(opsAdmin, 'resolve', requestId, { answer: 'Hay 12 cajas en el rack A-3' })).status
+    ).toBe('completed');
+    expect(requestRow(requestId).status).toBe('resolved');
+  });
+
   it('lets the requester or a system actor cancel, but not outsiders', async () => {
     const first = await createRequest();
     expect(await act(users.stranger, 'cancel', first.requestId, { reason: 'Ya no' })).toMatchObject(

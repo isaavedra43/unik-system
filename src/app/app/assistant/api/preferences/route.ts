@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentSession, hasPermission } from '@/modules/auth/authorization';
+import { AREA_LIST, areaViewPermissions, holdsAny } from '@/modules/areas/area-registry';
 import {
   getPreferences,
   preferencesPatchSchema,
@@ -21,7 +22,8 @@ export async function GET() {
       mywork: true,
       case: true,
       controlTower: hasPermission(session.user, 'operations.admin'),
-      area: false,
+      // At least one area workspace is open to this person (`/app/areas/<key>/trabajo`).
+      area: AREA_LIST.some((area) => holdsAny(session.user, areaViewPermissions(area))),
     },
   });
 }

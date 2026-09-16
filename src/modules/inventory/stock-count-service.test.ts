@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CurrentUser } from '@/modules/auth/authorization';
 
@@ -26,6 +27,7 @@ vi.mock('@/modules/realtime/realtime-service', () => ({
 }));
 vi.mock('./inventory-locks', () => mocks.locks.module);
 
+import { approverPermissionsFor, decideApproval } from '@/modules/operations/approvals-service';
 import { invalidateOperationsConfigCache } from '@/modules/operations/operations-config';
 import { seedArea, seedResponsible, seedUser } from '@/modules/operations/testing/fixtures';
 import {
@@ -387,6 +389,158 @@ describe('conteos', () => {
     expect(await startStockCount(viewer, { warehouseId }, { now: NOW })).toMatchObject({
       status: 'rejected',
       errorCode: 'forbidden',
+    });
+  });
+
+  /**
+   * Alcance `inventory_adjustment` del plan 6.0. Con la política por omisión
+   * (una firma) decide quien tiene `inventory.adjust` y el ajuste se aplica en
+   * el acto — es lo que comprueban las pruebas de arriba. Una política que pide
+   * DOS firmas es otra promesa: abre la aprobación de negocio, deja la línea
+   * pendiente y sólo la firma aplica el ajuste.
+   */
+  describe('aprobación de negocio del ajuste (inventory_adjustment)', () => {
+    async function pendingLine(): Promise<{ lineId: string; row: ReturnType<typeof seeded> }> {
+      const row = seeded('PROVISIONAL', 100, 1);
+      const countId = await openCount(counter);
+      await recordStockCountLine(
+        counter,
+        { countId, stockItemId: row.id, countedQty: 99 },
+        { now: NOW }
+      );
+      await closeStockCount(counter, { countId }, { now: NOW });
+      return { lineId: fake.rows('stockCountLine')[0].id, row };
+    }
+
+    function doubleSignaturePolicy() {
+      fake.seed('approvalPolicy', {
+        id: 'pol-inv',
+        scope: 'inventory_adjustment',
+        minAmount: new Prisma.Decimal(0),
+        maxAmount: null,
+        currency: 'MXN',
+        requiredApprovals: 2,
+        approverRoleKeys: [],
+        active: true,
+      });
+    }
+
+    it('con dos firmas: abre la aprobación, la línea sigue pendiente y la firma aplica el ajuste', async () => {
+      doubleSignaturePolicy();
+      const firmante1 = seedUser(fake, { id: 'firmante1', permissions: ALL }).currentUser;
+      const firmante2 = seedUser(fake, { id: 'firmante2', permissions: ALL }).currentUser;
+      const { lineId, row } = await pendingLine();
+
+      const asked = await decideStockCountAdjustment(
+        manager,
+        { lineId, decision: 'approve' },
+        { now: NOW }
+      );
+      expect(asked.status).toBe('completed');
+      expect(asked.data).toMatchObject({
+        awaitingApproval: true,
+        movementId: null,
+        noApprovers: false,
+      });
+      // Nada se movió todavía: el libro sigue igual y la línea sigue pendiente.
+      expect(row.knownQty.toString()).toBe('100');
+      expect(fake.rows('stockCountLine')[0].resolution).toBe('pending');
+      expect(events('stock.adjustment_approval_requested')).toHaveLength(1);
+
+      const request = fake.rows('approvalRequest')[0];
+      expect(request).toMatchObject({
+        scope: 'inventory_adjustment',
+        targetType: 'stock_count_line',
+        targetId: lineId,
+        requiredApprovals: 2,
+        status: 'pending',
+      });
+      // Quien pidió el ajuste no puede firmarlo.
+      expect(
+        fake
+          .rows('workItem')
+          .filter((item) => item.kind === 'approval' && item.objectId === request.id)
+          .map((item) => item.ownerUserId)
+          .sort()
+      ).toEqual(['firmante1', 'firmante2']);
+
+      const first = await decideApproval(
+        firmante1,
+        { approvalRequestId: request.id, decision: 'approve' },
+        { now: NOW }
+      );
+      expect(first.status).toBe('completed');
+      expect(fake.rows('stockCountLine')[0].resolution).toBe('pending');
+
+      const second = await decideApproval(
+        firmante2,
+        { approvalRequestId: request.id, decision: 'approve' },
+        { now: NOW }
+      );
+      expect(second.status).toBe('completed');
+      expect(fake.rows('approvalRequest')[0].status).toBe('approved');
+      // La firma aplicó el ajuste: libro, línea y evento.
+      expect(row.knownQty.toString()).toBe('99');
+      expect(fake.rows('stockCountLine')[0].resolution).toBe('adjusted');
+      expect(events('stock.adjustment_decided')).toHaveLength(1);
+    });
+
+    it('rechazar la aprobación conserva el saldo en libros', async () => {
+      doubleSignaturePolicy();
+      const firmante1 = seedUser(fake, { id: 'firmante1', permissions: ALL }).currentUser;
+      seedUser(fake, { id: 'firmante2', permissions: ALL });
+      const { lineId, row } = await pendingLine();
+      await decideStockCountAdjustment(manager, { lineId, decision: 'approve' }, { now: NOW });
+      const request = fake.rows('approvalRequest')[0];
+
+      const rejected = await decideApproval(
+        firmante1,
+        { approvalRequestId: request.id, decision: 'reject', note: 'Hay que recontar' },
+        { now: NOW }
+      );
+      expect(rejected.status).toBe('completed');
+      expect(fake.rows('approvalRequest')[0].status).toBe('rejected');
+      expect(row.knownQty.toString()).toBe('100');
+      expect(fake.rows('stockCountLine')[0].resolution).toBe('accepted');
+    });
+
+    it('si nadie más puede firmar, el ajuste NO se aplica por la puerta de atrás', async () => {
+      doubleSignaturePolicy();
+      const { lineId, row } = await pendingLine();
+      const asked = await decideStockCountAdjustment(
+        manager,
+        { lineId, decision: 'approve' },
+        { now: NOW }
+      );
+      expect(asked.status).toBe('completed');
+      expect(asked.data).toMatchObject({
+        awaitingApproval: true,
+        noApprovers: true,
+        approvalRequestId: null,
+      });
+      expect(row.knownQty.toString()).toBe('100');
+      expect(fake.rows('stockCountLine')[0].resolution).toBe('pending');
+      expect(fake.rows('approvalRequest')).toHaveLength(0);
+    });
+
+    it('rechazar la diferencia (conservar el libro) nunca pide firma', async () => {
+      doubleSignaturePolicy();
+      const { lineId, row } = await pendingLine();
+      const kept = await decideStockCountAdjustment(
+        manager,
+        { lineId, decision: 'reject' },
+        { now: NOW }
+      );
+      expect(kept.status).toBe('completed');
+      expect(kept.data).toMatchObject({ awaitingApproval: false, movementId: null });
+      expect(row.knownQty.toString()).toBe('100');
+      expect(fake.rows('stockCountLine')[0].resolution).toBe('accepted');
+      expect(fake.rows('approvalRequest')).toHaveLength(0);
+    });
+
+    it('quien puede ajustar es aprobador elegible del alcance, no sólo operations.admin', () => {
+      expect(approverPermissionsFor('inventory_adjustment')).toContain('inventory.adjust');
+      expect(approverPermissionsFor('inventory_adjustment')).toContain('operations.admin');
     });
   });
 });

@@ -21,7 +21,7 @@ import {
   getProductStatusOptions,
 } from '@/modules/products/products-helpers';
 import { ProductPreviewDrawer } from './ProductPreviewDrawer';
-import { CurrentUser } from '@/modules/auth/authorization';
+import type { CurrentUser } from '@/modules/auth/authorization';
 import type {
   EntityColumnDefinition,
   EntityListResult,

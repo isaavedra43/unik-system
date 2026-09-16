@@ -1,10 +1,15 @@
 import { Prisma, type SourcingCandidate } from '@prisma/client';
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
+import { sourcingLabLink } from '@/modules/areas/area-links';
 import { loadActiveCurrentUser } from '@/modules/auth/authorization';
 import { isHostAllowed } from '@/modules/extensions/safe-fetch';
 import { JOB_PRIORITY, type JobContext } from '@/modules/jobs/job-queue';
-import { executeCommand, type CommandContext, type CommandResult } from '@/modules/operations/commands';
+import {
+  executeCommand,
+  type CommandContext,
+  type CommandResult,
+} from '@/modules/operations/commands';
 import { OperationsError } from '@/modules/operations/errors';
 import { publishRealtime } from '@/modules/realtime/realtime-service';
 import { parseEvidence, parsePriceSnippets } from './purchases-dto';
@@ -94,7 +99,12 @@ export const sourcingSearchSchema = z.object({
   filters: z
     .object({
       maxResults: z.number().int().min(1).max(20).optional(),
-      country: z.string().trim().toUpperCase().regex(/^[A-Z]{2}$/).optional(),
+      country: z
+        .string()
+        .trim()
+        .toUpperCase()
+        .regex(/^[A-Z]{2}$/)
+        .optional(),
     })
     .strict()
     .default({}),
@@ -103,7 +113,12 @@ export const sourcingSearchSchema = z.object({
 });
 export type SourcingSearchInput = z.output<typeof sourcingSearchSchema>;
 
-const nullableString = (max: number) => z.string().max(max).nullish().transform((v) => v ?? null);
+const nullableString = (max: number) =>
+  z
+    .string()
+    .max(max)
+    .nullish()
+    .transform((v) => v ?? null);
 
 export const candidateDraftSchema = z.object({
   name: z.string().trim().min(1).max(200),
@@ -167,26 +182,49 @@ export interface SourcingSearchData {
   remainingBudget: number;
 }
 
-export async function requestSourcingSearchInTx(tx: Db, input: SourcingSearchInput, ctx: CommandContext): Promise<SourcingSearchData> {
+export async function requestSourcingSearchInTx(
+  tx: Db,
+  input: SourcingSearchInput,
+  ctx: CommandContext
+): Promise<SourcingSearchData> {
   const config = await loadSourcingConfig(tx);
-  if (!config.isEnabled) throw new OperationsError('module_disabled', 'El laboratorio de sourcing está desactivado');
+  if (!config.isEnabled)
+    throw new OperationsError('module_disabled', 'El laboratorio de sourcing está desactivado');
   const query = normalizeSourcingQuery(input.query);
   const urls = [...new Set(input.urls)];
   if (input.providerKey === 'catalog_page') {
-    if (urls.length === 0) throw new OperationsError('invalid_payload', 'Indica las páginas de catálogo que se van a revisar');
+    if (urls.length === 0)
+      throw new OperationsError(
+        'invalid_payload',
+        'Indica las páginas de catálogo que se van a revisar'
+      );
     for (const url of urls) {
       const host = new URL(url).hostname.toLowerCase();
       if (!isHostAllowed(host, config.allowedHosts)) {
-        throw new OperationsError('forbidden', `El sitio ${host} no está autorizado en el laboratorio de sourcing`);
+        throw new OperationsError(
+          'forbidden',
+          `El sitio ${host} no está autorizado en el laboratorio de sourcing`
+        );
       }
     }
   }
   const filters = { ...input.filters, ...(urls.length > 0 ? { urls } : {}) };
-  const queryHash = sourcingQueryHash({ providerKey: input.providerKey, query, urls, filters: input.filters });
+  const queryHash = sourcingQueryHash({
+    providerKey: input.providerKey,
+    query,
+    urls,
+    filters: input.filters,
+  });
   const usedToday = await sourcingUnitsUsed(tx, ctx.now);
   const remaining = budgetCheck(usedToday, 0, config.dailyBudgetUnits).remaining;
   const existing = await tx.sourcingSearch.findUnique({ where: { queryHash } });
-  if (existing && existing.status === 'done' && existing.expiresAt && existing.expiresAt.getTime() > ctx.now.getTime() && !input.refresh) {
+  if (
+    existing &&
+    existing.status === 'done' &&
+    existing.expiresAt &&
+    existing.expiresAt.getTime() > ctx.now.getTime() &&
+    !input.refresh
+  ) {
     return {
       searchId: existing.id,
       cached: true,
@@ -197,7 +235,11 @@ export async function requestSourcingSearchInTx(tx: Db, input: SourcingSearchInp
       remainingBudget: remaining,
     };
   }
-  if (existing && existing.status === 'pending' && ctx.now.getTime() - existing.updatedAt.getTime() < PENDING_STALE_MS) {
+  if (
+    existing &&
+    existing.status === 'pending' &&
+    ctx.now.getTime() - existing.updatedAt.getTime() < PENDING_STALE_MS
+  ) {
     return {
       searchId: existing.id,
       cached: false,
@@ -211,7 +253,14 @@ export async function requestSourcingSearchInTx(tx: Db, input: SourcingSearchInp
   const cost = estimateSearchCost(input.providerKey, urls.length);
   const budget = budgetCheck(usedToday, cost, config.dailyBudgetUnits);
   // The estimate (the most the provider can spend) is reserved atomically: concurrent searches never pass the day's budget.
-  if (!budget.ok || !(await reserveSourcingUnits(tx, { units: cost, dailyBudget: config.dailyBudgetUnits, at: ctx.now }))) {
+  if (
+    !budget.ok ||
+    !(await reserveSourcingUnits(tx, {
+      units: cost,
+      dailyBudget: config.dailyBudgetUnits,
+      at: ctx.now,
+    }))
+  ) {
     throw new OperationsError(
       'budget_exhausted',
       `Se agotó el presupuesto diario del laboratorio (${config.dailyBudgetUnits} unidades, quedan ${budget.remaining}); intenta mañana`,
@@ -221,7 +270,14 @@ export async function requestSourcingSearchInTx(tx: Db, input: SourcingSearchInp
   const search = existing
     ? await tx.sourcingSearch.update({
         where: { id: existing.id },
-        data: { status: 'pending', error: null, queryText: query, filters: filters as Prisma.InputJsonValue, executedAt: null, expiresAt: null },
+        data: {
+          status: 'pending',
+          error: null,
+          queryText: query,
+          filters: filters as Prisma.InputJsonValue,
+          executedAt: null,
+          expiresAt: null,
+        },
       })
     : await tx.sourcingSearch.create({
         data: {
@@ -235,7 +291,8 @@ export async function requestSourcingSearchInTx(tx: Db, input: SourcingSearchInp
       });
   ctx.outbox({
     type: PURCHASES_JOB_TYPES.sourcingSearch,
-    payload: { searchId: search.id },
+    // The day the units were reserved travels with the job: it is what the job releases and charges against.
+    payload: { searchId: search.id, reservedDay: sourcingDay(ctx.now) },
     dedupeKey: `${PURCHASES_JOB_TYPES.sourcingSearch}:${search.id}`,
     groupKey: 'purchases:sourcing',
     priority: JOB_PRIORITY.interactive,
@@ -245,7 +302,14 @@ export async function requestSourcingSearchInTx(tx: Db, input: SourcingSearchInp
   emitPurchases(
     ctx,
     EV.requested,
-    { searchId: search.id, query, providerKey: input.providerKey, urls: urls.length, estimatedCostUnits: cost, refresh: input.refresh },
+    {
+      searchId: search.id,
+      query,
+      providerKey: input.providerKey,
+      urls: urls.length,
+      estimatedCostUnits: cost,
+      refresh: input.refresh,
+    },
     { objectType: OBJ.search, objectId: search.id }
   );
   publishBoard(ctx, { searchId: search.id });
@@ -268,23 +332,36 @@ export async function runSourcingSearchJob(
   job: JobContext<unknown>,
   options: { now?: Date } = {}
 ): Promise<Record<string, unknown>> {
-  const payload = z.object({ searchId: idText }).safeParse(job.payload);
+  const payload = z
+    .object({ searchId: idText, reservedDay: z.string().optional() })
+    .safeParse(job.payload);
   if (!payload.success) return { skipped: 'invalid_payload' };
   const search = await prisma.sourcingSearch.findUnique({ where: { id: payload.data.searchId } });
   if (!search) return { skipped: 'not_found' };
   if (search.status !== 'pending') return { skipped: `status_${search.status}` };
   const config = await getSourcingConfig();
-  const actor = search.createdByUserId.includes(':') ? null : await loadActiveCurrentUser(search.createdByUserId);
+  const actor = search.createdByUserId.includes(':')
+    ? null
+    : await loadActiveCurrentUser(search.createdByUserId);
   const now = options.now ?? new Date();
   const filtersForCost = asRecord(search.filters);
   const estimate = estimateSearchCost(
     search.providerKey as SourcingProviderKey,
     Array.isArray(filtersForCost.urls) ? filtersForCost.urls.length : 0
   );
-  // The first attempt spends what the command reserved; a retry reserves again before spending anything.
-  let reservedDay = sourcingDay(search.updatedAt);
+  // The first attempt settles the reservation the command made: it must release and charge against the
+  // day that was RESERVED (carried in the payload), not the day the provider happened to finish, or a
+  // search that crosses UTC midnight never gives its units back. Jobs queued before this field existed
+  // fall back to the row's last write, which is when the command reserved.
+  let reservedDay = payload.data.reservedDay ?? sourcingDay(search.updatedAt);
   if (job.attempt > 1) {
-    if (!(await reserveSourcingUnits(prisma, { units: estimate, dailyBudget: config.dailyBudgetUnits, at: now }))) {
+    if (
+      !(await reserveSourcingUnits(prisma, {
+        units: estimate,
+        dailyBudget: config.dailyBudgetUnits,
+        at: now,
+      }))
+    ) {
       const result = await recordSourcingResults(
         {
           searchId: search.id,
@@ -302,7 +379,11 @@ export async function runSourcingSearchJob(
   }
   const progress = async (percent: number, stage: string) => {
     await job.setProgress(percent);
-    await publishRealtime(`job:${job.id}`, 'purchases.sourcing.progress', { searchId: search.id, percent, stage }).catch(() => undefined);
+    await publishRealtime(`job:${job.id}`, 'purchases.sourcing.progress', {
+      searchId: search.id,
+      percent,
+      stage,
+    }).catch(() => undefined);
   };
   await progress(5, `Buscando con ${labelOf(SOURCING_PROVIDER_LABELS, search.providerKey)}`);
   const filters = asRecord(search.filters);
@@ -316,7 +397,11 @@ export async function runSourcingSearchJob(
   };
   const outcome =
     search.providerKey === 'catalog_page'
-      ? await runCatalogPages(search.queryText, Array.isArray(filters.urls) ? filters.urls.map(String) : [], context)
+      ? await runCatalogPages(
+          search.queryText,
+          Array.isArray(filters.urls) ? filters.urls.map(String) : [],
+          context
+        )
       : await runBraveSearch(
           search.queryText,
           {
@@ -339,14 +424,26 @@ export async function runSourcingSearchJob(
   );
   try {
     await releaseSourcingUnits(prisma, { units: estimate - outcome.costUnits, day: reservedDay });
-    await chargeSourcingUnits(outcome.costUnits - estimate);
-    await countSourcingSearch(search.providerKey);
+    await chargeSourcingUnits(outcome.costUnits - estimate, reservedDay);
+    await countSourcingSearch(search.providerKey, reservedDay);
   } catch (err) {
-    log('spend_record_failed', { searchId: search.id, message: err instanceof Error ? err.message : String(err) });
+    log('spend_record_failed', {
+      searchId: search.id,
+      message: err instanceof Error ? err.message : String(err),
+    });
   }
-  await progress(100, outcome.error && outcome.candidates.length === 0 ? 'Sin resultados' : 'Listo');
-  if (result.status === 'rejected') throw new Error(result.message ?? 'No se pudieron guardar los resultados');
-  return { status: result.status, candidates: outcome.candidates.length, costUnits: outcome.costUnits, error: outcome.error };
+  await progress(
+    100,
+    outcome.error && outcome.candidates.length === 0 ? 'Sin resultados' : 'Listo'
+  );
+  if (result.status === 'rejected')
+    throw new Error(result.message ?? 'No se pudieron guardar los resultados');
+  return {
+    status: result.status,
+    candidates: outcome.candidates.length,
+    costUnits: outcome.costUnits,
+    error: outcome.error,
+  };
 }
 
 export async function recordSourcingResults(
@@ -401,13 +498,30 @@ export async function recordSourcingResultsInTx(
   input: z.output<typeof recordSourcingResultsSchema>,
   ctx: CommandContext
 ): Promise<RecordSourcingResultsData> {
-  const search = assertFoundRow(await tx.sourcingSearch.findUnique({ where: { id: input.searchId } }), 'No se encontró la búsqueda');
+  const search = assertFoundRow(
+    await tx.sourcingSearch.findUnique({ where: { id: input.searchId } }),
+    'No se encontró la búsqueda'
+  );
   const config = await loadSourcingConfig(tx);
   const drafts: CandidateDraft[] = input.candidates;
   const keys = [...new Set(drafts.map((d) => candidateDedupeKey(d)))];
-  const domains = [...new Set(drafts.map((d) => extractDomain(d.domain) ?? extractDomain(d.url)).filter((d): d is string => Boolean(d)))];
-  const phones = [...new Set(drafts.map((d) => normalizePhone(d.phone)).filter((p): p is string => Boolean(p)))];
-  const words = [...new Set(drafts.map((d) => normalizeCompanyName(d.name).split(' ')[0]).filter((w) => w && w.length >= 3))].slice(0, 50);
+  const domains = [
+    ...new Set(
+      drafts
+        .map((d) => extractDomain(d.domain) ?? extractDomain(d.url))
+        .filter((d): d is string => Boolean(d))
+    ),
+  ];
+  const phones = [
+    ...new Set(drafts.map((d) => normalizePhone(d.phone)).filter((p): p is string => Boolean(p))),
+  ];
+  const words = [
+    ...new Set(
+      drafts
+        .map((d) => normalizeCompanyName(d.name).split(' ')[0])
+        .filter((w) => w && w.length >= 3)
+    ),
+  ].slice(0, 50);
 
   const candidateWhere: Prisma.SourcingCandidateWhereInput[] = [];
   if (keys.length) candidateWhere.push({ dedupeKey: { in: keys } });
@@ -417,7 +531,12 @@ export async function recordSourcingResultsInTx(
     ? await tx.sourcingCandidate.findMany({ where: { OR: candidateWhere }, take: 500 })
     : [];
 
-  const identityWhere = (fields: { name: string; website: string; phone: string; email: string }) => {
+  const identityWhere = (fields: {
+    name: string;
+    website: string;
+    phone: string;
+    email: string;
+  }) => {
     const or: Record<string, unknown>[] = [];
     for (const word of words) or.push({ [fields.name]: { contains: word, mode: 'insensitive' } });
     for (const domain of domains) {
@@ -427,16 +546,37 @@ export async function recordSourcingResultsInTx(
     for (const phone of phones) or.push({ [fields.phone]: { contains: phone.slice(-8) } });
     return or;
   };
-  const supplierOr = identityWhere({ name: 'name', website: 'website', phone: 'primaryPhone', email: 'primaryEmail' });
+  const supplierOr = identityWhere({
+    name: 'name',
+    website: 'website',
+    phone: 'primaryPhone',
+    email: 'primaryEmail',
+  });
   const suppliers = supplierOr.length
-    ? await tx.supplier.findMany({ where: { OR: supplierOr as Prisma.SupplierWhereInput[] }, take: 500 })
+    ? await tx.supplier.findMany({
+        where: { OR: supplierOr as Prisma.SupplierWhereInput[] },
+        take: 500,
+      })
     : [];
-  const vendorOr = identityWhere({ name: 'companyName', website: 'website', phone: 'primaryPhone', email: 'primaryEmail' });
+  const vendorOr = identityWhere({
+    name: 'companyName',
+    website: 'website',
+    phone: 'primaryPhone',
+    email: 'primaryEmail',
+  });
   const vendors = vendorOr.length
     ? await tx.contact.findMany({
         where: { contactType: 'vendor', OR: vendorOr as Prisma.ContactWhereInput[] },
         take: 500,
-        select: { zohoContactId: true, contactName: true, companyName: true, website: true, primaryPhone: true, mobile: true, primaryEmail: true },
+        select: {
+          zohoContactId: true,
+          contactName: true,
+          companyName: true,
+          website: true,
+          primaryPhone: true,
+          mobile: true,
+          primaryEmail: true,
+        },
       })
     : [];
   const supplierRefs = suppliers.map((s) => ({ ...s, channels: parseChannels(s.channels) }));
@@ -450,7 +590,9 @@ export async function recordSourcingResultsInTx(
     const vendorMatch = supplierMatch ? null : matchVendorContact(draft, vendors);
     const supplierId =
       supplierMatch?.supplierId ??
-      (vendorMatch ? (suppliers.find((s) => s.zohoContactId === vendorMatch.zohoContactId)?.id ?? null) : null);
+      (vendorMatch
+        ? (suppliers.find((s) => s.zohoContactId === vendorMatch.zohoContactId)?.id ?? null)
+        : null);
     if (supplierId) knownSuppliers += 1;
     const match = findMatchingCandidate(draft, existing);
     const target = match ? mergeCandidateDrafts(draftFromRow(match), draft) : draft;
@@ -526,7 +668,17 @@ export async function recordSourcingResultsInTx(
   emitPurchases(
     ctx,
     failed ? EV.failed : EV.completed,
-    { searchId: search.id, query: search.queryText, status, candidates: unique.length, created, merged, knownSuppliers, costUnits: input.costUnits, error: input.error ?? null },
+    {
+      searchId: search.id,
+      query: search.queryText,
+      status,
+      candidates: unique.length,
+      created,
+      merged,
+      knownSuppliers,
+      costUnits: input.costUnits,
+      error: input.error ?? null,
+    },
     { objectType: OBJ.search, objectId: search.id }
   );
   if (!search.createdByUserId.includes(':')) {
@@ -534,9 +686,13 @@ export async function recordSourcingResultsInTx(
       userId: search.createdByUserId,
       category: purchaseNotificationCategory(),
       type: failed ? 'purchase_sourcing_failed' : 'purchase_sourcing_done',
-      title: failed ? `No se pudo buscar "${truncate(search.queryText, 60)}"` : `Búsqueda lista: "${truncate(search.queryText, 60)}"`,
-      body: failed ? (input.error ?? null) : `${unique.length} candidato(s)${knownSuppliers ? `, ${knownSuppliers} ya son proveedores` : ''}`,
-      url: `/app/purchases/sourcing?search=${search.id}`,
+      title: failed
+        ? `No se pudo buscar "${truncate(search.queryText, 60)}"`
+        : `Búsqueda lista: "${truncate(search.queryText, 60)}"`,
+      body: failed
+        ? (input.error ?? null)
+        : `${unique.length} candidato(s)${knownSuppliers ? `, ${knownSuppliers} ya son proveedores` : ''}`,
+      url: sourcingLabLink(search.id),
       entityType: OBJ.search,
       entityId: search.id,
     });
@@ -550,15 +706,26 @@ export async function setCandidateStatusInTx(
   input: z.output<typeof candidateStatusSchema>,
   ctx: CommandContext
 ): Promise<SourcingCandidate> {
-  const candidate = assertFoundRow(await tx.sourcingCandidate.findUnique({ where: { id: input.candidateId } }), 'No se encontró el candidato');
+  const candidate = assertFoundRow(
+    await tx.sourcingCandidate.findUnique({ where: { id: input.candidateId } }),
+    'No se encontró el candidato'
+  );
   if (candidate.status === 'promoted') {
     throw new OperationsError('invalid_state', 'El candidato ya es proveedor');
   }
-  const updated = await tx.sourcingCandidate.update({ where: { id: candidate.id }, data: { status: input.status } });
+  const updated = await tx.sourcingCandidate.update({
+    where: { id: candidate.id },
+    data: { status: input.status },
+  });
   emitPurchases(
     ctx,
     EV.candidateUpdated,
-    { candidateId: candidate.id, status: input.status, previousStatus: candidate.status, note: input.note ?? null },
+    {
+      candidateId: candidate.id,
+      status: input.status,
+      previousStatus: candidate.status,
+      note: input.note ?? null,
+    },
     { objectType: OBJ.candidate, objectId: candidate.id }
   );
   publishBoard(ctx, { candidateId: candidate.id });

@@ -24,6 +24,7 @@ vi.mock('@/modules/realtime/realtime-service', () => ({
   REALTIME_CHANNELS: { user: (id: string) => `user:${id}` },
 }));
 
+import { runWithApprovalFirstSignature } from './approval-first-signature';
 import {
   checkVote,
   decideApproval,
@@ -32,6 +33,7 @@ import {
   fallbackApprovalRule,
   listPendingApprovals,
   onApprovalDecided,
+  parseApprovalDecisions,
   requestApproval,
   selectApprovalPolicy,
   type ApprovalDecidedEvent,
@@ -462,5 +464,111 @@ describe('listPendingApprovals', () => {
         scopeLabel: 'Compra',
       }),
     ]);
+  });
+});
+
+/**
+ * Plan 5.4: «si quien aprueba la propuesta de IA cumple la política, esa decisión se registra
+ * también como primera firma de negocio para no pedir dos clics por lo mismo». La firma viaja
+ * por `runWithApprovalFirstSignature` desde `approveProposal`, no por los argumentos del módulo.
+ */
+describe('primera firma heredada de la propuesta de IA', () => {
+  const signature = { userId: 'a1', proposalId: 'prop-9', toolName: 'submitProcurementOrder' };
+
+  it('una sola firma cierra la solicitud que abrió su propio clic', async () => {
+    const result = await runWithApprovalFirstSignature(signature, () =>
+      ask({ amount: '12000', requestedByUserId: 'a1' })
+    );
+    expect(result.data).toMatchObject({
+      status: 'approved',
+      autoApproved: false,
+      firstSignatureByUserId: 'a1',
+      workItemIds: [],
+    });
+
+    const [request] = fake.rows('approvalRequest');
+    expect(request).toMatchObject({ status: 'approved', requiredApprovals: 1 });
+    expect(parseApprovalDecisions(request.decisions)).toMatchObject([
+      { userId: 'a1', decision: 'approve', note: expect.stringContaining('prop-9') },
+    ]);
+    expect(fake.rows('workItem')).toHaveLength(0);
+    // `auto` significa «decidida en la transacción que la pidió»: el módulo no vuelve a subir
+    // la versión de su agregado. `decidedByUserId` distingue la firma de la auto-aprobación.
+    expect(decided).toHaveLength(1);
+    expect(decided[0]).toMatchObject({ status: 'approved', auto: true, decidedByUserId: 'a1' });
+    expect(fake.rows('operationalEvent').map((e) => e.type)).toEqual([
+      'approval.requested',
+      'approval.voted',
+      'approval.approved',
+    ]);
+  });
+
+  it('con doble firma registra la primera y sólo pide la que falta a otra persona', async () => {
+    const result = await runWithApprovalFirstSignature(signature, () =>
+      ask({ amount: '60000', requestedByUserId: 'a1' })
+    );
+    expect(result.data).toMatchObject({ status: 'pending', firstSignatureByUserId: 'a1' });
+
+    const [request] = fake.rows('approvalRequest');
+    expect(request.requiredApprovals).toBe(2);
+    expect(parseApprovalDecisions(request.decisions).map((v) => v.userId)).toEqual(['a1']);
+    expect(fake.rows('workItem').map((i) => i.ownerUserId)).toEqual(['a2']);
+
+    const second = await decideApproval(
+      users.a2,
+      { approvalRequestId: request.id, decision: 'approve' },
+      { now: NOW }
+    );
+    expect(second.status).toBe('completed');
+    expect(second.data).toMatchObject({ status: 'approved', approvals: 2 });
+  });
+
+  it('sin la firma heredada la misma orden ni siquiera reúne aprobadores; con ella avanza', async () => {
+    const without = await ask({ targetId: 'po9', amount: '60000', requestedByUserId: 'a1' });
+    expect(without).toMatchObject({ status: 'rejected', errorCode: 'no_approvers' });
+
+    const withSignature = await runWithApprovalFirstSignature(signature, () =>
+      ask({ targetId: 'po9', amount: '60000', requestedByUserId: 'a1' })
+    );
+    expect(withSignature.data).toMatchObject({ status: 'pending', firstSignatureByUserId: 'a1' });
+  });
+
+  it('no la registra si quien decidió no cumple la política del alcance', async () => {
+    const result = await runWithApprovalFirstSignature({ ...signature, userId: 'viewer' }, () =>
+      ask({ amount: '12000', requestedByUserId: 'viewer' })
+    );
+    expect(result.data).toMatchObject({ status: 'pending', firstSignatureByUserId: null });
+    expect(parseApprovalDecisions(fake.rows('approvalRequest')[0].decisions)).toEqual([]);
+    expect(
+      fake
+        .rows('workItem')
+        .map((i) => i.ownerUserId)
+        .sort()
+    ).toEqual(['a1', 'a2']);
+  });
+
+  it('no la hereda una solicitud pedida por otra persona', async () => {
+    const result = await runWithApprovalFirstSignature(signature, () =>
+      ask({ amount: '12000', requestedByUserId: 'req' })
+    );
+    expect(result.data).toMatchObject({ status: 'pending', firstSignatureByUserId: null });
+  });
+
+  it('se consume una sola vez: una segunda aprobación del mismo clic ya no la hereda', async () => {
+    const both = await runWithApprovalFirstSignature(signature, async () => [
+      await ask({ targetId: 'po-a', amount: '12000', requestedByUserId: 'a1' }),
+      await ask({ targetId: 'po-b', amount: '12000', requestedByUserId: 'a1' }),
+    ]);
+    expect(both[0].data?.firstSignatureByUserId).toBe('a1');
+    expect(both[1].data?.firstSignatureByUserId).toBeNull();
+    expect(both[1].data?.status).toBe('pending');
+  });
+
+  it('fuera de una decisión de propuesta nada cambia: el solicitante sigue sin firmar lo suyo', async () => {
+    const result = await ask({ amount: '12000', requestedByUserId: 'a1' });
+    expect(result.data).toMatchObject({ status: 'pending', firstSignatureByUserId: null });
+    const [request] = fake.rows('approvalRequest');
+    expect(parseApprovalDecisions(request.decisions)).toEqual([]);
+    expect(await listPendingApprovals(users.a1, { now: NOW })).toEqual([]);
   });
 });

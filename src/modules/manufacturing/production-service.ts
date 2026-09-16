@@ -28,6 +28,7 @@ import {
   itemLabel,
   loadOperations,
   loadWorkCenter,
+  notifyProductionUpdate,
   num,
   openWorkItemsFor,
   orderEventOptions,
@@ -267,7 +268,13 @@ export interface ReleaseResult {
   blockers: ReleaseBlocker[];
   scrapApprovalRequestId: string | null;
   reservationId: string | null;
-  deliveryOrderId: string | null;
+  /**
+   * NO hay `deliveryOrderId`: liberar nunca crea la orden de entrega. Quien la
+   * planea es el motor de expedientes (`plan_delivery`), con TODAS las
+   * asignaciones elegibles del expediente y los datos de embarque del pedido;
+   * liberar sólo deja la reserva lista. El campo existía siempre en null y
+   * prometía lo contrario.
+   */
   finishedGoodsRequestId: string | null;
   materialsReleased: number;
 }
@@ -313,18 +320,26 @@ async function resolveOutputWarehouse(
   return warehouse.id;
 }
 
-async function assertOutputLocation(tx: Db, warehouseId: string, locationId: string | null | undefined): Promise<string | null> {
+async function assertOutputLocation(
+  tx: Db,
+  warehouseId: string,
+  locationId: string | null | undefined
+): Promise<string | null> {
   if (!locationId) return null;
   const location = await tx.storageLocation.findUnique({ where: { id: locationId } });
   if (!location || location.warehouseId !== warehouseId) {
     throw new OperationsError('invalid_payload', 'La ubicación de salida no pertenece a la bodega');
   }
-  if (!location.active) throw new OperationsError('invalid_state', `La ubicación ${location.code} está desactivada`);
+  if (!location.active)
+    throw new OperationsError('invalid_state', `La ubicación ${location.code} está desactivada`);
   return location.id;
 }
 
 async function defaultWorkCenter(tx: Db): Promise<WorkCenter | null> {
-  return tx.workCenter.findFirst({ where: { status: 'active' }, orderBy: [{ key: 'asc' }, { id: 'asc' }] });
+  return tx.workCenter.findFirst({
+    where: { status: 'active' },
+    orderBy: [{ key: 'asc' }, { id: 'asc' }],
+  });
 }
 
 interface NewOrderSpec {
@@ -341,7 +356,12 @@ interface NewOrderSpec {
   outputLocationId: string | null;
   workCenterId: string | null;
   inputs: Array<Record<string, unknown>> | null;
-  operations: Array<{ seq: number; workCenterId: string; name: string; plannedMinutes: number | null }>;
+  operations: Array<{
+    seq: number;
+    workCenterId: string;
+    name: string;
+    plannedMinutes: number | null;
+  }>;
   plannedStartAt: Date | null;
   areaRequestId: string | null;
   /**
@@ -356,12 +376,22 @@ interface NewOrderSpec {
  * Links the manufacture allocation of an order (planned → requested) unless a
  * `transformation` request already tracks it. Idempotent.
  */
-export async function commitAllocationLinkInTx(tx: Db, ctx: CommandContext, order: ProductionOrder): Promise<void> {
+export async function commitAllocationLinkInTx(
+  tx: Db,
+  ctx: CommandContext,
+  order: ProductionOrder
+): Promise<void> {
   if (!order.demandAllocationId) return;
-  const allocation = await tx.demandAllocation.findUnique({ where: { id: order.demandAllocationId } });
+  const allocation = await tx.demandAllocation.findUnique({
+    where: { id: order.demandAllocationId },
+  });
   if (!allocation || ['cancelled', 'delivered', 'released'].includes(allocation.status)) return;
   if (allocation.linkedType === 'area_request' && allocation.linkedId) return;
-  if (allocation.linkedType === MANUFACTURING_OBJECT_TYPES.productionOrder && allocation.linkedId === order.id) return;
+  if (
+    allocation.linkedType === MANUFACTURING_OBJECT_TYPES.productionOrder &&
+    allocation.linkedId === order.id
+  )
+    return;
   const updated = await tx.demandAllocation.update({
     where: { id: allocation.id },
     data: {
@@ -374,13 +404,28 @@ export async function commitAllocationLinkInTx(tx: Db, ctx: CommandContext, orde
   if (allocation.status === 'planned') {
     ctx.emit(
       OPS_EVENTS.allocation.requested,
-      { allocationId: updated.id, demandId: updated.demandId, source: 'manufacture', status: updated.status, productionOrderId: order.id },
-      { caseId: updated.caseId, areaKey: MANUFACTURING_AREA_KEY, objectType: 'demand_allocation', objectId: updated.id }
+      {
+        allocationId: updated.id,
+        demandId: updated.demandId,
+        source: 'manufacture',
+        status: updated.status,
+        productionOrderId: order.id,
+      },
+      {
+        caseId: updated.caseId,
+        areaKey: MANUFACTURING_AREA_KEY,
+        objectType: 'demand_allocation',
+        objectId: updated.id,
+      }
     );
   }
 }
 
-async function insertOrder(tx: Db, ctx: CommandContext, spec: NewOrderSpec): Promise<ProductionOrder> {
+async function insertOrder(
+  tx: Db,
+  ctx: CommandContext,
+  spec: NewOrderSpec
+): Promise<ProductionOrder> {
   const number = await nextNumber(tx, 'production_order', 'OP');
   const order = await tx.productionOrder.create({
     data: {
@@ -418,14 +463,24 @@ async function insertOrder(tx: Db, ctx: CommandContext, spec: NewOrderSpec): Pro
     });
   }
   const { opCase, demand, allocation } = spec.link;
-  if (opCase) await ctx.relate(orderRef(order.id), { type: 'operational_case', id: opCase.id }, 'for_case');
-  if (demand) await ctx.relate(orderRef(order.id), { type: 'case_demand', id: demand.id }, 'produces_for');
+  if (opCase)
+    await ctx.relate(orderRef(order.id), { type: 'operational_case', id: opCase.id }, 'for_case');
+  if (demand)
+    await ctx.relate(orderRef(order.id), { type: 'case_demand', id: demand.id }, 'produces_for');
   if (allocation) {
-    await ctx.relate(orderRef(order.id), { type: 'demand_allocation', id: allocation.id }, 'fulfills');
+    await ctx.relate(
+      orderRef(order.id),
+      { type: 'demand_allocation', id: allocation.id },
+      'fulfills'
+    );
     if (spec.commitAllocation) await commitAllocationLinkInTx(tx, ctx, order);
   }
   if (spec.areaRequestId) {
-    await ctx.relate(orderRef(order.id), { type: 'area_request', id: spec.areaRequestId }, 'answers');
+    await ctx.relate(
+      orderRef(order.id),
+      { type: 'area_request', id: spec.areaRequestId },
+      'answers'
+    );
   }
   ctx.emit(
     MANUFACTURING_EVENTS.orderCreated,
@@ -449,7 +504,10 @@ async function insertOrder(tx: Db, ctx: CommandContext, spec: NewOrderSpec): Pro
   return order;
 }
 
-function lineResults(outcomes: AssignmentLineOutcome[], products: Map<string, ProductInfo>): MaterialLineResult[] {
+function lineResults(
+  outcomes: AssignmentLineOutcome[],
+  products: Map<string, ProductInfo>
+): MaterialLineResult[] {
   return outcomes.map((line) => ({
     zohoItemId: line.zohoItemId,
     label: itemLabel(products, line.zohoItemId),
@@ -469,11 +527,16 @@ async function finishCreation(
 ): Promise<CreateOrderResult> {
   let schedule: ScheduleResult | null = null;
   if (order.workCenterId) {
-    schedule = await scheduleOrderInTx(tx, ctx, order, { plannedStartAt: options.plannedStartAt, commitLink: options.reserveNow });
+    schedule = await scheduleOrderInTx(tx, ctx, order, {
+      plannedStartAt: options.plannedStartAt,
+      commitLink: options.reserveNow,
+    });
   }
   let materials: ReserveMaterialsResult | null = null;
   if (options.reserveNow) {
-    materials = await reserveMaterialsInTx(tx, ctx, await loadOrderRow(tx, order.id), { allowProvisional: false });
+    materials = await reserveMaterialsInTx(tx, ctx, await loadOrderRow(tx, order.id), {
+      allowProvisional: false,
+    });
   }
   const final = await loadOrderRow(tx, order.id);
   return {
@@ -511,7 +574,10 @@ export async function createTransformationOrderInTx(
   if (!outputZohoItemId) {
     throw new OperationsError('invalid_payload', 'Indica el producto de salida');
   }
-  if (input.inputs.some((entry) => entry.zohoItemId === outputZohoItemId) && input.allowSameItem !== true) {
+  if (
+    input.inputs.some((entry) => entry.zohoItemId === outputZohoItemId) &&
+    input.allowSameItem !== true
+  ) {
     // Committing the finished product as its own raw material would ask Compras to buy what should be made.
     throw new OperationsError(
       'invalid_payload',
@@ -548,12 +614,18 @@ export async function createTransformationOrderInTx(
       unit,
       substituteZohoItemIds: substitutes,
       ...(entry.variantKey ? { variantKey: entry.variantKey } : {}),
-      ...(input.scrapAllowancePct !== undefined ? { scrapAllowancePct: input.scrapAllowancePct } : {}),
+      ...(input.scrapAllowancePct !== undefined
+        ? { scrapAllowancePct: input.scrapAllowancePct }
+        : {}),
     });
   }
 
   const outputWarehouseId = await resolveOutputWarehouse(tx, input.outputWarehouseId, link);
-  const outputLocationId = await assertOutputLocation(tx, outputWarehouseId, input.outputLocationId);
+  const outputLocationId = await assertOutputLocation(
+    tx,
+    outputWarehouseId,
+    input.outputLocationId
+  );
   const workCenter = input.workCenterId
     ? await loadWorkCenter(tx, input.workCenterId, { requireActive: true })
     : await defaultWorkCenter(tx);
@@ -565,7 +637,10 @@ export async function createTransformationOrderInTx(
     bomId: null,
     link,
     outputZohoItemId,
-    outputName: truncate(input.outputName ?? link.demand?.name ?? products.get(outputZohoItemId)?.name ?? null, 300),
+    outputName: truncate(
+      input.outputName ?? link.demand?.name ?? products.get(outputZohoItemId)?.name ?? null,
+      300
+    ),
     plannedQty,
     plannedUnit,
     priority: input.priority ?? link.opCase?.priority ?? 'normal',
@@ -620,7 +695,11 @@ export async function createProductionOrderFromBomInTx(
   const plannedBase = convertToBase(input.plannedQty, plannedUnit, output);
   const plannedInBomUnit = num(plannedBase.dividedBy(unitFactor(bom.outputUnit, output)));
   const outputWarehouseId = await resolveOutputWarehouse(tx, input.outputWarehouseId, link);
-  const outputLocationId = await assertOutputLocation(tx, outputWarehouseId, input.outputLocationId);
+  const outputLocationId = await assertOutputLocation(
+    tx,
+    outputWarehouseId,
+    input.outputLocationId
+  );
 
   let operations = [...bom.operations]
     .sort((a, b) => a.seq - b.seq)
@@ -628,7 +707,12 @@ export async function createProductionOrderFromBomInTx(
       seq: op.seq,
       workCenterId: op.workCenterId,
       name: op.name,
-      plannedMinutes: plannedOperationMinutes(op.stdMinutes, op.setupMinutes, plannedInBomUnit, num(bom.outputQty)),
+      plannedMinutes: plannedOperationMinutes(
+        op.stdMinutes,
+        op.setupMinutes,
+        plannedInBomUnit,
+        num(bom.outputQty)
+      ),
     }));
   if (input.workCenterId && operations.length > 0) {
     await loadWorkCenter(tx, input.workCenterId, { requireActive: true });
@@ -637,7 +721,9 @@ export async function createProductionOrderFromBomInTx(
     const center = input.workCenterId
       ? await loadWorkCenter(tx, input.workCenterId, { requireActive: true })
       : await defaultWorkCenter(tx);
-    operations = center ? [{ seq: 1, workCenterId: center.id, name: DEFAULT_BOM_OPERATION, plannedMinutes: 0 }] : [];
+    operations = center
+      ? [{ seq: 1, workCenterId: center.id, name: DEFAULT_BOM_OPERATION, plannedMinutes: 0 }]
+      : [];
   }
   const products = await productInfo(tx, [bom.outputZohoItemId]);
   const plannedStartAt = input.plannedStartAt ? new Date(input.plannedStartAt) : null;
@@ -646,7 +732,10 @@ export async function createProductionOrderFromBomInTx(
     bomId: bom.id,
     link,
     outputZohoItemId: bom.outputZohoItemId,
-    outputName: truncate(link.demand?.name ?? products.get(bom.outputZohoItemId)?.name ?? null, 300),
+    outputName: truncate(
+      link.demand?.name ?? products.get(bom.outputZohoItemId)?.name ?? null,
+      300
+    ),
     plannedQty: input.plannedQty,
     plannedUnit,
     priority: input.priority ?? link.opCase?.priority ?? 'normal',
@@ -674,7 +763,11 @@ export async function intakeTransformationRequestInTx(
   requestId: string
 ): Promise<IntakeResult> {
   const request = await tx.areaRequest.findUnique({ where: { id: requestId } });
-  const result = (outcome: IntakeResult['outcome'], productionOrderId: string | null, reason: string | null): IntakeResult => ({
+  const result = (
+    outcome: IntakeResult['outcome'],
+    productionOrderId: string | null,
+    reason: string | null
+  ): IntakeResult => ({
     outcome,
     requestId,
     productionOrderId,
@@ -688,11 +781,20 @@ export async function intakeTransformationRequestInTx(
     return result('skipped', null, 'La solicitud ya está cerrada');
   }
   const answered = await tx.objectRelation.findFirst({
-    where: { fromType: MANUFACTURING_OBJECT_TYPES.productionOrder, toType: 'area_request', toId: request.id, relation: 'answers', validTo: null },
+    where: {
+      fromType: MANUFACTURING_OBJECT_TYPES.productionOrder,
+      toType: 'area_request',
+      toId: request.id,
+      relation: 'answers',
+      validTo: null,
+    },
     select: { fromId: true },
   });
   if (answered) {
-    const order = await tx.productionOrder.findUnique({ where: { id: answered.fromId }, select: { id: true, status: true } });
+    const order = await tx.productionOrder.findUnique({
+      where: { id: answered.fromId },
+      select: { id: true, status: true },
+    });
     if (order && order.status !== 'cancelled') return result('existing', order.id, null);
   }
   const block = async (reason: string): Promise<IntakeResult> => {
@@ -712,7 +814,11 @@ export async function intakeTransformationRequestInTx(
   } else if (request.objectType === 'case_demand') {
     demandId = request.objectId;
     const allocation = await tx.demandAllocation.findFirst({
-      where: { demandId: request.objectId, source: 'manufacture', status: { notIn: ['cancelled', 'released', 'delivered'] } },
+      where: {
+        demandId: request.objectId,
+        source: 'manufacture',
+        status: { notIn: ['cancelled', 'released', 'delivered'] },
+      },
       orderBy: { createdAt: 'asc' },
     });
     allocationId = allocation?.id ?? null;
@@ -731,10 +837,14 @@ export async function intakeTransformationRequestInTx(
   const demand = demandId ? await tx.caseDemand.findUnique({ where: { id: demandId } }) : null;
   const targetId = await resolveItemRef(tx, payload.targetSku, demand);
   const sourceId = await resolveItemRef(tx, payload.sourceSku, demand);
-  if (!targetId) return block(`No se encontró en el catálogo el producto a fabricar (${payload.targetSku})`);
-  if (!sourceId) return block(`No se encontró en el catálogo el material de entrada (${payload.sourceSku})`);
+  if (!targetId)
+    return block(`No se encontró en el catálogo el producto a fabricar (${payload.targetSku})`);
+  if (!sourceId)
+    return block(`No se encontró en el catálogo el material de entrada (${payload.sourceSku})`);
 
-  const priority = (PRIORITIES as readonly string[]).includes(request.priority) ? (request.priority as (typeof PRIORITIES)[number]) : undefined;
+  const priority = (PRIORITIES as readonly string[]).includes(request.priority)
+    ? (request.priority as (typeof PRIORITIES)[number])
+    : undefined;
   // A repeatable product with an active BOM is made from its BOM (plan 6.2), never as a transformation of itself.
   const bom = await getActiveBom(tx, targetId);
   if (!bom && sourceId === targetId) {
@@ -762,23 +872,23 @@ export async function intakeTransformationRequestInTx(
         { areaRequestId: request.id }
       );
     } else {
-    convertToBase(payload.qty, payload.unit, await units(sourceId));
-    order = await createTransformationOrderInTx(
-      tx,
-      {
-        outputZohoItemId: targetId,
-        outputName: demand?.name ?? null,
-        plannedQty: payload.qty,
-        plannedUnit: payload.unit,
-        inputs: [{ zohoItemId: sourceId, qty: payload.qty, unit: payload.unit }],
-        caseId: request.caseId,
-        demandId,
-        demandAllocationId: allocationId,
-        priority,
-        reserveNow: true,
-      },
-      { areaRequestId: request.id }
-    );
+      convertToBase(payload.qty, payload.unit, await units(sourceId));
+      order = await createTransformationOrderInTx(
+        tx,
+        {
+          outputZohoItemId: targetId,
+          outputName: demand?.name ?? null,
+          plannedQty: payload.qty,
+          plannedUnit: payload.unit,
+          inputs: [{ zohoItemId: sourceId, qty: payload.qty, unit: payload.unit }],
+          caseId: request.caseId,
+          demandId,
+          demandAllocationId: allocationId,
+          priority,
+          reserveNow: true,
+        },
+        { areaRequestId: request.id }
+      );
     }
   } catch (err) {
     if (isOperationsError(err) && err.code !== 'concurrency_conflict') {
@@ -812,13 +922,22 @@ export async function scheduleOrderInTx(
   if (input.commitLink !== false) await commitAllocationLinkInTx(tx, ctx, current);
   if (input.workCenterId && input.workCenterId !== current.workCenterId) {
     if (current.kind === 'bom') {
-      throw new OperationsError('invalid_state', 'En una orden con lista de materiales el centro de trabajo se cambia en cada operación');
+      throw new OperationsError(
+        'invalid_state',
+        'En una orden con lista de materiales el centro de trabajo se cambia en cada operación'
+      );
     }
     if (current.status === 'prepared') {
-      throw new OperationsError('invalid_state', 'El material ya se surtió al centro actual: no se cambia de centro una orden preparada');
+      throw new OperationsError(
+        'invalid_state',
+        'El material ya se surtió al centro actual: no se cambia de centro una orden preparada'
+      );
     }
     const center = await loadWorkCenter(tx, input.workCenterId, { requireActive: true });
-    current = await tx.productionOrder.update({ where: { id: current.id }, data: { workCenterId: center.id } });
+    current = await tx.productionOrder.update({
+      where: { id: current.id },
+      data: { workCenterId: center.id },
+    });
     if (current.kind === 'transformation') {
       await tx.productionOperation.updateMany({
         where: { productionOrderId: current.id, status: { in: ['pending', 'paused'] } },
@@ -844,8 +963,16 @@ export async function scheduleOrderInTx(
     input.plannedStartAt ??
     (current.plannedStartAt && current.plannedStartAt > ctx.now ? current.plannedStartAt : ctx.now);
   if (pending.length === 0) {
-    await tx.productionOrder.update({ where: { id: current.id }, data: { plannedStartAt: earliest } });
-    return { plannedStartAt: earliest.toISOString(), plannedEndAt: null, overloaded: false, alertWorkItemIds: [] };
+    await tx.productionOrder.update({
+      where: { id: current.id },
+      data: { plannedStartAt: earliest },
+    });
+    return {
+      plannedStartAt: earliest.toISOString(),
+      plannedEndAt: null,
+      overloaded: false,
+      alertWorkItemIds: [],
+    };
   }
   const centers = new Map<string, WorkCenter>();
   const loadedCenters = new Set<string>();
@@ -868,12 +995,19 @@ export async function scheduleOrderInTx(
         productionOrderId: { not: current.id },
         plannedStartAt: { gte: addDays(earliest, -1), lt: horizonEnd },
       },
-      include: { productionOrder: { select: { plannedQty: true, plannedUnit: true, status: true } } },
+      include: {
+        productionOrder: { select: { plannedQty: true, plannedUnit: true, status: true } },
+      },
     });
     const items = perOrderLoads(
       capacityUnit,
       planned
-        .filter((row) => row.plannedStartAt && row.productionOrder && !['cancelled', 'released'].includes(row.productionOrder.status))
+        .filter(
+          (row) =>
+            row.plannedStartAt &&
+            row.productionOrder &&
+            !['cancelled', 'released'].includes(row.productionOrder.status)
+        )
         .map((row) => ({
           id: row.id,
           productionOrderId: row.productionOrderId,
@@ -909,12 +1043,18 @@ export async function scheduleOrderInTx(
       earliestStart: earliest,
       horizonDays: SCHEDULING_HORIZON_DAYS,
     });
-    await tx.productionOperation.update({ where: { id: op.id }, data: { plannedStartAt: slot.start } });
+    await tx.productionOperation.update({
+      where: { id: op.id },
+      data: { plannedStartAt: slot.start },
+    });
     first = first ?? slot.start;
     last = slot.end;
     if (slot.overloaded && slot.window) {
       overloaded = true;
-      const alert = await raiseCapacityAlert(tx, ctx, center, slot.window, { productionOrderId: current.id, number: current.number });
+      const alert = await raiseCapacityAlert(tx, ctx, center, slot.window, {
+        productionOrderId: current.id,
+        number: current.number,
+      });
       if (alert.workItemId) alertWorkItemIds.push(alert.workItemId);
     }
     earliest = slot.end.getTime() > slot.start.getTime() ? slot.end : slot.start;
@@ -964,7 +1104,8 @@ export async function raiseCapacityAlert(
     areaKey: MANUFACTURING_AREA_KEY,
   });
   if (open.length > 0) return { workItemId: open[0].id, created: false };
-  const unitLabel = CAPACITY_UNIT_LABELS[center.capacityUnit as CapacityUnit] ?? center.capacityUnit;
+  const unitLabel =
+    CAPACITY_UNIT_LABELS[center.capacityUnit as CapacityUnit] ?? center.capacityUnit;
   const item = await ctx.createWorkItem({
     areaKey: MANUFACTURING_AREA_KEY,
     kind: 'action',
@@ -991,7 +1132,10 @@ export async function raiseCapacityAlert(
     objectType: MANUFACTURING_OBJECT_TYPES.workCenter,
     objectId: center.id,
   });
-  ctx.realtime(MANUFACTURING_FLOOR_CHANNEL, MANUFACTURING_REALTIME_TYPES.capacity, { commandId: ctx.commandId, ...payload });
+  ctx.realtime(MANUFACTURING_FLOOR_CHANNEL, MANUFACTURING_REALTIME_TYPES.capacity, {
+    commandId: ctx.commandId,
+    ...payload,
+  });
   return { workItemId: item.id, created: true };
 }
 
@@ -1017,7 +1161,9 @@ async function requestShortfall(
         status: { in: [...AREA_REQUEST_OPEN_STATUSES] },
       },
     });
-    const existing = open.find((request) => (request.payload as Record<string, unknown> | null)?.sku === sku);
+    const existing = open.find(
+      (request) => (request.payload as Record<string, unknown> | null)?.sku === sku
+    );
     if (existing) return { requestId: existing.id, workItemId: existing.workItemId };
     const { request, workItem } = await ctx.createAreaRequest({
       caseId: order.caseId,
@@ -1026,24 +1172,38 @@ async function requestShortfall(
       kind: 'material_shortfall',
       objectType: MANUFACTURING_OBJECT_TYPES.productionOrder,
       objectId: order.id,
-      title: `Faltan ${qtyText(line.missing)} ${line.baseUnit} de ${label} para ${order.number}`.slice(0, 200),
+      title:
+        `Faltan ${qtyText(line.missing)} ${line.baseUnit} de ${label} para ${order.number}`.slice(
+          0,
+          200
+        ),
       payload: {
         productionOrderId: order.id,
         sku,
         missingQty: line.missing,
         unit: line.baseUnit,
-        neededBy: dayKey(order.plannedStartAt && order.plannedStartAt > ctx.now ? order.plannedStartAt : addDays(ctx.now, 2)),
+        neededBy: dayKey(
+          order.plannedStartAt && order.plannedStartAt > ctx.now
+            ? order.plannedStartAt
+            : addDays(ctx.now, 2)
+        ),
       },
     });
     return { requestId: request.id, workItemId: workItem.id };
   }
   const objectId = `${order.id}:${line.zohoItemId}`;
-  const open = await openWorkItemsFor(tx, MANUFACTURING_OBJECT_TYPES.productionMaterial, objectId, { areaKey: 'compras' });
+  const open = await openWorkItemsFor(tx, MANUFACTURING_OBJECT_TYPES.productionMaterial, objectId, {
+    areaKey: 'compras',
+  });
   if (open.length > 0) return { requestId: null, workItemId: open[0].id };
   const item = await ctx.createWorkItem({
     areaKey: 'compras',
     kind: 'action',
-    title: `Conseguir ${qtyText(line.missing)} ${line.baseUnit} de ${label} para ${order.number}`.slice(0, 200),
+    title:
+      `Conseguir ${qtyText(line.missing)} ${line.baseUnit} de ${label} para ${order.number}`.slice(
+        0,
+        200
+      ),
     description: `La orden de producción ${order.number} está bloqueada por falta de material.`,
     objectType: MANUFACTURING_OBJECT_TYPES.productionMaterial,
     objectId,
@@ -1081,7 +1241,12 @@ async function requestCount(
  * request fulfilled, never a cancellation of something it already bought),
  * `cancel` when the order itself is cancelled.
  */
-async function withdrawShortfalls(tx: Db, order: ProductionOrder, reason: string, action: 'resolve' | 'cancel'): Promise<void> {
+async function withdrawShortfalls(
+  tx: Db,
+  order: ProductionOrder,
+  reason: string,
+  action: 'resolve' | 'cancel'
+): Promise<void> {
   const requests = await tx.areaRequest.findMany({
     where: {
       kind: 'material_shortfall',
@@ -1091,7 +1256,8 @@ async function withdrawShortfalls(tx: Db, order: ProductionOrder, reason: string
     },
   });
   for (const request of requests) {
-    if (action === 'resolve') await transitionAreaRequestInTx(tx, request, 'resolve', { answer: reason });
+    if (action === 'resolve')
+      await transitionAreaRequestInTx(tx, request, 'resolve', { answer: reason });
     else await transitionAreaRequestInTx(tx, request, 'cancel', { reason });
   }
   const items = await tx.workItem.findMany({
@@ -1114,7 +1280,10 @@ export async function reserveMaterialsInTx(
   if (error) throw new OperationsError('invalid_state', error);
   await commitAllocationLinkInTx(tx, ctx, order);
   if (input.allowProvisional && ctx.actor.type !== 'user') {
-    throw inventoryError('provisional_requires_human', 'Sólo una persona puede decidir comprometer existencia provisional');
+    throw inventoryError(
+      'provisional_requires_human',
+      'Sólo una persona puede decidir comprometer existencia provisional'
+    );
   }
   const units = unitsResolver(tx, 'write');
   const recipe = await loadRecipe(tx, order, units);
@@ -1124,7 +1293,10 @@ export async function reserveMaterialsInTx(
     allowProvisional: input.allowProvisional,
     warehouseIds: materialWarehouses(order, center),
   });
-  const products = await productInfo(tx, requirements.map((line) => line.zohoItemId));
+  const products = await productInfo(
+    tx,
+    requirements.map((line) => line.zohoItemId)
+  );
   const lines = lineResults(outcomes, products);
   const missing = outcomes.filter((line) => line.missing > 0);
 
@@ -1133,21 +1305,42 @@ export async function reserveMaterialsInTx(
     const updated =
       order.status === 'reserved'
         ? order
-        : await tx.productionOrder.update({ where: { id: order.id }, data: { status: 'reserved', blockedReason: null } });
+        : await tx.productionOrder.update({
+            where: { id: order.id },
+            data: { status: 'reserved', blockedReason: null },
+          });
     await withdrawShortfalls(tx, order, `Material comprometido para ${order.number}`, 'resolve');
     if (order.status !== 'reserved' || outcomes.some((line) => line.assignedNow > 0)) {
-      ctx.emit(MANUFACTURING_EVENTS.materialsReserved, { productionOrderId: order.id, number: order.number, lines }, orderEventOptions(order));
+      ctx.emit(
+        MANUFACTURING_EVENTS.materialsReserved,
+        { productionOrderId: order.id, number: order.number, lines },
+        orderEventOptions(order)
+      );
     }
     if (wasBlocked) {
-      ctx.emit(MANUFACTURING_EVENTS.unblocked, { productionOrderId: order.id, number: order.number }, orderEventOptions(order));
+      ctx.emit(
+        MANUFACTURING_EVENTS.unblocked,
+        { productionOrderId: order.id, number: order.number },
+        orderEventOptions(order)
+      );
     }
     publishOrderChange(ctx, updated);
-    return { productionOrderId: order.id, status: updated.status, complete: true, lines, requestIds: [], workItemIds: [] };
+    return {
+      productionOrderId: order.id,
+      status: updated.status,
+      complete: true,
+      lines,
+      requestIds: [],
+      workItemIds: [],
+    };
   }
 
   const reason = truncate(
     `Faltan materiales: ${missing
-      .map((line) => `${qtyText(line.missing)} ${line.baseUnit} de ${itemLabel(products, line.zohoItemId)} (${ASSIGNMENT_REASON_LABELS[line.reason]})`)
+      .map(
+        (line) =>
+          `${qtyText(line.missing)} ${line.baseUnit} de ${itemLabel(products, line.zohoItemId)} (${ASSIGNMENT_REASON_LABELS[line.reason]})`
+      )
       .join('; ')}`,
     500
   );
@@ -1174,49 +1367,79 @@ export async function reserveMaterialsInTx(
     );
   }
   publishOrderChange(ctx, updated, { blockedReason: reason });
-  return { productionOrderId: order.id, status: 'blocked', complete: false, lines, requestIds, workItemIds };
+  return {
+    productionOrderId: order.id,
+    status: 'blocked',
+    complete: false,
+    lines,
+    requestIds,
+    workItemIds,
+  };
 }
 
 // ---------------------------------------------------------------------------
 // Preparation
 // ---------------------------------------------------------------------------
 
-export async function prepareInTx(tx: Db, ctx: CommandContext, order: ProductionOrder): Promise<PrepareResult> {
+export async function prepareInTx(
+  tx: Db,
+  ctx: CommandContext,
+  order: ProductionOrder
+): Promise<PrepareResult> {
   const error = orderActionError('prepare', order.status);
   if (error) throw new OperationsError('invalid_state', error);
   if (!order.workCenterId) {
-    throw manufacturingError('no_work_center', 'Asigna un centro de trabajo antes de preparar la orden');
+    throw manufacturingError(
+      'no_work_center',
+      'Asigna un centro de trabajo antes de preparar la orden'
+    );
   }
   const operations = await loadOperations(tx, order.id);
   if (operations.length === 0) {
-    throw manufacturingError('no_work_center', 'La orden no tiene operaciones; prográmala en un centro de trabajo');
+    throw manufacturingError(
+      'no_work_center',
+      'La orden no tiene operaciones; prográmala en un centro de trabajo'
+    );
   }
   const center = await loadWorkCenter(tx, order.workCenterId, { requireActive: true });
-  const transfers = center.warehouseId ? await moveAssignmentsToWarehouse(tx, ctx, order, center.warehouseId) : [];
+  const transfers = center.warehouseId
+    ? await moveAssignmentsToWarehouse(tx, ctx, order, center.warehouseId)
+    : [];
   const planned = await tx.materialConsumption.findMany({
     where: { productionOrderId: order.id, kind: 'planned' },
     orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
   });
   const stockRows = await tx.stockItem.findMany({
-    where: { id: { in: planned.map((row) => row.stockItemId).filter((id): id is string => Boolean(id)) } },
+    where: {
+      id: { in: planned.map((row) => row.stockItemId).filter((id): id is string => Boolean(id)) },
+    },
   });
   const locations = await tx.storageLocation.findMany({
     where: { id: { in: stockRows.map((row) => row.locationId) } },
     select: { id: true, code: true },
   });
-  const products = await productInfo(tx, planned.map((row) => row.inputZohoItemId));
+  const products = await productInfo(
+    tx,
+    planned.map((row) => row.inputZohoItemId)
+  );
   const lines = planned
     .filter((row) => heldQuantity(row).gt(0))
     .map((row) => {
       const stock = stockRows.find((candidate) => candidate.id === row.stockItemId);
-      const code = locations.find((location) => location.id === stock?.locationId)?.code ?? 'GENERAL';
+      const code =
+        locations.find((location) => location.id === stock?.locationId)?.code ?? 'GENERAL';
       const container = stock?.containerKey ? ` · ${stock.containerKey}` : '';
       return `• ${qtyText(heldQuantity(row))} ${row.unit} de ${itemLabel(products, row.inputZohoItemId)} (${code}${container})`;
     });
-  const existing = await openWorkItemsFor(tx, MANUFACTURING_OBJECT_TYPES.productionOrder, order.id, {
-    areaKey: 'inventario',
-    kind: 'action',
-  });
+  const existing = await openWorkItemsFor(
+    tx,
+    MANUFACTURING_OBJECT_TYPES.productionOrder,
+    order.id,
+    {
+      areaKey: 'inventario',
+      kind: 'action',
+    }
+  );
   const workItemId =
     existing[0]?.id ??
     (
@@ -1224,40 +1447,72 @@ export async function prepareInTx(tx: Db, ctx: CommandContext, order: Production
         areaKey: 'inventario',
         kind: 'action',
         title: `Surtir materiales de ${order.number} a ${center.name}`.slice(0, 200),
-        description: lines.length > 0 ? lines.join('\n') : 'La orden no tiene materiales asignados pendientes de surtir.',
+        description:
+          lines.length > 0
+            ? lines.join('\n')
+            : 'La orden no tiene materiales asignados pendientes de surtir.',
         caseId: order.caseId,
         objectType: MANUFACTURING_OBJECT_TYPES.productionOrder,
         objectId: order.id,
       })
     ).id;
-  const updated = await tx.productionOrder.update({ where: { id: order.id }, data: { status: 'prepared' } });
+  const updated = await tx.productionOrder.update({
+    where: { id: order.id },
+    data: { status: 'prepared' },
+  });
   ctx.emit(
     MANUFACTURING_EVENTS.prepared,
-    { productionOrderId: order.id, number: order.number, workCenterId: center.id, workItemId, transfers, pickList: lines },
+    {
+      productionOrderId: order.id,
+      number: order.number,
+      workCenterId: center.id,
+      workItemId,
+      transfers,
+      pickList: lines,
+    },
     orderEventOptions(order)
   );
   publishOrderChange(ctx, updated);
-  return { productionOrderId: order.id, status: updated.status, workItemId, transfers: transfers.length };
+  return {
+    productionOrderId: order.id,
+    status: updated.status,
+    workItemId,
+    transfers: transfers.length,
+  };
 }
 
 // ---------------------------------------------------------------------------
 // Release
 // ---------------------------------------------------------------------------
 
-async function transformationRequestOf(tx: Db, order: ProductionOrder): Promise<AreaRequest | null> {
+async function transformationRequestOf(
+  tx: Db,
+  order: ProductionOrder
+): Promise<AreaRequest | null> {
   const relation = await tx.objectRelation.findFirst({
-    where: { fromType: MANUFACTURING_OBJECT_TYPES.productionOrder, fromId: order.id, toType: 'area_request', relation: 'answers', validTo: null },
+    where: {
+      fromType: MANUFACTURING_OBJECT_TYPES.productionOrder,
+      fromId: order.id,
+      toType: 'area_request',
+      relation: 'answers',
+      validTo: null,
+    },
     select: { toId: true },
   });
   let requestId = relation?.toId ?? null;
   if (!requestId && order.demandAllocationId) {
-    const allocation = await tx.demandAllocation.findUnique({ where: { id: order.demandAllocationId } });
-    if (allocation?.linkedType === 'area_request' && allocation.linkedId) requestId = allocation.linkedId;
+    const allocation = await tx.demandAllocation.findUnique({
+      where: { id: order.demandAllocationId },
+    });
+    if (allocation?.linkedType === 'area_request' && allocation.linkedId)
+      requestId = allocation.linkedId;
   }
   if (!requestId) return null;
   const request = await tx.areaRequest.findUnique({ where: { id: requestId } });
   if (!request || request.kind !== 'transformation') return null;
-  return (AREA_REQUEST_OPEN_STATUSES as readonly string[]).includes(request.status) ? request : null;
+  return (AREA_REQUEST_OPEN_STATUSES as readonly string[]).includes(request.status)
+    ? request
+    : null;
 }
 
 export async function releaseInTx(
@@ -1271,17 +1526,24 @@ export async function releaseInTx(
   if (input.acceptBalanceDifference) {
     const user = ctx.user;
     const { hasPermission } = await import('@/modules/auth/authorization');
-    if (ctx.actor.type !== 'system' && (!user || !hasPermission(user, 'manufacturing.approve_incidents'))) {
-      throw new OperationsError('forbidden', 'Liberar con diferencia de balance requiere permiso para aprobar incidencias de producción');
+    if (
+      ctx.actor.type !== 'system' &&
+      (!user || !hasPermission(user, 'manufacturing.approve_incidents'))
+    ) {
+      throw new OperationsError(
+        'forbidden',
+        'Liberar con diferencia de balance requiere permiso para aprobar incidencias de producción'
+      );
     }
   }
   const units = unitsResolver(tx, 'write');
   const facts = await loadProductionFacts(tx, order, units);
-  let evaluation = evaluateRelease(releaseFactsOf(facts, { acceptBalanceDifference: input.acceptBalanceDifference }));
+  let evaluation = evaluateRelease(
+    releaseFactsOf(facts, { acceptBalanceDifference: input.acceptBalanceDifference })
+  );
   const base = {
     productionOrderId: order.id,
     reservationId: null,
-    deliveryOrderId: null,
     finishedGoodsRequestId: null,
     materialsReleased: 0,
   };
@@ -1289,10 +1551,16 @@ export async function releaseInTx(
     const outcome = await requestScrapApprovalInTx(tx, ctx, order, facts, input.note ?? null);
     if (outcome.status === 'approved') {
       evaluation = evaluateRelease(
-        releaseFactsOf(facts, { acceptBalanceDifference: input.acceptBalanceDifference, scrapApproval: 'approved' })
+        releaseFactsOf(facts, {
+          acceptBalanceDifference: input.acceptBalanceDifference,
+          scrapApproval: 'approved',
+        })
       );
     } else if (outcome.status === 'no_approvers') {
-      throw new OperationsError('no_approvers', 'La merma supera la tolerancia y no hay quién apruebe incidencias de producción');
+      throw new OperationsError(
+        'no_approvers',
+        'La merma supera la tolerancia y no hay quién apruebe incidencias de producción'
+      );
     } else {
       publishOrderChange(ctx, order, { scrapApprovalRequestId: outcome.approvalRequestId });
       return {
@@ -1314,7 +1582,11 @@ export async function releaseInTx(
 
   const released = await releaseAssignments(tx, order);
   if (released.length > 0) {
-    ctx.emit(MANUFACTURING_EVENTS.materialsReleased, { productionOrderId: order.id, number: order.number, released, reason: 'release' }, orderEventOptions(order));
+    ctx.emit(
+      MANUFACTURING_EVENTS.materialsReleased,
+      { productionOrderId: order.id, number: order.number, released, reason: 'release' },
+      orderEventOptions(order)
+    );
   }
   const movementIds = facts.outputs
     .filter((output) => output.kind === 'finished' && output.stockMovementId)
@@ -1325,11 +1597,14 @@ export async function releaseInTx(
   const baseUnit = facts.outputUnits.baseUnit;
 
   let reservationId: string | null = null;
-  const deliveryOrderId: string | null = null;
   let allocationId: string | null = null;
   if (order.demandAllocationId) {
-    const allocation = await tx.demandAllocation.findUnique({ where: { id: order.demandAllocationId } });
-    const demand = allocation ? await tx.caseDemand.findUnique({ where: { id: allocation.demandId } }) : null;
+    const allocation = await tx.demandAllocation.findUnique({
+      where: { id: order.demandAllocationId },
+    });
+    const demand = allocation
+      ? await tx.caseDemand.findUnique({ where: { id: allocation.demandId } })
+      : null;
     if (
       allocation &&
       demand &&
@@ -1376,7 +1651,12 @@ export async function releaseInTx(
           productionOrderId: order.id,
           reservationIds: reservation.reservations.map((row) => row.id),
         },
-        { caseId: ready.caseId, areaKey: MANUFACTURING_AREA_KEY, objectType: 'demand_allocation', objectId: ready.id }
+        {
+          caseId: ready.caseId,
+          areaKey: MANUFACTURING_AREA_KEY,
+          objectType: 'demand_allocation',
+          objectId: ready.id,
+        }
       );
       // `releaseTarget = logistics` is only a hint: the case engine plans the delivery (plan_delivery) with every
       // eligible allocation of the case and the shipping data of the sales order, in its turn.
@@ -1385,7 +1665,12 @@ export async function releaseInTx(
     // An order for a demand without a manufacture allocation still reserves what it made for that sale.
     const demand = await tx.caseDemand.findUnique({ where: { id: order.demandId } });
     const open = demand ? Math.max(0, num(demand.baseQuantity) - num(demand.fulfilledQuantity)) : 0;
-    if (demand && demand.zohoItemId === order.outputZohoItemId && !['fulfilled', 'cancelled'].includes(demand.status) && open > 0) {
+    if (
+      demand &&
+      demand.zohoItemId === order.outputZohoItemId &&
+      !['fulfilled', 'cancelled'].includes(demand.status) &&
+      open > 0
+    ) {
       try {
         const reservation = await reserveStock(
           tx,
@@ -1410,10 +1695,18 @@ export async function releaseInTx(
           kind: 'stock_conflict',
           areaKey: 'inventario',
           severity: 'medium',
-          title: `No se pudo reservar lo producido en ${order.number} para ${demand.name}`.slice(0, 200),
+          title: `No se pudo reservar lo producido en ${order.number} para ${demand.name}`.slice(
+            0,
+            200
+          ),
           dedupeKey: `mfg.release_reserve:${order.id}`,
           caseId: demand.caseId,
-          detail: { productionOrderId: order.id, demandId: demand.id, code: err.code, message: err.message },
+          detail: {
+            productionOrderId: order.id,
+            demandId: demand.id,
+            code: err.code,
+            message: err.message,
+          },
         });
       }
     }
@@ -1423,15 +1716,27 @@ export async function releaseInTx(
   if (request) {
     await transitionAreaRequestInTx(tx, request, 'resolve', {
       answer: `${order.number} liberada: ${produced} ${baseUnit} de ${label}`,
-      data: { productionOrderId: order.id, producedQty: produced, unit: baseUnit, movementIds, reservationId },
+      data: {
+        productionOrderId: order.id,
+        producedQty: produced,
+        unit: baseUnit,
+        movementIds,
+        reservationId,
+      },
     });
   }
 
   let finishedGoodsRequestId: string | null = null;
   if (order.caseId && order.releaseTarget === 'inventory') {
-    const warehouse = await tx.warehouse.findUnique({ where: { id: order.outputWarehouseId }, select: { name: true } });
+    const warehouse = await tx.warehouse.findUnique({
+      where: { id: order.outputWarehouseId },
+      select: { name: true },
+    });
     const location = order.outputLocationId
-      ? await tx.storageLocation.findUnique({ where: { id: order.outputLocationId }, select: { code: true } })
+      ? await tx.storageLocation.findUnique({
+          where: { id: order.outputLocationId },
+          select: { code: true },
+        })
       : null;
     const { request: finished } = await ctx.createAreaRequest({
       caseId: order.caseId,
@@ -1440,22 +1745,32 @@ export async function releaseInTx(
       kind: 'finished_goods',
       objectType: MANUFACTURING_OBJECT_TYPES.productionOrder,
       objectId: order.id,
-      title: `Producto terminado de ${order.number}: ${produced} ${baseUnit} de ${label}`.slice(0, 200),
+      title: `Producto terminado de ${order.number}: ${produced} ${baseUnit} de ${label}`.slice(
+        0,
+        200
+      ),
       payload: {
         productionOrderId: order.id,
         sku: (products.get(order.outputZohoItemId)?.sku ?? order.outputZohoItemId).slice(0, 120),
         qty: facts.producedBase,
         unit: baseUnit,
         location: `${warehouse?.name ?? 'Bodega'} · ${location?.code ?? 'GENERAL'}`.slice(0, 200),
-        ...(facts.lastOrderCheck?.notes ? { qualityNote: facts.lastOrderCheck.notes.slice(0, 500) } : {}),
+        ...(facts.lastOrderCheck?.notes
+          ? { qualityNote: facts.lastOrderCheck.notes.slice(0, 500) }
+          : {}),
       },
     });
     finishedGoodsRequestId = finished.id;
   }
 
-  const openItems = await openWorkItemsFor(tx, MANUFACTURING_OBJECT_TYPES.productionOrder, order.id, {
-    areaKey: MANUFACTURING_AREA_KEY,
-  });
+  const openItems = await openWorkItemsFor(
+    tx,
+    MANUFACTURING_OBJECT_TYPES.productionOrder,
+    order.id,
+    {
+      areaKey: MANUFACTURING_AREA_KEY,
+    }
+  );
   await closeWorkItems(tx, openItems, 'complete', `Orden ${order.number} liberada`);
 
   const updated = await tx.productionOrder.update({
@@ -1472,7 +1787,6 @@ export async function releaseInTx(
     leftoverQty: qtyText(order.leftoverQty),
     allocationId,
     reservationId,
-    deliveryOrderId,
     releaseTarget: order.releaseTarget,
     movementIds,
     acceptedBalanceDifference: input.acceptBalanceDifference === true && !facts.balance.balanced,
@@ -1480,6 +1794,14 @@ export async function releaseInTx(
   };
   ctx.emit(MANUFACTURING_EVENTS.released, payload, orderEventOptions(order));
   ctx.emit(MANUFACTURING_EVENTS.finished, payload, orderEventOptions(order));
+  // Plan 6.6: quien abrió la orden (y el dueño del expediente) se entera de que ya está liberada.
+  await notifyProductionUpdate(ctx, order, {
+    type: 'production_released',
+    title: `Liberada: orden ${order.number}`,
+    body: `${produced} ${baseUnit} de ${label}${
+      order.releaseTarget === 'logistics' ? ' · listo para entregar' : ' · en inventario'
+    }`,
+  });
   publishOrderChange(ctx, updated);
   return {
     ...base,
@@ -1488,7 +1810,6 @@ export async function releaseInTx(
     blockers: [],
     scrapApprovalRequestId: null,
     reservationId,
-    deliveryOrderId,
     finishedGoodsRequestId,
     materialsReleased: released.length,
   };
@@ -1499,16 +1820,31 @@ export async function releaseInTx(
 // ---------------------------------------------------------------------------
 
 /** Pending substitution and excess-scrap approvals of an order (their approvers no longer have anything to decide). */
-async function cancelPendingIncidentApprovals(tx: Db, ctx: CommandContext, order: ProductionOrder, reason: string): Promise<void> {
+async function cancelPendingIncidentApprovals(
+  tx: Db,
+  ctx: CommandContext,
+  order: ProductionOrder,
+  reason: string
+): Promise<void> {
   const consumptionIds = (
-    await tx.materialConsumption.findMany({ where: { productionOrderId: order.id }, select: { id: true } })
+    await tx.materialConsumption.findMany({
+      where: { productionOrderId: order.id },
+      select: { id: true },
+    })
   ).map((row) => row.id);
   const approvals = await tx.approvalRequest.findMany({
     where: {
       status: 'pending',
       OR: [
         { targetType: MANUFACTURING_OBJECT_TYPES.scrapReview, targetId: order.id },
-        ...(consumptionIds.length > 0 ? [{ targetType: MANUFACTURING_OBJECT_TYPES.materialConsumption, targetId: { in: consumptionIds } }] : []),
+        ...(consumptionIds.length > 0
+          ? [
+              {
+                targetType: MANUFACTURING_OBJECT_TYPES.materialConsumption,
+                targetId: { in: consumptionIds },
+              },
+            ]
+          : []),
       ],
     },
   });
@@ -1518,13 +1854,28 @@ async function cancelPendingIncidentApprovals(tx: Db, ctx: CommandContext, order
       data: { status: 'cancelled', decidedAt: ctx.now, version: { increment: 1 } },
     });
     const items = await tx.workItem.findMany({
-      where: { objectType: 'approval_request', objectId: approval.id, status: { in: ['open', 'in_progress', 'waiting', 'escalated'] } },
+      where: {
+        objectType: 'approval_request',
+        objectId: approval.id,
+        status: { in: ['open', 'in_progress', 'waiting', 'escalated'] },
+      },
     });
     await closeWorkItems(tx, items, 'cancel', reason);
     ctx.emit(
       OPS_EVENTS.approval.cancelled,
-      { approvalRequestId: approval.id, scope: approval.scope, targetType: approval.targetType, targetId: approval.targetId, reason },
-      { caseId: approval.caseId, areaKey: approval.areaKey, objectType: 'approval_request', objectId: approval.id }
+      {
+        approvalRequestId: approval.id,
+        scope: approval.scope,
+        targetType: approval.targetType,
+        targetId: approval.targetId,
+        reason,
+      },
+      {
+        caseId: approval.caseId,
+        areaKey: approval.areaKey,
+        objectType: 'approval_request',
+        objectId: approval.id,
+      }
     );
   }
 }
@@ -1540,10 +1891,20 @@ export async function cancelInTx(
   const reason = input.reason.trim();
   const released = await releaseAssignments(tx, order);
   await withdrawShortfalls(tx, order, `Orden ${order.number} cancelada: ${reason}`, 'cancel');
-  await cancelPendingIncidentApprovals(tx, ctx, order, `Orden ${order.number} cancelada: ${reason}`);
+  await cancelPendingIncidentApprovals(
+    tx,
+    ctx,
+    order,
+    `Orden ${order.number} cancelada: ${reason}`
+  );
   const openItems = await tx.workItem.findMany({
     where: {
-      objectType: { in: [MANUFACTURING_OBJECT_TYPES.productionOrder, MANUFACTURING_OBJECT_TYPES.productionOperation] },
+      objectType: {
+        in: [
+          MANUFACTURING_OBJECT_TYPES.productionOrder,
+          MANUFACTURING_OBJECT_TYPES.productionOperation,
+        ],
+      },
       objectId: { in: [order.id, ...(await loadOperations(tx, order.id)).map((op) => op.id)] },
       status: { in: ['open', 'in_progress', 'waiting', 'escalated'] },
     },
@@ -1555,14 +1916,26 @@ export async function cancelInTx(
   });
   const request = await transformationRequestOf(tx, order);
   if (request) {
-    await transitionAreaRequestInTx(tx, request, 'reject', { reason: `Orden ${order.number} cancelada: ${reason}` });
+    await transitionAreaRequestInTx(tx, request, 'reject', {
+      reason: `Orden ${order.number} cancelada: ${reason}`,
+    });
   } else if (order.demandAllocationId && order.caseId) {
-    const allocation = await tx.demandAllocation.findUnique({ where: { id: order.demandAllocationId } });
-    if (allocation && allocation.linkedId === order.id && !['cancelled', 'delivered', 'released'].includes(allocation.status)) {
+    const allocation = await tx.demandAllocation.findUnique({
+      where: { id: order.demandAllocationId },
+    });
+    if (
+      allocation &&
+      allocation.linkedId === order.id &&
+      !['cancelled', 'delivered', 'released'].includes(allocation.status)
+    ) {
       await ctx.openIncident({
         kind: 'cancellation_compensation',
         areaKey: MANUFACTURING_AREA_KEY,
-        title: `Producción cancelada: replanifica ${order.outputName ?? order.outputZohoItemId} (${order.number})`.slice(0, 200),
+        title:
+          `Producción cancelada: replanifica ${order.outputName ?? order.outputZohoItemId} (${order.number})`.slice(
+            0,
+            200
+          ),
         dedupeKey: `mfg:cancel:${order.id}`,
         severity: 'high',
         caseId: order.caseId,
@@ -1571,7 +1944,11 @@ export async function cancelInTx(
     }
   }
   const consumed = await tx.materialConsumption.count({
-    where: { productionOrderId: order.id, kind: { in: ['actual', 'substitution'] }, stockMovementId: { not: null } },
+    where: {
+      productionOrderId: order.id,
+      kind: { in: ['actual', 'substitution'] },
+      stockMovementId: { not: null },
+    },
   });
   const updated = await tx.productionOrder.update({
     where: { id: order.id },
@@ -1590,5 +1967,9 @@ export async function cancelInTx(
     orderEventOptions(order)
   );
   publishOrderChange(ctx, updated);
-  return { productionOrderId: order.id, status: updated.status, materialsReleased: released.length };
+  return {
+    productionOrderId: order.id,
+    status: updated.status,
+    materialsReleased: released.length,
+  };
 }

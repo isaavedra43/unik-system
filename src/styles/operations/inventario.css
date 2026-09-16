@@ -1,0 +1,552 @@
+/*
+ * Área de Inventario: mapa de ubicaciones, captura de conteo, existencias,
+ * perfiles, ubicaciones y etiquetas. Sólo tokens (--unik-*): ningún color
+ * literal. Se importa desde el layout del área y desde la vista especial
+ * (Next permite CSS global en cualquier componente del App Router).
+ */
+
+/* ------------------------------------------------------------ Mapa */
+
+.inv-map {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: var(--unik-space-4);
+  align-items: start;
+  min-width: 0;
+}
+
+.inv-map-main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--unik-space-3);
+  min-width: 0;
+}
+
+.inv-map-aside {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--unik-space-3);
+  align-content: start;
+  min-width: 0;
+}
+
+.inv-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--unik-space-3);
+}
+
+.inv-toolbar .form-field {
+  min-width: 12rem;
+}
+
+.inv-toolbar-spacer {
+  flex: 1 1 auto;
+}
+
+/* Cuadrícula de ubicaciones */
+.inv-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+  gap: var(--unik-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.inv-tile {
+  display: grid;
+  gap: 0.15rem;
+  width: 100%;
+  min-height: 5.5rem;
+  padding: var(--unik-space-3);
+  border: 1px solid var(--unik-border);
+  border-left: 4px solid var(--unik-text-muted);
+  border-radius: var(--unik-radius-md);
+  background: var(--unik-surface);
+  color: var(--unik-text);
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+  transition:
+    background-color var(--unik-transition, 0.15s ease),
+    border-color var(--unik-transition, 0.15s ease),
+    transform var(--unik-transition, 0.15s ease);
+}
+
+.inv-tile:hover {
+  background: var(--unik-surface-hover);
+}
+
+.inv-tile:focus-visible {
+  outline: 2px solid var(--unik-brand);
+  outline-offset: 2px;
+}
+
+.inv-tile[aria-pressed='true'] {
+  border-color: var(--unik-brand);
+  background: var(--unik-brand-subtle, var(--unik-surface-hover));
+}
+
+.inv-tile-code {
+  font-weight: var(--unik-weight-semibold, 600);
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inv-tile-label,
+.inv-tile-meta {
+  font-size: var(--unik-text-xs);
+  color: var(--unik-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inv-tile-meta {
+  color: var(--unik-text-muted);
+}
+
+.inv-tile-empty {
+  opacity: 0.75;
+}
+
+/* Confianza: el borde izquierdo dice el nivel sin depender del color solo */
+.inv-tone-CONTROLLED {
+  border-left-color: var(--unik-success);
+}
+
+.inv-tone-PROVISIONAL {
+  border-left-color: var(--unik-warning);
+}
+
+.inv-tone-DISPUTED {
+  border-left-color: var(--unik-danger);
+}
+
+.inv-tone-UNCOUNTED {
+  border-left-color: var(--unik-text-muted);
+}
+
+.inv-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--unik-space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--unik-text-xs);
+  color: var(--unik-text-secondary);
+}
+
+.inv-legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--unik-space-1);
+}
+
+.inv-legend-dot {
+  width: 0.75rem;
+  height: 0.75rem;
+  border-radius: var(--unik-radius-sm);
+  background: var(--unik-text-muted);
+  flex: 0 0 auto;
+}
+
+.inv-legend-CONTROLLED .inv-legend-dot {
+  background: var(--unik-success);
+}
+
+.inv-legend-PROVISIONAL .inv-legend-dot {
+  background: var(--unik-warning);
+}
+
+.inv-legend-DISPUTED .inv-legend-dot {
+  background: var(--unik-danger);
+}
+
+/* ------------------------------------------------------- Tarjetas */
+
+.inv-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--unik-space-2);
+  padding: var(--unik-space-3);
+  border: 1px solid var(--unik-border);
+  border-radius: var(--unik-radius-md);
+  background: var(--unik-surface);
+  min-width: 0;
+}
+
+.inv-card-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--unik-space-2);
+  margin: 0;
+  font-size: var(--unik-text-sm);
+  font-weight: var(--unik-weight-semibold, 600);
+  color: var(--unik-text);
+}
+
+.inv-card-hint {
+  margin: 0;
+  font-size: var(--unik-text-xs);
+  color: var(--unik-text-secondary);
+}
+
+.inv-next {
+  border-left: 4px solid var(--unik-brand);
+}
+
+.inv-list {
+  display: grid;
+  gap: var(--unik-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.inv-list-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--unik-space-2);
+  padding: var(--unik-space-2) 0;
+  border-bottom: 1px solid var(--unik-border-subtle, var(--unik-border));
+  font-size: var(--unik-text-sm);
+}
+
+.inv-list-item:last-child {
+  border-bottom: 0;
+}
+
+.inv-list-main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.1rem;
+  min-width: 0;
+}
+
+.inv-list-sub {
+  font-size: var(--unik-text-xs);
+  color: var(--unik-text-muted);
+}
+
+.inv-qty {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* ------------------------------------------------- Captura de conteo */
+
+.inv-capture {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--unik-space-3);
+  min-width: 0;
+}
+
+.inv-capture-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--unik-space-2);
+}
+
+.inv-capture-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+  gap: var(--unik-space-3);
+  align-items: end;
+}
+
+.inv-capture-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--unik-space-2);
+}
+
+.inv-diff-ok {
+  color: var(--unik-success);
+  font-weight: var(--unik-weight-medium, 500);
+}
+
+.inv-diff-off {
+  color: var(--unik-danger);
+  font-weight: var(--unik-weight-medium, 500);
+}
+
+/* --------------------------------------------------------- Tablas */
+
+.inv-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--unik-border);
+  border-radius: var(--unik-radius-md);
+  background: var(--unik-surface);
+}
+
+.inv-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--unik-text-sm);
+}
+
+.inv-table th,
+.inv-table td {
+  padding: var(--unik-space-2) var(--unik-space-3);
+  text-align: left;
+  border-bottom: 1px solid var(--unik-border-subtle, var(--unik-border));
+  white-space: nowrap;
+}
+
+.inv-table th {
+  font-size: var(--unik-text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--unik-text-muted);
+  font-weight: var(--unik-weight-semibold, 600);
+  background: var(--unik-surface-hover);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.inv-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.inv-table tbody tr:hover {
+  background: var(--unik-surface-hover);
+}
+
+.inv-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.inv-zoho {
+  color: var(--unik-text-muted);
+}
+
+.inv-pagination {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--unik-space-2);
+  font-size: var(--unik-text-xs);
+  color: var(--unik-text-secondary);
+}
+
+/* ------------------------------------------- Diferencias por decidir */
+
+/*
+ * Un renglón con su propia decisión: los datos arriba y el formulario abajo,
+ * en una sola columna acotada (`minmax(0, 1fr)`) para que un nombre largo de
+ * artículo no empuje la tabla fuera de su caja.
+ */
+.inv-decision-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: stretch;
+  gap: var(--unik-space-2);
+  min-width: 0;
+}
+
+.inv-decision-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  gap: var(--unik-space-2);
+  align-items: end;
+  min-width: 0;
+}
+
+.inv-decision-form .inv-capture-actions {
+  grid-column: 1 / -1;
+}
+
+/* Enlace dentro del aviso de la captura (lleva al conteo con sus diferencias). */
+.inv-capture-link {
+  color: inherit;
+  font-weight: var(--unik-weight-medium, 500);
+  text-decoration: underline;
+}
+
+/* Acciones de una fila de la tabla de existencias (registrar, perfil). */
+.inv-row-actions {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: var(--unik-space-1, 0.25rem);
+  white-space: nowrap;
+}
+
+/* --------------------------------------------------------- Formularios */
+
+.inv-form {
+  display: grid;
+  gap: var(--unik-space-4);
+  max-width: 52rem;
+}
+
+.inv-form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  gap: var(--unik-space-3);
+}
+
+.inv-conversion-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  gap: var(--unik-space-2);
+  align-items: end;
+}
+
+.inv-form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--unik-space-2);
+  align-items: center;
+}
+
+/* --------------------------------------------------------- Etiquetas */
+
+.inv-labels {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(13rem, 1fr));
+  gap: var(--unik-space-3);
+}
+
+.inv-label {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--unik-space-3);
+  padding: var(--unik-space-3);
+  border: 1px solid var(--unik-border);
+  border-radius: var(--unik-radius-md);
+  background: var(--unik-surface);
+  break-inside: avoid;
+}
+
+.inv-label-qr {
+  width: 5rem;
+  height: 5rem;
+  color: var(--unik-text);
+}
+
+.inv-label-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.1rem;
+  min-width: 0;
+}
+
+.inv-label-code {
+  font-family: var(--unik-font-mono);
+  font-size: var(--unik-text-base);
+  font-weight: var(--unik-weight-bold, 700);
+  overflow-wrap: anywhere;
+}
+
+.inv-label-title {
+  font-size: var(--unik-text-sm);
+  overflow-wrap: anywhere;
+}
+
+.inv-label-line {
+  font-size: var(--unik-text-xs);
+  color: var(--unik-text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.inv-label-fallback {
+  font-family: var(--unik-font-mono);
+  font-size: var(--unik-text-xs);
+  color: var(--unik-text-muted);
+  overflow-wrap: anywhere;
+}
+
+@media print {
+  .app-sidebar,
+  .app-topbar,
+  .area-shell-heading,
+  .inv-no-print {
+    display: none !important;
+  }
+
+  .inv-labels {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.5rem;
+  }
+
+  .inv-label {
+    border: 1px solid var(--unik-text);
+  }
+}
+
+/* -------------------------------------------------------- Responsive */
+
+@media (max-width: 1280px) {
+  .inv-map {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 768px) {
+  .inv-grid {
+    grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr));
+  }
+
+  .inv-tile {
+    min-height: 4.5rem;
+  }
+
+  .inv-toolbar .form-field {
+    min-width: 0;
+    flex: 1 1 100%;
+  }
+
+  .inv-capture-form {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .inv-capture-actions .btn,
+  .inv-form-actions .btn {
+    flex: 1 1 auto;
+    min-height: 2.75rem;
+  }
+
+  .inv-conversion-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* Barra fija de acciones en la captura móvil, respetando el área segura. */
+  .inv-sticky-bar {
+    position: sticky;
+    bottom: 0;
+    display: flex;
+    gap: var(--unik-space-2);
+    padding: var(--unik-space-2);
+    padding-bottom: calc(var(--unik-space-2) + env(safe-area-inset-bottom, 0px));
+    border-top: 1px solid var(--unik-border);
+    background: var(--unik-surface);
+    z-index: 2;
+  }
+
+  .inv-sticky-bar .btn {
+    flex: 1 1 auto;
+    min-height: 2.75rem;
+  }
+}
+
+@media (max-width: 400px) {
+  .inv-grid {
+    grid-template-columns: repeat(auto-fill, minmax(7.5rem, 1fr));
+  }
+}

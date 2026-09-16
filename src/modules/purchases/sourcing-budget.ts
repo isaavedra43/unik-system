@@ -54,7 +54,10 @@ export async function reserveSourcingUnits(
 }
 
 /** Gives back the part of a reservation the provider did not spend (never below zero). */
-export async function releaseSourcingUnits(db: MeterDb, input: { units: number; day: string }): Promise<void> {
+export async function releaseSourcingUnits(
+  db: MeterDb,
+  input: { units: number; day: string }
+): Promise<void> {
   if (input.units <= 0) return;
   const key = unitsKey(input.day);
   await db.usageMeter.updateMany({
@@ -63,12 +66,20 @@ export async function releaseSourcingUnits(db: MeterDb, input: { units: number; 
   });
 }
 
-/** Units spent beyond the reservation (the estimate is the maximum a provider can spend, so normally none). */
-export async function chargeSourcingUnits(units: number): Promise<void> {
+/**
+ * Units spent beyond the reservation (the estimate is the maximum a provider can spend, so normally none).
+ *
+ * `day` is the day the units were RESERVED, not the day the provider finished:
+ * a search queued just before UTC midnight whose job runs after it must charge
+ * and release against the same period it reserved, or the reservation is never
+ * given back and that day's budget shrinks for good.
+ */
+export async function chargeSourcingUnits(units: number, day: string): Promise<void> {
   if (units <= 0) return;
-  await recordUsage('extension', SOURCING_USAGE_KEY, 'units', units);
+  await recordUsage('extension', SOURCING_USAGE_KEY, 'units', units, day);
 }
 
-export async function countSourcingSearch(providerKey: string): Promise<void> {
-  await recordUsage('extension', `${SOURCING_USAGE_KEY}:${providerKey}`, 'searches', 1);
+/** Counts one finished search on the day its units were reserved (same period as the spend). */
+export async function countSourcingSearch(providerKey: string, day: string): Promise<void> {
+  await recordUsage('extension', `${SOURCING_USAGE_KEY}:${providerKey}`, 'searches', 1, day);
 }

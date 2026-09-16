@@ -76,7 +76,12 @@ import {
   updateExpenseTemplateInTx,
   type ExpenseCommandData,
 } from './expenses-service';
-import { toCashAccountDTO, toLedgerEntryDTO, type CashAccountDTO, type LedgerEntryDTO } from './finance-dto';
+import {
+  toCashAccountDTO,
+  toLedgerEntryDTO,
+  type CashAccountDTO,
+  type LedgerEntryDTO,
+} from './finance-dto';
 import {
   assertAggregateTarget,
   assertFinanceEnabledFor,
@@ -97,6 +102,8 @@ import {
   manualObligationSchema,
   requestPaymentAuthorizationInTx,
   requestPaymentAuthorizationSchema,
+  rescheduleObligationInTx,
+  rescheduleObligationSchema,
   reverseSettlementInTx,
   reverseSettlementSchema,
   settleObligationInTx,
@@ -105,6 +112,7 @@ import {
   writeOffObligationInTx,
   writeOffObligationSchema,
   type PaymentAuthorizationData,
+  type RescheduleObligationData,
   type SettleObligationData,
 } from './obligations-service';
 import {
@@ -141,7 +149,7 @@ import { FINANCE_COMMANDS, FINANCE_OBJECT_TYPES } from './types';
  * | cash account update | cash_account | finance.manage_catalog |
  * | ledger post_manual / reverse | none | finance.post |
  * | obligation create / request_authorization | none | finance.manage_obligations |
- * | obligation settle / cancel / write_off | obligation | finance.manage_obligations |
+ * | obligation settle / cancel / write_off / reschedule | obligation | finance.manage_obligations |
  * | obligation reverse_settlement | obligation | finance.post |
  * | expense capture / template create / capture_from_template | none | finance.capture_expense |
  * | expense update / resolve_duplicate / submit / reject | expense | finance.capture_expense (owner rules in the handler) |
@@ -321,35 +329,42 @@ registerCommand(FINANCE_COMMANDS.obligationCreate, {
     const { obligation, ledgerEntry } = await createObligationWithEntry(tx, cmd.payload, ctx);
     return {
       aggregateVersion: obligation.version,
-      data: { obligationId: obligation.id, number: obligation.number, ledgerEntryId: ledgerEntry?.id ?? null },
+      data: {
+        obligationId: obligation.id,
+        number: obligation.number,
+        ledgerEntryId: ledgerEntry?.id ?? null,
+      },
     };
   },
 });
 
-registerCommand<z.output<typeof settleObligationSchema>, SettleObligationData>(FINANCE_COMMANDS.obligationSettle, {
-  schema: settleObligationSchema,
-  permission: 'finance.manage_obligations',
-  aggregate: obligationAggregate,
-  actorTypes: HUMAN_ONLY,
-  async handler(tx, cmd, ctx) {
-    await assertFinanceEnabledFor(ctx);
-    assertAggregateTarget(cmd, cmd.payload.obligationId, 'La obligación');
-    const result = await settleObligationInTx(
-      tx,
-      {
-        obligationId: cmd.payload.obligationId,
-        amount: cmd.payload.amount,
-        cashAccountId: cmd.payload.cashAccountId,
-        dateKey: cmd.payload.date ?? null,
-        evidenceObjectIds: cmd.payload.evidenceObjectIds,
-        memo: cmd.payload.memo ?? null,
-      },
-      ctx,
-      { bumpVersion: false }
-    );
-    return { data: toSettleData(result) };
-  },
-});
+registerCommand<z.output<typeof settleObligationSchema>, SettleObligationData>(
+  FINANCE_COMMANDS.obligationSettle,
+  {
+    schema: settleObligationSchema,
+    permission: 'finance.manage_obligations',
+    aggregate: obligationAggregate,
+    actorTypes: HUMAN_ONLY,
+    async handler(tx, cmd, ctx) {
+      await assertFinanceEnabledFor(ctx);
+      assertAggregateTarget(cmd, cmd.payload.obligationId, 'La obligación');
+      const result = await settleObligationInTx(
+        tx,
+        {
+          obligationId: cmd.payload.obligationId,
+          amount: cmd.payload.amount,
+          cashAccountId: cmd.payload.cashAccountId,
+          dateKey: cmd.payload.date ?? null,
+          evidenceObjectIds: cmd.payload.evidenceObjectIds,
+          memo: cmd.payload.memo ?? null,
+        },
+        ctx,
+        { bumpVersion: false }
+      );
+      return { data: toSettleData(result) };
+    },
+  }
+);
 
 registerCommand(FINANCE_COMMANDS.obligationCancel, {
   schema: cancelObligationSchema,
@@ -359,10 +374,28 @@ registerCommand(FINANCE_COMMANDS.obligationCancel, {
   async handler(tx, cmd, ctx) {
     await assertFinanceEnabledFor(ctx);
     assertAggregateTarget(cmd, cmd.payload.obligationId, 'La obligación');
-    const row = await cancelObligation(tx, cmd.payload.obligationId, cmd.payload.reason, ctx, { bumpVersion: false });
+    const row = await cancelObligation(tx, cmd.payload.obligationId, cmd.payload.reason, ctx, {
+      bumpVersion: false,
+    });
     return { data: { obligationId: row.id, number: row.number, status: row.status } };
   },
 });
+
+registerCommand<z.output<typeof rescheduleObligationSchema>, RescheduleObligationData>(
+  FINANCE_COMMANDS.obligationReschedule,
+  {
+    schema: rescheduleObligationSchema,
+    permission: 'finance.manage_obligations',
+    aggregate: obligationAggregate,
+    actorTypes: HUMAN_ONLY,
+    async handler(tx, cmd, ctx) {
+      await assertFinanceEnabledFor(ctx);
+      assertAggregateTarget(cmd, cmd.payload.obligationId, 'La obligación');
+      const { data } = await rescheduleObligationInTx(tx, cmd.payload, ctx, { bumpVersion: false });
+      return { data };
+    },
+  }
+);
 
 registerCommand(FINANCE_COMMANDS.obligationWriteOff, {
   schema: writeOffObligationSchema,
@@ -372,8 +405,16 @@ registerCommand(FINANCE_COMMANDS.obligationWriteOff, {
   async handler(tx, cmd, ctx) {
     await assertFinanceEnabledFor(ctx);
     assertAggregateTarget(cmd, cmd.payload.obligationId, 'La obligación');
-    const { obligation, ledgerEntry } = await writeOffObligationInTx(tx, cmd.payload, ctx, { bumpVersion: false });
-    return { data: { obligationId: obligation.id, status: obligation.status, ledgerEntryId: ledgerEntry.id } };
+    const { obligation, ledgerEntry } = await writeOffObligationInTx(tx, cmd.payload, ctx, {
+      bumpVersion: false,
+    });
+    return {
+      data: {
+        obligationId: obligation.id,
+        status: obligation.status,
+        ledgerEntryId: ledgerEntry.id,
+      },
+    };
   },
 });
 
@@ -392,7 +433,11 @@ registerCommand(FINANCE_COMMANDS.settlementReverse, {
     const hold = result.settlement.zohoPaymentId
       ? await holdReversedPaymentInTx(
           tx,
-          { zohoPaymentId: result.settlement.zohoPaymentId, obligationNumber: result.obligation.number, reason: cmd.payload.reason },
+          {
+            zohoPaymentId: result.settlement.zohoPaymentId,
+            obligationNumber: result.obligation.number,
+            reason: cmd.payload.reason,
+          },
           ctx
         )
       : null;
@@ -432,40 +477,50 @@ function proposalQueued(expense: { aiProposal: unknown }): boolean {
   return record?.status === 'pending';
 }
 
-registerCommand<z.output<typeof captureExpenseSchema>, ExpenseCommandData>(FINANCE_COMMANDS.expenseCapture, {
-  schema: captureExpenseSchema,
-  permission: 'finance.capture_expense',
-  aggregate: 'none',
-  actorTypes: PEOPLE_AND_AGENTS,
-  async handler(tx, cmd, ctx) {
-    await assertFinanceEnabledFor(ctx);
-    const { expense, matches } = await captureExpenseInTx(tx, cmd.payload, ctx);
-    return {
-      aggregateVersion: expense.version,
-      data: toExpenseCommandData(expense, {
-        proposalQueued: proposalQueued(expense),
-        matches: matches.slice(0, 5).map(({ expenseId, number, kind, reason }) => ({ expenseId, number, kind, reason })),
-      }),
-    };
-  },
-});
+registerCommand<z.output<typeof captureExpenseSchema>, ExpenseCommandData>(
+  FINANCE_COMMANDS.expenseCapture,
+  {
+    schema: captureExpenseSchema,
+    permission: 'finance.capture_expense',
+    aggregate: 'none',
+    actorTypes: PEOPLE_AND_AGENTS,
+    async handler(tx, cmd, ctx) {
+      await assertFinanceEnabledFor(ctx);
+      const { expense, matches } = await captureExpenseInTx(tx, cmd.payload, ctx);
+      return {
+        aggregateVersion: expense.version,
+        data: toExpenseCommandData(expense, {
+          proposalQueued: proposalQueued(expense),
+          matches: matches
+            .slice(0, 5)
+            .map(({ expenseId, number, kind, reason }) => ({ expenseId, number, kind, reason })),
+        }),
+      };
+    },
+  }
+);
 
-registerCommand<z.output<typeof updateExpenseSchema>, ExpenseCommandData>(FINANCE_COMMANDS.expenseUpdate, {
-  schema: updateExpenseSchema,
-  permission: 'finance.capture_expense',
-  aggregate: expenseAggregate,
-  actorTypes: PEOPLE_AND_AGENTS,
-  async handler(tx, cmd, ctx) {
-    await assertFinanceEnabledFor(ctx);
-    assertAggregateTarget(cmd, cmd.payload.expenseId, 'El gasto');
-    const { expense, matches } = await updateExpenseInTx(tx, cmd.payload, ctx);
-    return {
-      data: toExpenseCommandData(expense, {
-        matches: matches.slice(0, 5).map(({ expenseId, number, kind, reason }) => ({ expenseId, number, kind, reason })),
-      }),
-    };
-  },
-});
+registerCommand<z.output<typeof updateExpenseSchema>, ExpenseCommandData>(
+  FINANCE_COMMANDS.expenseUpdate,
+  {
+    schema: updateExpenseSchema,
+    permission: 'finance.capture_expense',
+    aggregate: expenseAggregate,
+    actorTypes: PEOPLE_AND_AGENTS,
+    async handler(tx, cmd, ctx) {
+      await assertFinanceEnabledFor(ctx);
+      assertAggregateTarget(cmd, cmd.payload.expenseId, 'El gasto');
+      const { expense, matches } = await updateExpenseInTx(tx, cmd.payload, ctx);
+      return {
+        data: toExpenseCommandData(expense, {
+          matches: matches
+            .slice(0, 5)
+            .map(({ expenseId, number, kind, reason }) => ({ expenseId, number, kind, reason })),
+        }),
+      };
+    },
+  }
+);
 
 registerCommand(FINANCE_COMMANDS.expenseApplyProposal, {
   schema: applyProposalSchema,
@@ -475,7 +530,13 @@ registerCommand(FINANCE_COMMANDS.expenseApplyProposal, {
   async handler(tx, cmd, ctx) {
     assertAggregateTarget(cmd, cmd.payload.expenseId, 'El gasto');
     const result = await applyProposalInTx(tx, cmd.payload, ctx);
-    return { data: { applied: result.applied, fields: result.fields, duplicateStatus: result.expense.duplicateStatus } };
+    return {
+      data: {
+        applied: result.applied,
+        fields: result.fields,
+        duplicateStatus: result.expense.duplicateStatus,
+      },
+    };
   },
 });
 
@@ -491,29 +552,35 @@ registerCommand(FINANCE_COMMANDS.expenseResolveDuplicate, {
   },
 });
 
-registerCommand<z.output<typeof submitExpenseSchema>, ExpenseCommandData>(FINANCE_COMMANDS.expenseSubmit, {
-  schema: submitExpenseSchema,
-  permission: 'finance.capture_expense',
-  aggregate: expenseAggregate,
-  actorTypes: HUMAN_ONLY,
-  async handler(tx, cmd, ctx) {
-    await assertFinanceEnabledFor(ctx);
-    assertAggregateTarget(cmd, cmd.payload.expenseId, 'El gasto');
-    return { data: await submitExpenseInTx(tx, cmd.payload, ctx) };
-  },
-});
+registerCommand<z.output<typeof submitExpenseSchema>, ExpenseCommandData>(
+  FINANCE_COMMANDS.expenseSubmit,
+  {
+    schema: submitExpenseSchema,
+    permission: 'finance.capture_expense',
+    aggregate: expenseAggregate,
+    actorTypes: HUMAN_ONLY,
+    async handler(tx, cmd, ctx) {
+      await assertFinanceEnabledFor(ctx);
+      assertAggregateTarget(cmd, cmd.payload.expenseId, 'El gasto');
+      return { data: await submitExpenseInTx(tx, cmd.payload, ctx) };
+    },
+  }
+);
 
-registerCommand<z.output<typeof postExpenseSchema>, ExpenseCommandData>(FINANCE_COMMANDS.expensePost, {
-  schema: postExpenseSchema,
-  permission: 'finance.post',
-  aggregate: expenseAggregate,
-  actorTypes: HUMAN_ONLY,
-  async handler(tx, cmd, ctx) {
-    await assertFinanceEnabledFor(ctx);
-    assertAggregateTarget(cmd, cmd.payload.expenseId, 'El gasto');
-    return { data: await postExpenseInTx(tx, cmd.payload, ctx) };
-  },
-});
+registerCommand<z.output<typeof postExpenseSchema>, ExpenseCommandData>(
+  FINANCE_COMMANDS.expensePost,
+  {
+    schema: postExpenseSchema,
+    permission: 'finance.post',
+    aggregate: expenseAggregate,
+    actorTypes: HUMAN_ONLY,
+    async handler(tx, cmd, ctx) {
+      await assertFinanceEnabledFor(ctx);
+      assertAggregateTarget(cmd, cmd.payload.expenseId, 'El gasto');
+      return { data: await postExpenseInTx(tx, cmd.payload, ctx) };
+    },
+  }
+);
 
 registerCommand(FINANCE_COMMANDS.expenseReject, {
   schema: rejectExpenseSchema,
@@ -562,22 +629,27 @@ registerCommand(FINANCE_COMMANDS.expenseTemplateUpdate, {
   },
 });
 
-registerCommand<z.output<typeof captureFromTemplateSchema>, ExpenseCommandData>(FINANCE_COMMANDS.expenseCaptureFromTemplate, {
-  schema: captureFromTemplateSchema,
-  permission: 'finance.capture_expense',
-  aggregate: 'none',
-  actorTypes: PEOPLE_AND_AGENTS,
-  async handler(tx, cmd, ctx) {
-    await assertFinanceEnabledFor(ctx);
-    const { expense, matches } = await captureFromTemplateInTx(tx, cmd.payload, ctx);
-    return {
-      aggregateVersion: expense.version,
-      data: toExpenseCommandData(expense, {
-        matches: matches.slice(0, 5).map(({ expenseId, number, kind, reason }) => ({ expenseId, number, kind, reason })),
-      }),
-    };
-  },
-});
+registerCommand<z.output<typeof captureFromTemplateSchema>, ExpenseCommandData>(
+  FINANCE_COMMANDS.expenseCaptureFromTemplate,
+  {
+    schema: captureFromTemplateSchema,
+    permission: 'finance.capture_expense',
+    aggregate: 'none',
+    actorTypes: PEOPLE_AND_AGENTS,
+    async handler(tx, cmd, ctx) {
+      await assertFinanceEnabledFor(ctx);
+      const { expense, matches } = await captureFromTemplateInTx(tx, cmd.payload, ctx);
+      return {
+        aggregateVersion: expense.version,
+        data: toExpenseCommandData(expense, {
+          matches: matches
+            .slice(0, 5)
+            .map(({ expenseId, number, kind, reason }) => ({ expenseId, number, kind, reason })),
+        }),
+      };
+    },
+  }
+);
 
 registerCommand(FINANCE_COMMANDS.expenseRunRecurring, {
   schema: runRecurringSchema,
@@ -724,26 +796,32 @@ registerCommand(FINANCE_COMMANDS.collectionExpectCase, {
   },
 });
 
-registerCommand<z.output<typeof applyPaymentSchema>, ApplyPaymentResult>(FINANCE_COMMANDS.collectionApplyPayment, {
-  schema: applyPaymentSchema,
-  aggregate: 'none',
-  actorTypes: SYSTEM_ONLY,
-  audit: 'never',
-  async handler(tx, cmd, ctx) {
-    return { data: await applyPaymentInTx(tx, cmd.payload, ctx, { manual: false }) };
-  },
-});
+registerCommand<z.output<typeof applyPaymentSchema>, ApplyPaymentResult>(
+  FINANCE_COMMANDS.collectionApplyPayment,
+  {
+    schema: applyPaymentSchema,
+    aggregate: 'none',
+    actorTypes: SYSTEM_ONLY,
+    audit: 'never',
+    async handler(tx, cmd, ctx) {
+      return { data: await applyPaymentInTx(tx, cmd.payload, ctx, { manual: false }) };
+    },
+  }
+);
 
-registerCommand<z.output<typeof applyPaymentSchema>, ApplyPaymentResult>(FINANCE_COMMANDS.collectionMatchPayment, {
-  schema: applyPaymentSchema,
-  permission: 'finance.manage_obligations',
-  aggregate: 'none',
-  actorTypes: HUMAN_ONLY,
-  async handler(tx, cmd, ctx) {
-    await assertFinanceEnabledFor(ctx);
-    return { data: await applyPaymentInTx(tx, cmd.payload, ctx, { manual: true }) };
-  },
-});
+registerCommand<z.output<typeof applyPaymentSchema>, ApplyPaymentResult>(
+  FINANCE_COMMANDS.collectionMatchPayment,
+  {
+    schema: applyPaymentSchema,
+    permission: 'finance.manage_obligations',
+    aggregate: 'none',
+    actorTypes: HUMAN_ONLY,
+    async handler(tx, cmd, ctx) {
+      await assertFinanceEnabledFor(ctx);
+      return { data: await applyPaymentInTx(tx, cmd.payload, ctx, { manual: true }) };
+    },
+  }
+);
 
 registerCommand(FINANCE_COMMANDS.collectionFlagPayment, {
   schema: flagPaymentSchema,
@@ -801,16 +879,19 @@ registerCommand<z.output<typeof dailyCloseSchema>, CloseResultData>(FINANCE_COMM
   },
 });
 
-registerCommand<z.output<typeof monthlyCloseSchema>, CloseResultData>(FINANCE_COMMANDS.closeMonthly, {
-  schema: monthlyCloseSchema,
-  permission: 'finance.close',
-  aggregate: 'none',
-  actorTypes: HUMAN_ONLY,
-  async handler(tx, cmd, ctx) {
-    await assertFinanceEnabledFor(ctx);
-    return { data: await runMonthlyCloseInTx(tx, cmd.payload, ctx) };
-  },
-});
+registerCommand<z.output<typeof monthlyCloseSchema>, CloseResultData>(
+  FINANCE_COMMANDS.closeMonthly,
+  {
+    schema: monthlyCloseSchema,
+    permission: 'finance.close',
+    aggregate: 'none',
+    actorTypes: HUMAN_ONLY,
+    async handler(tx, cmd, ctx) {
+      await assertFinanceEnabledFor(ctx);
+      return { data: await runMonthlyCloseInTx(tx, cmd.payload, ctx) };
+    },
+  }
+);
 
 registerCommand(FINANCE_COMMANDS.closeReopen, {
   schema: reopenPeriodSchema,
@@ -831,40 +912,182 @@ registerCommand(FINANCE_COMMANDS.closeReopen, {
 type Options = FinanceCommandOptions;
 const none = (type: string, id = 'new') => ({ type, id });
 
-function run<D>(actor: CurrentUser, type: string, aggregate: { type: string; id: string }, payload: unknown, opts?: Options) {
+function run<D>(
+  actor: CurrentUser,
+  type: string,
+  aggregate: { type: string; id: string },
+  payload: unknown,
+  opts?: Options
+) {
   return runFinanceCommand<D>(actor, { type, aggregate, payload }, opts);
 }
 
 const idOf = (value: unknown) => String(value ?? '');
 
 export const seedFinanceCatalog = (actor: CurrentUser, opts?: Options) =>
-  run<{ created: number }>(actor, FINANCE_COMMANDS.catalogSeed, none('finance_catalog', 'seed'), {}, opts);
-export const createCashAccount = (actor: CurrentUser, input: z.input<typeof cashAccountCreateSchema>, opts?: Options) =>
-  run<CashAccountDTO>(actor, FINANCE_COMMANDS.cashAccountCreate, none('cash_account', `key:${idOf(input.key)}`), input, opts);
-export const updateCashAccount = (actor: CurrentUser, input: z.input<typeof cashAccountUpdateSchema>, opts?: Options) =>
-  run<CashAccountDTO>(actor, FINANCE_COMMANDS.cashAccountUpdate, { type: FINANCE_OBJECT_TYPES.cashAccount, id: idOf(input.cashAccountId) }, input, opts);
-export const createCategory = (actor: CurrentUser, input: z.input<typeof categoryCreateSchema>, opts?: Options) =>
-  run<{ categoryId: string; key: string }>(actor, FINANCE_COMMANDS.categoryCreate, none('finance_category', `key:${idOf(input.key)}`), input, opts);
-export const updateCategory = (actor: CurrentUser, input: z.input<typeof categoryUpdateSchema>, opts?: Options) =>
-  run<{ categoryId: string; status: string }>(actor, FINANCE_COMMANDS.categoryUpdate, none('finance_category', idOf(input.categoryId)), input, opts);
-export const createCostCenter = (actor: CurrentUser, input: z.input<typeof costCenterCreateSchema>, opts?: Options) =>
-  run<{ costCenterId: string; key: string }>(actor, FINANCE_COMMANDS.costCenterCreate, none('cost_center', `key:${idOf(input.key)}`), input, opts);
-export const updateCostCenter = (actor: CurrentUser, input: z.input<typeof costCenterUpdateSchema>, opts?: Options) =>
-  run<{ costCenterId: string; status: string }>(actor, FINANCE_COMMANDS.costCenterUpdate, none('cost_center', idOf(input.costCenterId)), input, opts);
-export const setBudget = (actor: CurrentUser, input: z.input<typeof budgetSetSchema>, opts?: Options) =>
-  run<{ id: string; amount: string }>(actor, FINANCE_COMMANDS.budgetSet, none('budget', `${idOf(input.periodKey)}:${idOf(input.costCenterId)}:${idOf(input.categoryId)}`), input, opts);
+  run<{ created: number }>(
+    actor,
+    FINANCE_COMMANDS.catalogSeed,
+    none('finance_catalog', 'seed'),
+    {},
+    opts
+  );
+export const createCashAccount = (
+  actor: CurrentUser,
+  input: z.input<typeof cashAccountCreateSchema>,
+  opts?: Options
+) =>
+  run<CashAccountDTO>(
+    actor,
+    FINANCE_COMMANDS.cashAccountCreate,
+    none('cash_account', `key:${idOf(input.key)}`),
+    input,
+    opts
+  );
+export const updateCashAccount = (
+  actor: CurrentUser,
+  input: z.input<typeof cashAccountUpdateSchema>,
+  opts?: Options
+) =>
+  run<CashAccountDTO>(
+    actor,
+    FINANCE_COMMANDS.cashAccountUpdate,
+    { type: FINANCE_OBJECT_TYPES.cashAccount, id: idOf(input.cashAccountId) },
+    input,
+    opts
+  );
+export const createCategory = (
+  actor: CurrentUser,
+  input: z.input<typeof categoryCreateSchema>,
+  opts?: Options
+) =>
+  run<{ categoryId: string; key: string }>(
+    actor,
+    FINANCE_COMMANDS.categoryCreate,
+    none('finance_category', `key:${idOf(input.key)}`),
+    input,
+    opts
+  );
+export const updateCategory = (
+  actor: CurrentUser,
+  input: z.input<typeof categoryUpdateSchema>,
+  opts?: Options
+) =>
+  run<{ categoryId: string; status: string }>(
+    actor,
+    FINANCE_COMMANDS.categoryUpdate,
+    none('finance_category', idOf(input.categoryId)),
+    input,
+    opts
+  );
+export const createCostCenter = (
+  actor: CurrentUser,
+  input: z.input<typeof costCenterCreateSchema>,
+  opts?: Options
+) =>
+  run<{ costCenterId: string; key: string }>(
+    actor,
+    FINANCE_COMMANDS.costCenterCreate,
+    none('cost_center', `key:${idOf(input.key)}`),
+    input,
+    opts
+  );
+export const updateCostCenter = (
+  actor: CurrentUser,
+  input: z.input<typeof costCenterUpdateSchema>,
+  opts?: Options
+) =>
+  run<{ costCenterId: string; status: string }>(
+    actor,
+    FINANCE_COMMANDS.costCenterUpdate,
+    none('cost_center', idOf(input.costCenterId)),
+    input,
+    opts
+  );
+export const setBudget = (
+  actor: CurrentUser,
+  input: z.input<typeof budgetSetSchema>,
+  opts?: Options
+) =>
+  run<{ id: string; amount: string }>(
+    actor,
+    FINANCE_COMMANDS.budgetSet,
+    none(
+      'budget',
+      `${idOf(input.periodKey)}:${idOf(input.costCenterId)}:${idOf(input.categoryId)}`
+    ),
+    input,
+    opts
+  );
 
-export const postManualEntry = (actor: CurrentUser, input: z.input<typeof postManualEntrySchema>, opts?: Options) =>
+export const postManualEntry = (
+  actor: CurrentUser,
+  input: z.input<typeof postManualEntrySchema>,
+  opts?: Options
+) =>
   run<LedgerEntryDTO>(actor, FINANCE_COMMANDS.ledgerPostManual, none('ledger_entry'), input, opts);
-export const reverseEntry = (actor: CurrentUser, input: z.input<typeof reverseEntrySchema>, opts?: Options) =>
-  run<{ entryId: string; reversal: LedgerEntryDTO }>(actor, FINANCE_COMMANDS.ledgerReverse, none('ledger_entry', idOf(input.entryId)), input, opts);
+export const reverseEntry = (
+  actor: CurrentUser,
+  input: z.input<typeof reverseEntrySchema>,
+  opts?: Options
+) =>
+  run<{ entryId: string; reversal: LedgerEntryDTO }>(
+    actor,
+    FINANCE_COMMANDS.ledgerReverse,
+    none('ledger_entry', idOf(input.entryId)),
+    input,
+    opts
+  );
 
-export const createManualObligation = (actor: CurrentUser, input: z.input<typeof manualObligationSchema>, opts?: Options) =>
-  run<{ obligationId: string; number: string; ledgerEntryId: string | null }>(actor, FINANCE_COMMANDS.obligationCreate, none('obligation'), input, opts);
-export const cancelObligationCommand = (actor: CurrentUser, input: z.input<typeof cancelObligationSchema>, opts?: Options) =>
-  run<{ obligationId: string; number: string; status: string }>(actor, FINANCE_COMMANDS.obligationCancel, { type: FINANCE_OBJECT_TYPES.obligation, id: idOf(input.obligationId) }, input, opts);
-export const writeOffObligation = (actor: CurrentUser, input: z.input<typeof writeOffObligationSchema>, opts?: Options) =>
-  run<{ obligationId: string; status: string; ledgerEntryId: string }>(actor, FINANCE_COMMANDS.obligationWriteOff, { type: FINANCE_OBJECT_TYPES.obligation, id: idOf(input.obligationId) }, input, opts);
+export const createManualObligation = (
+  actor: CurrentUser,
+  input: z.input<typeof manualObligationSchema>,
+  opts?: Options
+) =>
+  run<{ obligationId: string; number: string; ledgerEntryId: string | null }>(
+    actor,
+    FINANCE_COMMANDS.obligationCreate,
+    none('obligation'),
+    input,
+    opts
+  );
+export const cancelObligationCommand = (
+  actor: CurrentUser,
+  input: z.input<typeof cancelObligationSchema>,
+  opts?: Options
+) =>
+  run<{ obligationId: string; number: string; status: string }>(
+    actor,
+    FINANCE_COMMANDS.obligationCancel,
+    { type: FINANCE_OBJECT_TYPES.obligation, id: idOf(input.obligationId) },
+    input,
+    opts
+  );
+export const writeOffObligation = (
+  actor: CurrentUser,
+  input: z.input<typeof writeOffObligationSchema>,
+  opts?: Options
+) =>
+  run<{ obligationId: string; status: string; ledgerEntryId: string }>(
+    actor,
+    FINANCE_COMMANDS.obligationWriteOff,
+    { type: FINANCE_OBJECT_TYPES.obligation, id: idOf(input.obligationId) },
+    input,
+    opts
+  );
+/** Renegocia la fecha de una obligación abierta: no toca el asiento ni el importe. */
+export const rescheduleObligation = (
+  actor: CurrentUser,
+  input: z.input<typeof rescheduleObligationSchema>,
+  opts?: Options
+) =>
+  run<RescheduleObligationData>(
+    actor,
+    FINANCE_COMMANDS.obligationReschedule,
+    { type: FINANCE_OBJECT_TYPES.obligation, id: idOf(input.obligationId) },
+    input,
+    opts
+  );
 export const reverseSettlement = (
   actor: CurrentUser,
   input: z.input<typeof reverseSettlementSchema> & { obligationId: string },
@@ -884,61 +1107,325 @@ export const reverseSettlement = (
     { settlementId: input.settlementId, reason: input.reason, date: input.date },
     opts
   );
-export const requestPaymentAuthorization = (actor: CurrentUser, input: z.input<typeof requestPaymentAuthorizationSchema>, opts?: Options) =>
-  run<PaymentAuthorizationData>(actor, FINANCE_COMMANDS.paymentAuthorizationRequest, none('obligation', idOf(input.obligationId)), input, opts);
+export const requestPaymentAuthorization = (
+  actor: CurrentUser,
+  input: z.input<typeof requestPaymentAuthorizationSchema>,
+  opts?: Options
+) =>
+  run<PaymentAuthorizationData>(
+    actor,
+    FINANCE_COMMANDS.paymentAuthorizationRequest,
+    none('obligation', idOf(input.obligationId)),
+    input,
+    opts
+  );
 
-export const captureExpense = (actor: CurrentUser, input: z.input<typeof captureExpenseSchema>, opts?: Options) =>
-  run<ExpenseCommandData>(actor, FINANCE_COMMANDS.expenseCapture, none('expense'), input, opts);
-export const updateExpense = (actor: CurrentUser, input: z.input<typeof updateExpenseSchema>, opts?: Options) =>
-  run<ExpenseCommandData>(actor, FINANCE_COMMANDS.expenseUpdate, { type: FINANCE_OBJECT_TYPES.expense, id: idOf(input.expenseId) }, input, opts);
-export const resolveExpenseDuplicate = (actor: CurrentUser, input: z.input<typeof resolveDuplicateSchema>, opts?: Options) =>
-  run<ExpenseCommandData>(actor, FINANCE_COMMANDS.expenseResolveDuplicate, { type: FINANCE_OBJECT_TYPES.expense, id: idOf(input.expenseId) }, input, opts);
-export const submitExpense = (actor: CurrentUser, input: z.input<typeof submitExpenseSchema>, opts?: Options) =>
-  run<ExpenseCommandData>(actor, FINANCE_COMMANDS.expenseSubmit, { type: FINANCE_OBJECT_TYPES.expense, id: idOf(input.expenseId) }, input, opts);
-export const postExpense = (actor: CurrentUser, input: z.input<typeof postExpenseSchema>, opts?: Options) =>
-  run<ExpenseCommandData>(actor, FINANCE_COMMANDS.expensePost, { type: FINANCE_OBJECT_TYPES.expense, id: idOf(input.expenseId) }, input, opts);
-export const rejectExpense = (actor: CurrentUser, input: z.input<typeof rejectExpenseSchema>, opts?: Options) =>
-  run<ExpenseCommandData>(actor, FINANCE_COMMANDS.expenseReject, { type: FINANCE_OBJECT_TYPES.expense, id: idOf(input.expenseId) }, input, opts);
-export const reverseExpense = (actor: CurrentUser, input: z.input<typeof reverseExpenseSchema>, opts?: Options) =>
-  run<ExpenseCommandData>(actor, FINANCE_COMMANDS.expenseReverse, { type: FINANCE_OBJECT_TYPES.expense, id: idOf(input.expenseId) }, input, opts);
-export const createExpenseTemplate = (actor: CurrentUser, input: z.input<typeof expenseTemplateCreateSchema>, opts?: Options) =>
-  run<{ templateId: string; nextRunAt: string | null }>(actor, FINANCE_COMMANDS.expenseTemplateCreate, none('expense_template'), input, opts);
-export const updateExpenseTemplate = (actor: CurrentUser, input: z.input<typeof expenseTemplateUpdateSchema>, opts?: Options) =>
-  run<{ templateId: string; nextRunAt: string | null; active: boolean }>(actor, FINANCE_COMMANDS.expenseTemplateUpdate, none('expense_template', idOf(input.templateId)), input, opts);
-export const captureExpenseFromTemplate = (actor: CurrentUser, input: z.input<typeof captureFromTemplateSchema>, opts?: Options) =>
-  run<ExpenseCommandData>(actor, FINANCE_COMMANDS.expenseCaptureFromTemplate, none('expense_template', idOf(input.templateId)), input, opts);
+export const captureExpense = (
+  actor: CurrentUser,
+  input: z.input<typeof captureExpenseSchema>,
+  opts?: Options
+) => run<ExpenseCommandData>(actor, FINANCE_COMMANDS.expenseCapture, none('expense'), input, opts);
+export const updateExpense = (
+  actor: CurrentUser,
+  input: z.input<typeof updateExpenseSchema>,
+  opts?: Options
+) =>
+  run<ExpenseCommandData>(
+    actor,
+    FINANCE_COMMANDS.expenseUpdate,
+    { type: FINANCE_OBJECT_TYPES.expense, id: idOf(input.expenseId) },
+    input,
+    opts
+  );
+export const resolveExpenseDuplicate = (
+  actor: CurrentUser,
+  input: z.input<typeof resolveDuplicateSchema>,
+  opts?: Options
+) =>
+  run<ExpenseCommandData>(
+    actor,
+    FINANCE_COMMANDS.expenseResolveDuplicate,
+    { type: FINANCE_OBJECT_TYPES.expense, id: idOf(input.expenseId) },
+    input,
+    opts
+  );
+export const submitExpense = (
+  actor: CurrentUser,
+  input: z.input<typeof submitExpenseSchema>,
+  opts?: Options
+) =>
+  run<ExpenseCommandData>(
+    actor,
+    FINANCE_COMMANDS.expenseSubmit,
+    { type: FINANCE_OBJECT_TYPES.expense, id: idOf(input.expenseId) },
+    input,
+    opts
+  );
+export const postExpense = (
+  actor: CurrentUser,
+  input: z.input<typeof postExpenseSchema>,
+  opts?: Options
+) =>
+  run<ExpenseCommandData>(
+    actor,
+    FINANCE_COMMANDS.expensePost,
+    { type: FINANCE_OBJECT_TYPES.expense, id: idOf(input.expenseId) },
+    input,
+    opts
+  );
+export const rejectExpense = (
+  actor: CurrentUser,
+  input: z.input<typeof rejectExpenseSchema>,
+  opts?: Options
+) =>
+  run<ExpenseCommandData>(
+    actor,
+    FINANCE_COMMANDS.expenseReject,
+    { type: FINANCE_OBJECT_TYPES.expense, id: idOf(input.expenseId) },
+    input,
+    opts
+  );
+export const reverseExpense = (
+  actor: CurrentUser,
+  input: z.input<typeof reverseExpenseSchema>,
+  opts?: Options
+) =>
+  run<ExpenseCommandData>(
+    actor,
+    FINANCE_COMMANDS.expenseReverse,
+    { type: FINANCE_OBJECT_TYPES.expense, id: idOf(input.expenseId) },
+    input,
+    opts
+  );
+export const createExpenseTemplate = (
+  actor: CurrentUser,
+  input: z.input<typeof expenseTemplateCreateSchema>,
+  opts?: Options
+) =>
+  run<{ templateId: string; nextRunAt: string | null }>(
+    actor,
+    FINANCE_COMMANDS.expenseTemplateCreate,
+    none('expense_template'),
+    input,
+    opts
+  );
+export const updateExpenseTemplate = (
+  actor: CurrentUser,
+  input: z.input<typeof expenseTemplateUpdateSchema>,
+  opts?: Options
+) =>
+  run<{ templateId: string; nextRunAt: string | null; active: boolean }>(
+    actor,
+    FINANCE_COMMANDS.expenseTemplateUpdate,
+    none('expense_template', idOf(input.templateId)),
+    input,
+    opts
+  );
+export const captureExpenseFromTemplate = (
+  actor: CurrentUser,
+  input: z.input<typeof captureFromTemplateSchema>,
+  opts?: Options
+) =>
+  run<ExpenseCommandData>(
+    actor,
+    FINANCE_COMMANDS.expenseCaptureFromTemplate,
+    none('expense_template', idOf(input.templateId)),
+    input,
+    opts
+  );
 
-export const createEmployee = (actor: CurrentUser, input: z.input<typeof employeeCreateSchema>, opts?: Options) =>
-  run<{ employeeId: string; number: string }>(actor, FINANCE_COMMANDS.employeeCreate, none('employee'), input, opts);
-export const updateEmployee = (actor: CurrentUser, input: z.input<typeof employeeUpdateSchema>, opts?: Options) =>
-  run<{ employeeId: string; active: boolean }>(actor, FINANCE_COMMANDS.employeeUpdate, none('employee', idOf(input.employeeId)), input, opts);
-export const grantEmployeeAdvance = (actor: CurrentUser, input: z.input<typeof employeeAdvanceSchema>, opts?: Options) =>
-  run<{ obligationId: string; number: string; ledgerEntryId: string | null }>(actor, FINANCE_COMMANDS.employeeAdvance, none('employee', idOf(input.employeeId)), input, opts);
-export const createPayrollRun = (actor: CurrentUser, input: z.input<typeof payrollCreateSchema>, opts?: Options) =>
-  run<{ payrollRunId: string; number: string; totalNet: string; version: number }>(actor, FINANCE_COMMANDS.payrollCreate, none('payroll_run'), input, opts);
-export const updatePayrollRun = (actor: CurrentUser, input: z.input<typeof payrollUpdateSchema>, opts?: Options) =>
-  run<{ payrollRunId: string; totalNet: string }>(actor, FINANCE_COMMANDS.payrollUpdate, { type: FINANCE_OBJECT_TYPES.payrollRun, id: idOf(input.payrollRunId) }, input, opts);
-export const submitPayrollRun = (actor: CurrentUser, input: z.input<typeof payrollRunOnlySchema>, opts?: Options) =>
-  run<{ payrollRunId: string; status: string; approvalRequestId: string; requiredApprovals: number }>(actor, FINANCE_COMMANDS.payrollSubmit, { type: FINANCE_OBJECT_TYPES.payrollRun, id: idOf(input.payrollRunId) }, input, opts);
-export const createPayrollObligations = (actor: CurrentUser, input: z.input<typeof payrollCreateObligationsSchema>, opts?: Options) =>
-  run<{ payrollRunId: string; status: string; ledgerEntryId: string; obligationIds: string[] }>(actor, FINANCE_COMMANDS.payrollCreateObligations, { type: FINANCE_OBJECT_TYPES.payrollRun, id: idOf(input.payrollRunId) }, input, opts);
-export const payPayrollLine = (actor: CurrentUser, input: z.input<typeof payrollPayLineSchema>, opts?: Options) =>
-  run<{ payrollRunId: string; runStatus: string; obligationId: string; settlementId: string; ledgerEntryId: string }>(actor, FINANCE_COMMANDS.payrollPayLine, { type: FINANCE_OBJECT_TYPES.payrollRun, id: idOf(input.payrollRunId) }, input, opts);
-export const closePayrollRun = (actor: CurrentUser, input: z.input<typeof payrollRunOnlySchema>, opts?: Options) =>
-  run<{ payrollRunId: string; status: string }>(actor, FINANCE_COMMANDS.payrollClose, { type: FINANCE_OBJECT_TYPES.payrollRun, id: idOf(input.payrollRunId) }, input, opts);
-export const cancelPayrollRun = (actor: CurrentUser, input: z.input<typeof payrollCancelSchema>, opts?: Options) =>
-  run<{ payrollRunId: string; status: string; reversalEntryId: string | null }>(actor, FINANCE_COMMANDS.payrollCancel, { type: FINANCE_OBJECT_TYPES.payrollRun, id: idOf(input.payrollRunId) }, input, opts);
+export const createEmployee = (
+  actor: CurrentUser,
+  input: z.input<typeof employeeCreateSchema>,
+  opts?: Options
+) =>
+  run<{ employeeId: string; number: string }>(
+    actor,
+    FINANCE_COMMANDS.employeeCreate,
+    none('employee'),
+    input,
+    opts
+  );
+export const updateEmployee = (
+  actor: CurrentUser,
+  input: z.input<typeof employeeUpdateSchema>,
+  opts?: Options
+) =>
+  run<{ employeeId: string; active: boolean }>(
+    actor,
+    FINANCE_COMMANDS.employeeUpdate,
+    none('employee', idOf(input.employeeId)),
+    input,
+    opts
+  );
+export const grantEmployeeAdvance = (
+  actor: CurrentUser,
+  input: z.input<typeof employeeAdvanceSchema>,
+  opts?: Options
+) =>
+  run<{ obligationId: string; number: string; ledgerEntryId: string | null }>(
+    actor,
+    FINANCE_COMMANDS.employeeAdvance,
+    none('employee', idOf(input.employeeId)),
+    input,
+    opts
+  );
+export const createPayrollRun = (
+  actor: CurrentUser,
+  input: z.input<typeof payrollCreateSchema>,
+  opts?: Options
+) =>
+  run<{ payrollRunId: string; number: string; totalNet: string; version: number }>(
+    actor,
+    FINANCE_COMMANDS.payrollCreate,
+    none('payroll_run'),
+    input,
+    opts
+  );
+export const updatePayrollRun = (
+  actor: CurrentUser,
+  input: z.input<typeof payrollUpdateSchema>,
+  opts?: Options
+) =>
+  run<{ payrollRunId: string; totalNet: string }>(
+    actor,
+    FINANCE_COMMANDS.payrollUpdate,
+    { type: FINANCE_OBJECT_TYPES.payrollRun, id: idOf(input.payrollRunId) },
+    input,
+    opts
+  );
+export const submitPayrollRun = (
+  actor: CurrentUser,
+  input: z.input<typeof payrollRunOnlySchema>,
+  opts?: Options
+) =>
+  run<{
+    payrollRunId: string;
+    status: string;
+    approvalRequestId: string;
+    requiredApprovals: number;
+  }>(
+    actor,
+    FINANCE_COMMANDS.payrollSubmit,
+    { type: FINANCE_OBJECT_TYPES.payrollRun, id: idOf(input.payrollRunId) },
+    input,
+    opts
+  );
+export const createPayrollObligations = (
+  actor: CurrentUser,
+  input: z.input<typeof payrollCreateObligationsSchema>,
+  opts?: Options
+) =>
+  run<{ payrollRunId: string; status: string; ledgerEntryId: string; obligationIds: string[] }>(
+    actor,
+    FINANCE_COMMANDS.payrollCreateObligations,
+    { type: FINANCE_OBJECT_TYPES.payrollRun, id: idOf(input.payrollRunId) },
+    input,
+    opts
+  );
+export const payPayrollLine = (
+  actor: CurrentUser,
+  input: z.input<typeof payrollPayLineSchema>,
+  opts?: Options
+) =>
+  run<{
+    payrollRunId: string;
+    runStatus: string;
+    obligationId: string;
+    settlementId: string;
+    ledgerEntryId: string;
+  }>(
+    actor,
+    FINANCE_COMMANDS.payrollPayLine,
+    { type: FINANCE_OBJECT_TYPES.payrollRun, id: idOf(input.payrollRunId) },
+    input,
+    opts
+  );
+export const closePayrollRun = (
+  actor: CurrentUser,
+  input: z.input<typeof payrollRunOnlySchema>,
+  opts?: Options
+) =>
+  run<{ payrollRunId: string; status: string }>(
+    actor,
+    FINANCE_COMMANDS.payrollClose,
+    { type: FINANCE_OBJECT_TYPES.payrollRun, id: idOf(input.payrollRunId) },
+    input,
+    opts
+  );
+export const cancelPayrollRun = (
+  actor: CurrentUser,
+  input: z.input<typeof payrollCancelSchema>,
+  opts?: Options
+) =>
+  run<{ payrollRunId: string; status: string; reversalEntryId: string | null }>(
+    actor,
+    FINANCE_COMMANDS.payrollCancel,
+    { type: FINANCE_OBJECT_TYPES.payrollRun, id: idOf(input.payrollRunId) },
+    input,
+    opts
+  );
 
-export const matchPaymentToObligation = (actor: CurrentUser, input: z.input<typeof applyPaymentSchema>, opts?: Options) =>
-  run<ApplyPaymentResult>(actor, FINANCE_COMMANDS.collectionMatchPayment, { type: FINANCE_OBJECT_TYPES.customerPayment, id: idOf(input.zohoPaymentId) }, input, opts);
-export const recordUnexpectedCollection = (actor: CurrentUser, input: z.input<typeof recordUnexpectedCollectionSchema>, opts?: Options) =>
-  run<ApplyPaymentResult & { obligationId: string }>(actor, FINANCE_COMMANDS.collectionRecordUnexpected, { type: FINANCE_OBJECT_TYPES.customerPayment, id: idOf(input.zohoPaymentId) }, input, opts);
+export const matchPaymentToObligation = (
+  actor: CurrentUser,
+  input: z.input<typeof applyPaymentSchema>,
+  opts?: Options
+) =>
+  run<ApplyPaymentResult>(
+    actor,
+    FINANCE_COMMANDS.collectionMatchPayment,
+    { type: FINANCE_OBJECT_TYPES.customerPayment, id: idOf(input.zohoPaymentId) },
+    input,
+    opts
+  );
+export const recordUnexpectedCollection = (
+  actor: CurrentUser,
+  input: z.input<typeof recordUnexpectedCollectionSchema>,
+  opts?: Options
+) =>
+  run<ApplyPaymentResult & { obligationId: string }>(
+    actor,
+    FINANCE_COMMANDS.collectionRecordUnexpected,
+    { type: FINANCE_OBJECT_TYPES.customerPayment, id: idOf(input.zohoPaymentId) },
+    input,
+    opts
+  );
 
-export const runDailyClose = (actor: CurrentUser, input: z.input<typeof dailyCloseSchema>, opts?: Options) =>
-  run<CloseResultData>(actor, FINANCE_COMMANDS.closeDaily, none('period_close', `daily:${idOf(input.date)}`), input, opts);
-export const runMonthlyClose = (actor: CurrentUser, input: z.input<typeof monthlyCloseSchema>, opts?: Options) =>
-  run<CloseResultData>(actor, FINANCE_COMMANDS.closeMonthly, none('period_close', `monthly:${idOf(input.periodKey)}`), input, opts);
-export const reopenPeriod = (actor: CurrentUser, input: z.input<typeof reopenPeriodSchema>, opts?: Options) =>
-  run<{ closeId: string; kind: string; periodKey: string; status: string }>(actor, FINANCE_COMMANDS.closeReopen, none('period_close', `${idOf(input.kind)}:${idOf(input.periodKey)}`), input, opts);
+export const runDailyClose = (
+  actor: CurrentUser,
+  input: z.input<typeof dailyCloseSchema>,
+  opts?: Options
+) =>
+  run<CloseResultData>(
+    actor,
+    FINANCE_COMMANDS.closeDaily,
+    none('period_close', `daily:${idOf(input.date)}`),
+    input,
+    opts
+  );
+export const runMonthlyClose = (
+  actor: CurrentUser,
+  input: z.input<typeof monthlyCloseSchema>,
+  opts?: Options
+) =>
+  run<CloseResultData>(
+    actor,
+    FINANCE_COMMANDS.closeMonthly,
+    none('period_close', `monthly:${idOf(input.periodKey)}`),
+    input,
+    opts
+  );
+export const reopenPeriod = (
+  actor: CurrentUser,
+  input: z.input<typeof reopenPeriodSchema>,
+  opts?: Options
+) =>
+  run<{ closeId: string; kind: string; periodKey: string; status: string }>(
+    actor,
+    FINANCE_COMMANDS.closeReopen,
+    none('period_close', `${idOf(input.kind)}:${idOf(input.periodKey)}`),
+    input,
+    opts
+  );
 
 export type { CommandResult };

@@ -86,7 +86,9 @@ export const PRODUCTION_ORDER_STATUS_LABELS: Record<ProductionOrderStatus, strin
 };
 
 export function isProductionOrderStatus(value: unknown): value is ProductionOrderStatus {
-  return typeof value === 'string' && (PRODUCTION_ORDER_STATUSES as readonly string[]).includes(value);
+  return (
+    typeof value === 'string' && (PRODUCTION_ORDER_STATUSES as readonly string[]).includes(value)
+  );
 }
 
 export const RELEASE_TARGETS = ['inventory', 'logistics'] as const;
@@ -327,3 +329,13 @@ export function manufacturingHttpStatus(code: string | undefined): number | null
 }
 
 export const productionOrderUrl = (orderId: string) => `/app/manufacturing/orders/${orderId}`;
+
+/**
+ * Páginas de gestión de Manufactura que viven FUERA de `/app/areas` (plan 6.2).
+ * Estaban escritas a mano en tres lugares (las server actions que revalidan, el
+ * tablero y las propias páginas); aquí son una sola constante para que un
+ * cambio de ruta no deje un enlace muerto.
+ */
+export const MANUFACTURING_BOM_PATH = '/app/manufacturing/bom';
+export const MANUFACTURING_WORK_CENTERS_PATH = '/app/manufacturing/centros';
+export const MANUFACTURING_NEW_ORDER_PATH = '/app/manufacturing/orders/nueva';

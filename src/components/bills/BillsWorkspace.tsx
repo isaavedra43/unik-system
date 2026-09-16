@@ -75,6 +75,8 @@ export function BillsWorkspace(props: BillsWorkspaceProps) {
   return (
     <EntityWorkspace<BillListRow>
       {...props}
+      // «Factura de compra» es femenina.
+      entityGender="f"
       columns={BILL_COLUMNS}
       columnMap={BILL_COLUMN_MAP}
       defaultColumnOrder={BILL_DEFAULT_COLUMN_ORDER}

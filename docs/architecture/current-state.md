@@ -126,11 +126,13 @@ en `prisma/migrations/` (de `20260831182914_add_integration_sync_foundation` a `
 - Los datos de Zoho se guardan como snapshots RAW (`IntegrationSnapshot`) + modelos de negocio normalizados (ver `docs/integrations/zoho.md`).
 - 5 migraciones contienen `DROP TABLE`/`DROP COLUMN` (limpieza de tablas retiradas): `20260909210000_drop_legacy_zoho_inventory_tables`, `20260909230000_drop_all_obsolete_tables`, `20260910160000_expand_modules_add_payments_po_bills_vendorcredits`, `20260912100000_add_object_storage_jobs_realtime` y `20260912130000_drop_studio_requests_quotes`.
 
-### Modelos del plan de Operaciones (esquema listo, sin commit y sin aplicar)
+### Modelos del plan de Operaciones (implementado en el árbol de trabajo, sin commit; migraciones sin aplicar en `unik_system`)
 
-Verificado el 2026-09-15 en el árbol de trabajo (sin commit): `prisma/schema.prisma` tiene **189 modelos** (104 + 85
-nuevos) y hay **41 migraciones**. Las 8 nuevas son aditivas y NO están aplicadas en ninguna base real; el orden de
-aplicación y su contenido están en `docs/pilot-runbook.md` §11.1.
+Verificado el 2026-09-16 en el árbol de trabajo (sin commit): `prisma/schema.prisma` tiene **189 modelos** (104 + 85
+nuevos) y hay **41 migraciones**. Las 8 nuevas son aditivas y **no están aplicadas en `unik_system` ni en producción**;
+sí están aplicadas en las dos bases locales desechables (`unik_preview` y `unik_schema_check`, 41 migraciones y 190
+tablas cada una, contra 32 y 105 de `unik_system`). El orden de aplicación y su contenido están en
+`docs/pilot-runbook.md` §11.1.
 
 | Dominio (sección del esquema) | Modelos | Migración                                                                    |
 | ----------------------------- | ------- | ---------------------------------------------------------------------------- |
@@ -144,15 +146,16 @@ aplicación y su contenido están en `docs/pilot-runbook.md` §11.1.
 | Ventas / CRM                  | 5       | `20260916150100_add_crm`                                                     |
 | Dashboards y Control Tower    | 7       | `20260916160000_add_dashboards_control_tower`                                |
 
-Sólo existe el esquema: los servicios, rutas y UI de estos dominios todavía no están implementados.
+No es sólo el esquema: los servicios, rutas y UI de estos dominios están implementados en el árbol de trabajo (ver
+"Plan UNIK Neural Operations" más abajo y `docs/modules/{operations,areas,agents,inventory,logistics,purchases,manufacturing,finance,crm,control-tower}.md`).
 
 ## Not Implemented Yet
 
-Verificado contra el código el 2026-09-15 (commit `6e24501`).
+Verificado contra el código el 2026-09-16 en el árbol de trabajo (el plan de Operaciones todavía no está en un commit).
 
-- **Operaciones (plan UNIK Neural Operations): en implementación.** Núcleo operativo (expedientes, work items, eventos, supervisor), inventario progresivo, logística, capa de agentes IA por área y Control Tower. Hasta ahora (sin commit) sólo existen la Entrega 0 (navegación en `nav-config.ts`, kit de dashboard, cambios aditivos de infraestructura, humo `e2e/`) y el esquema Prisma con sus 8 migraciones sin aplicar; no hay servicios, rutas ni UI de estos dominios.
-- Módulos de dominio propios (sin Zoho) de compras, inventario, logística, contabilidad interna y reportes: `src/modules/{purchases,inventory,logistics,finance,reports}` sólo contienen `.gitkeep`. Los datos de Zoho de esas áreas sí se leen (`purchase-orders`, `bills`, `vendor-credits`, `payments`, `invoices`, `packages`).
-- Escritura hacia Zoho fuera de paquetes/órdenes de envío y cotizaciones; en particular, crear órdenes de venta.
+- **Operaciones (plan UNIK Neural Operations): implementado en el árbol de trabajo, sin commit y sin verificar en producción.** Las nueve entregas (E0–E8) tienen esquema, servicios, rutas y UI; lo que falta es la verificación contra los servicios reales y la operación en producción (ver "Plan UNIK Neural Operations" más abajo). E9 (escalamiento: pilotos por bodega, partición de `OperationalEvent`, prueba con ≥10 M de eventos) no está hecha.
+- Módulo de reportes: `src/modules/reports` sólo contiene `.gitkeep`. (Compras, inventario, logística, contabilidad y los demás dominios propios **sí** están implementados; ver la sección siguiente.)
+- Escritura hacia Zoho de facturas, contactos, productos, pagos, órdenes de compra, facturas de proveedor y notas de crédito. Crear órdenes de venta desde una cotización **sí** existe (`src/modules/crm/sales-order-write-service.ts` → `POST /salesorders`), pero sólo se ha ejercido con `ZOHO_BOOKS_MOCK=true` y arranca apagada tras el indicador `crmSalesOrderWrite`; detalle en `docs/integrations/zoho.md`.
 - Webhooks de Zoho (los webhooks existentes en `src/app/api/webhooks/` son de voz, Telegram y Twilio).
 - Detección de eliminaciones en Zoho durante la sincronización.
 - UI general de `AuditLog`: sólo existe la auditoría del chat (`/app/admin/chat/api/audit`).
@@ -191,13 +194,49 @@ Las rutas web y sus APIs bajo `/app/**` (`/login`, `/change-password`, `/app/**`
 de cada módulo) se autentican por sesión (cookie `unik_session`) y validan permisos en el servidor; la lista completa
 la imprime `npm run build`.
 
-## Next Planned Phase
+## Plan UNIK Neural Operations (E0–E8 implementadas en el árbol de trabajo, sin commit)
 
-Plan UNIK Neural Operations (`/Users/israel/.claude/plans/plan unik system completo.md`, sección 8): tras la Entrega 0
-sigue la Entrega 1 (núcleo operativo, identidades IA y "Mi trabajo"), todo detrás de flags apagados en
-`IntegrationConfig('operations')` y `AiSettings.agents.enabled=false`. Las verificaciones pendientes de producción se
-acumulan en `docs/pilot-runbook.md` §11. (La activación del scheduler de Zoho ya no depende de una variable de entorno:
-se hace desde `IntegrationConfig('zoho')`.)
+Plan maestro: `/Users/israel/.claude/plans/plan unik system completo.md`, sección 8 (los ajustes de la sección 13
+prevalecen sobre las tablas). Verificado contra el código el 2026-09-16.
+
+| Entrega | Contenido                                                          | Dónde vive                                                                                               |
+| ------- | ------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------- |
+| 0       | Navegación/migas/rutas full-bleed, kit de dashboard, `e2e/`        | `src/components/layout/nav-config.ts`, `src/components/patterns/dashboard/`, `e2e/`                      |
+| 1       | Núcleo operativo, identidades IA, "Mi trabajo"                     | `src/modules/operations`, `src/modules/agents`, `/app/mywork`                                            |
+| 2       | Venta→expediente, inventario progresivo, áreas Ventas e Inventario | `src/modules/inventory`, `src/modules/areas`, `/app/areas/[areaKey]/[space]`                             |
+| 3       | Compras y Laboratorio de Sourcing                                  | `src/modules/purchases` (`sourcing-service.ts`, `rfq-scoring.ts`)                                        |
+| 4       | Logística, viajes y PWA de chofer                                  | `src/modules/logistics`, `/app/areas/[areaKey]/{flota,viajes,chofer}`                                    |
+| 5       | CRM, radar de cierre y `createSalesOrderFromQuote`                 | `src/modules/crm`, `/app/areas/[areaKey]/{pipeline,oportunidades}`                                       |
+| 6       | Manufactura                                                        | `src/modules/manufacturing`                                                                              |
+| 7       | Contabilidad interna (libro, obligaciones, nómina, cierres)        | `src/modules/finance`, `/app/areas/[areaKey]/(contabilidad)/*`                                           |
+| 8       | Control Tower completo y UNIK Neural Operations                    | `src/modules/control-tower`, `/app/admin/control-tower/[view]`, `/app/admin/control-tower/neural/[tool]` |
+
+Superficies: seis áreas (`ventas`, `compras`, `inventario`, `manufactura`, `logistica`, `contabilidad`) en
+`/app/areas/[areaKey]/[space]`; Expediente 360 en `/app/operations` y `/app/operations/cases/[id]`; Torre de Control
+con seis vistas (`resumen`, `personas`, `excepciones`, `aprobaciones`, `auditoria`, `configuracion`) y Neural con cinco
+herramientas (`procesos`, `variantes`, `grafo`, `replay`, `simulacion`); "Mi trabajo" en `/app/mywork`. Los documentos
+por módulo están en `docs/modules/` (`operations`, `areas`, `agents`, `inventory`, `logistics`, `purchases`,
+`manufacturing`, `finance`, `crm`, `control-tower`).
+
+**Estado de los indicadores (decisión del dueño, 2026-09-15): encendidos, no apagados.** `IntegrationConfig('operations')`
+se siembra con `isEnabled: true` y los nueve indicadores de `flags` en `true`
+(`src/modules/operations/operations-config.ts`); el freno de seguridad es `cutoverDate` (sólo las órdenes creadas
+después abren expediente solas), más los permisos, los presupuestos y el horario de la IA. `isEnabled = false` en la
+fila es el interruptor que apaga todo de golpe. `AiSettings.agents.enabled` también arranca en `true`
+(`src/modules/ai/agent-settings.ts`). La única excepción es `crmSalesOrderWrite`, que arranca en `false` hasta validar
+los campos de `POST /salesorders` contra la organización real.
+
+### Lo que falta
+
+- **Verificación en producción**: las migraciones no están aplicadas en `unik_system`; nada se ha ejercido contra Zoho,
+  Twilio/WhatsApp ni proveedores de IA reales (todo se validó con `ZOHO_BOOKS_MOCK`, adaptadores falsos y una base de
+  vista previa sembrada). Las comprobaciones pendientes se acumulan en `docs/pilot-runbook.md` §11.
+- **Entrega 9 (escalamiento y transición)**: pilotos por bodega/área, conteos cíclicos, conciliación diaria con Zoho,
+  partición de `OperationalEvent` por fecha y prueba con ≥10 M de eventos sintéticos. No está hecha.
+- Módulo de reportes (`src/modules/reports`, sólo `.gitkeep`).
+
+(La activación del scheduler de Zoho no depende de una variable de entorno: se hace desde `IntegrationConfig('zoho')`,
+que sí arranca apagado.)
 
 ## Phase 8 — Almacenamiento seguro, asistente extensible y comunicaciones (implementado, pendiente de migración y validación externa)
 

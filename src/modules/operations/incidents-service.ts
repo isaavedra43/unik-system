@@ -2,7 +2,11 @@ import { randomUUID } from 'crypto';
 import type { Incident, Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
-import { hasPermission, type CurrentUser } from '@/modules/auth/authorization';
+import { hasAnyPermission, hasPermission, type CurrentUser } from '@/modules/auth/authorization';
+import {
+  OPERATIONS_OPERATOR_PERMISSIONS,
+  OPERATIONS_VIEW_PERMISSION,
+} from '@/modules/operations/permissions';
 import {
   executeCommand,
   registerCommand,
@@ -46,8 +50,9 @@ import {
  * previous resolution kept in `detail.history`, `incident.opened` with
  * `reopened: true`. Dismissed incidents stay dismissed unless the caller asks.
  *
- * Commands on the `incident` aggregate, allowed to its owner, `operations.manage`
- * or a system actor:
+ * Commands on the `incident` aggregate, allowed to its owner, to whoever
+ * operates the core (`operations.manage` / `operations.admin`) or to a system
+ * actor:
  * - `incident.acknowledge` open → acknowledged (a manager acknowledging an
  *   incident without owner becomes its owner)
  * - `incident.resolve`     open | acknowledged → resolved (resolution required);
@@ -73,8 +78,9 @@ export const INCIDENT_STATUS_LABELS: Record<IncidentStatus, string> = {
 
 export const INCIDENT_HISTORY_LIMIT = 20;
 
-const MANAGE_PERMISSION = 'operations.manage';
-const VIEW_PERMISSION = 'operations.view';
+const VIEW_PERMISSION = OPERATIONS_VIEW_PERMISSION;
+/** Quien opera el núcleo sin ser dueño de la fila: `operations.manage` u `operations.admin`. */
+const OPERATOR_PERMISSIONS = [...OPERATIONS_OPERATOR_PERMISSIONS];
 
 type Db = Prisma.TransactionClient;
 
@@ -289,7 +295,7 @@ export async function loadIncident(db: Db, incidentId: string): Promise<Incident
   return incident;
 }
 
-/** Owner of the incident, `operations.manage` or a system actor. */
+/** Owner of the incident, an operator of the core (`operations.manage` / `operations.admin`) or a system actor. */
 export function assertCanHandleIncident(
   ctx: Pick<CommandContext, 'actor' | 'user'>,
   incident: Pick<Incident, 'ownerUserId'>
@@ -299,11 +305,11 @@ export function assertCanHandleIncident(
   if (!user) {
     throw new OperationsError('unauthenticated', 'Tu sesión expiró; vuelve a iniciar sesión');
   }
-  if (hasPermission(user, MANAGE_PERMISSION)) return;
+  if (hasAnyPermission(user, OPERATOR_PERMISSIONS)) return;
   if (incident.ownerUserId && incident.ownerUserId === user.id) return;
   throw new OperationsError(
     'forbidden',
-    'Sólo el responsable de la incidencia o un gestor de operaciones puede hacer esto'
+    'Sólo el responsable de la incidencia o quien gestiona operaciones puede hacer esto'
   );
 }
 
@@ -720,7 +726,7 @@ export async function getIncident(
 
   const [dto] = await toIncidentDTOs([row]);
   const canHandle =
-    hasPermission(actor, MANAGE_PERMISSION) ||
+    hasAnyPermission(actor, OPERATOR_PERMISSIONS) ||
     Boolean(row.ownerUserId && row.ownerUserId === actor.id);
   return {
     ...dto,

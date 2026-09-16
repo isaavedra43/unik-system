@@ -8,8 +8,7 @@
 export async function startNodeInstrumentation() {
   const { startSalesOrdersScheduler } =
     await import('@/modules/integrations/zoho/sales-orders-scheduler');
-  const { startContactsScheduler } =
-    await import('@/modules/integrations/zoho/contacts-scheduler');
+  const { startContactsScheduler } = await import('@/modules/integrations/zoho/contacts-scheduler');
   const { createProductsScheduler } =
     await import('@/modules/integrations/zoho/products-scheduler');
   const { createPackagesScheduler } =
@@ -18,8 +17,7 @@ export async function startNodeInstrumentation() {
     await import('@/modules/integrations/zoho/invoices-scheduler');
   const { createEstimatesScheduler } =
     await import('@/modules/integrations/zoho/estimates-scheduler');
-  const { createBillsScheduler } =
-    await import('@/modules/integrations/zoho/bills-scheduler');
+  const { createBillsScheduler } = await import('@/modules/integrations/zoho/bills-scheduler');
   const { createPurchaseOrdersScheduler } =
     await import('@/modules/integrations/zoho/purchase-orders-scheduler');
   const { createPaymentsScheduler } =
@@ -55,7 +53,8 @@ export async function startNodeInstrumentation() {
     // Checked every minute so short recurring jobs (ops.supervisor every 4 min) keep
     // their cadence; each job still runs only when its own interval has elapsed.
     startRecurringScheduler(60_000);
-    const { startNotificationDispatcher } = await import('@/modules/notifications/notification-jobs');
+    const { startNotificationDispatcher } =
+      await import('@/modules/notifications/notification-jobs');
     startNotificationDispatcher();
     log('jobs.worker_start_requested');
   } catch (err) {
@@ -88,6 +87,17 @@ export async function startNodeInstrumentation() {
         await ensureOperationsSeed();
       } catch (err) {
         logFailure('operations.seed_failed', err);
+      }
+
+      // Team roles of the areas (`equipo_<área>`): without them the picker of
+      // "Canales y responsables" cannot tag a `CommAccount` with the team and
+      // the "Externos" tab of every area opens empty forever. Creates what is
+      // missing and never touches a role that already exists.
+      try {
+        const { ensureAreaTeamRoles } = await import('@/modules/areas/area-teams');
+        await ensureAreaTeamRoles();
+      } catch (err) {
+        logFailure('areas.team_roles_failed', err);
       }
 
       // Agents layer (after the areas exist): the bot identities, then one chat

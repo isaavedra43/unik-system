@@ -49,6 +49,13 @@ export default function manifest(): MetadataRoute.Manifest {
         icons: [{ src: '/icon-192.png', sizes: '192x192' }],
       },
       {
+        name: 'Escanear',
+        short_name: 'Escanear',
+        description: 'Lee una etiqueta, una ubicación o un SKU con la cámara',
+        url: '/app/areas/inventario/mapa?scan=1',
+        icons: [{ src: '/icon-192.png', sizes: '192x192' }],
+      },
+      {
         name: 'Asistente IA',
         short_name: 'Asistente',
         description: 'Conversa con el asistente IA',

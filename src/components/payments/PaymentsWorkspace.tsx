@@ -20,7 +20,7 @@ import {
   getPaymentStatusOptions,
 } from '@/modules/payments/payments-helpers';
 import { PaymentPreviewDrawer } from './PaymentPreviewDrawer';
-import { CurrentUser } from '@/modules/auth/authorization';
+import type { CurrentUser } from '@/modules/auth/authorization';
 import type {
   EntityColumnDefinition,
   EntityQueryState,
@@ -157,9 +157,7 @@ export function PaymentsWorkspace(props: PaymentsWorkspaceProps) {
       unwatchAction={props.unwatchAction}
       bulkWatchAction={props.bulkWatchAction}
       exportAction={props.exportAction}
-      renderPreviewDrawer={(drawerProps) => (
-        <PaymentPreviewDrawer {...drawerProps} />
-      )}
+      renderPreviewDrawer={(drawerProps) => <PaymentPreviewDrawer {...drawerProps} />}
     />
   );
 }

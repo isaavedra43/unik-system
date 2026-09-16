@@ -1,4 +1,10 @@
-import { Prisma, type SourcingCandidate, type Supplier, type SupplierEvaluation, type SupplierProduct } from '@prisma/client';
+import {
+  Prisma,
+  type SourcingCandidate,
+  type Supplier,
+  type SupplierEvaluation,
+  type SupplierProduct,
+} from '@prisma/client';
 import { z } from 'zod';
 import type { CommandContext } from '@/modules/operations/commands';
 import { OperationsError } from '@/modules/operations/errors';
@@ -67,7 +73,9 @@ const rfcSchema = z
   .regex(/^[A-ZÑ&]{3,4}\d{6}[A-Z0-9]{3}$/, 'RFC inválido');
 
 const supplierFields = {
-  name: requiredText(200, 'Indica el nombre del proveedor').pipe(z.string().min(2, 'Nombre muy corto')),
+  name: requiredText(200, 'Indica el nombre del proveedor').pipe(
+    z.string().min(2, 'Nombre muy corto')
+  ),
   legalName: optionalText(300),
   taxRegNo: rfcSchema.nullish(),
   zohoContactId: idText.nullish(),
@@ -115,7 +123,10 @@ export const updateSupplierSchema = z.object({
 });
 export type UpdateSupplierInput = z.output<typeof updateSupplierSchema>;
 
-export const linkZohoContactSchema = z.object({ supplierId: idText, zohoContactId: idText.nullable() });
+export const linkZohoContactSchema = z.object({
+  supplierId: idText,
+  zohoContactId: idText.nullable(),
+});
 
 export const upsertSupplierProductSchema = z.object({
   supplierId: idText,
@@ -160,34 +171,59 @@ export type PromoteCandidateInput = z.output<typeof promoteCandidateSchema>;
 // Duplicates
 // ---------------------------------------------------------------------------
 
-function primaryPhoneOf(channels: readonly SupplierChannel[], explicit: string | null | undefined): string | null {
+function primaryPhoneOf(
+  channels: readonly SupplierChannel[],
+  explicit: string | null | undefined
+): string | null {
   if (explicit) return explicit;
   return channels.find((c) => ['whatsapp', 'phone', 'sms'].includes(c.type))?.value ?? null;
 }
 
-function primaryEmailOf(channels: readonly SupplierChannel[], explicit: string | null | undefined): string | null {
+function primaryEmailOf(
+  channels: readonly SupplierChannel[],
+  explicit: string | null | undefined
+): string | null {
   if (explicit) return explicit;
   return channels.find((c) => c.type === 'email')?.value ?? null;
 }
 
-function websiteOf(channels: readonly SupplierChannel[], explicit: string | null | undefined): string | null {
+function websiteOf(
+  channels: readonly SupplierChannel[],
+  explicit: string | null | undefined
+): string | null {
   if (explicit) return explicit;
   return channels.find((c) => c.type === 'web')?.value ?? null;
 }
 
-/** Suppliers that may be the same company (RFC, Zoho vendor, domain, phone, name) — bounded queries. */
-export async function findSimilarSuppliers(
+/**
+ * Suppliers that may be the same company (RFC, Zoho vendor, domain, phone,
+ * name) — bounded queries. INTERNAL to this service: it is not a second
+ * implementation of the deduplication, it is the DB side of the pure rule
+ * `matchExistingSupplier` (`sourcing-dedupe.ts`), which it calls for every
+ * candidate row. Both callers (creating a supplier and promoting a sourcing
+ * candidate) live in this file.
+ */
+async function findSimilarSuppliers(
   db: Db,
   identity: CandidateIdentity & { taxRegNo?: string | null; zohoContactId?: string | null },
   options: { excludeId?: string } = {}
-): Promise<Array<{ supplier: Supplier; reason: 'tax_reg_no' | 'zoho_contact' | 'domain' | 'phone' | 'name' }>> {
-  const out: Array<{ supplier: Supplier; reason: 'tax_reg_no' | 'zoho_contact' | 'domain' | 'phone' | 'name' }> = [];
+): Promise<
+  Array<{ supplier: Supplier; reason: 'tax_reg_no' | 'zoho_contact' | 'domain' | 'phone' | 'name' }>
+> {
+  const out: Array<{
+    supplier: Supplier;
+    reason: 'tax_reg_no' | 'zoho_contact' | 'domain' | 'phone' | 'name';
+  }> = [];
   const push = (supplier: Supplier, reason: (typeof out)[number]['reason']) => {
     if (supplier.id === options.excludeId || out.some((o) => o.supplier.id === supplier.id)) return;
     out.push({ supplier, reason });
   };
   if (identity.taxRegNo) {
-    for (const row of await db.supplier.findMany({ where: { taxRegNo: identity.taxRegNo }, take: 5 })) push(row, 'tax_reg_no');
+    for (const row of await db.supplier.findMany({
+      where: { taxRegNo: identity.taxRegNo },
+      take: 5,
+    }))
+      push(row, 'tax_reg_no');
   }
   if (identity.zohoContactId) {
     const row = await db.supplier.findUnique({ where: { zohoContactId: identity.zohoContactId } });
@@ -195,7 +231,8 @@ export async function findSimilarSuppliers(
   }
   const normalizedName = normalizeCompanyName(identity.name);
   const firstWord = normalizedName.split(' ')[0] ?? '';
-  const domain = extractDomain(identity.domain) ?? extractDomain(identity.url) ?? extractDomain(identity.email);
+  const domain =
+    extractDomain(identity.domain) ?? extractDomain(identity.url) ?? extractDomain(identity.email);
   const phone = normalizePhone(identity.phone);
   const or: Prisma.SupplierWhereInput[] = [];
   if (firstWord.length >= 3) or.push({ name: { contains: firstWord, mode: 'insensitive' } });
@@ -205,7 +242,11 @@ export async function findSimilarSuppliers(
   }
   if (phone) or.push({ primaryPhone: { contains: phone.slice(-8) } });
   if (or.length > 0) {
-    const rows = await db.supplier.findMany({ where: { OR: or }, take: 200, orderBy: { createdAt: 'asc' } });
+    const rows = await db.supplier.findMany({
+      where: { OR: or },
+      take: 200,
+      orderBy: { createdAt: 'asc' },
+    });
     for (const row of rows) {
       const match = matchExistingSupplier(identity, [
         { ...row, channels: parseChannels(row.channels) },
@@ -231,7 +272,10 @@ export async function createSupplierInTx(
   const primaryEmail = primaryEmailOf(channels, input.primaryEmail ?? null);
   const website = websiteOf(channels, input.website);
   if (input.zohoContactId) {
-    const contact = await tx.contact.findUnique({ where: { zohoContactId: input.zohoContactId }, select: { id: true } });
+    const contact = await tx.contact.findUnique({
+      where: { zohoContactId: input.zohoContactId },
+      select: { id: true },
+    });
     if (!contact) throw new OperationsError('not_found', 'No se encontró el proveedor en Zoho');
   }
   const similar = await findSimilarSuppliers(tx, {
@@ -284,26 +328,53 @@ export async function createSupplierInTx(
   emitPurchases(
     ctx,
     EV.created,
-    { supplierId: supplier.id, number, name: supplier.name, sourceCandidateId: supplier.sourceCandidateId },
+    {
+      supplierId: supplier.id,
+      number,
+      name: supplier.name,
+      sourceCandidateId: supplier.sourceCandidateId,
+    },
     { objectType: OBJ.supplier, objectId: supplier.id }
   );
   if (supplier.zohoContactId) {
-    await ctx.relate({ type: OBJ.supplier, id: supplier.id }, { type: 'zoho_contact', id: supplier.zohoContactId }, 'same_as');
+    await ctx.relate(
+      { type: OBJ.supplier, id: supplier.id },
+      { type: 'zoho_contact', id: supplier.zohoContactId },
+      'same_as'
+    );
   }
   publishBoard(ctx, { supplierId: supplier.id });
   return supplier;
 }
 
-export async function updateSupplierInTx(tx: Db, input: UpdateSupplierInput, ctx: CommandContext): Promise<Supplier> {
-  const current = assertFoundRow(await tx.supplier.findUnique({ where: { id: input.supplierId } }), 'No se encontró el proveedor');
-  const channels = input.channels !== undefined ? parseChannels(input.channels) : parseChannels(current.channels);
+export async function updateSupplierInTx(
+  tx: Db,
+  input: UpdateSupplierInput,
+  ctx: CommandContext
+): Promise<Supplier> {
+  const current = assertFoundRow(
+    await tx.supplier.findUnique({ where: { id: input.supplierId } }),
+    'No se encontró el proveedor'
+  );
+  const channels =
+    input.channels !== undefined ? parseChannels(input.channels) : parseChannels(current.channels);
   if (input.taxRegNo && input.taxRegNo !== current.taxRegNo) {
-    const other = await tx.supplier.findFirst({ where: { taxRegNo: input.taxRegNo, id: { not: current.id } } });
-    if (other) throw new OperationsError('duplicate', `El RFC ya pertenece al proveedor ${other.number} (${other.name})`);
+    const other = await tx.supplier.findFirst({
+      where: { taxRegNo: input.taxRegNo, id: { not: current.id } },
+    });
+    if (other)
+      throw new OperationsError(
+        'duplicate',
+        `El RFC ya pertenece al proveedor ${other.number} (${other.name})`
+      );
   }
   const data: Prisma.SupplierUpdateInput = {};
-  const assign = <K extends keyof UpdateSupplierInput>(key: K, column: keyof Prisma.SupplierUpdateInput = key as never) => {
-    if (input[key] !== undefined) (data as Record<string, unknown>)[column as string] = input[key] ?? null;
+  const assign = <K extends keyof UpdateSupplierInput>(
+    key: K,
+    column: keyof Prisma.SupplierUpdateInput = key as never
+  ) => {
+    if (input[key] !== undefined)
+      (data as Record<string, unknown>)[column as string] = input[key] ?? null;
   };
   assign('name');
   assign('legalName');
@@ -318,13 +389,22 @@ export async function updateSupplierInTx(tx: Db, input: UpdateSupplierInput, ctx
   if (input.tags !== undefined) data.tags = [...new Set(input.tags)];
   if (input.channels !== undefined) data.channels = channels as unknown as Prisma.InputJsonValue;
   if (input.primaryPhone !== undefined || input.channels !== undefined) {
-    data.primaryPhone = primaryPhoneOf(channels, input.primaryPhone === undefined ? current.primaryPhone : input.primaryPhone);
+    data.primaryPhone = primaryPhoneOf(
+      channels,
+      input.primaryPhone === undefined ? current.primaryPhone : input.primaryPhone
+    );
   }
   if (input.primaryEmail !== undefined || input.channels !== undefined) {
-    data.primaryEmail = primaryEmailOf(channels, input.primaryEmail === undefined ? current.primaryEmail : input.primaryEmail);
+    data.primaryEmail = primaryEmailOf(
+      channels,
+      input.primaryEmail === undefined ? current.primaryEmail : input.primaryEmail
+    );
   }
   if (input.website !== undefined || input.channels !== undefined) {
-    data.website = websiteOf(channels, input.website === undefined ? current.website : input.website);
+    data.website = websiteOf(
+      channels,
+      input.website === undefined ? current.website : input.website
+    );
   }
   const updated = await tx.supplier.update({ where: { id: current.id }, data });
   const fields = Object.keys(data);
@@ -343,7 +423,10 @@ export async function linkSupplierToZohoContactInTx(
   input: z.output<typeof linkZohoContactSchema>,
   ctx: CommandContext
 ): Promise<Supplier> {
-  const supplier = assertFoundRow(await tx.supplier.findUnique({ where: { id: input.supplierId } }), 'No se encontró el proveedor');
+  const supplier = assertFoundRow(
+    await tx.supplier.findUnique({ where: { id: input.supplierId } }),
+    'No se encontró el proveedor'
+  );
   if (input.zohoContactId) {
     const contact = await tx.contact.findUnique({
       where: { zohoContactId: input.zohoContactId },
@@ -355,7 +438,10 @@ export async function linkSupplierToZohoContactInTx(
     }
     const other = await tx.supplier.findUnique({ where: { zohoContactId: input.zohoContactId } });
     if (other && other.id !== supplier.id) {
-      throw new OperationsError('duplicate', `Ese proveedor de Zoho ya está ligado a ${other.number} (${other.name})`);
+      throw new OperationsError(
+        'duplicate',
+        `Ese proveedor de Zoho ya está ligado a ${other.number} (${other.name})`
+      );
     }
   }
   const updated = await tx.supplier.update({
@@ -363,12 +449,20 @@ export async function linkSupplierToZohoContactInTx(
     data: { zohoContactId: input.zohoContactId },
   });
   if (input.zohoContactId) {
-    await ctx.relate({ type: OBJ.supplier, id: supplier.id }, { type: 'zoho_contact', id: input.zohoContactId }, 'same_as');
+    await ctx.relate(
+      { type: OBJ.supplier, id: supplier.id },
+      { type: 'zoho_contact', id: input.zohoContactId },
+      'same_as'
+    );
   }
   emitPurchases(
     ctx,
     EV.linkedZoho,
-    { supplierId: supplier.id, zohoContactId: input.zohoContactId, previous: supplier.zohoContactId },
+    {
+      supplierId: supplier.id,
+      zohoContactId: input.zohoContactId,
+      previous: supplier.zohoContactId,
+    },
     { objectType: OBJ.supplier, objectId: supplier.id }
   );
   return updated;
@@ -379,7 +473,10 @@ export async function upsertSupplierProductInTx(
   input: UpsertSupplierProductInput,
   ctx: CommandContext
 ): Promise<SupplierProduct> {
-  const supplier = assertFoundRow(await tx.supplier.findUnique({ where: { id: input.supplierId } }), 'No se encontró el proveedor');
+  const supplier = assertFoundRow(
+    await tx.supplier.findUnique({ where: { id: input.supplierId } }),
+    'No se encontró el proveedor'
+  );
   const zohoItemId = input.zohoItemId ?? '';
   const supplierSku = input.supplierSku ?? '';
   const data = {
@@ -388,16 +485,21 @@ export async function upsertSupplierProductInTx(
     unitFactorToBase: D(input.unitFactorToBase),
     currency: input.currency,
     leadTimeDays: input.leadTimeDays ?? null,
-    minOrderQty: input.minOrderQty === null || input.minOrderQty === undefined ? null : D(input.minOrderQty),
+    minOrderQty:
+      input.minOrderQty === null || input.minOrderQty === undefined ? null : D(input.minOrderQty),
     source: input.source,
     ...(input.lastPrice !== null && input.lastPrice !== undefined
       ? { lastPrice: D(input.lastPrice), lastQuotedAt: ctx.now }
       : {}),
   };
-  const existing = await tx.supplierProduct.findFirst({ where: { supplierId: supplier.id, zohoItemId, supplierSku } });
+  const existing = await tx.supplierProduct.findFirst({
+    where: { supplierId: supplier.id, zohoItemId, supplierSku },
+  });
   const product = existing
     ? await tx.supplierProduct.update({ where: { id: existing.id }, data })
-    : await tx.supplierProduct.create({ data: { supplierId: supplier.id, zohoItemId, supplierSku, ...data } });
+    : await tx.supplierProduct.create({
+        data: { supplierId: supplier.id, zohoItemId, supplierSku, ...data },
+      });
   emitPurchases(
     ctx,
     EV.productUpserted,
@@ -435,7 +537,8 @@ export async function touchSupplierProductPrice(
   const existing = await tx.supplierProduct.findFirst({
     where: { supplierId: input.supplierId, zohoItemId: input.zohoItemId, supplierSku: '' },
   });
-  if (existing?.lastQuotedAt && existing.lastQuotedAt.getTime() > input.at.getTime()) return existing;
+  if (existing?.lastQuotedAt && existing.lastQuotedAt.getTime() > input.at.getTime())
+    return existing;
   const data = {
     description: input.description.slice(0, 300),
     unit: input.unit,
@@ -443,12 +546,19 @@ export async function touchSupplierProductPrice(
     currency: input.currency,
     lastQuotedAt: input.at,
     source: input.source,
-    ...(input.leadTimeDays !== undefined && input.leadTimeDays !== null ? { leadTimeDays: input.leadTimeDays } : {}),
+    ...(input.leadTimeDays !== undefined && input.leadTimeDays !== null
+      ? { leadTimeDays: input.leadTimeDays }
+      : {}),
   };
   return existing
     ? tx.supplierProduct.update({ where: { id: existing.id }, data })
     : tx.supplierProduct.create({
-        data: { supplierId: input.supplierId, zohoItemId: input.zohoItemId, supplierSku: '', ...data },
+        data: {
+          supplierId: input.supplierId,
+          zohoItemId: input.zohoItemId,
+          supplierSku: '',
+          ...data,
+        },
       });
 }
 
@@ -457,17 +567,29 @@ export async function recordSupplierEvaluationInTx(
   input: EvaluateSupplierInput,
   ctx: CommandContext
 ): Promise<{ evaluation: SupplierEvaluation; supplier: Supplier }> {
-  const supplier = assertFoundRow(await tx.supplier.findUnique({ where: { id: input.supplierId } }), 'No se encontró el proveedor');
+  const supplier = assertFoundRow(
+    await tx.supplier.findUnique({ where: { id: input.supplierId } }),
+    'No se encontró el proveedor'
+  );
   if (input.orderId) {
-    const order = await tx.procurementOrder.findUnique({ where: { id: input.orderId }, select: { supplierId: true } });
+    const order = await tx.procurementOrder.findUnique({
+      where: { id: input.orderId },
+      select: { supplierId: true },
+    });
     if (!order || order.supplierId !== supplier.id) {
       throw new OperationsError('invalid_payload', 'La orden no es de este proveedor');
     }
   }
   if (input.receiptId) {
-    const receipt = await tx.goodsReceipt.findUnique({ where: { id: input.receiptId }, select: { orderId: true } });
+    const receipt = await tx.goodsReceipt.findUnique({
+      where: { id: input.receiptId },
+      select: { orderId: true },
+    });
     const order = receipt
-      ? await tx.procurementOrder.findUnique({ where: { id: receipt.orderId }, select: { supplierId: true } })
+      ? await tx.procurementOrder.findUnique({
+          where: { id: receipt.orderId },
+          select: { supplierId: true },
+        })
       : null;
     if (!order || order.supplierId !== supplier.id) {
       throw new OperationsError('invalid_payload', 'La recepción no es de este proveedor');
@@ -479,7 +601,8 @@ export async function recordSupplierEvaluationInTx(
       where: { supplierId: supplier.id, orderId: input.orderId, evaluatedByUserId: evaluatedBy },
       select: { id: true },
     });
-    if (repeated) throw new OperationsError('duplicate', 'Ya evaluaste a este proveedor por esta orden');
+    if (repeated)
+      throw new OperationsError('duplicate', 'Ya evaluaste a este proveedor por esta orden');
   }
   const evaluation = await tx.supplierEvaluation.create({
     data: {
@@ -550,7 +673,10 @@ export async function promoteCandidateToSupplierInTx(
     'No se encontró el candidato'
   );
   if (candidate.status === 'rejected') {
-    throw new OperationsError('invalid_state', 'El candidato fue descartado; reactívalo antes de promoverlo');
+    throw new OperationsError(
+      'invalid_state',
+      'El candidato fue descartado; reactívalo antes de promoverlo'
+    );
   }
   let supplier: Supplier | null = null;
   let created = false;
@@ -584,19 +710,36 @@ export async function promoteCandidateToSupplierInTx(
     const domain = extractDomain(candidate.domain) ?? extractDomain(candidate.url);
     const phone = normalizePhone(candidate.phone);
     if (domain) vendorWhere.push({ website: { contains: domain, mode: 'insensitive' } });
-    if (phone) vendorWhere.push({ primaryPhone: { contains: phone.slice(-8) } }, { mobile: { contains: phone.slice(-8) } });
+    if (phone)
+      vendorWhere.push(
+        { primaryPhone: { contains: phone.slice(-8) } },
+        { mobile: { contains: phone.slice(-8) } }
+      );
     const firstWord = normalizeCompanyName(identity.name).split(' ')[0] ?? '';
-    if (firstWord.length >= 3) vendorWhere.push({ companyName: { contains: firstWord, mode: 'insensitive' } });
+    if (firstWord.length >= 3)
+      vendorWhere.push({ companyName: { contains: firstWord, mode: 'insensitive' } });
     const vendors = vendorWhere.length
       ? await tx.contact.findMany({
           where: { contactType: 'vendor', OR: vendorWhere },
           take: 50,
-          select: { zohoContactId: true, contactName: true, companyName: true, website: true, primaryPhone: true, mobile: true, primaryEmail: true },
+          select: {
+            zohoContactId: true,
+            contactName: true,
+            companyName: true,
+            website: true,
+            primaryPhone: true,
+            mobile: true,
+            primaryEmail: true,
+          },
         })
       : [];
     const vendor = matchVendorContact(identity, vendors);
     const linkedVendor =
-      vendor && !(await tx.supplier.findUnique({ where: { zohoContactId: vendor.zohoContactId }, select: { id: true } }))
+      vendor &&
+      !(await tx.supplier.findUnique({
+        where: { zohoContactId: vendor.zohoContactId },
+        select: { id: true },
+      }))
         ? vendor.zohoContactId
         : null;
     supplier = await createSupplierInTx(
@@ -616,7 +759,9 @@ export async function promoteCandidateToSupplierInTx(
         leadTimeDaysDefault: input.leadTimeDaysDefault ?? null,
         freightTerms: null,
         tags: ['sourcing'],
-        notes: candidate.productsSummary ? `Encontrado en el laboratorio de sourcing: ${candidate.productsSummary}`.slice(0, 2000) : null,
+        notes: candidate.productsSummary
+          ? `Encontrado en el laboratorio de sourcing: ${candidate.productsSummary}`.slice(0, 2000)
+          : null,
         allowSimilarName: true,
       },
       ctx,
@@ -632,11 +777,20 @@ export async function promoteCandidateToSupplierInTx(
       ...(options.bumpCandidateVersion ? { version: { increment: 1 } } : {}),
     },
   });
-  await ctx.relate({ type: OBJ.candidate, id: candidate.id }, { type: OBJ.supplier, id: supplier.id }, 'promoted_to');
+  await ctx.relate(
+    { type: OBJ.candidate, id: candidate.id },
+    { type: OBJ.supplier, id: supplier.id },
+    'promoted_to'
+  );
   emitPurchases(
     ctx,
     EV.promoted,
-    { candidateId: candidate.id, supplierId: supplier.id, supplierNumber: supplier.number, created },
+    {
+      candidateId: candidate.id,
+      supplierId: supplier.id,
+      supplierNumber: supplier.number,
+      created,
+    },
     { objectType: OBJ.supplier, objectId: supplier.id }
   );
   publishBoard(ctx, { supplierId: supplier.id, candidateId: candidate.id });

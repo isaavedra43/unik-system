@@ -126,5 +126,8 @@ import './finance-internal-tools';
 // Ventas / CRM (oportunidades, radar de cierre, orden de venta desde cotización)
 import './crm-tools';
 
+// Logística (tablero de despacho, viajes y paradas, entregas con evidencia)
+import './logistics-tools';
+
 // Export the registry API for consumers
 export * from './registry';

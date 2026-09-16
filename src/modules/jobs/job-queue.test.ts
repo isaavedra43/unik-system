@@ -24,7 +24,13 @@ const { rootJobs } = vi.hoisted(() => ({
 
 vi.mock('@/lib/prisma', () => ({ prisma: { backgroundJob: rootJobs } }));
 
-import { enqueueJob, JOB_PRIORITY, JobDedupeConflictError, wakeJobWorker } from './job-queue';
+import {
+  enqueueJob,
+  isJobDedupeConflictError,
+  JOB_PRIORITY,
+  JobDedupeConflictError,
+  wakeJobWorker,
+} from './job-queue';
 
 type WorkerScope = typeof globalThis & {
   __unikJobWorker?: {
@@ -273,6 +279,36 @@ describe('enqueueJob dentro de una transacción', () => {
     await expect(attempt).rejects.toBeInstanceOf(JobDedupeConflictError);
     await expect(attempt).rejects.toMatchObject({ dedupeKey: 'k1' });
     expect(jobs.createManyAndReturn).toHaveBeenCalledTimes(2);
+  });
+
+  it('isJobDedupeConflictError reconoce también el error de otra copia compilada', async () => {
+    const { jobs, tx } = makeTx();
+    jobs.findUnique.mockResolvedValue(null);
+    jobs.createManyAndReturn.mockResolvedValue([]);
+
+    const thrown = await enqueueJob({ type: 'demo.run', payload: {}, dedupeKey: 'k1', tx }).catch(
+      (err: unknown) => err
+    );
+    expect(isJobDedupeConflictError(thrown)).toBe(true);
+
+    // Misma forma que el error de otra capa de webpack: clase distinta, misma
+    // marca `Symbol.for`. Con `instanceof` a secas esto daría false y el motor
+    // de comandos dejaría de reintentar.
+    const FOREIGN_BRAND: unique symbol = Symbol.for('unik.jobs.dedupeConflict');
+    class ForeignJobDedupeConflictError extends Error {
+      readonly [FOREIGN_BRAND] = true;
+      readonly dedupeKey = 'k1';
+    }
+    expect(new ForeignJobDedupeConflictError() instanceof JobDedupeConflictError).toBe(false);
+    expect(isJobDedupeConflictError(new ForeignJobDedupeConflictError())).toBe(true);
+
+    // Y nada más pasa la guarda: ni un error suelto ni un impostor por nombre.
+    expect(isJobDedupeConflictError(new Error('boom'))).toBe(false);
+    expect(isJobDedupeConflictError({ name: 'JobDedupeConflictError', dedupeKey: 'k1' })).toBe(
+      false
+    );
+    expect(isJobDedupeConflictError(null)).toBe(false);
+    expect(isJobDedupeConflictError(undefined)).toBe(false);
   });
 
   it('propaga los errores de la base sin intentar recuperarse', async () => {

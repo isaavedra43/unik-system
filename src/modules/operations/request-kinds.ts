@@ -422,7 +422,7 @@ export type AreaRequestValidation =
 export function normalizeFreeText(value: unknown): string | null {
   if (typeof value !== 'string') return null;
   // eslint-disable-next-line no-control-regex
-  const cleaned = value.replace(/[ --]/g, '').trim();
+  const cleaned = value.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '').trim();
   return cleaned.length > 0 ? cleaned : null;
 }
 

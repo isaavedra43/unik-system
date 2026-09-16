@@ -5,6 +5,10 @@ import '../src/app/globals.css';
 
 const preview: Preview = {
   parameters: {
+    // Toda la app es App Router: sin esto `useRouter()` de `next/navigation`
+    // revienta con «invariant expected app router to be mounted».
+    nextjs: { appDirectory: true },
+
     controls: {
       matchers: {
         color: /(background|color)$/i,

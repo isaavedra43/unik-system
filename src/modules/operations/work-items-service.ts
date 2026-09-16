@@ -2,7 +2,11 @@ import { randomUUID } from 'crypto';
 import type { Prisma, WorkItem } from '@prisma/client';
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
-import { hasPermission, type CurrentUser } from '@/modules/auth/authorization';
+import { hasAnyPermission, hasPermission, type CurrentUser } from '@/modules/auth/authorization';
+import {
+  OPERATIONS_OPERATOR_PERMISSIONS,
+  OPERATIONS_VIEW_PERMISSION,
+} from '@/modules/operations/permissions';
 import { resolveResponsible } from '@/modules/comms/responsibles-service';
 import {
   executeCommand,
@@ -74,8 +78,9 @@ export const WORK_ITEM_COMMANDS = {
   escalate: 'workitem.escalate',
 } as const;
 
-const MANAGE_PERMISSION = 'operations.manage';
-const VIEW_PERMISSION = 'operations.view';
+const VIEW_PERMISSION = OPERATIONS_VIEW_PERMISSION;
+/** Quien opera el núcleo sin ser dueño de la fila: `operations.manage` u `operations.admin`. */
+const OPERATOR_PERMISSIONS = [...OPERATIONS_OPERATOR_PERMISSIONS];
 const MAX_WAIT_MS = 366 * 24 * 60 * 60_000;
 const MAX_RESULT_JSON_LENGTH = 20_000;
 
@@ -392,7 +397,7 @@ export async function isActiveHumanUser(
   return Boolean(user?.isActive && !user.isBot);
 }
 
-/** Owner, backup, `operations.manage` or a system actor. */
+/** Owner, backup, an operator of the core (`operations.manage` / `operations.admin`) or a system actor. */
 export function assertCanActOnWorkItem(
   ctx: Pick<CommandContext, 'actor' | 'user'>,
   item: Pick<WorkItem, 'ownerUserId' | 'backupUserId'>
@@ -402,10 +407,10 @@ export function assertCanActOnWorkItem(
   if (!user) {
     throw new OperationsError('unauthenticated', 'Tu sesión expiró; vuelve a iniciar sesión');
   }
-  if (isWorkItemParticipant(user.id, item) || hasPermission(user, MANAGE_PERMISSION)) return;
+  if (isWorkItemParticipant(user.id, item) || hasAnyPermission(user, OPERATOR_PERMISSIONS)) return;
   throw new OperationsError(
     'forbidden',
-    'Sólo el responsable del trabajo, su suplente o un gestor de operaciones puede hacer esto'
+    'Sólo el responsable del trabajo, su suplente o quien gestiona operaciones puede hacer esto'
   );
 }
 
@@ -1250,7 +1255,7 @@ registerCommand<z.output<typeof escalateSchema>, WorkItemEscalationData>(
       const { escalation } = await getOperationsConfig();
       const applied = appliedEscalationLevel(item);
       const automatic = ctx.actor.type === 'system' || ctx.actor.type === 'zoho';
-      const manager = ctx.user ? hasPermission(ctx.user, MANAGE_PERMISSION) : false;
+      const manager = ctx.user ? hasAnyPermission(ctx.user, OPERATOR_PERMISSIONS) : false;
 
       let level = cmd.payload.level;
       if (level === undefined) {
@@ -1609,10 +1614,24 @@ export async function listMyWorkItems(
  * required evidence are not queried. Keyed by work item id.
  */
 export async function missingEvidenceForWorkItems(
-  items: ReadonlyArray<Pick<WorkItemDTO, 'id' | 'stepId' | 'objectType' | 'objectId' | 'createdAt' | 'requiredEvidence' | 'result' | 'status'>>
+  items: ReadonlyArray<
+    Pick<
+      WorkItemDTO,
+      | 'id'
+      | 'stepId'
+      | 'objectType'
+      | 'objectId'
+      | 'createdAt'
+      | 'requiredEvidence'
+      | 'result'
+      | 'status'
+    >
+  >
 ): Promise<Map<string, string[]>> {
   const out = new Map<string, string[]>();
-  const pending = items.filter((item) => item.requiredEvidence.length > 0 && isWorkItemOpenStatus(item.status));
+  const pending = items.filter(
+    (item) => item.requiredEvidence.length > 0 && isWorkItemOpenStatus(item.status)
+  );
   await Promise.all(
     pending.map(async (item) => {
       const links = await prisma.evidenceLink.findMany({
@@ -1658,7 +1677,8 @@ export function workItemPermissions(
   actor: CurrentUser,
   item: Pick<WorkItem, 'ownerUserId' | 'backupUserId' | 'status' | 'objectType'>
 ): WorkItemPermissionsDTO {
-  const canAct = isWorkItemParticipant(actor.id, item) || hasPermission(actor, MANAGE_PERMISSION);
+  const canAct =
+    isWorkItemParticipant(actor.id, item) || hasAnyPermission(actor, OPERATOR_PERMISSIONS);
   const approval = item.objectType === 'approval_request';
   return {
     canStart: canAct && canTransitionWorkItem('start', item.status),

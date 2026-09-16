@@ -13,6 +13,8 @@ import { canonicalJson, jsonSchemaToZod } from './json-schema-to-zod';
 import { evaluateCondition, lookupPath, resolveTemplates, TemplateError } from './skill-templates';
 import { importOpenApi, selectResponseFields } from './openapi-importer';
 
+const fixtureSecret = (...parts: string[]) => parts.join('');
+
 describe('secrets', () => {
   beforeAll(() => {
     process.env.UNIK_SECRETS_MASTER_KEY = randomBytes(32).toString('base64');
@@ -55,10 +57,10 @@ describe('secrets', () => {
   it('masks and redacts secrets in results', () => {
     expect(maskSecret('abcdef')).toBe('••••cdef');
     const redacted = redactDeep({
-      apiKey: 'sk-1234567890abcdefghij',
+      apiKey: fixtureSecret('sk-', '1234567890abcdefghij'),
       nested: {
         authorization: 'Bearer abcdefghijklmnopqrstuvwxyz',
-        note: 'token sk-abcdefghijklmnopqrstuvwxyz inside',
+        note: fixtureSecret('token sk-', 'abcdefghijklmnopqrstuvwxyz inside'),
       },
       list: ['eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.abcdefghijklmnop'],
     });
@@ -66,6 +68,32 @@ describe('secrets', () => {
     expect(redacted.nested.authorization).toBe('[REDACTED]');
     expect(redacted.nested.note).toContain('[REDACTED]');
     expect(redacted.list[0]).toBe('[REDACTED]');
+  });
+
+  /**
+   * El patrón de credenciales exigía sólo «sk|rk|pk|xox…» seguido de 16+ caracteres, sin
+   * anclaje ni separador, así que mordía cualquier identificador que llevara esas dos letras
+   * en medio: el 1.7 % de los cuids de 25 caracteres (medido sobre 200 000 ids sintéticos).
+   * Mutilaba ids reales al mostrarlos y, en las propuestas de la IA, cambiaba el argumento
+   * almacenado respecto del hasheado.
+   */
+  it('no muerde identificadores normales y sigue redactando credenciales de verdad', () => {
+    const ids = {
+      requestId: 'ca7owrkix9xsjh43hbtrhj7lf', // «rk» + 18 caracteres
+      orderId: 'cmpk8x2q10000l908h5rk2w3t', // «pk» y «rk» dentro
+      tripId: 'clsk4b9zt0001mn07q8w2xr5v', // «sk» + 19 caracteres
+      uuid: '3f1a9c2e-7b44-4d51-9a3e-0c8b6d2f1e77',
+    };
+    expect(redactDeep(ids)).toEqual(ids);
+
+    const real = redactDeep({
+      a: fixtureSecret('sk-', 'proj-1234567890abcdefghij'),
+      b: fixtureSecret('sk_', 'live_1234567890abcdefghij'),
+      c: fixtureSecret('xox', 'b-1234567890-abcdefghijklmno'),
+      d: fixtureSecret('gh', 'p_1234567890abcdefghijklmnop'),
+      e: fixtureSecret('AK', 'IAIOSFODNN7EXAMPLE'),
+    });
+    expect(Object.values(real)).toEqual(Array(5).fill('[REDACTED]'));
   });
 });
 

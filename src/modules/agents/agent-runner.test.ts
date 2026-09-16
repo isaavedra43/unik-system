@@ -13,7 +13,8 @@ const h = await vi.hoisted(async () => {
   const delivered: Array<Record<string, unknown>> = [];
   const deliver = (input: Record<string, unknown>) => {
     const key = typeof input.dedupeKey === 'string' ? input.dedupeKey : null;
-    if (key && sent.has(key)) return { id: null, inApp: false, push: false, suppressed: true, reason: 'duplicate' };
+    if (key && sent.has(key))
+      return { id: null, inApp: false, push: false, suppressed: true, reason: 'duplicate' };
     if (key) sent.add(key);
     delivered.push(input);
     return { id: `notification_${delivered.length}`, inApp: true, push: false, suppressed: false };
@@ -42,7 +43,12 @@ const h = await vi.hoisted(async () => {
         internalChatReaction: { user: { model: 'user', fk: 'userId' } },
       },
       defaults: {
-        internalChatChannel: () => ({ name: null, avatarPath: null, lastMessageAt: new Date(), createdAt: new Date() }),
+        internalChatChannel: () => ({
+          name: null,
+          avatarPath: null,
+          lastMessageAt: new Date(),
+          createdAt: new Date(),
+        }),
         internalChatMessage: () => ({
           content: null,
           replyToId: null,
@@ -86,26 +92,37 @@ vi.mock('@/modules/realtime/realtime-service', async (importOriginal) => ({
 }));
 vi.mock('@/modules/notifications/notification-service', () => ({
   notifyUser: vi.fn(async (input: Record<string, unknown>) => h.deliver(input)),
-  notifyUsers: vi.fn(async (userIds: string[], input: Record<string, unknown>) => userIds.map((userId) => h.deliver({ ...input, userId }))),
+  notifyUsers: vi.fn(async (userIds: string[], input: Record<string, unknown>) =>
+    userIds.map((userId) => h.deliver({ ...input, userId }))
+  ),
 }));
 vi.mock('@/modules/ai/ai-admin-config-service', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/modules/ai/ai-admin-config-service')>();
-  return { ...actual, getAiSettings: vi.fn(async () => ({ ...actual.DEFAULT_AI_SETTINGS, isEnabled: true })) };
+  return {
+    ...actual,
+    getAiSettings: vi.fn(async () => ({ ...actual.DEFAULT_AI_SETTINGS, isEnabled: true })),
+  };
 });
 vi.mock('@/modules/ai/ai-orchestrator', () => ({ runAssistant: h.runAssistant }));
 vi.mock('@/modules/ai/copilot-surfaces', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/modules/ai/copilot-surfaces')>();
   return {
     ...actual,
-    getOrCreateSurfaceConversation: vi.fn(async (actor: { id: string }, surface: { kind: string; id: string }) => ({
-      id: `conv:${actor.id}:${surface.kind}:${surface.id}`,
-      created: false,
-    })),
+    getOrCreateSurfaceConversation: vi.fn(
+      async (actor: { id: string }, surface: { kind: string; id: string }) => ({
+        id: `conv:${actor.id}:${surface.kind}:${surface.id}`,
+        created: false,
+      })
+    ),
   };
 });
 
+import { getArea } from '@/modules/areas/area-registry';
 import { seedAreas, seedResponsible, seedUser } from '@/modules/operations/testing/fixtures';
+import { AREA_KEYS } from '@/modules/operations/types';
 import {
+  AREA_APPROVER_PERMISSION_CANDIDATES,
+  areaApproverPermissions,
   isToolChoiceUnsupportedError,
   parseConclusion,
   runAgentTurn,
@@ -117,9 +134,11 @@ import { ensureAgentIdentities } from './identities';
 const fake = h.fake;
 const NOW = new Date('2026-09-15T17:00:00.000Z');
 
-const botId = (username: string) => fake.rows('user').find((u) => u.username === username)!.id as string;
+const botId = (username: string) =>
+  fake.rows('user').find((u) => u.username === username)!.id as string;
 const eventsOf = (type: string) => fake.rows('operationalEvent').filter((e) => e.type === type);
-const messagesIn = (channelId: string) => fake.rows('internalChatMessage').filter((m) => m.channelId === channelId);
+const messagesIn = (channelId: string) =>
+  fake.rows('internalChatMessage').filter((m) => m.channelId === channelId);
 const metaKind = (m: Record<string, unknown>) => (m.meta as Record<string, unknown> | null)?.kind;
 
 function scriptTurn(events: Ev[]) {
@@ -131,9 +150,21 @@ function scriptTurn(events: Ev[]) {
 function conclude(outcome: string, message: string | null, before: Ev[] = []): Ev[] {
   return [
     ...before,
-    { type: 'tool_call_start', data: { name: 'concludeAgentTurn', args: JSON.stringify({ outcome, message }) } },
+    {
+      type: 'tool_call_start',
+      data: { name: 'concludeAgentTurn', args: JSON.stringify({ outcome, message }) },
+    },
     { type: 'tool_call_end', data: { name: 'concludeAgentTurn', success: true } },
-    { type: 'done', data: { content: '', promptTokens: 1200, completionTokens: 80, model: 'kimi-k2.6', messageId: 'ai_msg_1' } },
+    {
+      type: 'done',
+      data: {
+        content: '',
+        promptTokens: 1200,
+        completionTokens: 80,
+        model: 'kimi-k2.6',
+        messageId: 'ai_msg_1',
+      },
+    },
   ];
 }
 
@@ -189,25 +220,62 @@ afterEach(() => {
 describe('pure helpers', () => {
   it('parses the conclusion contract', () => {
     // Tool arguments arrive as valid JSON: the newline inside the message is escaped.
-    expect(parseConclusion('{"outcome":"acted","message":"  Listo,\\n escalé  "}')).toEqual({ outcome: 'acted', message: 'Listo, escalé' });
+    expect(parseConclusion('{"outcome":"acted","message":"  Listo,\\n escalé  "}')).toEqual({
+      outcome: 'acted',
+      message: 'Listo, escalé',
+    });
     // A raw control character is not valid JSON, so there is no conclusion.
     expect(parseConclusion('{"outcome":"acted","message":"a\nb"}')).toBeNull();
-    expect(parseConclusion({ outcome: 'no_action' })).toEqual({ outcome: 'no_action', message: null });
+    expect(parseConclusion({ outcome: 'no_action' })).toEqual({
+      outcome: 'no_action',
+      message: null,
+    });
     expect(parseConclusion('{"outcome":"maybe"}')).toBeNull();
     expect(parseConclusion('not json')).toBeNull();
-    expect(parseConclusion({ outcome: 'needs_human', message: 'x'.repeat(400) })!.message).toHaveLength(300);
+    expect(
+      parseConclusion({ outcome: 'needs_human', message: 'x'.repeat(400) })!.message
+    ).toHaveLength(300);
   });
 
   it('recognizes providers that reject tool_choice', () => {
-    expect(isToolChoiceUnsupportedError(new Error("400 tool_choice 'required' is not supported for this model"))).toBe(true);
-    expect(isToolChoiceUnsupportedError(new Error('Invalid value for tool_choice: required'))).toBe(true);
+    expect(
+      isToolChoiceUnsupportedError(
+        new Error("400 tool_choice 'required' is not supported for this model")
+      )
+    ).toBe(true);
+    expect(isToolChoiceUnsupportedError(new Error('Invalid value for tool_choice: required'))).toBe(
+      true
+    );
     expect(isToolChoiceUnsupportedError(new Error('503 upstream unavailable'))).toBe(false);
     expect(isToolChoiceUnsupportedError(new Error('tool_choice ok but rate limited'))).toBe(false);
   });
 
+  // Las llaves de aprobador de la IA NO son una segunda copia de la tabla: salen de la columna
+  // «Aprobar» del registro de áreas (la que publica docs/modules/areas.md §3), así que no pueden
+  // separarse otra vez — Inventario aprueba con `inventory.adjust` O `inventory.manage`.
+  it('the approver keys of a turn are exactly the approval column of the area registry', () => {
+    for (const areaKey of AREA_KEYS) {
+      expect(AREA_APPROVER_PERMISSION_CANDIDATES[areaKey]).toEqual([
+        ...(getArea(areaKey)?.permissions.approve ?? []),
+      ]);
+      // Every published key exists in the permission registry (nothing invented).
+      expect(areaApproverPermissions(areaKey)).toEqual([
+        ...AREA_APPROVER_PERMISSION_CANDIDATES[areaKey],
+      ]);
+    }
+    expect(areaApproverPermissions('inventario')).toEqual(['inventory.adjust', 'inventory.manage']);
+    expect(areaApproverPermissions('administracion')).toEqual([]);
+  });
+
   it('maps the turn object and hashes triggers', () => {
-    expect(turnObjectRef({ caseId: 'c', requestId: 'r' })).toEqual({ objectType: 'area_request', objectId: 'r' });
-    expect(turnObjectRef({ caseId: 'c' })).toEqual({ objectType: 'operational_case', objectId: 'c' });
+    expect(turnObjectRef({ caseId: 'c', requestId: 'r' })).toEqual({
+      objectType: 'area_request',
+      objectId: 'r',
+    });
+    expect(turnObjectRef({ caseId: 'c' })).toEqual({
+      objectType: 'operational_case',
+      objectId: 'c',
+    });
     expect(turnObjectRef({})).toEqual({ objectType: null, objectId: null });
     expect(triggerHashOf('a')).toMatch(/^[0-9a-f]{32}$/);
     expect(triggerHashOf('a')).toBe(triggerHashOf('a'));
@@ -231,15 +299,26 @@ describe('runAgentTurn', () => {
             args: { qty: 15, secret: 'no-debe-ir-al-chat' },
           },
         },
-        { type: 'tool_call_end', data: { name: 'reserveStock', success: false, needsApproval: true } },
+        {
+          type: 'tool_call_end',
+          data: { name: 'reserveStock', success: false, needsApproval: true },
+        },
       ])
     );
     const result = await unblockTurn();
-    expect(result).toMatchObject({ status: 'done', outcome: 'needs_human', proposalIds: ['prop_1'], toolsUsed: ['reserveStock', 'concludeAgentTurn'] });
+    expect(result).toMatchObject({
+      status: 'done',
+      outcome: 'needs_human',
+      proposalIds: ['prop_1'],
+      toolsUsed: ['reserveStock', 'concludeAgentTurn'],
+    });
 
     const call = h.runAssistant.mock.calls[0][0];
     const identity = fake.rows('agentIdentity').find((i) => i.key === 'area:compras')!;
-    expect(call).toMatchObject({ conversationId: `conv:${botId('ia_compras')}:case:case_1`, actor: { id: botId('ia_compras') } });
+    expect(call).toMatchObject({
+      conversationId: `conv:${botId('ia_compras')}:case:case_1`,
+      actor: { id: botId('ia_compras') },
+    });
     expect(call.message).toMatch(/^⟦auto:unblock⟧ .*solicitud=req_1/);
     expect(call.context).toEqual({
       caseId: 'case_1',
@@ -250,7 +329,12 @@ describe('runAgentTurn', () => {
         botUserId: botId('ia_compras'),
         agentKey: 'area:compras',
         // Compras registers `purchases.approve`, so its holders also approve the card.
-        approverScope: { caseId: 'case_1', areaKey: 'compras', permission: 'purchases.approve', userIds: ['marta', 'nico'] },
+        approverScope: {
+          caseId: 'case_1',
+          areaKey: 'compras',
+          permissions: ['purchases.approve'],
+          userIds: ['marta', 'nico'],
+        },
       },
     });
 
@@ -258,20 +342,46 @@ describe('runAgentTurn', () => {
     const card = messagesIn(room).find((m) => metaKind(m) === 'agent_proposal')!;
     expect(card).toMatchObject({
       senderId: botId('ia_compras'),
-      meta: expect.objectContaining({ proposalId: 'prop_1', caseId: 'case_1', toolName: 'reserveStock', status: 'pending', approverUserIds: ['marta', 'nico'] }),
+      meta: expect.objectContaining({
+        proposalId: 'prop_1',
+        caseId: 'case_1',
+        toolName: 'reserveStock',
+        status: 'pending',
+        approverUserIds: ['marta', 'nico'],
+      }),
     });
     expect(card.meta).not.toHaveProperty('args');
-    expect(String(card.content)).toContain('IA de Compras propone una acción · OV-23131 — Reservar 15 m² de Loseta Perla');
+    expect(String(card.content)).toContain(
+      'IA de Compras propone una acción · OV-23131 — Reservar 15 m² de Loseta Perla'
+    );
     expect(String(card.content)).toContain('Aprueba Marta o Nico');
-    expect(h.delivered.filter((n) => n.category === 'agent_proposal').map((n) => n.userId)).toEqual(['marta', 'nico']);
+    expect(h.delivered.filter((n) => n.category === 'agent_proposal').map((n) => n.userId)).toEqual(
+      ['marta', 'nico']
+    );
     // The case timeline shows the same card the room shows.
     expect(eventsOf('ai.proposal_created')).toEqual([
-      expect.objectContaining({ caseId: 'case_1', areaKey: 'compras', objectType: 'ai_proposal', objectId: 'prop_1', actorId: botId('ia_compras'), payload: expect.objectContaining({ chatMessageId: card.id, toolName: 'reserveStock' }) }),
+      expect.objectContaining({
+        caseId: 'case_1',
+        areaKey: 'compras',
+        objectType: 'ai_proposal',
+        objectId: 'prop_1',
+        actorId: botId('ia_compras'),
+        payload: expect.objectContaining({ chatMessageId: card.id, toolName: 'reserveStock' }),
+      }),
     ]);
 
-    expect(messagesIn(room).find((m) => metaKind(m) === 'agent_reply')).toMatchObject({ content: 'Propuse reservar 15 m²; Marta o Nico aprueban.' });
+    expect(messagesIn(room).find((m) => metaKind(m) === 'agent_reply')).toMatchObject({
+      content: 'Propuse reservar 15 m²; Marta o Nico aprueban.',
+    });
     const [turn] = eventsOf('ai.turn');
-    expect(turn).toMatchObject({ actorType: 'ai', actorId: botId('ia_compras'), caseId: 'case_1', areaKey: 'compras', objectType: 'area_request', objectId: 'req_1' });
+    expect(turn).toMatchObject({
+      actorType: 'ai',
+      actorId: botId('ia_compras'),
+      caseId: 'case_1',
+      areaKey: 'compras',
+      objectType: 'area_request',
+      objectId: 'req_1',
+    });
     expect(turn.payload).toMatchObject({
       agentKey: 'area:compras',
       trigger: 'unblock',
@@ -290,18 +400,31 @@ describe('runAgentTurn', () => {
   it('does not publish anything when the outcome is no_action', async () => {
     scriptTurn(conclude('no_action', 'Nada que hacer'));
     const result = await unblockTurn();
-    expect(result).toMatchObject({ status: 'done', outcome: 'no_action', message: null, postedMessageId: null });
+    expect(result).toMatchObject({
+      status: 'done',
+      outcome: 'no_action',
+      message: null,
+      postedMessageId: null,
+    });
     expect(fake.rows('internalChatMessage')).toHaveLength(0);
     expect(eventsOf('ai.turn')[0].payload).toMatchObject({ outcome: 'no_action' });
   });
 
   it('an orchestrator error ⇒ ai.turn_failed without retry', async () => {
-    scriptTurn([{ type: 'error', data: { message: 'El asistente alcanzó el límite de iteraciones de tools.' } }]);
+    scriptTurn([
+      {
+        type: 'error',
+        data: { message: 'El asistente alcanzó el límite de iteraciones de tools.' },
+      },
+    ]);
     const result = await unblockTurn();
     expect(result).toMatchObject({ status: 'failed', errorCode: 'turn_error' });
     expect(h.runAssistant).toHaveBeenCalledTimes(1);
     expect(eventsOf('ai.turn')).toHaveLength(0);
-    expect(eventsOf('ai.turn_failed')[0].payload).toMatchObject({ errorCode: 'turn_error', trigger: 'unblock' });
+    expect(eventsOf('ai.turn_failed')[0].payload).toMatchObject({
+      errorCode: 'turn_error',
+      trigger: 'unblock',
+    });
   });
 
   it('retries once asking for concludeAgentTurn by name when the provider rejects tool_choice required', async () => {
@@ -317,18 +440,34 @@ describe('runAgentTurn', () => {
     expect(result).toMatchObject({ status: 'done', outcome: 'acted', retriedWithNamedTool: true });
     expect(h.runAssistant).toHaveBeenCalledTimes(2);
     expect(h.runAssistant.mock.calls[0][0].context.agent).not.toHaveProperty('forceToolName');
-    expect(h.runAssistant.mock.calls[1][0].context.agent).toMatchObject({ forceToolName: 'concludeAgentTurn', reuseUserMessage: true });
+    expect(h.runAssistant.mock.calls[1][0].context.agent).toMatchObject({
+      forceToolName: 'concludeAgentTurn',
+      reuseUserMessage: true,
+    });
     expect(eventsOf('ai.turn')[0].payload).toMatchObject({ retriedWithNamedTool: true });
   });
 
   it('a turn that already concluded is finished even if the stream ends with an error', async () => {
     scriptTurn([
-      { type: 'tool_call_start', data: { name: 'concludeAgentTurn', args: JSON.stringify({ outcome: 'needs_human', message: 'Decide Marta' }) } },
+      {
+        type: 'tool_call_start',
+        data: {
+          name: 'concludeAgentTurn',
+          args: JSON.stringify({ outcome: 'needs_human', message: 'Decide Marta' }),
+        },
+      },
       { type: 'tool_call_end', data: { name: 'concludeAgentTurn', success: true } },
-      { type: 'error', data: { message: 'El asistente alcanzó el límite de iteraciones de tools.' } },
+      {
+        type: 'error',
+        data: { message: 'El asistente alcanzó el límite de iteraciones de tools.' },
+      },
     ]);
     const result = await unblockTurn();
-    expect(result).toMatchObject({ status: 'done', outcome: 'needs_human', message: 'Decide Marta' });
+    expect(result).toMatchObject({
+      status: 'done',
+      outcome: 'needs_human',
+      message: 'Decide Marta',
+    });
     expect(eventsOf('ai.turn_failed')).toHaveLength(0);
     expect(eventsOf('ai.turn')[0].payload).toMatchObject({ outcome: 'needs_human' });
   });
@@ -339,7 +478,9 @@ describe('runAgentTurn', () => {
     expect(result.message).toBe('Listo @\u200bmarta y @\u200bvero: revisen');
     const room = fake.rows('operationalCase')[0].chatChannelId as string;
     const reply = messagesIn(room).find((m) => metaKind(m) === 'agent_reply')!;
-    expect(fake.rows('internalChatMention').filter((m) => m.messageId === reply.id)).toHaveLength(0);
+    expect(fake.rows('internalChatMention').filter((m) => m.messageId === reply.id)).toHaveLength(
+      0
+    );
     expect(h.delivered.filter((n) => n.category === 'chat_mention')).toHaveLength(0);
   });
 
@@ -355,7 +496,11 @@ describe('runAgentTurn', () => {
       causedByUserId: 'marta',
       now: NOW,
     });
-    expect(h.runAssistant.mock.calls[0][0].context.agent).toMatchObject({ onBehalfOfUserId: 'marta', lockedCaseId: 'case_1', causedByUserId: 'marta' });
+    expect(h.runAssistant.mock.calls[0][0].context.agent).toMatchObject({
+      onBehalfOfUserId: 'marta',
+      lockedCaseId: 'case_1',
+      causedByUserId: 'marta',
+    });
     expect(eventsOf('ai.turn')[0].payload).toMatchObject({ causedByUserId: 'marta' });
   });
 
@@ -365,7 +510,11 @@ describe('runAgentTurn', () => {
       throw new Error('503 upstream unavailable');
     });
     const result = await unblockTurn();
-    expect(result).toMatchObject({ status: 'failed', errorCode: 'provider_error', retriedWithNamedTool: false });
+    expect(result).toMatchObject({
+      status: 'failed',
+      errorCode: 'provider_error',
+      retriedWithNamedTool: false,
+    });
     expect(h.runAssistant).toHaveBeenCalledTimes(1);
   });
 
@@ -374,25 +523,56 @@ describe('runAgentTurn', () => {
     const result = await unblockTurn();
     expect(result).toMatchObject({ status: 'failed', errorCode: 'bot_inactive' });
     expect(h.runAssistant).not.toHaveBeenCalled();
-    expect(eventsOf('ai.turn_failed')[0]).toMatchObject({ actorId: botId('ia_compras'), payload: expect.objectContaining({ errorCode: 'bot_inactive' }) });
+    expect(eventsOf('ai.turn_failed')[0]).toMatchObject({
+      actorId: botId('ia_compras'),
+      payload: expect.objectContaining({ errorCode: 'bot_inactive' }),
+    });
   });
 
   it('without a case the turn runs on the area surface and posts in the area channel', async () => {
     scriptTurn(conclude('acted', 'Revisé las solicitudes vencidas del área.'));
-    const result = await runAgentTurn({ agentKey: 'area:compras', surface: 'case', trigger: 'triage', detail: { incidentId: 'inc_9' }, now: NOW });
+    const result = await runAgentTurn({
+      agentKey: 'area:compras',
+      surface: 'case',
+      trigger: 'triage',
+      detail: { incidentId: 'inc_9' },
+      now: NOW,
+    });
     expect(result.status).toBe('done');
     expect(h.runAssistant.mock.calls[0][0]).toMatchObject({
       conversationId: `conv:${botId('ia_compras')}:area:compras`,
-      context: { areaKey: 'compras', agent: { approverScope: { areaKey: 'compras', userIds: ['marta', 'nico'] } } },
+      context: {
+        areaKey: 'compras',
+        agent: { approverScope: { areaKey: 'compras', userIds: ['marta', 'nico'] } },
+      },
     });
     const channel = fake.rows('area').find((a) => a.key === 'compras')!.chatChannelId as string;
-    expect(messagesIn(channel)).toEqual([expect.objectContaining({ content: 'Revisé las solicitudes vencidas del área.', senderId: botId('ia_compras') })]);
+    expect(messagesIn(channel)).toEqual([
+      expect.objectContaining({
+        content: 'Revisé las solicitudes vencidas del área.',
+        senderId: botId('ia_compras'),
+      }),
+    ]);
   });
 
   it('rejects unknown agents and triggers', async () => {
-    expect(await runAgentTurn({ agentKey: 'area:marketing', surface: 'area', trigger: 'unblock', detail: {}, now: NOW })).toMatchObject({ status: 'failed', errorCode: 'unknown_agent' });
     expect(
-      await runAgentTurn({ agentKey: 'area:compras', surface: 'area', trigger: 'open' as never, detail: {}, now: NOW })
+      await runAgentTurn({
+        agentKey: 'area:marketing',
+        surface: 'area',
+        trigger: 'unblock',
+        detail: {},
+        now: NOW,
+      })
+    ).toMatchObject({ status: 'failed', errorCode: 'unknown_agent' });
+    expect(
+      await runAgentTurn({
+        agentKey: 'area:compras',
+        surface: 'area',
+        trigger: 'open' as never,
+        detail: {},
+        now: NOW,
+      })
     ).toMatchObject({ status: 'failed', errorCode: 'invalid_trigger' });
     expect(h.runAssistant).not.toHaveBeenCalled();
   });

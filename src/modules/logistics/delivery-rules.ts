@@ -206,3 +206,30 @@ export function chooseLinkablePackage(
   }
   return null;
 }
+
+/**
+ * Status a delivery order goes back to when its trip is cancelled and it is
+ * released (plan §4: `Trip.status = cancelled`). Nothing was attempted, so the
+ * order must NOT look like a failed delivery: it returns to the state it had
+ * before leaving, which is the one its Zoho mirror still describes.
+ *
+ * Only an order that actually left (`dispatched`) is translated; any other
+ * status is already assignable (`TRANSPORT_ASSIGNABLE_STATUSES`) and is kept.
+ * Pure: the table mirrors `zoho-sync-state.ts`.
+ */
+const STATUS_BY_SYNC_STATE: Readonly<Record<string, string>> = {
+  not_required: 'planned',
+  pending_write: 'pending_external',
+  written: 'pending_external',
+  readback_ok: 'assigned',
+  readback_mismatch: 'conflict',
+  // The shipment write was given up on: the order keeps its Zoho failure visible.
+  failed: 'failed',
+};
+
+export function statusAfterTripRelease(
+  order: Readonly<{ status: string; zohoSyncState: string }>
+): string {
+  if (order.status !== 'dispatched') return order.status;
+  return STATUS_BY_SYNC_STATE[order.zohoSyncState] ?? 'planned';
+}

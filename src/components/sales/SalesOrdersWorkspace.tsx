@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   DndContext,
@@ -37,22 +37,24 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { CloseTicketsDialog } from '@/components/sales/CloseTicketsDialog';
-import { CurrentUser } from '@/modules/auth/authorization';
+import type { CurrentUser } from '@/modules/auth/authorization';
 import {
   SALES_ORDER_COLUMNS,
   SALES_ORDER_COLUMN_MAP,
   SALES_ORDER_DEFAULT_COLUMN_ORDER,
-  SalesOrderColumnDefinition,
 } from '@/modules/sales/sales-orders-columns';
+import type { SalesOrderColumnDefinition } from '@/modules/sales/sales-orders-columns';
 import {
-  SalesOrderQueryState,
-  TablePreferenceConfig,
   FILTER_OPERATORS_BY_TYPE,
   FILTER_OPERATOR_LABELS,
   DATE_SHORTCUTS,
   DATE_SHORTCUT_LABELS,
 } from '@/modules/sales/sales-orders-filters';
-import {
+import type {
+  SalesOrderQueryState,
+  TablePreferenceConfig,
+} from '@/modules/sales/sales-orders-filters';
+import type {
   SalesOrderFilterOptions,
   SalesOrdersListResult,
   SalesOrderListRow,
@@ -74,7 +76,7 @@ import {
   exportSalesOrdersAction,
 } from '@/app/app/sales/orders/actions';
 import { SalesOrderPreviewDrawer } from './SalesOrderPreviewDrawer';
-import { TableViewRow } from '@/modules/sales/table-views-service';
+import type { TableViewRow } from '@/modules/sales/table-views-service';
 
 interface SyncRunInfo {
   run_id: string;
@@ -137,9 +139,7 @@ function normalizeTablePreference(p: TablePreferenceConfig): TablePreferenceConf
   const defaultVisibility = Object.fromEntries(
     SALES_ORDER_COLUMNS.map((c) => [c.id, c.defaultVisible])
   );
-  const defaultWidths = Object.fromEntries(
-    SALES_ORDER_COLUMNS.map((c) => [c.id, c.defaultWidth])
-  );
+  const defaultWidths = Object.fromEntries(SALES_ORDER_COLUMNS.map((c) => [c.id, c.defaultWidth]));
   const savedOrder = p.columnOrder.length > 0 ? p.columnOrder : SALES_ORDER_DEFAULT_COLUMN_ORDER;
   const missing = SALES_ORDER_DEFAULT_COLUMN_ORDER.filter((id) => !savedOrder.includes(id));
 
@@ -464,7 +464,9 @@ export function SalesOrdersWorkspace({
   const [data, setData] = useState<SalesOrdersListResult>(initialData);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [pref, setPref] = useState<TablePreferenceConfig>(() => normalizeTablePreference(preference));
+  const [pref, setPref] = useState<TablePreferenceConfig>(() =>
+    normalizeTablePreference(preference)
+  );
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [previewId, setPreviewId] = useState<string | null>(null);
   const [fullscreen, setFullscreen] = useState(false);
@@ -489,6 +491,11 @@ export function SalesOrdersWorkspace({
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prefTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // dnd-kit numbers its accessibility ids from a module-level counter that does not
+  // line up between the server render and the client one, so the generated
+  // `aria-describedby` differed and React threw this whole subtree away and rebuilt
+  // it on every load (hydration error #418). `useId` is stable across both.
+  const dndId = useId();
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
 
   // Sync URL state
@@ -1403,7 +1410,8 @@ export function SalesOrdersWorkspace({
               const col = SALES_ORDER_COLUMNS.find((c) => c.field === rule.field);
               if (!col) return null;
               const displayValue = (() => {
-                if (!('value' in rule) || rule.value === undefined || rule.value === null) return '';
+                if (!('value' in rule) || rule.value === undefined || rule.value === null)
+                  return '';
                 if (col.type === 'boolean') return rule.value === true ? 'Sí' : 'No';
                 if (col.type === 'status' && col.statusCategory) {
                   const values = Array.isArray(rule.value) ? rule.value : [String(rule.value)];
@@ -1416,7 +1424,8 @@ export function SalesOrdersWorkspace({
               if (col.type === 'date' && rule.shortcut) {
                 return (
                   <span key={i} className="so-filter-chip">
-                    <strong>{col.label}:</strong> {DATE_SHORTCUT_LABELS[rule.shortcut] ?? rule.shortcut}
+                    <strong>{col.label}:</strong>{' '}
+                    {DATE_SHORTCUT_LABELS[rule.shortcut] ?? rule.shortcut}
                     <button onClick={() => removeFilter(i)} aria-label="Quitar filtro">
                       <X size={12} />
                     </button>
@@ -1495,15 +1504,15 @@ export function SalesOrdersWorkspace({
                           ).map((opt) => (
                             <option key={opt.value} value={opt.value}>
                               {opt.label}
-                              {'count' in opt ? ` (${Number(opt.count).toLocaleString('es-MX')})` : ''}
+                              {'count' in opt
+                                ? ` (${Number(opt.count).toLocaleString('es-MX')})`
+                                : ''}
                             </option>
                           ))}
                         </select>
                       ) : col?.type === 'boolean' ? (
                         <select
-                          value={
-                            rule.value === true ? 'true' : rule.value === false ? 'false' : ''
-                          }
+                          value={rule.value === true ? 'true' : rule.value === false ? 'false' : ''}
                           onChange={(e) => {
                             const boolValue =
                               e.target.value === 'true'
@@ -1533,12 +1542,12 @@ export function SalesOrdersWorkspace({
                         />
                       )}
                       {rule.operator === 'between' &&
-                      (col?.type === 'number' || col?.type === 'currency' || col?.type === 'date') ? (
+                      (col?.type === 'number' ||
+                        col?.type === 'currency' ||
+                        col?.type === 'date') ? (
                         <input
                           type={
-                            col?.type === 'number' || col?.type === 'currency'
-                              ? 'number'
-                              : 'date'
+                            col?.type === 'number' || col?.type === 'currency' ? 'number' : 'date'
                           }
                           value={'valueTo' in rule ? String(rule.valueTo ?? '') : ''}
                           onChange={(e) => updateFilter(i, { valueTo: e.target.value })}
@@ -1662,6 +1671,7 @@ export function SalesOrdersWorkspace({
           </div>
         ) : (
           <DndContext
+            id={dndId}
             sensors={sensors}
             collisionDetection={closestCenter}
             onDragEnd={handleDragEnd}

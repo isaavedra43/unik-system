@@ -7,7 +7,14 @@ import { agentKeyForArea } from '@/modules/agents/identity-catalog';
 import { getAiSettings } from '@/modules/ai/ai-admin-config-service';
 import { chatCompletion } from '@/modules/ai/ai-client';
 import { modelForTask } from '@/modules/ai/model-policy';
-import { OperationsError, registerCommand, type CommandContext } from '@/modules/operations/commands';
+import { radarLink } from '@/modules/areas/area-links';
+import { isNotificationCategory, type NotificationCategory } from '@/modules/notifications/catalog';
+import { notifyUser } from '@/modules/notifications/notification-service';
+import {
+  OperationsError,
+  registerCommand,
+  type CommandContext,
+} from '@/modules/operations/commands';
 import { toOperationalJson } from '@/modules/operations/events-service';
 import { isOpsFlagEnabled } from '@/modules/operations/operations-config';
 import { publishRealtime, REALTIME_CHANNELS } from '@/modules/realtime/realtime-service';
@@ -29,7 +36,12 @@ import { FAILED_OUTBOUND_STATUSES, toNumber, truncateText } from './opportunity-
 import { effectiveProbability } from './pipeline-rules';
 import { loadPipelineStages } from './pipeline-service';
 import { supplierConversationIds } from './supplier-conversations';
-import { buildExplanationMessages, EXPLANATION_MAX_TOKENS, parseExplanation, type ExplanationContext } from './radar-explain';
+import {
+  buildExplanationMessages,
+  EXPLANATION_MAX_TOKENS,
+  parseExplanation,
+  type ExplanationContext,
+} from './radar-explain';
 import {
   DELIVERY_INCIDENT_SEVERITIES,
   evaluateRadar,
@@ -113,7 +125,10 @@ function assertVisibleInCommand(ctx: CommandContext, signal: RadarSignal): void 
 // Facts
 // ---------------------------------------------------------------------------
 
-function firstBy<T>(rows: readonly T[], keys: (row: T) => ReadonlyArray<string | null | undefined>): Map<string, T> {
+function firstBy<T>(
+  rows: readonly T[],
+  keys: (row: T) => ReadonlyArray<string | null | undefined>
+): Map<string, T> {
   const map = new Map<string, T>();
   for (const row of rows) {
     for (const key of keys(row)) {
@@ -156,12 +171,23 @@ export async function loadRadarFacts(now: Date): Promise<RadarFacts> {
           opportunityId: { in: openOpportunities.map((row) => row.id) },
           kind: { in: ['objection', 'objection_resolved'] },
         },
-        select: { id: true, opportunityId: true, kind: true, refType: true, refId: true, at: true, summary: true },
+        select: {
+          id: true,
+          opportunityId: true,
+          kind: true,
+          refType: true,
+          refId: true,
+          at: true,
+          summary: true,
+        },
       })
     : [];
   const objectionsByOpportunity = new Map<string, typeof objectionRows>();
   for (const row of objectionRows) {
-    objectionsByOpportunity.set(row.opportunityId, [...(objectionsByOpportunity.get(row.opportunityId) ?? []), row]);
+    objectionsByOpportunity.set(row.opportunityId, [
+      ...(objectionsByOpportunity.get(row.opportunityId) ?? []),
+      row,
+    ]);
   }
   const opportunities: OpportunityFacts[] = openOpportunities.map((row) => ({
     id: row.id,
@@ -171,10 +197,14 @@ export async function loadRadarFacts(now: Date): Promise<RadarFacts> {
     salespersonUserId: row.salespersonUserId,
     zohoContactId: row.zohoContactId,
     commContactId: row.commContactId,
-    conversationId: row.conversationIds.length > 0 ? row.conversationIds[row.conversationIds.length - 1] : null,
+    conversationId:
+      row.conversationIds.length > 0 ? row.conversationIds[row.conversationIds.length - 1] : null,
     status: row.status,
     stage: stageRef(row.stageId),
-    probability: effectiveProbability(row.probability, stageById.get(row.stageId)?.probabilityDefault ?? null),
+    probability: effectiveProbability(
+      row.probability,
+      stageById.get(row.stageId)?.probabilityDefault ?? null
+    ),
     estimatedValue: toNumber(row.estimatedValue),
     currencyCode: row.currency,
     nextActionAt: row.nextActionAt,
@@ -204,7 +234,12 @@ export async function loadRadarFacts(now: Date): Promise<RadarFacts> {
   });
   const supplierIds = await supplierConversationIds(
     prisma,
-    recentConversations.map((row) => ({ id: row.id, tags: row.tags, contactId: row.contactId, zohoContactId: row.contact.zohoContactId }))
+    recentConversations.map((row) => ({
+      id: row.id,
+      tags: row.tags,
+      contactId: row.contactId,
+      zohoContactId: row.contact.zohoContactId,
+    }))
   );
   const conversationRows = recentConversations.filter((row) => !supplierIds.has(row.id));
   const messageStats = conversationRows.length
@@ -307,7 +342,10 @@ export async function loadRadarFacts(now: Date): Promise<RadarFacts> {
   const ordersByCustomer = new Map<string, typeof orderRows>();
   for (const row of orderRows) {
     if (!row.zohoCustomerId || !row.orderDate) continue;
-    ordersByCustomer.set(row.zohoCustomerId, [...(ordersByCustomer.get(row.zohoCustomerId) ?? []), row]);
+    ordersByCustomer.set(row.zohoCustomerId, [
+      ...(ordersByCustomer.get(row.zohoCustomerId) ?? []),
+      row,
+    ]);
   }
   const customers: CustomerOrderFacts[] = [];
   for (const [zohoContactId, rows] of ordersByCustomer) {
@@ -334,15 +372,28 @@ export async function loadRadarFacts(now: Date): Promise<RadarFacts> {
     orderBy: { openedAt: 'desc' },
     take: MAX_INCIDENTS,
   });
-  const caseIds = [...new Set(incidentRows.map((row) => row.caseId).filter((id): id is string => Boolean(id)))];
+  const caseIds = [
+    ...new Set(incidentRows.map((row) => row.caseId).filter((id): id is string => Boolean(id))),
+  ];
   const caseRows = caseIds.length
     ? await prisma.operationalCase.findMany({
         where: { id: { in: caseIds } },
-        select: { id: true, caseNumber: true, salesOrderNumber: true, zohoCustomerId: true, customerName: true, zohoSalesOrderId: true },
+        select: {
+          id: true,
+          caseNumber: true,
+          salesOrderNumber: true,
+          zohoCustomerId: true,
+          customerName: true,
+          zohoSalesOrderId: true,
+        },
       })
     : [];
   const caseById = new Map(caseRows.map((row) => [row.id, row]));
-  const salesOrderIds = [...new Set(caseRows.map((row) => row.zohoSalesOrderId).filter((id): id is string => Boolean(id)))];
+  const salesOrderIds = [
+    ...new Set(
+      caseRows.map((row) => row.zohoSalesOrderId).filter((id): id is string => Boolean(id))
+    ),
+  ];
   const caseOpportunities = salesOrderIds.length
     ? await prisma.opportunity.findMany({
         where: { zohoSalesOrderIds: { hasSome: salesOrderIds } },
@@ -387,7 +438,71 @@ export interface RefreshRadarResult {
   updated: number;
   resolved: number;
   active: number;
+  /** People told about a new high-scoring signal of theirs (plan 6.6). */
+  notified: number;
   skipped?: 'disabled';
+}
+
+interface NewSignalSummary {
+  count: number;
+  topScore: number;
+  /** Best of the new drafts of this salesperson (what the notification talks about). */
+  top: RadarSignalDraft | null;
+}
+
+/**
+ * Score from which a NEW signal is worth an interruption (plan 6.6: "señal del
+ * radar de alto puntaje"). Below it the signal is still on the board and in the
+ * realtime counter; it just does not ring.
+ */
+export const RADAR_NOTIFY_MIN_SCORE = 70;
+
+/**
+ * One notification per salesperson per refresh, about the best of their NEW
+ * signals (`radar_signal`, push off by default in the catalogue). The dedupe key
+ * carries the subject and the local day, so the same signal never rings twice
+ * the same day even if it is resolved and reactivated.
+ */
+async function notifyNewSignals(
+  newBySalesperson: Map<string, NewSignalSummary>,
+  now: Date
+): Promise<number> {
+  const category: NotificationCategory = isNotificationCategory('radar_signal')
+    ? 'radar_signal'
+    : 'entity_change';
+  const dayKey = localDateKey(now);
+  let notified = 0;
+  for (const [userId, summary] of newBySalesperson) {
+    const top = summary.top;
+    if (!top || top.score < RADAR_NOTIFY_MIN_SCORE) continue;
+    const kindLabel = isRadarKind(top.kind) ? RADAR_KIND_LABELS[top.kind] : top.kind;
+    const others = summary.count - 1;
+    try {
+      const outcome = await notifyUser({
+        userId,
+        category,
+        type: 'crm_radar_signal',
+        title: `${kindLabel}: ${top.customerName ?? 'cliente sin nombre'} (${top.score})`,
+        body: truncateText(
+          `${top.reason}${others > 0 ? ` · ${others} señal(es) nueva(s) más en tu radar` : ''}`,
+          400
+        ),
+        url: radarLink(),
+        entityType: CRM_OBJECT_TYPES.radarSignal,
+        entityId: null,
+        metadata: { kind: top.kind, score: top.score, newSignals: summary.count },
+        dedupeKey: `crm_radar:${userId}:${top.kind}:${top.subjectKey}:${dayKey}`,
+      });
+      if (!outcome.suppressed) notified += 1;
+    } catch (error) {
+      // A radar refresh never fails because of a notification.
+      log('notify_failed', {
+        userId,
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  return notified;
 }
 
 function draftColumns(draft: RadarSignalDraft) {
@@ -407,11 +522,26 @@ function draftColumns(draft: RadarSignalDraft) {
 }
 
 /** Keys a person wrote on a signal (snooze, dismiss, conversion): a refresh never erases them. */
-const DECISION_DATA_KEYS = ['snoozedBy', 'snoozeNote', 'dismissedBy', 'dismissReason', 'workItemId', 'convertedBy'] as const;
+const DECISION_DATA_KEYS = [
+  'snoozedBy',
+  'snoozeNote',
+  'dismissedBy',
+  'dismissReason',
+  'workItemId',
+  'convertedBy',
+] as const;
 
-function withDecisionData(existing: Prisma.JsonValue | null, draftData: Record<string, unknown>): Prisma.InputJsonValue {
-  const base = existing && typeof existing === 'object' && !Array.isArray(existing) ? (existing as Record<string, unknown>) : {};
-  const kept = Object.fromEntries(DECISION_DATA_KEYS.filter((key) => key in base).map((key) => [key, base[key]]));
+function withDecisionData(
+  existing: Prisma.JsonValue | null,
+  draftData: Record<string, unknown>
+): Prisma.InputJsonValue {
+  const base =
+    existing && typeof existing === 'object' && !Array.isArray(existing)
+      ? (existing as Record<string, unknown>)
+      : {};
+  const kept = Object.fromEntries(
+    DECISION_DATA_KEYS.filter((key) => key in base).map((key) => [key, base[key]])
+  );
   return toOperationalJson({ ...draftData, ...kept });
 }
 
@@ -429,15 +559,27 @@ function materiallyChanged(existing: RadarSignal, draft: RadarSignalDraft): bool
 /** Recomputes every signal (see module comment). */
 export async function refreshRadar(options: { now?: Date } = {}): Promise<RefreshRadarResult> {
   const now = options.now ?? new Date();
-  const result: RefreshRadarResult = { evaluated: 0, created: 0, reactivated: 0, updated: 0, resolved: 0, active: 0 };
+  const result: RefreshRadarResult = {
+    evaluated: 0,
+    created: 0,
+    reactivated: 0,
+    updated: 0,
+    resolved: 0,
+    active: 0,
+    notified: 0,
+  };
   if (!(await isOpsFlagEnabled('crm'))) return { ...result, skipped: 'disabled' };
 
   const drafts = evaluateRadar(await loadRadarFacts(now), now);
   result.evaluated = drafts.length;
-  const live = await prisma.radarSignal.findMany({ where: { status: { in: LIVE_SIGNAL_STATUSES } } });
-  const liveByKey = new Map(live.map((signal) => [signalKey(signal.kind, signal.subjectKey), signal]));
+  const live = await prisma.radarSignal.findMany({
+    where: { status: { in: LIVE_SIGNAL_STATUSES } },
+  });
+  const liveByKey = new Map(
+    live.map((signal) => [signalKey(signal.kind, signal.subjectKey), signal])
+  );
   const seen = new Set<string>();
-  const newBySalesperson = new Map<string, { count: number; topScore: number }>();
+  const newBySalesperson = new Map<string, NewSignalSummary>();
 
   for (const draft of drafts) {
     const key = signalKey(draft.kind, draft.subjectKey);
@@ -447,7 +589,13 @@ export async function refreshRadar(options: { now?: Date } = {}): Promise<Refres
       // New subject, or one that had been resolved: (re)activate it without the old AI text.
       const row = await prisma.radarSignal.upsert({
         where: { kind_subjectKey: { kind: draft.kind, subjectKey: draft.subjectKey } },
-        create: { kind: draft.kind, subjectKey: draft.subjectKey, ...draftColumns(draft), computedAt: now, status: 'active' },
+        create: {
+          kind: draft.kind,
+          subjectKey: draft.subjectKey,
+          ...draftColumns(draft),
+          computedAt: now,
+          status: 'active',
+        },
         update: {
           ...draftColumns(draft),
           computedAt: now,
@@ -462,12 +610,22 @@ export async function refreshRadar(options: { now?: Date } = {}): Promise<Refres
       if (row.version === 1) result.created++;
       else result.reactivated++;
       if (draft.salespersonUserId) {
-        const current = newBySalesperson.get(draft.salespersonUserId) ?? { count: 0, topScore: 0 };
-        newBySalesperson.set(draft.salespersonUserId, { count: current.count + 1, topScore: Math.max(current.topScore, draft.score) });
+        const current = newBySalesperson.get(draft.salespersonUserId) ?? {
+          count: 0,
+          topScore: 0,
+          top: null,
+        };
+        newBySalesperson.set(draft.salespersonUserId, {
+          count: current.count + 1,
+          topScore: Math.max(current.topScore, draft.score),
+          top: !current.top || draft.score > current.top.score ? draft : current.top,
+        });
       }
       continue;
     }
-    const wakes = existing.status === 'snoozed' && (!existing.snoozedUntil || existing.snoozedUntil.getTime() <= now.getTime());
+    const wakes =
+      existing.status === 'snoozed' &&
+      (!existing.snoozedUntil || existing.snoozedUntil.getTime() <= now.getTime());
     const changed = wakes || materiallyChanged(existing, draft);
     await prisma.radarSignal.update({
       where: { id: existing.id },
@@ -490,12 +648,22 @@ export async function refreshRadar(options: { now?: Date } = {}): Promise<Refres
     });
     result.resolved = resolved.count;
   }
-  result.active = await prisma.radarSignal.count({ where: { status: 'active', expiresAt: { gt: now } } });
+  result.active = await prisma.radarSignal.count({
+    where: { status: 'active', expiresAt: { gt: now } },
+  });
+
+  result.notified = await notifyNewSignals(newBySalesperson, now);
 
   try {
-    await publishRealtime(CRM_RADAR_CHANNEL, 'radar_refreshed', { ...result, computedAt: now.toISOString() });
+    await publishRealtime(CRM_RADAR_CHANNEL, 'radar_refreshed', {
+      ...result,
+      computedAt: now.toISOString(),
+    });
     for (const [userId, summary] of newBySalesperson) {
-      await publishRealtime(REALTIME_CHANNELS.user(userId), 'crm_radar_new', summary);
+      await publishRealtime(REALTIME_CHANNELS.user(userId), 'crm_radar_new', {
+        count: summary.count,
+        topScore: summary.topScore,
+      });
     }
   } catch (error) {
     log('realtime_failed', { message: error instanceof Error ? error.message : String(error) });
@@ -555,72 +723,27 @@ function assertActionable(signal: RadarSignal): void {
   }
 }
 
-function mergeData(data: Prisma.JsonValue | null, patch: Record<string, unknown>): Prisma.InputJsonValue {
-  const base = data && typeof data === 'object' && !Array.isArray(data) ? (data as Record<string, unknown>) : {};
+function mergeData(
+  data: Prisma.JsonValue | null,
+  patch: Record<string, unknown>
+): Prisma.InputJsonValue {
+  const base =
+    data && typeof data === 'object' && !Array.isArray(data)
+      ? (data as Record<string, unknown>)
+      : {};
   return toOperationalJson({ ...base, ...patch });
 }
 
-const radarEventOptions = (signal: RadarSignal) => ({ areaKey: CRM_AREA_KEY, objectType: RADAR, objectId: signal.id });
-
-registerCommand<z.output<typeof snoozeSignalSchema>, { signalId: string; snoozedUntil: string }>(CRM_COMMANDS.radarSnooze, {
-  schema: snoozeSignalSchema,
-  permission: 'crm.radar',
-  aggregate: radarSignalAggregate,
-  async handler(tx, cmd, ctx) {
-    const input = cmd.payload;
-    assertAggregateTarget(cmd, input.signalId, 'señal');
-    const signal = await loadSignal(tx, input.signalId);
-    assertVisibleInCommand(ctx, signal);
-    assertActionable(signal);
-    const until = new Date(input.until);
-    if (until.getTime() < ctx.now.getTime() + SNOOZE_MIN_MS) {
-      throw new OperationsError('invalid_payload', 'Pospón la señal al menos 5 minutos');
-    }
-    if (until.getTime() > ctx.now.getTime() + SNOOZE_MAX_MS) {
-      throw new OperationsError('invalid_payload', 'Una señal se pospone como máximo 30 días');
-    }
-    await tx.radarSignal.update({
-      where: { id: signal.id },
-      data: {
-        status: 'snoozed',
-        snoozedUntil: until,
-        data: mergeData(signal.data, { snoozedBy: commandUserId(ctx), snoozeNote: input.note ?? null }),
-      },
-    });
-    ctx.emit(CRM_EVENTS.radarSnoozed, { signalId: signal.id, kind: signal.kind, until: until.toISOString() }, radarEventOptions(signal));
-    ctx.realtime(CRM_RADAR_CHANNEL, 'signal_changed', { signalId: signal.id, status: 'snoozed' });
-    return { data: { signalId: signal.id, snoozedUntil: until.toISOString() } };
-  },
+const radarEventOptions = (signal: RadarSignal) => ({
+  areaKey: CRM_AREA_KEY,
+  objectType: RADAR,
+  objectId: signal.id,
 });
 
-registerCommand<z.output<typeof dismissSignalSchema>, { signalId: string }>(CRM_COMMANDS.radarDismiss, {
-  schema: dismissSignalSchema,
-  permission: 'crm.radar',
-  aggregate: radarSignalAggregate,
-  async handler(tx, cmd, ctx) {
-    const input = cmd.payload;
-    assertAggregateTarget(cmd, input.signalId, 'señal');
-    const signal = await loadSignal(tx, input.signalId);
-    assertVisibleInCommand(ctx, signal);
-    assertActionable(signal);
-    await tx.radarSignal.update({
-      where: { id: signal.id },
-      data: {
-        status: 'dismissed',
-        snoozedUntil: null,
-        data: mergeData(signal.data, { dismissedBy: commandUserId(ctx), dismissReason: input.reason ?? null }),
-      },
-    });
-    ctx.emit(CRM_EVENTS.radarDismissed, { signalId: signal.id, kind: signal.kind, reason: input.reason ?? null }, radarEventOptions(signal));
-    ctx.realtime(CRM_RADAR_CHANNEL, 'signal_changed', { signalId: signal.id, status: 'dismissed' });
-    return { data: { signalId: signal.id } };
-  },
-});
-
-registerCommand<z.output<typeof convertSignalToTaskSchema>, { signalId: string; workItemId: string }>(
-  CRM_COMMANDS.radarConvertToTask,
+registerCommand<z.output<typeof snoozeSignalSchema>, { signalId: string; snoozedUntil: string }>(
+  CRM_COMMANDS.radarSnooze,
   {
-    schema: convertSignalToTaskSchema,
+    schema: snoozeSignalSchema,
     permission: 'crm.radar',
     aggregate: radarSignalAggregate,
     async handler(tx, cmd, ctx) {
@@ -629,116 +752,242 @@ registerCommand<z.output<typeof convertSignalToTaskSchema>, { signalId: string; 
       const signal = await loadSignal(tx, input.signalId);
       assertVisibleInCommand(ctx, signal);
       assertActionable(signal);
-      const ownerUserId = input.ownerUserId ?? signal.salespersonUserId ?? commandUserId(ctx);
-      if (ownerUserId) {
-        const owner = await tx.user.findUnique({ where: { id: ownerUserId }, select: { isActive: true, isBot: true } });
-        if (!owner?.isActive || owner.isBot) {
-          throw new OperationsError('invalid_payload', 'El responsable de la tarea no existe, está inactivo o es una identidad de IA');
-        }
+      const until = new Date(input.until);
+      if (until.getTime() < ctx.now.getTime() + SNOOZE_MIN_MS) {
+        throw new OperationsError('invalid_payload', 'Pospón la señal al menos 5 minutos');
       }
-      const label = isRadarKind(signal.kind) ? RADAR_KIND_LABELS[signal.kind] : signal.kind;
-      const title = input.title ?? truncateText(`${label}: ${signal.customerName ?? signal.subjectKey}`, 160);
-      const dueAt = input.dueAt ? new Date(input.dueAt) : undefined;
-      const workItem = await ctx.createWorkItem({
-        areaKey: CRM_AREA_KEY,
-        kind: 'action',
-        title,
-        description: signal.reason,
-        objectType: RADAR,
-        objectId: signal.id,
-        ...(ownerUserId ? { ownerUserId } : {}),
-        ...(dueAt ? { dueAt } : {}),
-      });
-      // Snoozed until the task is due: the radar stays quiet while the task is open and the
-      // subject resurfaces if the condition still holds after the due date.
-      const snoozedUntil = workItem.dueAt ?? new Date(ctx.now.getTime() + DAY_MS);
+      if (until.getTime() > ctx.now.getTime() + SNOOZE_MAX_MS) {
+        throw new OperationsError('invalid_payload', 'Una señal se pospone como máximo 30 días');
+      }
       await tx.radarSignal.update({
         where: { id: signal.id },
         data: {
           status: 'snoozed',
-          snoozedUntil,
-          data: mergeData(signal.data, { workItemId: workItem.id, convertedBy: commandUserId(ctx) }),
+          snoozedUntil: until,
+          data: mergeData(signal.data, {
+            snoozedBy: commandUserId(ctx),
+            snoozeNote: input.note ?? null,
+          }),
         },
       });
-      if (signal.opportunityId) {
-        const opportunity = await tx.opportunity.findUnique({ where: { id: signal.opportunityId }, select: { id: true } });
-        if (opportunity) {
-          await tx.opportunityActivity.create({
-            data: {
-              opportunityId: opportunity.id,
-              kind: 'task',
-              summary: `Tarea creada desde el radar: ${title}`,
-              refType: ACTIVITY_REF_TYPES.workItem,
-              refId: workItem.id,
-              payload: toOperationalJson({ signalId: signal.id, kind: signal.kind }),
-              userId: commandUserId(ctx),
-              at: ctx.now,
-            },
-          });
-          await tx.opportunity.updateMany({
-            where: { id: opportunity.id, nextActionAt: null },
-            data: { nextActionAt: workItem.dueAt, nextActionText: title },
-          });
-        }
-      }
       ctx.emit(
-        CRM_EVENTS.radarConverted,
-        { signalId: signal.id, kind: signal.kind, workItemId: workItem.id },
+        CRM_EVENTS.radarSnoozed,
+        { signalId: signal.id, kind: signal.kind, until: until.toISOString() },
         radarEventOptions(signal)
       );
-      ctx.realtime(CRM_RADAR_CHANNEL, 'signal_changed', { signalId: signal.id, status: 'snoozed', workItemId: workItem.id });
-      return { data: { signalId: signal.id, workItemId: workItem.id } };
+      ctx.realtime(CRM_RADAR_CHANNEL, 'signal_changed', { signalId: signal.id, status: 'snoozed' });
+      return { data: { signalId: signal.id, snoozedUntil: until.toISOString() } };
     },
   }
 );
 
-registerCommand<z.output<typeof setExplanationSchema>, { signalId: string }>(CRM_COMMANDS.radarSetExplanation, {
-  schema: setExplanationSchema,
+registerCommand<z.output<typeof dismissSignalSchema>, { signalId: string }>(
+  CRM_COMMANDS.radarDismiss,
+  {
+    schema: dismissSignalSchema,
+    permission: 'crm.radar',
+    aggregate: radarSignalAggregate,
+    async handler(tx, cmd, ctx) {
+      const input = cmd.payload;
+      assertAggregateTarget(cmd, input.signalId, 'señal');
+      const signal = await loadSignal(tx, input.signalId);
+      assertVisibleInCommand(ctx, signal);
+      assertActionable(signal);
+      await tx.radarSignal.update({
+        where: { id: signal.id },
+        data: {
+          status: 'dismissed',
+          snoozedUntil: null,
+          data: mergeData(signal.data, {
+            dismissedBy: commandUserId(ctx),
+            dismissReason: input.reason ?? null,
+          }),
+        },
+      });
+      ctx.emit(
+        CRM_EVENTS.radarDismissed,
+        { signalId: signal.id, kind: signal.kind, reason: input.reason ?? null },
+        radarEventOptions(signal)
+      );
+      ctx.realtime(CRM_RADAR_CHANNEL, 'signal_changed', {
+        signalId: signal.id,
+        status: 'dismissed',
+      });
+      return { data: { signalId: signal.id } };
+    },
+  }
+);
+
+registerCommand<
+  z.output<typeof convertSignalToTaskSchema>,
+  { signalId: string; workItemId: string }
+>(CRM_COMMANDS.radarConvertToTask, {
+  schema: convertSignalToTaskSchema,
   permission: 'crm.radar',
-  aggregate: 'none',
-  audit: 'never',
+  aggregate: radarSignalAggregate,
   async handler(tx, cmd, ctx) {
     const input = cmd.payload;
+    assertAggregateTarget(cmd, input.signalId, 'señal');
     const signal = await loadSignal(tx, input.signalId);
     assertVisibleInCommand(ctx, signal);
+    assertActionable(signal);
+    const ownerUserId = input.ownerUserId ?? signal.salespersonUserId ?? commandUserId(ctx);
+    if (ownerUserId) {
+      const owner = await tx.user.findUnique({
+        where: { id: ownerUserId },
+        select: { isActive: true, isBot: true },
+      });
+      if (!owner?.isActive || owner.isBot) {
+        throw new OperationsError(
+          'invalid_payload',
+          'El responsable de la tarea no existe, está inactivo o es una identidad de IA'
+        );
+      }
+    }
+    const label = isRadarKind(signal.kind) ? RADAR_KIND_LABELS[signal.kind] : signal.kind;
+    const title =
+      input.title ?? truncateText(`${label}: ${signal.customerName ?? signal.subjectKey}`, 160);
+    const dueAt = input.dueAt ? new Date(input.dueAt) : undefined;
+    const workItem = await ctx.createWorkItem({
+      areaKey: CRM_AREA_KEY,
+      kind: 'action',
+      title,
+      description: signal.reason,
+      objectType: RADAR,
+      objectId: signal.id,
+      ...(ownerUserId ? { ownerUserId } : {}),
+      ...(dueAt ? { dueAt } : {}),
+    });
+    // Snoozed until the task is due: the radar stays quiet while the task is open and the
+    // subject resurfaces if the condition still holds after the due date.
+    const snoozedUntil = workItem.dueAt ?? new Date(ctx.now.getTime() + DAY_MS);
     await tx.radarSignal.update({
       where: { id: signal.id },
       data: {
-        aiExplanation: input.explanation,
-        aiSuggestedMessage: input.suggestedMessage,
-        aiGeneratedAt: ctx.now,
+        status: 'snoozed',
+        snoozedUntil,
+        data: mergeData(signal.data, { workItemId: workItem.id, convertedBy: commandUserId(ctx) }),
       },
     });
-    const requestedBy = commandUserId(ctx);
-    if (requestedBy && signal.opportunityId) {
-      const opportunity = await tx.opportunity.findUnique({ where: { id: signal.opportunityId }, select: { id: true } });
+    if (signal.opportunityId) {
+      const opportunity = await tx.opportunity.findUnique({
+        where: { id: signal.opportunityId },
+        select: { id: true },
+      });
       if (opportunity) {
         await tx.opportunityActivity.create({
           data: {
             opportunityId: opportunity.id,
-            kind: 'ai_suggestion',
-            summary: truncateText(input.explanation, 300),
-            refType: ACTIVITY_REF_TYPES.radarSignal,
-            refId: signal.id,
-            payload: toOperationalJson({ kind: signal.kind, model: input.model }),
-            userId: requestedBy,
+            kind: 'task',
+            summary: `Tarea creada desde el radar: ${title}`,
+            refType: ACTIVITY_REF_TYPES.workItem,
+            refId: workItem.id,
+            payload: toOperationalJson({ signalId: signal.id, kind: signal.kind }),
+            userId: commandUserId(ctx),
             at: ctx.now,
           },
         });
+        await tx.opportunity.updateMany({
+          where: { id: opportunity.id, nextActionAt: null },
+          data: { nextActionAt: workItem.dueAt, nextActionText: title },
+        });
       }
     }
-    ctx.emit(CRM_EVENTS.radarExplained, { signalId: signal.id, kind: signal.kind, model: input.model }, radarEventOptions(signal));
-    return { data: { signalId: signal.id } };
+    ctx.emit(
+      CRM_EVENTS.radarConverted,
+      { signalId: signal.id, kind: signal.kind, workItemId: workItem.id },
+      radarEventOptions(signal)
+    );
+    ctx.realtime(CRM_RADAR_CHANNEL, 'signal_changed', {
+      signalId: signal.id,
+      status: 'snoozed',
+      workItemId: workItem.id,
+    });
+    return { data: { signalId: signal.id, workItemId: workItem.id } };
   },
 });
 
-export const snoozeSignal = (actor: CurrentUser, input: SnoozeSignalInput, options?: CrmCommandOptions) =>
-  runCrmCommand<{ signalId: string; snoozedUntil: string }>(actor, CRM_COMMANDS.radarSnooze, { type: RADAR, id: input.signalId }, input, options);
+registerCommand<z.output<typeof setExplanationSchema>, { signalId: string }>(
+  CRM_COMMANDS.radarSetExplanation,
+  {
+    schema: setExplanationSchema,
+    permission: 'crm.radar',
+    aggregate: 'none',
+    audit: 'never',
+    async handler(tx, cmd, ctx) {
+      const input = cmd.payload;
+      const signal = await loadSignal(tx, input.signalId);
+      assertVisibleInCommand(ctx, signal);
+      await tx.radarSignal.update({
+        where: { id: signal.id },
+        data: {
+          aiExplanation: input.explanation,
+          aiSuggestedMessage: input.suggestedMessage,
+          aiGeneratedAt: ctx.now,
+        },
+      });
+      const requestedBy = commandUserId(ctx);
+      if (requestedBy && signal.opportunityId) {
+        const opportunity = await tx.opportunity.findUnique({
+          where: { id: signal.opportunityId },
+          select: { id: true },
+        });
+        if (opportunity) {
+          await tx.opportunityActivity.create({
+            data: {
+              opportunityId: opportunity.id,
+              kind: 'ai_suggestion',
+              summary: truncateText(input.explanation, 300),
+              refType: ACTIVITY_REF_TYPES.radarSignal,
+              refId: signal.id,
+              payload: toOperationalJson({ kind: signal.kind, model: input.model }),
+              userId: requestedBy,
+              at: ctx.now,
+            },
+          });
+        }
+      }
+      ctx.emit(
+        CRM_EVENTS.radarExplained,
+        { signalId: signal.id, kind: signal.kind, model: input.model },
+        radarEventOptions(signal)
+      );
+      return { data: { signalId: signal.id } };
+    },
+  }
+);
 
-export const dismissSignal = (actor: CurrentUser, input: DismissSignalInput, options?: CrmCommandOptions) =>
-  runCrmCommand<{ signalId: string }>(actor, CRM_COMMANDS.radarDismiss, { type: RADAR, id: input.signalId }, input, options);
+export const snoozeSignal = (
+  actor: CurrentUser,
+  input: SnoozeSignalInput,
+  options?: CrmCommandOptions
+) =>
+  runCrmCommand<{ signalId: string; snoozedUntil: string }>(
+    actor,
+    CRM_COMMANDS.radarSnooze,
+    { type: RADAR, id: input.signalId },
+    input,
+    options
+  );
 
-export const convertSignalToTask = (actor: CurrentUser, input: ConvertSignalToTaskInput, options?: CrmCommandOptions) =>
+export const dismissSignal = (
+  actor: CurrentUser,
+  input: DismissSignalInput,
+  options?: CrmCommandOptions
+) =>
+  runCrmCommand<{ signalId: string }>(
+    actor,
+    CRM_COMMANDS.radarDismiss,
+    { type: RADAR, id: input.signalId },
+    input,
+    options
+  );
+
+export const convertSignalToTask = (
+  actor: CurrentUser,
+  input: ConvertSignalToTaskInput,
+  options?: CrmCommandOptions
+) =>
   runCrmCommand<{ signalId: string; workItemId: string }>(
     actor,
     CRM_COMMANDS.radarConvertToTask,
@@ -771,7 +1020,14 @@ async function loadExplanationContext(signal: RadarSignal): Promise<ExplanationC
     signal.quoteId
       ? prisma.quote.findUnique({
           where: { id: signal.quoteId },
-          select: { estimateNumber: true, zohoEstimateId: true, status: true, total: true, currencyCode: true, expiryDate: true },
+          select: {
+            estimateNumber: true,
+            zohoEstimateId: true,
+            status: true,
+            total: true,
+            currencyCode: true,
+            expiryDate: true,
+          },
         })
       : null,
     signal.salespersonUserId
@@ -779,7 +1035,10 @@ async function loadExplanationContext(signal: RadarSignal): Promise<ExplanationC
       : null,
   ]);
   const stage = opportunity
-    ? await prisma.pipelineStage.findUnique({ where: { id: opportunity.stageId }, select: { name: true } })
+    ? await prisma.pipelineStage.findUnique({
+        where: { id: opportunity.stageId },
+        select: { name: true },
+      })
     : null;
   const conversationId =
     signal.conversationId ??
@@ -844,14 +1103,22 @@ export async function generateSignalExplanation(
 ): Promise<GeneratedExplanation> {
   const now = options.now ?? new Date();
   const settings = await getAiSettings();
-  if (!settings.isEnabled) throw new CrmError('La IA está desactivada en la configuración', 'ai_disabled', 503);
+  if (!settings.isEnabled)
+    throw new CrmError('La IA está desactivada en la configuración', 'ai_disabled', 503);
   const agentKey = agentKeyForArea(CRM_AREA_KEY);
-  const identity = agentKey ? await prisma.agentIdentity.findUnique({ where: { key: agentKey } }) : null;
-  if (identity?.mode === 'paused') throw new CrmError('La IA de Ventas está en pausa', 'ai_paused', 503);
+  const identity = agentKey
+    ? await prisma.agentIdentity.findUnique({ where: { key: agentKey } })
+    : null;
+  if (identity?.mode === 'paused')
+    throw new CrmError('La IA de Ventas está en pausa', 'ai_paused', 503);
   if (identity) {
     const budget = await checkAgentBudget(identity, { now });
     if (budget.state === 'exhausted') {
-      throw new CrmError('Se agotó el presupuesto de IA de Ventas; intenta más tarde', 'ai_budget', 429);
+      throw new CrmError(
+        'Se agotó el presupuesto de IA de Ventas; intenta más tarde',
+        'ai_budget',
+        429
+      );
     }
   }
   const context = await loadExplanationContext(signal);
@@ -874,16 +1141,25 @@ export async function generateSignalExplanation(
     now,
   });
   const parsed = parseExplanation(completion.content);
-  if (!parsed) throw new CrmError('La IA no devolvió una explicación válida; intenta de nuevo', 'ai_invalid', 502);
+  if (!parsed)
+    throw new CrmError(
+      'La IA no devolvió una explicación válida; intenta de nuevo',
+      'ai_invalid',
+      502
+    );
   return { ...parsed, model: usedModel };
 }
 
 /** On demand (`crm.radar`): returns the cached explanation for 12 hours unless `force`. */
 /** A signal as it is stored (no model call): the cached explanation and suggested message, if any. */
-export async function getRadarSignal(actor: CurrentUser, signalId: string): Promise<RadarSignalDTO> {
+export async function getRadarSignal(
+  actor: CurrentUser,
+  signalId: string
+): Promise<RadarSignalDTO> {
   assertCrmPermission(actor, 'crm.radar');
   const signal = await prisma.radarSignal.findUnique({ where: { id: signalId } });
-  if (!signal || !isSignalVisibleTo(actor, signal)) throw new CrmError('No se encontró la señal del radar', 'not_found', 404);
+  if (!signal || !isSignalVisibleTo(actor, signal))
+    throw new CrmError('No se encontró la señal del radar', 'not_found', 404);
   return toRadarSignalDTO(signal);
 }
 
@@ -895,8 +1171,12 @@ export async function explainSignal(
   assertCrmPermission(actor, 'crm.radar');
   const now = options.now ?? new Date();
   const signal = await prisma.radarSignal.findUnique({ where: { id: input.signalId } });
-  if (!signal || !isSignalVisibleTo(actor, signal)) throw new CrmError('No se encontró la señal del radar', 'not_found', 404);
-  const fresh = signal.aiExplanation && signal.aiGeneratedAt && now.getTime() - signal.aiGeneratedAt.getTime() < EXPLANATION_FRESH_MS;
+  if (!signal || !isSignalVisibleTo(actor, signal))
+    throw new CrmError('No se encontró la señal del radar', 'not_found', 404);
+  const fresh =
+    signal.aiExplanation &&
+    signal.aiGeneratedAt &&
+    now.getTime() - signal.aiGeneratedAt.getTime() < EXPLANATION_FRESH_MS;
   if (fresh && !input.force) return toRadarSignalDTO(signal);
   const generated = await generateSignalExplanation(signal, { chargeUserId: actor.id, now });
   unwrapCrmResult(
@@ -920,7 +1200,9 @@ export interface ExplainTopSignalsResult {
 }
 
 /** Daily job: the 5 best active signals of each salesperson without a recent explanation. */
-export async function explainTopSignals(options: { now?: Date; perSalesperson?: number } = {}): Promise<ExplainTopSignalsResult> {
+export async function explainTopSignals(
+  options: { now?: Date; perSalesperson?: number } = {}
+): Promise<ExplainTopSignalsResult> {
   const now = options.now ?? new Date();
   const result: ExplainTopSignalsResult = { explained: 0, failed: 0, stopped: null };
   if (!(await isOpsFlagEnabled('crm'))) return { ...result, skipped: 'disabled' };
@@ -929,7 +1211,10 @@ export async function explainTopSignals(options: { now?: Date; perSalesperson?: 
       status: 'active',
       expiresAt: { gt: now },
       salespersonUserId: { not: null },
-      OR: [{ aiGeneratedAt: null }, { aiGeneratedAt: { lt: new Date(now.getTime() - DAILY_EXPLANATION_STALE_MS) } }],
+      OR: [
+        { aiGeneratedAt: null },
+        { aiGeneratedAt: { lt: new Date(now.getTime() - DAILY_EXPLANATION_STALE_MS) } },
+      ],
     },
     // Stable order: ties never change which signals are explained (and charged) from one run to the next.
     orderBy: [{ score: 'desc' }, { kind: 'asc' }, { subjectKey: 'asc' }, { id: 'asc' }],
@@ -940,7 +1225,10 @@ export async function explainTopSignals(options: { now?: Date; perSalesperson?: 
   for (const signals of top.values()) {
     for (const signal of signals) {
       try {
-        const generated = await generateSignalExplanation(signal, { chargeUserId: signal.salespersonUserId, now });
+        const generated = await generateSignalExplanation(signal, {
+          chargeUserId: signal.salespersonUserId,
+          now,
+        });
         const stored = await runCrmSystemCommand(
           CRM_COMMANDS.radarSetExplanation,
           { type: RADAR, id: `explain:${signal.id}` },
@@ -951,12 +1239,18 @@ export async function explainTopSignals(options: { now?: Date; perSalesperson?: 
         if (stored.status === 'completed') result.explained++;
         else result.failed++;
       } catch (error) {
-        if (error instanceof CrmError && ['ai_disabled', 'ai_paused', 'ai_budget'].includes(error.code)) {
+        if (
+          error instanceof CrmError &&
+          ['ai_disabled', 'ai_paused', 'ai_budget'].includes(error.code)
+        ) {
           result.stopped = error.code;
           return result;
         }
         result.failed++;
-        log('explain_failed', { signalId: signal.id, message: error instanceof Error ? error.message : String(error) });
+        log('explain_failed', {
+          signalId: signal.id,
+          message: error instanceof Error ? error.message : String(error),
+        });
       }
     }
   }

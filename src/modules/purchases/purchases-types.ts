@@ -22,7 +22,14 @@ export const SUPPLIER_STATUS_LABELS: Record<SupplierStatus, string> = {
   archived: 'Archivado',
 };
 
-export const SUPPLIER_CHANNEL_TYPES = ['whatsapp', 'sms', 'telegram', 'email', 'phone', 'web'] as const;
+export const SUPPLIER_CHANNEL_TYPES = [
+  'whatsapp',
+  'sms',
+  'telegram',
+  'email',
+  'phone',
+  'web',
+] as const;
 export type SupplierChannelType = (typeof SUPPLIER_CHANNEL_TYPES)[number];
 export const SUPPLIER_CHANNEL_LABELS: Record<SupplierChannelType, string> = {
   whatsapp: 'WhatsApp',
@@ -77,7 +84,13 @@ export const PURCHASE_REQUEST_STATUS_LABELS: Record<PurchaseRequestStatus, strin
   closed: 'Cerrada',
   cancelled: 'Cancelada',
 };
-export const PURCHASE_REQUEST_OPEN_STATUSES = ['draft', 'open', 'consolidated', 'sourcing', 'ordered'] as const;
+export const PURCHASE_REQUEST_OPEN_STATUSES = [
+  'draft',
+  'open',
+  'consolidated',
+  'sourcing',
+  'ordered',
+] as const;
 
 export const PURCHASE_REQUEST_LINE_STATUSES = ['open', 'ordered', 'received', 'cancelled'] as const;
 export type PurchaseRequestLineStatus = (typeof PURCHASE_REQUEST_LINE_STATUSES)[number];
@@ -91,13 +104,24 @@ export const PURCHASE_REQUEST_LINE_STATUS_LABELS: Record<PurchaseRequestLineStat
 export const REQUEST_PRIORITIES = ['normal', 'high', 'urgent'] as const;
 
 /** Area requests addressed to Compras that turn into a purchase request (plan 6.1, núcleo). */
-export const SHORTFALL_REQUEST_KINDS = ['purchase_shortfall', 'material_shortfall', 'direct_delivery'] as const;
+export const SHORTFALL_REQUEST_KINDS = [
+  'purchase_shortfall',
+  'material_shortfall',
+  'direct_delivery',
+] as const;
 
 // ---------------------------------------------------------------------------
 // RFQ
 // ---------------------------------------------------------------------------
 
-export const RFQ_STATUSES = ['draft', 'sent', 'collecting', 'compared', 'closed', 'cancelled'] as const;
+export const RFQ_STATUSES = [
+  'draft',
+  'sent',
+  'collecting',
+  'compared',
+  'closed',
+  'cancelled',
+] as const;
 export type RfqStatus = (typeof RFQ_STATUSES)[number];
 export const RFQ_STATUS_LABELS: Record<RfqStatus, string> = {
   draft: 'Borrador',
@@ -109,7 +133,14 @@ export const RFQ_STATUS_LABELS: Record<RfqStatus, string> = {
 };
 export const RFQ_OPEN_STATUSES = ['draft', 'sent', 'collecting', 'compared'] as const;
 
-export const RFQ_INVITATION_STATUSES = ['pending', 'sent', 'failed', 'replied', 'declined', 'expired'] as const;
+export const RFQ_INVITATION_STATUSES = [
+  'pending',
+  'sent',
+  'failed',
+  'replied',
+  'declined',
+  'expired',
+] as const;
 export type RfqInvitationStatus = (typeof RFQ_INVITATION_STATUSES)[number];
 export const RFQ_INVITATION_STATUS_LABELS: Record<RfqInvitationStatus, string> = {
   pending: 'Por enviar',
@@ -120,7 +151,13 @@ export const RFQ_INVITATION_STATUS_LABELS: Record<RfqInvitationStatus, string> =
   expired: 'Sin respuesta',
 };
 
-export const RFQ_RESPONSE_STATUSES = ['parsed', 'needs_review', 'confirmed', 'rejected', 'selected'] as const;
+export const RFQ_RESPONSE_STATUSES = [
+  'parsed',
+  'needs_review',
+  'confirmed',
+  'rejected',
+  'selected',
+] as const;
 export type RfqResponseStatus = (typeof RFQ_RESPONSE_STATUSES)[number];
 export const RFQ_RESPONSE_STATUS_LABELS: Record<RfqResponseStatus, string> = {
   parsed: 'Interpretada',
@@ -365,8 +402,38 @@ export const PURCHASES_JOB_TYPES = {
 export const PURCHASES_BOARD_CHANNEL = 'purchases:board';
 export const PURCHASES_REALTIME_TYPE = 'purchases.changed';
 
-/** Conversation tag that marks an RFQ thread: `rfq:{rfqId}`. */
+/**
+ * Conversation tag that marks an RFQ thread: `rfq:{rfqId}`.
+ *
+ * ÚNICO CONTRATO entre Compras (que ETIQUETA la conversación al invitar al
+ * proveedor, `tagRfqConversation` en rfq-service.ts) y el fan-out de mensajería
+ * (que LEE la etiqueta para decidir si interpreta la respuesta,
+ * `runMessageFanout` en comms-jobs.ts). Este módulo es puro (sin Prisma, sin
+ * registro de permisos), así que mensajería lo importa directamente en vez de
+ * copiar el literal: una copia divergente rompería la interpretación de las
+ * cotizaciones entrantes EN SILENCIO (`rfq: 'not_tagged'`, sin error ni
+ * reintento). Escribe y lee siempre con los ayudantes de abajo.
+ */
 export const RFQ_CONVERSATION_TAG_PREFIX = 'rfq:';
+
+/** Etiqueta que Compras escribe en la conversación de una invitación. */
+export function rfqConversationTag(rfqId: string): string {
+  return `${RFQ_CONVERSATION_TAG_PREFIX}${rfqId}`;
+}
+
+/** True si la conversación es un hilo de RFQ (el fan-out interpreta sus mensajes entrantes). */
+export function isRfqConversationTagged(tags: readonly string[]): boolean {
+  return tags.some((tag) => tag.startsWith(RFQ_CONVERSATION_TAG_PREFIX));
+}
+
+/** Ids de las RFQ a las que pertenece la conversación (inverso de `rfqConversationTag`). */
+export function rfqIdsFromConversationTags(tags: readonly string[]): string[] {
+  return tags
+    .filter((tag) => tag.startsWith(RFQ_CONVERSATION_TAG_PREFIX))
+    .map((tag) => tag.slice(RFQ_CONVERSATION_TAG_PREFIX.length))
+    .filter(Boolean);
+}
+
 /** Conversation tag that marks the thread where an order was sent: `oc:{orderId}`. */
 export const ORDER_CONVERSATION_TAG_PREFIX = 'oc:';
 

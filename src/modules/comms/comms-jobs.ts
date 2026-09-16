@@ -5,6 +5,10 @@ import { registerRecurringJob } from '@/modules/jobs/scheduled-jobs';
 import { publishRealtime, REALTIME_CHANNELS } from '@/modules/realtime/realtime-service';
 import { isKnownPermission } from '@/modules/auth/permissions';
 import { saveGeneratedFile } from '@/modules/storage/storage-service';
+import {
+  RFQ_CONVERSATION_TAG_PREFIX,
+  isRfqConversationTagged,
+} from '@/modules/purchases/purchases-types';
 import { getChannelAdapter, hasMediaFetcher } from './adapters';
 import { markOverdueCommitments } from './commitments-service';
 import { COMMS_MESSAGE_FANOUT_JOB, COMMS_PROCESS_INBOUND_JOB } from './comms-service';
@@ -30,8 +34,16 @@ import './comms-storage';
 
 export const COMMS_COMMITMENTS_OVERDUE_JOB = 'comms.commitments_overdue';
 
-/** Conversations of a request for quotation carry the tag `rfq:{rfqId}`. */
-export const RFQ_CONVERSATION_TAG_PREFIX = 'rfq:';
+/**
+ * Conversations of a request for quotation carry the tag `rfq:{rfqId}`.
+ *
+ * Reexportado, NO copiado: la etiqueta es un único contrato con Compras, que es
+ * quien la escribe. `purchases-types` es un módulo puro (sin Prisma ni registro
+ * de permisos), así que importarlo aquí no carga el módulo de compras — sólo los
+ * RECEPTORES se cargan bajo demanda, más abajo. Un literal duplicado dejaría de
+ * encolar la interpretación de las respuestas de proveedores sin ningún error.
+ */
+export { RFQ_CONVERSATION_TAG_PREFIX };
 
 /** Receivers of the fan-out (loaded on demand so messaging does not load CRM or purchases). */
 export interface MessageFanoutDeps {
@@ -80,8 +92,12 @@ export async function runMessageFanout(
   });
   if (!message) return { messageId, skipped: 'missing', crm: 'skipped', rfq: 'not_tagged' };
   const errors: string[] = [];
-  const tagged = message.conversation.tags.some((tag) => tag.startsWith(RFQ_CONVERSATION_TAG_PREFIX));
-  const rfq: MessageFanoutResult['rfq'] = !tagged ? 'not_tagged' : message.direction === 'inbound' ? 'done' : 'outbound';
+  const tagged = isRfqConversationTagged(message.conversation.tags);
+  const rfq: MessageFanoutResult['rfq'] = !tagged
+    ? 'not_tagged'
+    : message.direction === 'inbound'
+      ? 'done'
+      : 'outbound';
   if (rfq === 'done') {
     try {
       await deps.interpretRfqReplyIfTagged(messageId);

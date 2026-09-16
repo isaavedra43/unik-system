@@ -1,5 +1,5 @@
 import type { Prisma } from '@prisma/client';
-import { RFQ_CONVERSATION_TAG_PREFIX } from '@/modules/purchases/purchases-types';
+import { isRfqConversationTagged } from '@/modules/purchases/purchases-types';
 
 /**
  * Conversations of the inbox that belong to Compras, not to Ventas: requests
@@ -19,11 +19,14 @@ export interface ConversationRef {
 }
 
 export function isRfqConversation(tags: readonly string[]): boolean {
-  return tags.some((tag) => tag.startsWith(RFQ_CONVERSATION_TAG_PREFIX));
+  return isRfqConversationTagged(tags);
 }
 
 /** Ids of the conversations (of `rows`) held with suppliers. */
-export async function supplierConversationIds(db: Db, rows: readonly ConversationRef[]): Promise<Set<string>> {
+export async function supplierConversationIds(
+  db: Db,
+  rows: readonly ConversationRef[]
+): Promise<Set<string>> {
   const ids = new Set<string>();
   const rest: ConversationRef[] = [];
   for (const row of rows) {
@@ -32,17 +35,29 @@ export async function supplierConversationIds(db: Db, rows: readonly Conversatio
   }
   if (rest.length === 0) return ids;
   const contactIds = [...new Set(rest.map((row) => row.contactId))];
-  const zohoIds = [...new Set(rest.map((row) => row.zohoContactId).filter((id): id is string => Boolean(id)))];
+  const zohoIds = [
+    ...new Set(rest.map((row) => row.zohoContactId).filter((id): id is string => Boolean(id))),
+  ];
   const [suppliers, vendors] = await Promise.all([
-    db.supplier.findMany({ where: { commContactId: { in: contactIds } }, select: { commContactId: true } }),
+    db.supplier.findMany({
+      where: { commContactId: { in: contactIds } },
+      select: { commContactId: true },
+    }),
     zohoIds.length > 0
-      ? db.contact.findMany({ where: { zohoContactId: { in: zohoIds }, contactType: 'vendor' }, select: { zohoContactId: true } })
+      ? db.contact.findMany({
+          where: { zohoContactId: { in: zohoIds }, contactType: 'vendor' },
+          select: { zohoContactId: true },
+        })
       : Promise.resolve([] as Array<{ zohoContactId: string }>),
   ]);
   const supplierContacts = new Set(suppliers.map((row) => row.commContactId));
   const vendorContacts = new Set(vendors.map((row) => row.zohoContactId));
   for (const row of rest) {
-    if (supplierContacts.has(row.contactId) || (row.zohoContactId && vendorContacts.has(row.zohoContactId))) ids.add(row.id);
+    if (
+      supplierContacts.has(row.contactId) ||
+      (row.zohoContactId && vendorContacts.has(row.zohoContactId))
+    )
+      ids.add(row.id);
   }
   return ids;
 }

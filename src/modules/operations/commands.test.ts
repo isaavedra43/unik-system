@@ -840,6 +840,128 @@ describe('executeCommand — validation and permissions', () => {
       expect.objectContaining({ code: 'outside_command' })
     );
   });
+
+  /**
+   * Next.js compiles a server module once per webpack layer, so this file is
+   * instantiated several times in one process and the command registry (shared
+   * on `globalThis`) hands a handler compiled by one copy to the engine of
+   * another. The running context must therefore live on `globalThis` too, or
+   * every work-item and request action fails with `outside_command`.
+   */
+  it('keeps the running context on globalThis so another compiled copy sees it', async () => {
+    const scope = globalThis as typeof globalThis & {
+      __unikOperationalCommandContexts?: WeakMap<object, unknown>;
+    };
+    delete scope.__unikOperationalCommandContexts;
+    let seen: WeakMap<object, unknown> | undefined;
+    let foundByTx: unknown = null;
+    registerCommand('test.global_context', {
+      schema: z.object({}),
+      aggregate: 'none',
+      async handler(tx) {
+        seen = scope.__unikOperationalCommandContexts;
+        // What another copy of the module would do: read the shared store directly.
+        foundByTx = seen?.get(tx as unknown as object) ?? null;
+      },
+    });
+    const result = await executeCommand(system('test.global_context', {}, 'global-ctx'), null, {
+      now: NOW,
+    });
+    expect(result.status).toBe('completed');
+    expect(seen).toBeInstanceOf(WeakMap);
+    expect(foundByTx).not.toBeNull();
+  });
+
+  it('answers a rejection (not a 500) for an error thrown by another compiled copy', async () => {
+    // Same shape as an `OperationsError` from a duplicated module instance:
+    // a different class, branded with the process-wide symbol.
+    const FOREIGN_BRAND: unique symbol = Symbol.for('unik.operations.error');
+    class ForeignOperationsError extends Error {
+      readonly [FOREIGN_BRAND] = true;
+      readonly code = 'invalid_state';
+      readonly httpStatus = 409;
+      constructor() {
+        super('Rechazo de otra copia del módulo');
+        this.name = 'OperationsError';
+      }
+    }
+    registerCommand('test.foreign_error', {
+      schema: z.object({}),
+      aggregate: 'none',
+      async handler() {
+        throw new ForeignOperationsError();
+      },
+    });
+    const result = await executeCommand(system('test.foreign_error', {}, 'foreign'), null, {
+      now: NOW,
+    });
+    expect(result.status).toBe('rejected');
+    expect(result.errorCode).toBe('invalid_state');
+  });
+
+  it('retries the command for a JobDedupeConflictError thrown by another compiled copy', async () => {
+    // Same shape as the error `enqueueJob({ tx })` raises from a duplicated
+    // module instance: a different class, branded with the process-wide symbol.
+    // With a plain `instanceof` this transient rejection would be re-thrown as
+    // an unexpected error (HTTP 500) instead of retried.
+    const FOREIGN_DEDUPE_BRAND: unique symbol = Symbol.for('unik.jobs.dedupeConflict');
+    class ForeignJobDedupeConflictError extends Error {
+      readonly [FOREIGN_DEDUPE_BRAND] = true;
+      readonly dedupeKey = 'demo.run:k1';
+      constructor() {
+        super('Could not enqueue job: dedupe key "demo.run:k1" is still in conflict');
+        this.name = 'JobDedupeConflictError';
+      }
+    }
+    let attempts = 0;
+    registerCommand('test.foreign_dedupe', {
+      schema: z.object({}),
+      aggregate: 'none',
+      async handler() {
+        attempts += 1;
+        // Only the first transaction loses the dedupe key, as in production.
+        if (attempts === 1) throw new ForeignJobDedupeConflictError();
+      },
+    });
+    const result = await executeCommand(system('test.foreign_dedupe', {}, 'foreign-dedupe'), null, {
+      now: NOW,
+    });
+    expect(result.status).toBe('completed');
+    expect(attempts).toBe(2);
+  });
+
+  it('gives up with concurrency_conflict when the foreign JobDedupeConflictError persists', async () => {
+    const FOREIGN_DEDUPE_BRAND: unique symbol = Symbol.for('unik.jobs.dedupeConflict');
+    class ForeignJobDedupeConflictError extends Error {
+      readonly [FOREIGN_DEDUPE_BRAND] = true;
+      readonly dedupeKey = 'demo.run:k2';
+      constructor() {
+        super('Could not enqueue job: dedupe key "demo.run:k2" is still in conflict');
+        this.name = 'JobDedupeConflictError';
+      }
+    }
+    let attempts = 0;
+    registerCommand('test.foreign_dedupe_always', {
+      schema: z.object({}),
+      aggregate: 'none',
+      async handler() {
+        attempts += 1;
+        throw new ForeignJobDedupeConflictError();
+      },
+    });
+    const result = await executeCommand(
+      system('test.foreign_dedupe_always', {}, 'foreign-dedupe-always'),
+      null,
+      { now: NOW }
+    );
+    expect(result).toMatchObject({ status: 'rejected', errorCode: 'concurrency_conflict' });
+    expect(attempts).toBe(2);
+    // A transient loss is kept retryable, never stored as a final rejection.
+    expect(fake.rows('operationalCommand')[0]).toMatchObject({
+      status: 'failed',
+      errorCode: 'concurrency_conflict',
+    });
+  });
 });
 
 describe('CommandContext primitives', () => {

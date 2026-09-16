@@ -187,7 +187,10 @@ function localParts(date: Date, tz: string): LocalParts {
   try {
     parts = new Intl.DateTimeFormat('en-US', { ...options, timeZone: tz }).formatToParts(date);
   } catch {
-    parts = new Intl.DateTimeFormat('en-US', { ...options, timeZone: AGENT_TIMEZONE }).formatToParts(date);
+    parts = new Intl.DateTimeFormat('en-US', {
+      ...options,
+      timeZone: AGENT_TIMEZONE,
+    }).formatToParts(date);
   }
   const get = (type: string) => parts.find((p) => p.type === type)?.value ?? '';
   return {
@@ -226,13 +229,18 @@ export function formatShortDate(value: DateInput, tz = AGENT_TIMEZONE): string {
 }
 
 /** `hoy 17:00`, `mañana 09:00`, `ayer 18:30` or `18 sep 17:00` relative to `now`. */
-export function formatDueLabel(value: DateInput, now: Date = new Date(), tz = AGENT_TIMEZONE): string {
+export function formatDueLabel(
+  value: DateInput,
+  now: Date = new Date(),
+  tz = AGENT_TIMEZONE
+): string {
   const date = toDate(value);
   if (!date) return '';
   const target = localParts(date, tz);
   const today = localParts(now, tz);
   const days = Math.round(
-    (Date.UTC(target.year, target.month - 1, target.day) - Date.UTC(today.year, today.month - 1, today.day)) /
+    (Date.UTC(target.year, target.month - 1, target.day) -
+      Date.UTC(today.year, today.month - 1, today.day)) /
       86_400_000
   );
   const clock = `${target.hour}:${target.minute}`;
@@ -296,7 +304,8 @@ const str = (value: unknown): string | null =>
 
 const num = (value: unknown): number | null => {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
-  if (typeof value === 'string' && value.trim() && Number.isFinite(Number(value))) return Number(value);
+  if (typeof value === 'string' && value.trim() && Number.isFinite(Number(value)))
+    return Number(value);
   return null;
 };
 
@@ -309,7 +318,12 @@ function stripEndPeriod(text: string): string {
   return text.replace(/[.\s]+$/, '');
 }
 
-function sentence(icon: string, head: string, subject: string, tails: Array<string | null | undefined | false>): string {
+function sentence(
+  icon: string,
+  head: string,
+  subject: string,
+  tails: Array<string | null | undefined | false>
+): string {
   const parts = tails.filter((t): t is string => typeof t === 'string' && t.length > 0);
   const body = subject ? ` — ${stripEndPeriod(subject)}` : '';
   return `${icon} ${head}${body}${parts.length > 0 ? `. ${parts.join(' · ')}` : ''}`;
@@ -350,7 +364,9 @@ function requestSubject(ctx: AgentMessageContext): string {
   const kind = str(ctx.requestKind);
   if (qty && item) {
     const shortfall = !kind || SHORTFALL_KINDS.has(kind);
-    const base = shortfall ? `Faltan ${qty} de ${item}` : `${requestKindLabel(kind) ?? 'Solicitud'}: ${qty} de ${item}`;
+    const base = shortfall
+      ? `Faltan ${qty} de ${item}`
+      : `${requestKindLabel(kind) ?? 'Solicitud'}: ${qty} de ${item}`;
     return needed ? `${base} para entregar el ${needed}` : base;
   }
   const title = cleanText(ctx.title, 160);
@@ -358,7 +374,10 @@ function requestSubject(ctx: AgentMessageContext): string {
   return requestKindLabel(kind) ?? '';
 }
 
-function timelineQuantity(ctx: AgentMessageContext | undefined, payload: Record<string, unknown>): string {
+function timelineQuantity(
+  ctx: AgentMessageContext | undefined,
+  payload: Record<string, unknown>
+): string {
   return (
     formatQuantity(ctx?.quantity, ctx?.unit) ||
     formatQuantity(
@@ -372,24 +391,42 @@ function timelineQuantity(ctx: AgentMessageContext | undefined, payload: Record<
 // Timeline
 // ---------------------------------------------------------------------------
 
-type PhraseBuilder = (event: TimelineEvent, payload: Record<string, unknown>, ctx: AgentMessageContext | undefined) => string;
+type PhraseBuilder = (
+  event: TimelineEvent,
+  payload: Record<string, unknown>,
+  ctx: AgentMessageContext | undefined
+) => string;
 
-function requestAreas(event: TimelineEvent, payload: Record<string, unknown>, ctx: AgentMessageContext | undefined) {
+function requestAreas(
+  event: TimelineEvent,
+  payload: Record<string, unknown>,
+  ctx: AgentMessageContext | undefined
+) {
   const to = areaLabel(ctx?.toAreaKey ?? payload.toAreaKey ?? event.areaKey) ?? 'El área destino';
   const from = areaLabel(ctx?.fromAreaKey ?? payload.fromAreaKey);
   return { to, ofFrom: from ? ` de ${from}` : '' };
 }
 
-function timelineReason(payload: Record<string, unknown>, ctx: AgentMessageContext | undefined): string {
+function timelineReason(
+  payload: Record<string, unknown>,
+  ctx: AgentMessageContext | undefined
+): string {
   const reason = cleanText(ctx?.reason ?? payload.reason, 120);
   return reason ? `: ${reason}` : '';
 }
 
-function workItemTitle(payload: Record<string, unknown>, ctx: AgentMessageContext | undefined): string {
+function workItemTitle(
+  payload: Record<string, unknown>,
+  ctx: AgentMessageContext | undefined
+): string {
   return cleanText(ctx?.workItemTitle ?? ctx?.title ?? payload.title, 100);
 }
 
-function eventArea(event: TimelineEvent, ctx: AgentMessageContext | undefined, fallback: string): string {
+function eventArea(
+  event: TimelineEvent,
+  ctx: AgentMessageContext | undefined,
+  fallback: string
+): string {
   return areaLabel(event.areaKey ?? ctx?.areaKey) ?? fallback;
 }
 
@@ -446,7 +483,8 @@ const PHRASES: Record<string, PhraseBuilder> = {
     const { to, ofFrom } = requestAreas(e, p, c);
     return `${to} rechazó la solicitud${ofFrom}${timelineReason(p, c)}`;
   },
-  'request.cancelled': (e, p, c) => `Se canceló la solicitud a ${requestAreas(e, p, c).to}${timelineReason(p, c)}`,
+  'request.cancelled': (e, p, c) =>
+    `Se canceló la solicitud a ${requestAreas(e, p, c).to}${timelineReason(p, c)}`,
   'request.expired': (e, p, c) => `Venció sin respuesta la solicitud a ${requestAreas(e, p, c).to}`,
   'request.overdue': (e, p, c) => {
     const late = formatDuration(c?.overdueMinutes ?? num(p.overdueMinutes));
@@ -485,7 +523,10 @@ const PHRASES: Record<string, PhraseBuilder> = {
     return `Se escaló un trabajo de ${eventArea(e, c, 'un área')}${level !== null && level !== undefined ? ` (nivel ${level + 1})` : ''}`;
   },
   'incident.opened': (e, p, c) => {
-    const title = cleanText(c?.incidentTitle ?? c?.title ?? p.title, 100) || incidentKindLabel(c?.incidentKind ?? p.kind) || 'sin título';
+    const title =
+      cleanText(c?.incidentTitle ?? c?.title ?? p.title, 100) ||
+      incidentKindLabel(c?.incidentKind ?? p.kind) ||
+      'sin título';
     const severity = severityLabel(c?.severity ?? p.severity);
     return `Incidencia${severity ? ` ${severity}` : ''} en ${eventArea(e, c, 'un área')}: ${title}`;
   },
@@ -514,22 +555,42 @@ const PHRASES: Record<string, PhraseBuilder> = {
   'case.cancelled': (_e, p, c) => `Se canceló el expediente${timelineReason(p, c)}`,
   'case.owner_changed': () => 'Cambió el responsable del expediente',
   'case.status_changed': (_e, p) => {
-    const to = typeof p.to === 'string' ? (CASE_STATUS_LABELS as Record<string, string>)[p.to] : undefined;
+    const to =
+      typeof p.to === 'string' ? (CASE_STATUS_LABELS as Record<string, string>)[p.to] : undefined;
     return to ? `El expediente pasó a ${to.toLowerCase()}` : 'Cambió el estado del expediente';
   },
   'case.phase_changed': (_e, p) => {
-    const to = typeof p.to === 'string' ? (CASE_PHASE_LABELS as Record<string, string>)[p.to] : undefined;
-    return to ? `El expediente pasó a la fase de ${to.toLowerCase()}` : 'Cambió la fase del expediente';
+    const to =
+      typeof p.to === 'string' ? (CASE_PHASE_LABELS as Record<string, string>)[p.to] : undefined;
+    return to
+      ? `El expediente pasó a la fase de ${to.toLowerCase()}`
+      : 'Cambió la fase del expediente';
   },
   'demand.shortfall_confirmed': (e, p, c) => {
     const qty = timelineQuantity(c, p);
     return `${eventArea(e, c, 'Inventario')} confirmó faltante${qty ? ` de ${qty}` : ''}`;
   },
+  'demand.created': (e, p, c) => {
+    const qty = timelineQuantity(c, p);
+    return `${eventArea(e, c, 'Ventas')} registró una partida${qty ? ` de ${qty}` : ''}`;
+  },
+  'demand.verified': (e, _p, c) =>
+    `${eventArea(e, c, 'Inventario')} verificó la existencia de una partida`,
+  'demand.allocated': (e, p, c) => {
+    const qty = timelineQuantity(c, p);
+    return `${eventArea(e, c, 'Inventario')} comprometió existencias${qty ? ` por ${qty}` : ''}`;
+  },
+  'allocation.planned': (e, _p, c) => `${eventArea(e, c, 'Inventario')} planeó cómo se surte`,
+  'allocation.reserved': (e, _p, c) => `${eventArea(e, c, 'Inventario')} apartó el material`,
+  'allocation.requested': (e, _p, c) => `${eventArea(e, c, 'Compras')} pidió el material faltante`,
+  'allocation.in_progress': (e, _p, c) => `${eventArea(e, c, 'Manufactura')} empezó a producirlo`,
+  'allocation.ready': (e, _p, c) => `${eventArea(e, c, 'Inventario')} dejó el material listo`,
   'demand.cancelled': () => 'Se canceló una partida del expediente',
   'demand.changed': () => 'Cambió una partida del expediente',
   'demand.fulfilled': () => 'Se cubrió una partida del expediente',
   'stock.reserved': (e, _p, c) => `${eventArea(e, c, 'Inventario')} reservó existencias`,
-  'stock.reserved_provisional': (e, _p, c) => `${eventArea(e, c, 'Inventario')} reservó existencias sin conteo confirmado`,
+  'stock.reserved_provisional': (e, _p, c) =>
+    `${eventArea(e, c, 'Inventario')} reservó existencias sin conteo confirmado`,
   'stock.released': (e, _p, c) => `${eventArea(e, c, 'Inventario')} liberó una reserva`,
   'stock.received': (e, _p, c) => `${eventArea(e, c, 'Inventario')} recibió material`,
   'stock.issued': (e, _p, c) => `${eventArea(e, c, 'Inventario')} surtió material`,
@@ -561,10 +622,14 @@ const PHRASES: Record<string, PhraseBuilder> = {
     const agent = cleanText(c?.agentName, 40) || agentLabelOf(p.agentKey);
     return `${agent} propuso${summary ? `: ${summary}` : ' una acción'} · falta aprobación`;
   },
-  'ai.budget_exhausted': (_e, p, c) => `${cleanText(c?.agentName, 40) || agentLabelOf(p.agentKey)} quedó en pausa por presupuesto`,
-  'ai.turn': (_e, p, c) => `${cleanText(c?.agentName, 40) || agentLabelOf(p.agentKey)} atendió ${triggerLabelOf(p.trigger)}`,
-  'ai.turn_skipped': (_e, p, c) => `${cleanText(c?.agentName, 40) || agentLabelOf(p.agentKey)} no tomó turno (${triggerLabelOf(p.trigger)})`,
-  'ai.turn_failed': (_e, p, c) => `${cleanText(c?.agentName, 40) || agentLabelOf(p.agentKey)} no pudo completar ${triggerLabelOf(p.trigger)}`,
+  'ai.budget_exhausted': (_e, p, c) =>
+    `${cleanText(c?.agentName, 40) || agentLabelOf(p.agentKey)} quedó en pausa por presupuesto`,
+  'ai.turn': (_e, p, c) =>
+    `${cleanText(c?.agentName, 40) || agentLabelOf(p.agentKey)} atendió ${triggerLabelOf(p.trigger)}`,
+  'ai.turn_skipped': (_e, p, c) =>
+    `${cleanText(c?.agentName, 40) || agentLabelOf(p.agentKey)} no tomó turno (${triggerLabelOf(p.trigger)})`,
+  'ai.turn_failed': (_e, p, c) =>
+    `${cleanText(c?.agentName, 40) || agentLabelOf(p.agentKey)} no pudo completar ${triggerLabelOf(p.trigger)}`,
   'proposal.approved': (_e, p, c) => {
     const summary = cleanText(c?.proposalSummary ?? p.summary, 100);
     return `${cleanText(c?.approverName, 60) || 'El responsable'} aprobó${summary ? `: ${summary}` : ' la propuesta'}`;
@@ -584,9 +649,22 @@ function humanizeType(type: string): string {
   return cleanText(type.replace(/[._]+/g, ' '), 60);
 }
 
-/** `09:29 Compras recibió solicitud por 15 m²` (Mexico City time). */
-export function formatTimelineLine(event: TimelineEvent, ctx?: AgentMessageContext): string {
-  const clock = formatClock(event.occurredAt ?? ctx?.occurredAt ?? ctx?.now, ctx?.tz ?? AGENT_TIMEZONE);
+/**
+ * `09:29 Compras recibió solicitud por 15 m²` (Mexico City time).
+ *
+ * `withClock: false` devuelve sólo la frase, para las vistas que ya pintan su
+ * propia columna de hora (el Replay del Control Tower): con la hora dentro de
+ * la cadena se leían DOS horas por renglón.
+ */
+export function formatTimelineLine(
+  event: TimelineEvent,
+  ctx?: AgentMessageContext,
+  options: { withClock?: boolean } = {}
+): string {
+  const clock = formatClock(
+    event.occurredAt ?? ctx?.occurredAt ?? ctx?.now,
+    ctx?.tz ?? AGENT_TIMEZONE
+  );
   const payload = event.payload && typeof event.payload === 'object' ? event.payload : {};
   const builder = PHRASES[event.type];
   let phrase: string;
@@ -596,7 +674,8 @@ export function formatTimelineLine(event: TimelineEvent, ctx?: AgentMessageConte
     const area = areaLabel(event.areaKey);
     phrase = area ? `${area}: ${humanizeType(event.type)}` : humanizeType(event.type) || 'Evento';
   }
-  return `${clock} ${cleanText(phrase, 180)}`;
+  const text = cleanText(phrase, 180);
+  return options.withClock === false ? text : `${clock} ${text}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -689,21 +768,28 @@ const TEXTS: Record<AgentMessageKind, TextBuilder> = {
       actorPart(c),
     ]),
   'request.resolved': (c, i) =>
-    sentence(i, `${capitalize(toArea(c))} resolvió la solicitud${reference(c)}`, requestSubject(c), [
-      cleanText(c.note, 200) ? `Respuesta: ${cleanText(c.note, 200)}` : null,
-      actorPart(c),
-    ]),
+    sentence(
+      i,
+      `${capitalize(toArea(c))} resolvió la solicitud${reference(c)}`,
+      requestSubject(c),
+      [cleanText(c.note, 200) ? `Respuesta: ${cleanText(c.note, 200)}` : null, actorPart(c)]
+    ),
   'request.rejected': (c, i) =>
     sentence(i, `${capitalize(toArea(c))} rechazó la solicitud${reference(c)}`, requestSubject(c), [
       reasonPart(c),
       actorPart(c),
     ]),
   'request.cancelled': (c, i) =>
-    sentence(i, `Se canceló la solicitud a ${toArea(c)}${reference(c)}`, requestSubject(c), [reasonPart(c)]),
-  'request.expired': (c, i) =>
-    sentence(i, `Venció sin respuesta la solicitud a ${toArea(c)}${reference(c)}`, requestSubject(c), [
-      responsiblePart(c),
+    sentence(i, `Se canceló la solicitud a ${toArea(c)}${reference(c)}`, requestSubject(c), [
+      reasonPart(c),
     ]),
+  'request.expired': (c, i) =>
+    sentence(
+      i,
+      `Venció sin respuesta la solicitud a ${toArea(c)}${reference(c)}`,
+      requestSubject(c),
+      [responsiblePart(c)]
+    ),
   'request.overdue': (c, i) => {
     const late = formatDuration(c.overdueMinutes);
     return sentence(i, `Solicitud vencida en ${toArea(c)}${reference(c)}`, requestSubject(c), [
@@ -712,37 +798,62 @@ const TEXTS: Record<AgentMessageKind, TextBuilder> = {
     ]);
   },
   'workitem.assigned': (c, i) =>
-    sentence(i, `Trabajo nuevo en ${ownArea(c)}${reference(c)}`, cleanText(c.workItemTitle ?? c.title, 160), [
-      responsiblePart(c),
-      duePart(c),
-    ]),
+    sentence(
+      i,
+      `Trabajo nuevo en ${ownArea(c)}${reference(c)}`,
+      cleanText(c.workItemTitle ?? c.title, 160),
+      [responsiblePart(c), duePart(c)]
+    ),
   'workitem.overdue': (c, i) => {
     const late = formatDuration(c.overdueMinutes);
-    const level = typeof c.escalationLevel === 'number' && c.escalationLevel >= 0 ? c.escalationLevel + 1 : null;
-    return sentence(i, `Trabajo vencido en ${ownArea(c)}${reference(c)}`, cleanText(c.workItemTitle ?? c.title, 160), [
-      late ? `Vencido hace ${late}` : null,
-      responsiblePart(c),
-      level ? `Escalación nivel ${level}` : null,
-    ]);
+    const level =
+      typeof c.escalationLevel === 'number' && c.escalationLevel >= 0
+        ? c.escalationLevel + 1
+        : null;
+    return sentence(
+      i,
+      `Trabajo vencido en ${ownArea(c)}${reference(c)}`,
+      cleanText(c.workItemTitle ?? c.title, 160),
+      [
+        late ? `Vencido hace ${late}` : null,
+        responsiblePart(c),
+        level ? `Escalación nivel ${level}` : null,
+      ]
+    );
   },
   'workitem.completed': (c, i) =>
-    sentence(i, `${capitalize(ownArea(c))} terminó un trabajo${reference(c)}`, cleanText(c.workItemTitle ?? c.title, 160), [
-      actorPart(c),
-    ]),
+    sentence(
+      i,
+      `${capitalize(ownArea(c))} terminó un trabajo${reference(c)}`,
+      cleanText(c.workItemTitle ?? c.title, 160),
+      [actorPart(c)]
+    ),
   'incident.opened': (c, i) => {
     const severity = severityLabel(c.severity);
-    const subject = cleanText(c.incidentTitle ?? c.title, 160) || incidentKindLabel(c.incidentKind) || '';
-    return sentence(i, `Incidencia${severity ? ` ${severity}` : ''} en ${ownArea(c)}${reference(c)}`, subject, [
-      responsiblePart(c),
-    ]);
+    const subject =
+      cleanText(c.incidentTitle ?? c.title, 160) || incidentKindLabel(c.incidentKind) || '';
+    return sentence(
+      i,
+      `Incidencia${severity ? ` ${severity}` : ''} en ${ownArea(c)}${reference(c)}`,
+      subject,
+      [responsiblePart(c)]
+    );
   },
   'incident.resolved': (c, i) =>
-    sentence(i, `Incidencia resuelta en ${ownArea(c)}${reference(c)}`, cleanText(c.incidentTitle ?? c.title, 160), [
-      cleanText(c.resolution, 200) ? `Resolución: ${cleanText(c.resolution, 200)}` : null,
-      actorPart(c),
-    ]),
+    sentence(
+      i,
+      `Incidencia resuelta en ${ownArea(c)}${reference(c)}`,
+      cleanText(c.incidentTitle ?? c.title, 160),
+      [
+        cleanText(c.resolution, 200) ? `Resolución: ${cleanText(c.resolution, 200)}` : null,
+        actorPart(c),
+      ]
+    ),
   'proposal.created': (c, i) => {
-    const approver = cleanText(c.approverName, 60) || cleanText(c.responsibleName, 60) || 'el responsable del área';
+    const approver =
+      cleanText(c.approverName, 60) ||
+      cleanText(c.responsibleName, 60) ||
+      'el responsable del área';
     const expires = formatDueLabel(c.expiresAt, c.now ?? new Date(), c.tz ?? AGENT_TIMEZONE);
     return sentence(
       i,
@@ -766,22 +877,30 @@ const TEXTS: Record<AgentMessageKind, TextBuilder> = {
       [reasonPart(c)]
     ),
   'proposal.failed': (c, i) =>
-    sentence(i, `Falló una acción aprobada${reference(c)}`, cleanText(c.proposalSummary, 200) || cleanText(c.toolName, 60), [
-      cleanText(c.error, 200) ? `Error: ${cleanText(c.error, 200)}` : null,
-      cleanText(c.agentName, 40) ? `${cleanText(c.agentName, 40)} lo revisa` : null,
-    ]),
+    sentence(
+      i,
+      `Falló una acción aprobada${reference(c)}`,
+      cleanText(c.proposalSummary, 200) || cleanText(c.toolName, 60),
+      [
+        cleanText(c.error, 200) ? `Error: ${cleanText(c.error, 200)}` : null,
+        cleanText(c.agentName, 40) ? `${cleanText(c.agentName, 40)} lo revisa` : null,
+      ]
+    ),
   'case.started': (c, i) => {
     const caseNumber = cleanText(c.caseNumber, 40);
     const so = cleanText(c.salesOrderNumber, 40);
     const promised = formatShortDate(c.promisedAt, c.tz ?? AGENT_TIMEZONE);
-    return sentence(i, `Expediente${caseNumber ? ` ${caseNumber}` : ''} abierto${so ? ` · ${so}` : ''}`, cleanText(c.customerName, 120), [
-      responsiblePart(c),
-      promised ? `Promesa de entrega ${promised}` : null,
-    ]);
+    return sentence(
+      i,
+      `Expediente${caseNumber ? ` ${caseNumber}` : ''} abierto${so ? ` · ${so}` : ''}`,
+      cleanText(c.customerName, 120),
+      [responsiblePart(c), promised ? `Promesa de entrega ${promised}` : null]
+    );
   },
   'case.delivered': (c, i) => {
     const delivered = formatDueLabel(c.deliveredAt, c.now ?? new Date(), c.tz ?? AGENT_TIMEZONE);
-    const incidents = typeof c.incidentCount === 'number' && c.incidentCount > 0 ? c.incidentCount : 0;
+    const incidents =
+      typeof c.incidentCount === 'number' && c.incidentCount > 0 ? c.incidentCount : 0;
     return sentence(i, `Pedido entregado${reference(c)}`, cleanText(c.customerName, 120), [
       delivered ? `Entregado ${delivered}` : null,
       incidents > 0 ? `Con ${incidents} ${incidents === 1 ? 'incidencia' : 'incidencias'}` : null,
@@ -789,7 +908,8 @@ const TEXTS: Record<AgentMessageKind, TextBuilder> = {
   },
   'budget.exhausted': (c, i) => {
     const agent = cleanText(c.agentName, 40) || 'La IA del área';
-    const responsible = cleanText(c.responsibleName, 60) || cleanText(c.ownerName, 60) || 'el responsable del área';
+    const responsible =
+      cleanText(c.responsibleName, 60) || cleanText(c.ownerName, 60) || 'el responsable del área';
     return `${i} ${agent} en pausa por presupuesto, atiende ${responsible}`;
   },
 };
@@ -798,14 +918,19 @@ const TEXTS: Record<AgentMessageKind, TextBuilder> = {
  * Chat text and timeline line of a template kind. Never calls a model and never
  * throws for missing optional fields; an unknown kind throws (programming error).
  */
-export function renderAgentMessage(kind: AgentMessageKind, ctx: AgentMessageContext = {}): RenderedAgentMessage {
+export function renderAgentMessage(
+  kind: AgentMessageKind,
+  ctx: AgentMessageContext = {}
+): RenderedAgentMessage {
   if (!isAgentMessageKind(kind)) throw new Error(`Unknown agent message kind "${String(kind)}"`);
   const text = TEXTS[kind](ctx, ICONS[kind]).replace(/\s+/g, ' ').trim();
   const timelineLine = formatTimelineLine(
     {
       type: TIMELINE_TYPE[kind],
       occurredAt: ctx.occurredAt ?? ctx.now ?? new Date(),
-      areaKey: kind.startsWith('request.') ? (ctx.toAreaKey ?? ctx.areaKey ?? null) : (ctx.areaKey ?? null),
+      areaKey: kind.startsWith('request.')
+        ? (ctx.toAreaKey ?? ctx.areaKey ?? null)
+        : (ctx.areaKey ?? null),
       payload: {},
     },
     ctx

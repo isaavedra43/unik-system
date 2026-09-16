@@ -1,6 +1,12 @@
 import { Prisma, type StockCount, type StockCountLine, type StockItem } from '@prisma/client';
+import { stockCountLink } from '@/modules/areas/area-links';
+import {
+  requestApproval,
+  resolveApprovalRequirement,
+  type ApprovalDecidedEvent,
+} from '@/modules/operations/approvals-service';
 import { requireCommandContext, type CommandContext } from '@/modules/operations/commands';
-import { OperationsError } from '@/modules/operations/errors';
+import { OperationsError, isOperationsError } from '@/modules/operations/errors';
 import { toOperationalJson } from '@/modules/operations/events-service';
 import { OPS_EVENTS, WORK_ITEM_OPEN_STATUSES } from '@/modules/operations/types';
 import { qty } from './inventory-dto';
@@ -483,6 +489,9 @@ export async function closeCount(
           description: `Diferencia de ${qty(decision.diff)} ${units.baseUnit} (esperado ${qty(line.expectedQty)}, contado ${qty(line.countedQty)}). Está dentro de la tolerancia; falta autorizar el ajuste.`,
           objectType: 'stock_count_line',
           objectId: line.id,
+          // La decisión se toma en el conteo (panel «Diferencias por decidir»):
+          // sin esta dirección el aviso dejaba a la persona buscando el conteo.
+          notification: { url: stockCountLink(countId) },
         });
         summary.workItemIds.push(workItem.id);
         ctx.emit(
@@ -622,27 +631,150 @@ export interface DecideAdjustmentInput {
   note?: string | null;
 }
 
-/** Approves (adjusts) or rejects (keeps the book) a pending within-tolerance difference. */
-export async function decideCountAdjustment(
+/**
+ * Monetary value of an adjustment, so the `inventory_adjustment` approval policy
+ * can have amount ranges like every other scope. `Product.purchaseRate` is the
+ * only cost UNIK keeps; without it the value is 0 and the policy of the range
+ * `[0, …)` decides.
+ */
+async function adjustmentValue(
   tx: Db,
-  input: DecideAdjustmentInput,
-  ctx: CommandContext = requireCommandContext(tx)
+  zohoItemId: string,
+  diff: Prisma.Decimal
+): Promise<Prisma.Decimal> {
+  const product = await tx.product.findUnique({
+    where: { zohoItemId },
+    select: { purchaseRate: true },
+  });
+  const rate = product?.purchaseRate ?? null;
+  return rate ? diff.abs().times(rate).toDecimalPlaces(4) : new Prisma.Decimal(0);
+}
+
+export interface AdjustmentApprovalOutcome {
+  /** `ready`: the decision itself is the signature. `pending`: it waits for other people. */
+  gate: 'ready' | 'pending';
+  approvalRequestId: string | null;
+  requiredApprovals: number;
+  /** Nobody else could sign the policy that this adjustment needs. */
+  noApprovers: boolean;
+}
+
+/**
+ * Business approval of an inventory adjustment (plan 6.0, scope
+ * `inventory_adjustment`). Until this existed the scope was configurable in the
+ * Control Tower and NOTHING ever asked for it.
+ *
+ * How the two approval paths of Inventario fit together:
+ *
+ * - Whoever decides here already holds `inventory.adjust`, which is the
+ *   approver permission of the scope (`registerApprovalScopePermission` in
+ *   `inventory-commands.ts`), and the line only reaches this point through its
+ *   `approval` work item. That IS one signature, so a policy of one signature —
+ *   the default of `defaultApprovalPolicies` — is satisfied by the decision
+ *   itself and the adjustment is applied right away, exactly as before.
+ * - A policy the administrator configures with TWO or more signatures (say, for
+ *   adjustments over a given value) is a different promise: it needs other
+ *   people. Then a real `ApprovalRequest` is opened, the line stays pending and
+ *   the adjustment is applied by the reaction to that decision.
+ *
+ * `no_approvers` is not a silent bypass: the line stays pending and the event
+ * says nobody could sign, so the adjustment never happens behind the policy's
+ * back.
+ */
+async function requestAdjustmentApproval(
+  tx: Db,
+  ctx: CommandContext,
+  line: StockCountLine & { count: StockCount },
+  row: StockItem,
+  note: string | null | undefined
+): Promise<AdjustmentApprovalOutcome> {
+  const diff = dec(line.diffQty);
+  const amount = await adjustmentValue(tx, row.zohoItemId, diff);
+  const { requiredApprovals } = await resolveApprovalRequirement(tx, {
+    scope: 'inventory_adjustment',
+    amount,
+    currency: 'MXN',
+  });
+  if (requiredApprovals <= 1) {
+    return { gate: 'ready', approvalRequestId: null, requiredApprovals, noApprovers: false };
+  }
+  const detail = {
+    countId: line.countId,
+    lineId: line.id,
+    stockItemId: row.id,
+    zohoItemId: row.zohoItemId,
+    diff: qty(diff),
+    amount: amount.toString(),
+    requiredApprovals,
+  };
+  try {
+    const outcome = await requestApproval(tx, {
+      scope: 'inventory_adjustment',
+      targetType: 'stock_count_line',
+      targetId: line.id,
+      amount,
+      currency: 'MXN',
+      areaKey: INVENTORY_AREA_KEY,
+      requestedByUserId: ctx.actor.id,
+      title: `Ajuste de inventario: ${row.zohoItemId} (${qty(diff)})`.slice(0, 200),
+      description:
+        [
+          `Conteo ${line.countId}: en libros ${qty(line.expectedQty)}, contado ${qty(line.countedQty)}.`,
+          note?.trim() || null,
+        ]
+          .filter(Boolean)
+          .join(' ')
+          .slice(0, 1000) || null,
+    });
+    if (outcome.status === 'approved') {
+      return {
+        gate: 'ready',
+        approvalRequestId: outcome.approvalRequest.id,
+        requiredApprovals,
+        noApprovers: false,
+      };
+    }
+    ctx.emit(
+      INVENTORY_EVENTS.adjustmentApprovalRequested,
+      {
+        ...detail,
+        approvalRequestId: outcome.approvalRequest.id,
+        approvers: outcome.approverUserIds.length,
+        reused: outcome.reused,
+      },
+      { areaKey: INVENTORY_AREA_KEY, objectType: 'stock_count_line', objectId: line.id }
+    );
+    return {
+      gate: 'pending',
+      approvalRequestId: outcome.approvalRequest.id,
+      requiredApprovals,
+      noApprovers: false,
+    };
+  } catch (err) {
+    if (!isOperationsError(err) || err.code !== 'no_approvers') throw err;
+    // Nobody else can sign: the adjustment waits instead of slipping through.
+    ctx.emit(
+      INVENTORY_EVENTS.adjustmentApprovalRequested,
+      { ...detail, approvalRequestId: null, approvers: 0, reused: false },
+      { areaKey: INVENTORY_AREA_KEY, objectType: 'stock_count_line', objectId: line.id }
+    );
+    return { gate: 'pending', approvalRequestId: null, requiredApprovals, noApprovers: true };
+  }
+}
+
+/**
+ * Applies the decision on a pending line: records the movement when it adjusts,
+ * closes the work items and emits `stock.adjustment_decided`. Both the person's
+ * command and the reaction to the business approval land here, so the effect of
+ * an adjustment is written in ONE place.
+ */
+async function applyCountAdjustment(
+  tx: Db,
+  ctx: CommandContext,
+  line: StockCountLine & { count: StockCount },
+  row: StockItem,
+  input: DecideAdjustmentInput
 ): Promise<{ line: StockCountLine; movementId: string | null; workItemIds: string[] }> {
-  if (!actorMay(ctx, 'inventory.adjust')) {
-    throw new OperationsError('forbidden', 'No tienes permiso para ajustar inventario');
-  }
-  const initialLine = await loadLineWithCount(tx, input.lineId);
-  // Re-read under the row lock: two concurrent approvals never adjust twice.
-  await lockStockItem(tx, initialLine.stockItemId);
-  const line = await loadLineWithCount(tx, initialLine.id);
-  if (line.count.status !== 'closed') {
-    throw new OperationsError('invalid_state', 'El conteo aún no se cierra');
-  }
-  if (line.resolution !== 'pending') {
-    throw new OperationsError('invalid_state', 'La diferencia ya fue resuelta');
-  }
-  const row = await tx.stockItem.findUnique({ where: { id: line.stockItemId } });
-  if (!row) throw new OperationsError('not_found', 'No se encontró la existencia');
   let movementId: string | null = null;
   if (input.decision === 'approve' && !dec(line.diffQty).isZero()) {
     const profile = await getOrCreateProfile(tx, row.zohoItemId);
@@ -688,6 +820,102 @@ export async function decideCountAdjustment(
     { areaKey: INVENTORY_AREA_KEY, objectType: 'stock_count_line', objectId: line.id }
   );
   return { line: updated, movementId, workItemIds };
+}
+
+export interface DecideAdjustmentResult {
+  line: StockCountLine;
+  movementId: string | null;
+  workItemIds: string[];
+  /** Business approval opened (or reused) by this decision; null when nobody else had to sign. */
+  approvalRequestId: string | null;
+  /** True when the adjustment waits for other signatures: the line is still pending. */
+  awaitingApproval: boolean;
+  /** The policy asks for more signatures than there are people who can give them. */
+  noApprovers: boolean;
+}
+
+/**
+ * Approves (adjusts) or rejects (keeps the book) a pending within-tolerance
+ * difference.
+ *
+ * Approving moves the book, so it passes the business approval of the
+ * `inventory_adjustment` scope (plan 6.0): with the default policy (one
+ * signature) the decision of somebody holding `inventory.adjust` IS that
+ * signature and the adjustment is applied straight away; with a policy that
+ * asks for two or more, a real `ApprovalRequest` is opened, the line stays
+ * pending and the reaction to that decision applies it. Rejecting (keeping the
+ * book) changes nothing physical and needs no approval.
+ */
+export async function decideCountAdjustment(
+  tx: Db,
+  input: DecideAdjustmentInput,
+  ctx: CommandContext = requireCommandContext(tx)
+): Promise<DecideAdjustmentResult> {
+  if (!actorMay(ctx, 'inventory.adjust')) {
+    throw new OperationsError('forbidden', 'No tienes permiso para ajustar inventario');
+  }
+  const initialLine = await loadLineWithCount(tx, input.lineId);
+  // Re-read under the row lock: two concurrent approvals never adjust twice.
+  await lockStockItem(tx, initialLine.stockItemId);
+  const line = await loadLineWithCount(tx, initialLine.id);
+  if (line.count.status !== 'closed') {
+    throw new OperationsError('invalid_state', 'El conteo aún no se cierra');
+  }
+  if (line.resolution !== 'pending') {
+    throw new OperationsError('invalid_state', 'La diferencia ya fue resuelta');
+  }
+  const row = await tx.stockItem.findUnique({ where: { id: line.stockItemId } });
+  if (!row) throw new OperationsError('not_found', 'No se encontró la existencia');
+
+  let approvalRequestId: string | null = null;
+  let noApprovers = false;
+  if (input.decision === 'approve' && !dec(line.diffQty).isZero()) {
+    const approval = await requestAdjustmentApproval(tx, ctx, line, row, input.note);
+    approvalRequestId = approval.approvalRequestId;
+    noApprovers = approval.noApprovers;
+    if (approval.gate === 'pending') {
+      return {
+        line,
+        movementId: null,
+        workItemIds: [],
+        approvalRequestId,
+        awaitingApproval: true,
+        noApprovers,
+      };
+    }
+  }
+  const applied = await applyCountAdjustment(tx, ctx, line, row, input);
+  return { ...applied, approvalRequestId, awaitingApproval: false, noApprovers };
+}
+
+/**
+ * Reaction to the decision on an inventory adjustment (`stock_count_line`):
+ * approving applies the adjustment, rejecting keeps the book. It runs inside the
+ * same transaction as the decision, so the signature and its effect are one
+ * single fact.
+ */
+export async function handleAdjustmentApprovalDecision(
+  tx: Db,
+  event: ApprovalDecidedEvent
+): Promise<void> {
+  if (event.status !== 'approved' && event.status !== 'rejected') return;
+  const line = await tx.stockCountLine.findUnique({
+    where: { id: event.approvalRequest.targetId },
+    include: { count: true },
+  });
+  // The line may have been settled by another path (a dispute, a recount).
+  if (!line || line.resolution !== 'pending') return;
+  const row = await tx.stockItem.findUnique({ where: { id: line.stockItemId } });
+  if (!row) return;
+  await lockStockItem(tx, line.stockItemId);
+  await applyCountAdjustment(tx, event.ctx, line, row, {
+    lineId: line.id,
+    decision: event.status === 'approved' ? 'approve' : 'reject',
+    note:
+      event.status === 'approved'
+        ? `Ajuste aprobado (solicitud ${event.approvalRequest.id})`
+        : `Ajuste rechazado: se conserva el saldo en libros (solicitud ${event.approvalRequest.id})`,
+  });
 }
 
 export interface ResolveDisputeInput {

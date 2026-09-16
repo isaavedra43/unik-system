@@ -4,21 +4,41 @@ import React from 'react';
 import Link from 'next/link';
 import { Plus } from 'lucide-react';
 import { EntityWorkspace } from '@/components/common/EntityWorkspace';
-import { QUOTE_COLUMNS, QUOTE_COLUMN_MAP, QUOTE_DEFAULT_COLUMN_ORDER } from '@/modules/quotes/quotes-columns';
 import {
-  type QuoteQueryState, type TablePreferenceConfig, type QuoteSegment,
-  QUOTE_SEGMENTS, QUOTE_SEGMENT_LABELS,
+  QUOTE_COLUMNS,
+  QUOTE_COLUMN_MAP,
+  QUOTE_DEFAULT_COLUMN_ORDER,
+} from '@/modules/quotes/quotes-columns';
+import {
+  type QuoteQueryState,
+  type TablePreferenceConfig,
+  type QuoteSegment,
+  QUOTE_SEGMENTS,
+  QUOTE_SEGMENT_LABELS,
 } from '@/modules/quotes/quotes-filters';
 import { type QuotesListResult, type QuoteListRow } from '@/modules/quotes/quotes-service';
 import {
-  formatCurrency, formatDateOnly, getQuoteStatusConfig, getQuoteStatusLabel, getQuoteStatusOptions, getQuoteExpiryInfo,
+  formatCurrency,
+  formatDateOnly,
+  getQuoteStatusConfig,
+  getQuoteStatusLabel,
+  getQuoteStatusOptions,
+  getQuoteExpiryInfo,
 } from '@/modules/quotes/quotes-helpers';
 import { QuotePreviewDrawer } from './QuotePreviewDrawer';
-import { CurrentUser } from '@/modules/auth/authorization';
+import type { CurrentUser } from '@/modules/auth/authorization';
 import type {
-  EntityColumnDefinition, EntityListResult, EntityQueryState,
-  SavePreferenceAction, ResetPreferenceAction, CreateViewAction, WatchAction, BulkWatchAction, ExportAction,
-  SyncStatus, TableViewRow,
+  EntityColumnDefinition,
+  EntityListResult,
+  EntityQueryState,
+  SavePreferenceAction,
+  ResetPreferenceAction,
+  CreateViewAction,
+  WatchAction,
+  BulkWatchAction,
+  ExportAction,
+  SyncStatus,
+  TableViewRow,
 } from '@/modules/shared/entity-workspace-types';
 
 export interface QuotesWorkspaceProps {
@@ -78,7 +98,9 @@ function ExpiryCell({ value, status }: { value: string | null; status: string | 
     <span className="so-status-cell" title={info ? info.label : undefined}>
       {info ? <span className={`so-status-dot so-status-dot-${info.tone}`} /> : null}
       <span>{formatDateOnly(value)}</span>
-      {info ? <span style={{ fontSize: '0.75rem', color: 'var(--unik-text-muted)' }}>· {info.label}</span> : null}
+      {info ? (
+        <span style={{ fontSize: '0.75rem', color: 'var(--unik-text-muted)' }}>· {info.label}</span>
+      ) : null}
     </span>
   );
 }
@@ -87,17 +109,30 @@ function renderCell(row: QuoteListRow, column: EntityColumnDefinition): React.Re
   const value = (row as unknown as Record<string, unknown>)[column.id];
   const formatter = column.formatter as string | undefined;
   if (formatter === 'origin') {
-    return <span className={`badge ${row.createdInUnik ? 'badge-info' : 'badge-weak'}`}>{row.createdInUnik ? 'UNIK' : 'Zoho'}</span>;
+    return (
+      <span className={`badge ${row.createdInUnik ? 'badge-info' : 'badge-weak'}`}>
+        {row.createdInUnik ? 'UNIK' : 'Zoho'}
+      </span>
+    );
   }
   if (value === null || value === undefined) return '—';
   if (formatter === 'currency') return formatCurrency(value as string | number, row.currencyCode);
   if (formatter === 'date') return formatDateOnly(value as string | Date);
   if (formatter === 'expiry') return <ExpiryCell value={value as string} status={row.status} />;
-  if (formatter === 'statusDot') return <StatusCell value={value as string | null} label={column.label} />;
+  if (formatter === 'statusDot')
+    return <StatusCell value={value as string | null} label={column.label} />;
   return String(value);
 }
 
-function SegmentChips({ basePath, current, counts }: { basePath: string; current: QuoteSegment; counts: Record<QuoteSegment, number> }) {
+function SegmentChips({
+  basePath,
+  current,
+  counts,
+}: {
+  basePath: string;
+  current: QuoteSegment;
+  counts: Record<QuoteSegment, number>;
+}) {
   return (
     <div className="so-segment-chips" role="tablist" aria-label="Segmentos de cotizaciones">
       {QUOTE_SEGMENTS.map((segment) => {
@@ -133,6 +168,8 @@ export function QuotesWorkspace(props: QuotesWorkspaceProps) {
       tableKey={props.tableKey}
       entityLabel={props.entityLabel}
       entityLabelPlural={props.entityLabelPlural}
+      // Factura, Cotización, Orden de compra: femeninas.
+      entityGender="f"
       basePath={props.basePath}
       permissionView={props.permissionView}
       permissionExport={props.permissionExport}
@@ -140,7 +177,9 @@ export function QuotesWorkspace(props: QuotesWorkspaceProps) {
       permissionShareViews={props.permissionShareViews}
       initialData={props.initialData as unknown as EntityListResult<QuoteListRow>}
       initialQuery={initialQuery}
-      preference={props.preference as unknown as import('@/modules/shared/entity-workspace-types').TablePreferenceConfig}
+      preference={
+        props.preference as unknown as import('@/modules/shared/entity-workspace-types').TablePreferenceConfig
+      }
       views={props.views}
       defaultViewId={props.defaultViewId}
       watchedIds={props.watchedIds}
@@ -167,12 +206,16 @@ export function QuotesWorkspace(props: QuotesWorkspaceProps) {
       bulkWatchAction={props.bulkWatchAction}
       exportAction={props.exportAction}
       extraUrlParams={segment !== 'all' ? { segment } : undefined}
-      headerActions={props.canCreate ? (
-        <Link href={`${props.basePath}/new`} className="btn btn-primary btn-sm">
-          <Plus size={14} /> Nueva cotización
-        </Link>
-      ) : null}
-      toolbarExtra={<SegmentChips basePath={props.basePath} current={segment} counts={props.segmentCounts} />}
+      headerActions={
+        props.canCreate ? (
+          <Link href={`${props.basePath}/new`} className="btn btn-primary btn-sm">
+            <Plus size={14} /> Nueva cotización
+          </Link>
+        ) : null
+      }
+      toolbarExtra={
+        <SegmentChips basePath={props.basePath} current={segment} counts={props.segmentCounts} />
+      }
       renderPreviewDrawer={({ entityId, ...rest }) => (
         <QuotePreviewDrawer quoteId={entityId} {...rest} />
       )}

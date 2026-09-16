@@ -235,6 +235,20 @@ describe('incident commands', () => {
     expect(incidentRow().status).toBe('open');
   });
 
+  /** Plan 7.7: la Torre se abre con `operations.admin` y ofrece cerrar la incidencia. */
+  it('accepts operations.admin, the key the Control Tower is gated with', async () => {
+    const opsAdmin = seedUser(fake, {
+      id: 'opsAdmin',
+      permissions: ['operations.admin'],
+    }).currentUser;
+    expect((await act(opsAdmin, 'acknowledge')).status).toBe('completed');
+    expect(
+      (await act(opsAdmin, 'resolve', { resolution: 'Se recontó y se ajustó el inventario' }))
+        .status
+    ).toBe('completed');
+    expect(incidentRow().status).toBe('resolved');
+  });
+
   it('makes a manager the owner of an unowned incident when acknowledging it', async () => {
     incidentRow().ownerUserId = null;
     expect(await act(users.owner, 'acknowledge')).toMatchObject({ errorCode: 'forbidden' });

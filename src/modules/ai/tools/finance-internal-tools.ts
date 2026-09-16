@@ -2,16 +2,27 @@ import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { hasPermission, type CurrentUser } from '@/modules/auth/authorization';
 import { isKnownPermission } from '@/modules/auth/permissions';
-import { getBudgetVsActual, getCashBook, getCashflowProjection } from '@/modules/finance/cashflow-service';
+import {
+  getBudgetVsActual,
+  getCashBook,
+  getCashflowProjection,
+} from '@/modules/finance/cashflow-service';
 import { supplierKeyOf } from '@/modules/finance/expense-duplicates';
-import { buildExtractionMaterial, proposeExpenseWithAi } from '@/modules/finance/expense-extraction';
+import {
+  buildExtractionMaterial,
+  proposeExpenseWithAi,
+} from '@/modules/finance/expense-extraction';
 import {
   resolveExpenseProposal,
   suggestExpenseClassification,
   type ExpenseProposalRaw,
 } from '@/modules/finance/expense-rules';
 import { findExpenseDuplicates } from '@/modules/finance/expenses-service';
-import { captureExpense, matchPaymentToObligation, submitExpense } from '@/modules/finance/finance-commands';
+import {
+  captureExpense,
+  matchPaymentToObligation,
+  submitExpense,
+} from '@/modules/finance/finance-commands';
 import { addDaysToKey, dateKeyOf, localDateKey, toDbDate } from '@/modules/finance/finance-dates';
 import { loadCatalogRefs } from '@/modules/finance/finance-helpers';
 import { getExpense, listUnassignedCollections } from '@/modules/finance/finance-queries';
@@ -52,7 +63,12 @@ const AREA = 'contabilidad' as const;
 type ScopeCtx = ToolExecutionContext | undefined;
 
 function registerFinanceTool(def: Omit<ToolDefinition, 'category' | 'enabledByDefault'>): void {
-  registerTool({ category: 'finance', enabledByDefault: true, contextTags: FINANCE_TOOL_CONTEXT_TAGS, ...def });
+  registerTool({
+    category: 'finance',
+    enabledByDefault: true,
+    contextTags: FINANCE_TOOL_CONTEXT_TAGS,
+    ...def,
+  });
 }
 
 function assertReading(actor: CurrentUser, ctx: ScopeCtx): void {
@@ -77,7 +93,12 @@ const idArg = z.string().trim().min(1).max(120);
 // ---------------------------------------------------------------------------
 
 export const captureExpenseDraftParams = z.object({
-  text: z.string().trim().min(3).max(2000).describe('El gasto como lo dijo la persona: concepto, monto, proveedor, fecha, forma de pago'),
+  text: z
+    .string()
+    .trim()
+    .min(3)
+    .max(2000)
+    .describe('El gasto como lo dijo la persona: concepto, monto, proveedor, fecha, forma de pago'),
   amount: z.number().positive().describe('Monto total si la persona lo dijo').optional(),
   date: dayArg.describe('Fecha del gasto AAAA-MM-DD si la persona la dijo').optional(),
   supplierName: z.string().trim().max(200).describe('Proveedor si la persona lo dijo').optional(),
@@ -116,7 +137,11 @@ registerFinanceTool({
         { commandId: creationCommandId('captureExpenseDraft', actor.id, args, ctx) }
       )
     );
-    if (!result.data) throw new OperationsToolError('La captura se está procesando; intenta de nuevo en un momento', 'accepted');
+    if (!result.data)
+      throw new OperationsToolError(
+        'La captura se está procesando; intenta de nuevo en un momento',
+        'accepted'
+      );
     const data = result.data;
     return {
       expenseId: data.expenseId,
@@ -139,10 +164,18 @@ registerFinanceTool({
 
 export const proposeExpenseFieldsParams = z
   .object({
-    text: z.string().trim().min(3).max(2000).describe('Descripción libre del gasto a interpretar').optional(),
+    text: z
+      .string()
+      .trim()
+      .min(3)
+      .max(2000)
+      .describe('Descripción libre del gasto a interpretar')
+      .optional(),
     expenseId: idArg.describe('Gasto ya capturado: devuelve su propuesta actual').optional(),
   })
-  .refine((v) => Boolean(v.text || v.expenseId), { message: 'Indica el texto del gasto o el gasto (expenseId)' });
+  .refine((v) => Boolean(v.text || v.expenseId), {
+    message: 'Indica el texto del gasto o el gasto (expenseId)',
+  });
 
 registerFinanceTool({
   name: 'proposeExpenseFields',
@@ -179,8 +212,17 @@ registerFinanceTool({
     const refs = await loadCatalogRefs(prisma);
     const [history, suppliers] = await Promise.all([
       prisma.expense.findMany({
-        where: { status: { in: ['approved', 'posted'] }, date: { gte: toDbDate(addDaysToKey(todayKey, -183)) } },
-        select: { supplierId: true, supplierNameFree: true, categoryId: true, costCenterId: true, date: true },
+        where: {
+          status: { in: ['approved', 'posted'] },
+          date: { gte: toDbDate(addDaysToKey(todayKey, -183)) },
+        },
+        select: {
+          supplierId: true,
+          supplierNameFree: true,
+          categoryId: true,
+          costCenterId: true,
+          date: true,
+        },
         orderBy: { date: 'desc' },
         take: 500,
       }),
@@ -201,7 +243,13 @@ registerFinanceTool({
     let error: string | null = null;
     try {
       const material = await buildExtractionMaterial({ rawInput: args.text ?? null, receipts: [] });
-      const ai = await proposeExpenseWithAi({ material, categories: refs.categories, costCenters: refs.costCenters, todayKey, currency: 'MXN' });
+      const ai = await proposeExpenseWithAi({
+        material,
+        categories: refs.categories,
+        costCenters: refs.costCenters,
+        todayKey,
+        currency: 'MXN',
+      });
       raw = ai.raw;
       source = 'ai';
     } catch (err) {
@@ -223,7 +271,8 @@ registerFinanceTool({
       fallback,
       expenseCurrency: 'MXN',
     });
-    const nameOf = (list: Array<{ id: string; name: string }>, id: string | null) => (id ? (list.find((row) => row.id === id)?.name ?? null) : null);
+    const nameOf = (list: Array<{ id: string; name: string }>, id: string | null) =>
+      id ? (list.find((row) => row.id === id)?.name ?? null) : null;
     return {
       source,
       error,
@@ -249,7 +298,9 @@ export const checkExpenseDuplicateParams = z
     date: dayArg.describe('Fecha AAAA-MM-DD (sin expenseId)').optional(),
     supplierName: z.string().trim().max(200).optional(),
   })
-  .refine((v) => Boolean(v.expenseId || (v.amount && v.date)), { message: 'Indica el gasto (expenseId) o el monto y la fecha' });
+  .refine((v) => Boolean(v.expenseId || (v.amount && v.date)), {
+    message: 'Indica el gasto (expenseId) o el monto y la fecha',
+  });
 
 registerFinanceTool({
   name: 'checkExpenseDuplicate',
@@ -274,14 +325,30 @@ registerFinanceTool({
       };
     } else {
       if (!can(actor, 'finance.view')) {
-        throw new OperationsToolError('Para buscar entre todos los gastos necesitas ver la contabilidad; indica tu gasto (expenseId)', 'forbidden');
+        throw new OperationsToolError(
+          'Para buscar entre todos los gastos necesitas ver la contabilidad; indica tu gasto (expenseId)',
+          'forbidden'
+        );
       }
-      subject = { amount: String(args.amount), dateKey: args.date as string, supplierNameFree: args.supplierName ?? null };
+      subject = {
+        amount: String(args.amount),
+        dateKey: args.date as string,
+        supplierNameFree: args.supplierName ?? null,
+      };
     }
     const matches = await findExpenseDuplicates(prisma, subject);
     return {
-      duplicates: matches.slice(0, 10).map((m) => ({ expenseId: m.expenseId, number: m.number, kind: m.kind, reason: m.reason, daysApart: m.daysApart })),
-      verdict: matches.length === 0 ? 'Sin duplicados aparentes' : `${matches.length} posible(s) duplicado(s)`,
+      duplicates: matches.slice(0, 10).map((m) => ({
+        expenseId: m.expenseId,
+        number: m.number,
+        kind: m.kind,
+        reason: m.reason,
+        daysApart: m.daysApart,
+      })),
+      verdict:
+        matches.length === 0
+          ? 'Sin duplicados aparentes'
+          : `${matches.length} posible(s) duplicado(s)`,
     };
   },
 });
@@ -315,38 +382,62 @@ registerFinanceTool({
     const scope = checkActingScope(actor, AREA, ctx);
     if (scope) return { error: scope };
     const expense = await getExpense(actor, args.expenseId);
-    if (expense.status !== 'draft') return { error: `${expense.number} ya no es un borrador (${expense.statusLabel})` };
+    if (expense.status !== 'draft')
+      return { error: `${expense.number} ya no es un borrador (${expense.statusLabel})` };
     if (expense.duplicateStatus === 'suspect') {
-      return { error: `${expense.number} parece duplicado: confirma con la persona si es único antes de enviarlo` };
+      return {
+        error: `${expense.number} parece duplicado: confirma con la persona si es único antes de enviarlo`,
+      };
     }
-    if (expense.duplicateStatus === 'confirmed_duplicate') return { error: `${expense.number} está marcado como duplicado` };
+    if (expense.duplicateStatus === 'confirmed_duplicate')
+      return { error: `${expense.number} está marcado como duplicado` };
     return {
       args: {
         expenseId: expense.id,
         number: expense.number,
         amount: expense.amount,
         currency: expense.currency,
-        concept: truncateText(expense.description ?? expense.supplierNameFree ?? '', 200) || undefined,
+        concept:
+          truncateText(expense.description ?? expense.supplierNameFree ?? '', 200) || undefined,
       },
     };
   },
   execute: async (actor, raw, ctx) => {
     const args = raw as z.output<typeof submitExpenseParams>;
     assertActing(actor, ctx);
-    if (isBotActor(actor)) throw new OperationsToolError('Un gasto lo envía una persona: queda como propuesta', 'forbidden');
+    if (isBotActor(actor))
+      throw new OperationsToolError(
+        'Un gasto lo envía una persona: queda como propuesta',
+        'forbidden'
+      );
     const result = unwrapCommand(
-      await submitExpense(actor, { expenseId: args.expenseId }, { commandId: transitionCommandId('submitExpense', ctx) })
+      await submitExpense(
+        actor,
+        { expenseId: args.expenseId },
+        { commandId: transitionCommandId('submitExpense', ctx) }
+      )
     );
     const data = result.data;
-    if (!data) throw new OperationsToolError('El envío se está procesando; revisa el gasto en un momento', 'accepted');
+    if (!data)
+      throw new OperationsToolError(
+        'El envío se está procesando; revisa el gasto en un momento',
+        'accepted'
+      );
     if (!data.submitted) {
-      return { ...data, message: `No se envió: ${data.number} parece duplicado de ${data.matches?.[0]?.number ?? 'otro gasto'}; resuélvelo primero` };
+      return {
+        ...data,
+        message: `No se envió: ${data.number} parece duplicado de ${data.matches?.[0]?.number ?? 'otro gasto'}; resuélvelo primero`,
+      };
     }
     return {
       ...data,
       message: data.autoApproved
         ? `${data.number} quedó aprobado por la política (bajo el umbral); falta contabilizarlo`
-        : `${data.number} espera ${data.requiredApprovals ?? 1} aprobación(es) en Mi trabajo`,
+        : data.status === 'approved'
+          ? `Tu aprobación contó como la firma de negocio: ${data.number} quedó aprobado; falta contabilizarlo`
+          : `${data.number} espera ${data.requiredApprovals ?? 1} aprobación(es) en Mi trabajo${
+              data.firstSignatureByUserId ? ' (la tuya ya quedó registrada)' : ''
+            }`,
     };
   },
 });
@@ -358,7 +449,10 @@ registerFinanceTool({
 export const cashflowParams = z.object({
   weeks: z.number().int().min(1).max(26).describe('Semanas a proyectar (8 por omisión)').optional(),
   from: dayArg.describe('Desde (AAAA-MM-DD); por omisión esta semana').optional(),
-  currency: z.string().regex(/^[A-Z]{3}$/).optional(),
+  currency: z
+    .string()
+    .regex(/^[A-Z]{3}$/)
+    .optional(),
 });
 
 registerFinanceTool({
@@ -375,13 +469,17 @@ registerFinanceTool({
 });
 
 export const budgetParams = z.object({
-  periodKey: z.string().regex(/^\d{4}-\d{2}$/, 'Usa AAAA-MM').describe('Mes AAAA-MM'),
+  periodKey: z
+    .string()
+    .regex(/^\d{4}-\d{2}$/, 'Usa AAAA-MM')
+    .describe('Mes AAAA-MM'),
   costCenterId: idArg.optional(),
 });
 
 registerFinanceTool({
   name: 'getBudgetVsActual',
-  description: 'Presupuesto contra real de un mes por centro de costo y categoría, con variación y porcentaje usado; incluye lo gastado sin presupuesto.',
+  description:
+    'Presupuesto contra real de un mes por centro de costo y categoría, con variación y porcentaje usado; incluye lo gastado sin presupuesto.',
   requiredPermission: 'finance.view',
   effect: 'read',
   parameters: budgetParams,
@@ -406,14 +504,22 @@ registerFinanceTool({
   execute: async (actor, raw, ctx) => {
     assertReading(actor, ctx);
     const args = raw as z.output<typeof unmatchedParams>;
-    const payments = await listUnassignedCollections(actor, { from: args.from, limit: args.limit ?? 30 });
+    const payments = await listUnassignedCollections(actor, {
+      from: args.from,
+      limit: args.limit ?? 30,
+    });
     return { payments, count: payments.length };
   },
 });
 
 export const cashBookParams = z.object({
   cashAccountId: idArg.optional(),
-  cashAccountKey: z.string().trim().max(60).describe('Clave de la cuenta, p. ej. caja_general o banco_zoho').optional(),
+  cashAccountKey: z
+    .string()
+    .trim()
+    .max(60)
+    .describe('Clave de la cuenta, p. ej. caja_general o banco_zoho')
+    .optional(),
   from: dayArg.optional(),
   to: dayArg.optional(),
   page: z.number().int().min(1).optional(),
@@ -422,7 +528,8 @@ export const cashBookParams = z.object({
 
 registerFinanceTool({
   name: 'getCashBook',
-  description: 'Libro de caja de una cuenta (caja o banco): saldo inicial, movimientos con saldo corrido y saldo final en un rango de fechas.',
+  description:
+    'Libro de caja de una cuenta (caja o banco): saldo inicial, movimientos con saldo corrido y saldo final en un rango de fechas.',
   requiredPermission: 'finance.view',
   effect: 'read',
   parameters: cashBookParams,
@@ -431,11 +538,24 @@ registerFinanceTool({
     const args = raw as z.output<typeof cashBookParams>;
     let cashAccountId = args.cashAccountId;
     if (!cashAccountId) {
-      const account = await prisma.cashAccount.findUnique({ where: { key: args.cashAccountKey ?? 'caja_general' }, select: { id: true } });
-      if (!account) throw new OperationsToolError(`No existe la cuenta ${args.cashAccountKey ?? 'caja_general'}`, 'not_found');
+      const account = await prisma.cashAccount.findUnique({
+        where: { key: args.cashAccountKey ?? 'caja_general' },
+        select: { id: true },
+      });
+      if (!account)
+        throw new OperationsToolError(
+          `No existe la cuenta ${args.cashAccountKey ?? 'caja_general'}`,
+          'not_found'
+        );
       cashAccountId = account.id;
     }
-    return getCashBook(actor, { cashAccountId, from: args.from, to: args.to, page: args.page, pageSize: args.pageSize ?? 50 });
+    return getCashBook(actor, {
+      cashAccountId,
+      from: args.from,
+      to: args.to,
+      page: args.page,
+      pageSize: args.pageSize ?? 50,
+    });
   },
 });
 
@@ -451,7 +571,11 @@ export const matchPaymentParams = z.object({
     .max(20)
     .describe('Cuentas por cobrar y montos a los que se aplica el pago'),
   paymentLabel: z.string().max(200).describe('Lo completa el sistema').optional(),
-  allocationLabels: z.array(z.string().max(200)).max(20).describe('Lo completa el sistema').optional(),
+  allocationLabels: z
+    .array(z.string().max(200))
+    .max(20)
+    .describe('Lo completa el sistema')
+    .optional(),
 });
 
 registerFinanceTool({
@@ -472,23 +596,31 @@ registerFinanceTool({
     const args = raw as z.output<typeof matchPaymentParams>;
     const scope = checkActingScope(actor, AREA, ctx);
     if (scope) return { error: scope };
-    const payment = await prisma.customerPayment.findUnique({ where: { zohoPaymentId: args.zohoPaymentId } });
+    const payment = await prisma.customerPayment.findUnique({
+      where: { zohoPaymentId: args.zohoPaymentId },
+    });
     if (!payment) return { error: 'No encontré ese pago de Zoho' };
     const ids = [...new Set(args.allocations.map((a) => a.obligationId))];
-    if (ids.length !== args.allocations.length) return { error: 'Una cuenta por cobrar aparece dos veces' };
+    if (ids.length !== args.allocations.length)
+      return { error: 'Una cuenta por cobrar aparece dos veces' };
     const obligations = await prisma.obligation.findMany({ where: { id: { in: ids } } });
     const labels: string[] = [];
     for (const allocation of args.allocations) {
       const obligation = obligations.find((o) => o.id === allocation.obligationId);
       if (!obligation) return { error: 'Una cuenta por cobrar no existe' };
-      if (obligation.kind !== 'receivable') return { error: `${obligation.number} no es una cuenta por cobrar` };
+      if (obligation.kind !== 'receivable')
+        return { error: `${obligation.number} no es una cuenta por cobrar` };
       if (obligation.status !== 'expected' && obligation.status !== 'partially_settled') {
         return { error: `${obligation.number} ya no tiene saldo pendiente` };
       }
       if (allocation.amount > remainingOf(obligation).toNumber() + 0.005) {
-        return { error: `El monto para ${obligation.number} excede su saldo (${formatMoney(remainingOf(obligation).toFixed(2), obligation.currency)})` };
+        return {
+          error: `El monto para ${obligation.number} excede su saldo (${formatMoney(remainingOf(obligation).toFixed(2), obligation.currency)})`,
+        };
       }
-      labels.push(`${obligation.number}${obligation.counterpartyName ? ` (${truncateText(obligation.counterpartyName, 60)})` : ''} ${formatMoney(allocation.amount, obligation.currency)}`);
+      labels.push(
+        `${obligation.number}${obligation.counterpartyName ? ` (${truncateText(obligation.counterpartyName, 60)})` : ''} ${formatMoney(allocation.amount, obligation.currency)}`
+      );
     }
     return {
       args: {
@@ -501,16 +633,29 @@ registerFinanceTool({
   execute: async (actor, raw, ctx) => {
     const args = raw as z.output<typeof matchPaymentParams>;
     assertActing(actor, ctx);
-    if (isBotActor(actor)) throw new OperationsToolError('Una IA no asigna cobros: la asignación la confirma una persona', 'forbidden');
+    if (isBotActor(actor))
+      throw new OperationsToolError(
+        'Una IA no asigna cobros: la asignación la confirma una persona',
+        'forbidden'
+      );
     const payload = {
       zohoPaymentId: args.zohoPaymentId,
-      allocations: args.allocations.map((a) => ({ obligationId: a.obligationId, amount: a.amount.toFixed(2) })),
+      allocations: args.allocations.map((a) => ({
+        obligationId: a.obligationId,
+        amount: a.amount.toFixed(2),
+      })),
     };
     const result = unwrapCommand(
-      await matchPaymentToObligation(actor, payload, { commandId: creationCommandId('matchPaymentToObligation', actor.id, payload, ctx) })
+      await matchPaymentToObligation(actor, payload, {
+        commandId: creationCommandId('matchPaymentToObligation', actor.id, payload, ctx),
+      })
     );
     const data = result.data;
-    if (!data) throw new OperationsToolError('La asignación se está procesando; revisa el pago en un momento', 'accepted');
+    if (!data)
+      throw new OperationsToolError(
+        'La asignación se está procesando; revisa el pago en un momento',
+        'accepted'
+      );
     return {
       ...data,
       message:

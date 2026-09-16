@@ -41,11 +41,30 @@ export interface CurrentSession {
   user: CurrentUser;
 }
 
+/**
+ * Cross-instance brand: Next.js compiles a server module once per webpack
+ * layer, so this class exists several times in the same process and a plain
+ * `instanceof` misses an error thrown by another copy (which would turn a
+ * "no tienes permisos" into an HTTP 500). `Symbol.for` is process-wide.
+ */
+const AUTHORIZATION_ERROR_BRAND: unique symbol = Symbol.for('unik.auth.authorizationError');
+
 export class AuthorizationError extends Error {
+  readonly [AUTHORIZATION_ERROR_BRAND] = true;
+
   constructor(message = 'No tienes permisos para realizar esta acción') {
     super(message);
     this.name = 'AuthorizationError';
   }
+}
+
+export function isAuthorizationError(err: unknown): err is AuthorizationError {
+  if (err instanceof AuthorizationError) return true;
+  return (
+    typeof err === 'object' &&
+    err !== null &&
+    (err as Record<symbol, unknown>)[AUTHORIZATION_ERROR_BRAND] === true
+  );
 }
 
 /** A user row loaded with `roles → role → permissions`, as the projection needs it. */
@@ -54,12 +73,12 @@ export type UserWithRoles = Pick<
   'id' | 'username' | 'name' | 'email' | 'mustChangePassword'
 > &
   Partial<Pick<User, 'isBot'>> & {
-  roles: {
-    role: Pick<Role, 'key' | 'isActive'> & {
-      permissions: Pick<RolePermission, 'permissionKey'>[];
-    };
-  }[];
-};
+    roles: {
+      role: Pick<Role, 'key' | 'isActive'> & {
+        permissions: Pick<RolePermission, 'permissionKey'>[];
+      };
+    }[];
+  };
 
 /**
  * Projects a user with their roles into the authorization shape: only active

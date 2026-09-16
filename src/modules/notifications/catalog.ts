@@ -22,6 +22,11 @@ export const NOTIFICATION_CATEGORIES = [
   'ops_request',
   'approval_requested',
   'approval_decided',
+  'purchase_update',
+  'delivery_update',
+  'production_update',
+  'finance_alert',
+  'radar_signal',
   'agent_request',
   'agent_proposal',
   'agent_budget',
@@ -161,6 +166,46 @@ export const NOTIFICATION_CATALOG: CategoryDefinition[] = [
     description: 'Se aprobó o rechazó algo que solicitaste.',
     group: 'Operaciones',
     defaults: { inApp: true, push: true },
+  },
+  {
+    key: 'purchase_update',
+    label: 'Movimiento de una compra',
+    description:
+      'Avances de compras que te tocan: cotizaciones respondidas, órdenes aprobadas o enviadas al proveedor, diferencias en una recepción.',
+    group: 'Operaciones',
+    defaults: { inApp: true, push: true },
+  },
+  {
+    key: 'delivery_update',
+    label: 'Movimiento de una entrega',
+    description:
+      'Avances de logística: viajes que salen, paradas entregadas, entregas con conflicto o reprogramadas.',
+    group: 'Operaciones',
+    defaults: { inApp: true, push: true },
+  },
+  {
+    key: 'production_update',
+    label: 'Movimiento de producción',
+    description:
+      'Avances de manufactura: órdenes liberadas, material preparado, merma fuera de tolerancia.',
+    group: 'Operaciones',
+    defaults: { inApp: true, push: true },
+  },
+  {
+    key: 'finance_alert',
+    label: 'Alerta de contabilidad',
+    description:
+      'Obligaciones vencidas o por vencer, cierres del día pendientes y otros avisos del dinero.',
+    group: 'Operaciones',
+    defaults: { inApp: true, push: true },
+  },
+  {
+    key: 'radar_signal',
+    label: 'Señal del radar de ventas',
+    description:
+      'Oportunidades que se enfrían, cotizaciones por vencer y otras señales del radar. Llegan a la aplicación; el push viene apagado.',
+    group: 'Seguimiento',
+    defaults: { inApp: true, push: false },
   },
   {
     key: 'agent_request',

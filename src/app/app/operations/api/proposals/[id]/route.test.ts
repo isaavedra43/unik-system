@@ -29,7 +29,9 @@ vi.mock('@/modules/ai/tools/registry', () => ({
   getToolDefinition: (name: string) => mocks.tools.get(name),
   executeTool: mocks.executeTool,
 }));
-vi.mock('@/modules/extensions/external-tools', () => ({ refreshExternalTools: vi.fn(async () => undefined) }));
+vi.mock('@/modules/extensions/external-tools', () => ({
+  refreshExternalTools: vi.fn(async () => undefined),
+}));
 vi.mock('@/modules/ai/ai-sessions-service', () => ({ addMessage: mocks.addMessage }));
 
 import { computeProposalHash } from '@/modules/extensions/proposals-service';
@@ -41,15 +43,44 @@ const perms = (...keys: string[]) => keys as CurrentUser['permissionKeys'];
 
 const responsible = makeCurrentUser({ id: 'u-resp', username: 'ana' });
 const backup = makeCurrentUser({ id: 'u-backup', username: 'luis' });
-const manager = makeCurrentUser({ id: 'u-mgr', username: 'marta', permissionKeys: perms('operations.manage') });
-const stranger = makeCurrentUser({ id: 'u-otro', username: 'otro', permissionKeys: perms('operations.view') });
-const bot = makeCurrentUser({ id: 'bot-inv', username: 'ia_inventario', roleKeys: ['agent_inventario'] });
+const manager = makeCurrentUser({
+  id: 'u-mgr',
+  username: 'marta',
+  permissionKeys: perms('operations.manage'),
+});
+const stranger = makeCurrentUser({
+  id: 'u-otro',
+  username: 'otro',
+  permissionKeys: perms('operations.view'),
+});
+const bot = makeCurrentUser({
+  id: 'bot-inv',
+  username: 'ia_inventario',
+  roleKeys: ['agent_inventario'],
+});
 
 const ARGS = { sku: 'LP-01', quantity: 15, unit: 'm2' };
-const SCOPE = { caseId: 'case-1', areaKey: 'inventario', userIds: ['u-resp', 'u-backup'], permission: 'operations.manage' };
+// Fila guardada con la forma ANTIGUA (`permission` singular): se sigue leyendo y se normaliza a la plural.
+const SCOPE = {
+  caseId: 'case-1',
+  areaKey: 'inventario',
+  userIds: ['u-resp', 'u-backup'],
+  permission: 'operations.manage',
+};
+const NORMALIZED_SCOPE = {
+  caseId: 'case-1',
+  areaKey: 'inventario',
+  userIds: ['u-resp', 'u-backup'],
+  permissions: ['operations.manage'],
+};
 
 function registerTool(overrides: Record<string, unknown> = {}) {
-  mocks.tools.set('reserveStock', { name: 'reserveStock', version: '1', category: 'operations', ...overrides });
+  mocks.tools.set('reserveStock', {
+    name: 'reserveStock',
+    version: '1',
+    category: 'operations',
+    ...overrides,
+  });
 }
 
 function seedProposal(overrides: Record<string, unknown> = {}) {
@@ -113,7 +144,11 @@ beforeEach(() => {
   for (const id of ['u-resp', 'u-backup', 'u-mgr', 'u-otro']) seedUser(fake, { id });
   seedUser(fake, { id: 'bot-inv', isBot: true });
   registerTool();
-  mocks.executeTool.mockResolvedValue({ success: true, result: { reservationId: 'res-1' }, durationMs: 4 });
+  mocks.executeTool.mockResolvedValue({
+    success: true,
+    result: { reservationId: 'res-1' },
+    durationMs: 4,
+  });
 });
 
 describe('POST /app/operations/api/proposals/[id]', () => {
@@ -139,14 +174,21 @@ describe('POST /app/operations/api/proposals/[id]', () => {
     const res = await decide(responsible, { decision: 'approve' });
     expect(res.status).toBe(200);
     const json = await res.json();
-    expect(json).toMatchObject({ proposal: { id: 'prop-1', status: 'executed' }, execution: { success: true } });
+    expect(json).toMatchObject({
+      proposal: { id: 'prop-1', status: 'executed' },
+      execution: { success: true },
+    });
     expect(json.execution.result).toMatchObject({ reservationId: 'res-1' });
     expect(mocks.executeTool).toHaveBeenCalledTimes(1);
     const [toolName, actor, args, ctx] = mocks.executeTool.mock.calls[0];
     expect(toolName).toBe('reserveStock');
     expect(actor).toBe(responsible);
     expect(args).toEqual(ARGS);
-    expect(ctx).toMatchObject({ approverScope: SCOPE, agentAreaKey: 'inventario', skipApproval: true });
+    expect(ctx).toMatchObject({
+      approverScope: NORMALIZED_SCOPE,
+      agentAreaKey: 'inventario',
+      skipApproval: true,
+    });
   });
 
   it('quien tiene el permiso del alcance puede rechazar con motivo', async () => {
@@ -154,7 +196,11 @@ describe('POST /app/operations/api/proposals/[id]', () => {
     const res = await decide(manager, { decision: 'reject', reason: 'Ya se reservó a mano' });
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ proposal: { status: 'rejected' } });
-    expect(row()).toMatchObject({ status: 'rejected', decisionBy: 'u-mgr', error: 'Ya se reservó a mano' });
+    expect(row()).toMatchObject({
+      status: 'rejected',
+      decisionBy: 'u-mgr',
+      error: 'Ya se reservó a mano',
+    });
   });
 
   it('un bot nunca decide, ni sus propias propuestas', async () => {
@@ -183,7 +229,9 @@ describe('POST /app/operations/api/proposals/[id]', () => {
 
     const second = await decide(manager, { decision: 'approve' });
     expect(second.status).toBe(200);
-    expect(await second.json()).toMatchObject({ proposal: { status: 'executed', secondDecisionBy: 'u-mgr' } });
+    expect(await second.json()).toMatchObject({
+      proposal: { status: 'executed', secondDecisionBy: 'u-mgr' },
+    });
     expect(mocks.executeTool).toHaveBeenCalledTimes(1);
   });
 

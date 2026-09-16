@@ -1,11 +1,8 @@
 'use client';
 
 import React from 'react';
-import { CurrentUser } from '@/modules/auth/authorization';
-import {
-  EntityWorkspace,
-  type EntityWorkspaceProps,
-} from '@/components/common/EntityWorkspace';
+import type { CurrentUser } from '@/modules/auth/authorization';
+import { EntityWorkspace, type EntityWorkspaceProps } from '@/components/common/EntityWorkspace';
 import { PurchaseOrderPreviewDrawer } from './PurchaseOrderPreviewDrawer';
 import {
   PURCHASE_ORDER_COLUMNS,
@@ -66,16 +63,11 @@ export interface PurchaseOrdersWorkspaceProps {
   exportAction: ExportAction;
 }
 
-function renderCell(
-  row: PurchaseOrderListRow,
-  column: EntityColumnDefinition
-): React.ReactNode {
+function renderCell(row: PurchaseOrderListRow, column: EntityColumnDefinition): React.ReactNode {
   const value = (row as unknown as Record<string, unknown>)[column.id];
   if (column.formatter === 'currency') {
     return (
-      <span
-        style={{ fontVariantNumeric: 'tabular-nums', textAlign: 'right', display: 'block' }}
-      >
+      <span style={{ fontVariantNumeric: 'tabular-nums', textAlign: 'right', display: 'block' }}>
         {formatCurrency(value as string | null, row.currencyCode)}
       </span>
     );
@@ -116,6 +108,8 @@ export function PurchaseOrdersWorkspace(props: PurchaseOrdersWorkspaceProps) {
     tableKey: props.tableKey,
     entityLabel: props.entityLabel,
     entityLabelPlural: props.entityLabelPlural,
+    // «Orden de compra» es femenina.
+    entityGender: 'f' as const,
     basePath: props.basePath,
     permissionView: props.permissionView,
     permissionExport: props.permissionExport,

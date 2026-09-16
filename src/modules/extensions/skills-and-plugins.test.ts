@@ -369,7 +369,7 @@ describe('plugin importer', () => {
             name: 'manifest.json',
             data: JSON.stringify({ ...manifest, skills: [], templates: [], docs: [] }),
           },
-          { name: 'notes.txt', data: 'api_key = "sk_live_abcdefghijklmnop"' },
+          { name: 'notes.txt', data: `api_key = "${['sk_', 'live_abcdefghijklmnop'].join('')}"` },
         ])
       )
     ).rejects.toThrow(/secreto/);

@@ -20,12 +20,8 @@ export const metadata: Metadata = {
       { url: '/icon-512.png', sizes: '512x512', type: 'image/png' },
       { url: '/favicon-32.png', sizes: '32x32', type: 'image/png' },
     ],
-    apple: [
-      { url: '/apple-touch-icon.png', sizes: '180x180', type: 'image/png' },
-    ],
-    shortcut: [
-      { url: '/icon-192.png', sizes: '192x192', type: 'image/png' },
-    ],
+    apple: [{ url: '/apple-touch-icon.png', sizes: '180x180', type: 'image/png' }],
+    shortcut: [{ url: '/icon-192.png', sizes: '192x192', type: 'image/png' }],
   },
   formatDetection: {
     telephone: false,
@@ -60,7 +56,11 @@ export default function RootLayout({
   children: ReactNode;
 }>) {
   return (
-    <html lang="es" suppressHydrationWarning>
+    // `es-MX`, no `es`: es el locale que usa toda la aplicación para fechas y
+    // moneda, y Firefox y Safari pintan los `<input type="date">` con el
+    // formato del documento (dd/mm/aaaa). Chrome sigue el idioma del navegador,
+    // así que ahí el formato depende del equipo, no de la página.
+    <html lang="es-MX" suppressHydrationWarning>
       <body>
         <Providers>{children}</Providers>
         <script

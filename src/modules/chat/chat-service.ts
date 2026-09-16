@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { CurrentUser, AuthorizationError } from '@/modules/auth/authorization';
 import { recordAuditEvent } from '@/modules/auth/audit-service';
+import { runBackgroundTask } from '@/modules/jobs/background-tasks';
 import type {
   ChatMessageDTO,
   ChatChannelDTO,
@@ -434,11 +435,26 @@ export async function listUserChannels(userId: string): Promise<ChatChannelDTO[]
     resolveOperationsChannelLinks(memberships.map((m) => m.channel)),
   ]);
 
+  // Los no leídos se resolvían uno por uno DENTRO del bucle (N+1 serializado) y
+  // el número de canales crece con las salas de expediente en las que participa
+  // cada persona. Ahora se piden todos a la vez.
+  const unreadByChannel = new Map(
+    await Promise.all(
+      memberships.map(
+        async (m) =>
+          [
+            m.channel.id,
+            await countUnread(m.channel.id, userId, m.lastReadAt, m.channel.lastMessageAt),
+          ] as const
+      )
+    )
+  );
+
   const result: ChatChannelDTO[] = [];
   for (const m of memberships) {
     const channel = m.channel;
     const lastMsg = channel.messages[0];
-    const unreadCount = await countUnread(channel.id, userId, m.lastReadAt, channel.lastMessageAt);
+    const unreadCount = unreadByChannel.get(channel.id) ?? 0;
     const members = channel.members.map((mem) => toMemberDTO(mem, presenceMap));
     const link = links.get(channel.id);
 
@@ -684,14 +700,23 @@ export async function sendMessage(
   // Link pre-uploaded attachments: only the actor's own pending, READY files for this channel.
   if (input.attachmentIds && input.attachmentIds.length > 0) {
     const { resolveLinkableAttachmentIds } = await import('./chat-attachments-service');
-    const linkable = await resolveLinkableAttachmentIds(input.channelId, actor.id, input.attachmentIds);
+    const linkable = await resolveLinkableAttachmentIds(
+      input.channelId,
+      actor.id,
+      input.attachmentIds
+    );
     if (linkable.length === 0 && !content && !input.location && !input.poll && !input.event) {
       await prisma.internalChatMessage.delete({ where: { id: message.id } });
       throw new ChatError('Los archivos adjuntos no están listos o no te pertenecen');
     }
     if (linkable.length > 0) {
       await prisma.internalChatAttachment.updateMany({
-        where: { id: { in: linkable }, messageId: null, uploadedBy: actor.id, channelId: input.channelId },
+        where: {
+          id: { in: linkable },
+          messageId: null,
+          uploadedBy: actor.id,
+          channelId: input.channelId,
+        },
         data: { messageId: message.id },
       });
     }
@@ -801,37 +826,37 @@ export async function sendMessage(
   if (!fullMessage) throw new ChatError('Error al crear el mensaje');
 
   // Run anti-fraud alert detection (async, non-blocking)
-  detectChatAlerts({
-    id: message.id,
-    channelId: input.channelId,
-    senderId: actor.id,
-    content: content,
-    createdAt: message.createdAt,
-  }).catch(() => {
-    // silent — alert detection failures should not block message sending
-  });
+  await runBackgroundTask('chat.detect_alerts', () =>
+    detectChatAlerts({
+      id: message.id,
+      channelId: input.channelId,
+      senderId: actor.id,
+      content: content,
+      createdAt: message.createdAt,
+    })
+  );
 
   // In-app + push for the other members (async, never blocks the sender).
-  notifyChatMessage({
-    messageId: message.id,
-    channelId: input.channelId,
-    senderId: actor.id,
-    senderName: actor.name,
-    content,
-    priority: input.priority ?? 'normal',
-    mentionedUserIds: mentionUserIds,
-    kind: input.attachmentIds?.length
-      ? 'attachment'
-      : input.location
-        ? 'location'
-        : input.poll
-          ? 'poll'
-          : input.event
-            ? 'event'
-            : 'text',
-  }).catch(() => {
-    // silent — notification failures never block message sending
-  });
+  await runBackgroundTask('chat.notify_message', () =>
+    notifyChatMessage({
+      messageId: message.id,
+      channelId: input.channelId,
+      senderId: actor.id,
+      senderName: actor.name,
+      content,
+      priority: input.priority ?? 'normal',
+      mentionedUserIds: mentionUserIds,
+      kind: input.attachmentIds?.length
+        ? 'attachment'
+        : input.location
+          ? 'location'
+          : input.poll
+            ? 'poll'
+            : input.event
+              ? 'event'
+              : 'text',
+    })
+  );
 
   // Extension point: the agents layer reacts to @mentions of its bot users.
   // Bots never trigger it (no bot-to-bot loops); the message is already stored.
@@ -1267,7 +1292,14 @@ export async function searchUsers(
   actor: CurrentUser,
   query: string
 ): Promise<
-  { id: string; name: string; username: string; email: string | null; status: string; isBot: boolean }[]
+  {
+    id: string;
+    name: string;
+    username: string;
+    email: string | null;
+    status: string;
+    isBot: boolean;
+  }[]
 > {
   const q = query.trim();
   if (q.length < 1) return [];
@@ -1989,12 +2021,18 @@ export async function broadcastMessage(
           id: { in: input.attachmentIds },
           uploadedBy: actor.id,
           messageId: null,
-          OR: [{ storageObject: { status: 'ready' } }, { storageObjectId: null, storagePath: { not: null } }],
+          OR: [
+            { storageObject: { status: 'ready' } },
+            { storageObjectId: null, storagePath: { not: null } },
+          ],
         },
       });
       for (const row of sourceRows) {
         if (row.channelId === channelId) {
-          await prisma.internalChatAttachment.update({ where: { id: row.id }, data: { messageId: message.id } });
+          await prisma.internalChatAttachment.update({
+            where: { id: row.id },
+            data: { messageId: message.id },
+          });
         } else {
           await prisma.internalChatAttachment.create({
             data: {
@@ -2021,17 +2059,17 @@ export async function broadcastMessage(
       data: { lastMessageAt: message.createdAt },
     });
 
-    notifyChatMessage({
-      messageId: message.id,
-      channelId,
-      senderId: actor.id,
-      senderName: actor.name,
-      content: trimmed,
-      priority: input.priority ?? 'normal',
-      kind: input.attachmentIds?.length ? 'attachment' : 'text',
-    }).catch(() => {
-      // silent
-    });
+    await runBackgroundTask('chat.notify_broadcast', () =>
+      notifyChatMessage({
+        messageId: message.id,
+        channelId,
+        senderId: actor.id,
+        senderName: actor.name,
+        content: trimmed,
+        priority: input.priority ?? 'normal',
+        kind: input.attachmentIds?.length ? 'attachment' : 'text',
+      })
+    );
 
     const fullMsg = await prisma.internalChatMessage.findUnique({
       where: { id: message.id },
@@ -2265,7 +2303,11 @@ async function ensureOperationsChannel(
     metadata: { ...target.auditMetadata, memberCount: memberIds.length },
   });
 
-  return { id: createdId, isNew: true, members: { added: memberIds, reactivated: [], removed: [] } };
+  return {
+    id: createdId,
+    isNew: true,
+    members: { added: memberIds, reactivated: [], removed: [] },
+  };
 }
 
 /**
@@ -2278,7 +2320,10 @@ export async function createAreaChannel(
   areaKey: string,
   input: OperationsChannelInput
 ): Promise<OperationsChannelResult> {
-  const area = await prisma.area.findUnique({ where: { key: areaKey }, select: { id: true, key: true } });
+  const area = await prisma.area.findUnique({
+    where: { key: areaKey },
+    select: { id: true, key: true },
+  });
   if (!area) throw new ChatError(`Área no encontrada: ${areaKey}`);
   return ensureOperationsChannel(
     {
@@ -2418,7 +2463,9 @@ export interface SystemMessageInput {
 
 const SYSTEM_META_MAX_BYTES = 16_000;
 
-function normalizeSystemMeta(meta: ChatMessageMeta | null | undefined): Prisma.InputJsonObject | null {
+function normalizeSystemMeta(
+  meta: ChatMessageMeta | null | undefined
+): Prisma.InputJsonObject | null {
   if (meta === null || meta === undefined) return null;
   if (typeof meta !== 'object' || Array.isArray(meta)) {
     throw new ChatError('Los metadatos del mensaje deben ser un objeto');
@@ -2561,20 +2608,20 @@ export async function sendSystemMessage(
   });
   if (!fullMessage) throw new ChatError('Error al crear el mensaje');
 
-  notifyChatMessage({
-    messageId: message.id,
-    channelId,
-    senderId: sender.id,
-    senderName: sender.name,
-    content,
-    priority,
-    mentionedUserIds: mentionUserIds,
-    kind: 'text',
-    senderIsBot: true,
-    meta,
-  }).catch(() => {
-    // silent — notification failures never block the post
-  });
+  await runBackgroundTask('chat.notify_bot_message', () =>
+    notifyChatMessage({
+      messageId: message.id,
+      channelId,
+      senderId: sender.id,
+      senderName: sender.name,
+      content,
+      priority,
+      mentionedUserIds: mentionUserIds,
+      kind: 'text',
+      senderIsBot: true,
+      meta,
+    })
+  );
 
   return toMessageDTO(fullMessage, sender.id);
 }

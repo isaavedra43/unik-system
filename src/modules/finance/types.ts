@@ -48,7 +48,12 @@ export const CATEGORY_KIND_LABELS: Record<CategoryKind, string> = {
 };
 
 /** Category kinds an expense (or a payable) may be booked to. */
-export const EXPENSE_CATEGORY_KINDS: readonly CategoryKind[] = ['expense', 'payroll', 'tax', 'debt'];
+export const EXPENSE_CATEGORY_KINDS: readonly CategoryKind[] = [
+  'expense',
+  'payroll',
+  'tax',
+  'debt',
+];
 
 export const CATALOG_STATUSES = ['active', 'archived'] as const;
 export type CatalogStatus = (typeof CATALOG_STATUSES)[number];
@@ -285,6 +290,7 @@ export const FINANCE_COMMANDS = {
   obligationCreate: 'finance.obligation.create',
   obligationSettle: 'finance.obligation.settle',
   obligationCancel: 'finance.obligation.cancel',
+  obligationReschedule: 'finance.obligation.reschedule',
   obligationWriteOff: 'finance.obligation.write_off',
   settlementReverse: 'finance.obligation.reverse_settlement',
   paymentAuthorizationRequest: 'finance.payment.request_authorization',
@@ -329,6 +335,7 @@ export const FINANCE_EVENTS = {
     created: 'finance.obligation.created',
     settled: 'finance.obligation.settled',
     cancelled: 'finance.obligation.cancelled',
+    rescheduled: 'finance.obligation.rescheduled',
     writtenOff: 'finance.obligation.written_off',
     settlementReversed: 'finance.obligation.settlement_reversed',
   },

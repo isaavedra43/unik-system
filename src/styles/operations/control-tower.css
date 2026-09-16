@@ -1,0 +1,590 @@
+/*
+ * Torre de Control (plan 7.7): shell, resumen, personas, excepciones,
+ * aprobaciones, auditoría y configuración.
+ *
+ * Sólo tokens (--unik-*): ningún color literal, ningún tamaño mágico. Se
+ * importa desde src/app/app/admin/control-tower/[view]/page.tsx (Next permite
+ * CSS global en un componente del App Router).
+ *
+ * Prefijo `.ct-` para no pisar `area-shell.css`, `case-360.css` ni globals.
+ */
+
+/* ------------------------------------------------------------------ Shell */
+
+.ct-shell {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--unik-space-4);
+  min-width: 0;
+}
+
+/* Excepciones es ruta full-bleed (`.app-content-flush` pone padding 0): sin
+   esto la tabla y los chips se cortaban contra el borde derecho. */
+.app-content-flush .ct-shell {
+  padding: var(--unik-space-8) var(--unik-space-8) var(--unik-space-12);
+}
+
+@media (max-width: 1024px) {
+  .app-content-flush .ct-shell {
+    padding: var(--unik-space-5) var(--unik-space-4) var(--unik-space-8);
+  }
+}
+
+@media (max-width: 768px) {
+  .app-content-flush .ct-shell {
+    padding: var(--unik-space-4) var(--unik-space-3) var(--unik-space-6);
+  }
+}
+
+.ct-shell-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--unik-space-2) var(--unik-space-4);
+  font-size: var(--unik-text-xs);
+  color: var(--unik-text-secondary);
+}
+
+.ct-shell-meta strong {
+  color: var(--unik-text);
+  font-weight: var(--unik-weight-semibold);
+}
+
+.ct-view {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--unik-space-4);
+  min-width: 0;
+}
+
+.ct-view-description {
+  margin: 0;
+  font-size: var(--unik-text-sm);
+  color: var(--unik-text-secondary);
+}
+
+/* Chip de tiempo real */
+.ct-live {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--unik-space-2);
+  padding: 0.2rem 0.55rem;
+  border: 1px solid var(--unik-border);
+  border-radius: var(--unik-radius-full);
+  background: var(--unik-surface);
+  font-size: var(--unik-text-xs);
+  color: var(--unik-text-secondary);
+  white-space: nowrap;
+}
+
+.ct-live-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: var(--unik-radius-full);
+  background: var(--unik-success);
+  flex: 0 0 auto;
+}
+
+.ct-live-idle .ct-live-dot {
+  background: var(--unik-text-muted);
+}
+
+.ct-live-pulse .ct-live-dot {
+  animation: ct-live-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes ct-live-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ct-live-pulse .ct-live-dot {
+    animation: none;
+  }
+}
+
+/* ---------------------------------------------------------------- Resumen */
+
+/* Panel + copiloto al lado en pantallas anchas. */
+.ct-overview {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 22rem;
+  gap: var(--unik-space-4);
+  align-items: start;
+  min-width: 0;
+}
+
+.ct-overview-main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--unik-space-4);
+  min-width: 0;
+}
+
+.ct-overview-aside {
+  position: sticky;
+  top: var(--unik-space-4);
+  max-height: calc(100dvh - var(--unik-topbar-height) - var(--unik-space-8));
+  min-height: 24rem;
+  overflow: hidden;
+  border: 1px solid var(--unik-border);
+  border-radius: var(--unik-radius-lg);
+  background: var(--unik-surface);
+}
+
+.ct-copilot-sheet {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  min-height: 0;
+}
+
+.ct-freshness {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--unik-space-2) var(--unik-space-3);
+  font-size: var(--unik-text-xs);
+  color: var(--unik-text-secondary);
+}
+
+.ct-freshness-status {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--unik-space-2) var(--unik-space-3);
+  min-width: 0;
+}
+
+.ct-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--unik-space-2);
+}
+
+.ct-charts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--unik-space-4);
+  min-width: 0;
+}
+
+.ct-health {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--unik-space-4);
+  min-width: 0;
+}
+
+.ct-health-list {
+  display: grid;
+  gap: var(--unik-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ct-health-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--unik-space-3);
+  padding-bottom: var(--unik-space-2);
+  border-bottom: 1px solid var(--unik-border-subtle);
+  font-size: var(--unik-text-sm);
+  min-width: 0;
+}
+
+.ct-health-row:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.ct-health-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.ct-health-name small {
+  display: block;
+  color: var(--unik-text-muted);
+  font-size: var(--unik-text-xs);
+}
+
+.ct-health-value {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  color: var(--unik-text-secondary);
+}
+
+.ct-tone-success {
+  color: var(--unik-success);
+}
+
+.ct-tone-warning {
+  color: var(--unik-warning);
+}
+
+.ct-tone-danger {
+  color: var(--unik-danger);
+}
+
+/* -------------------------------------------------------------- Tablas */
+
+.ct-table-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--unik-space-3);
+  min-width: 0;
+}
+
+.ct-table-scroll {
+  overflow-x: auto;
+  min-width: 0;
+}
+
+.ct-table-scroll table {
+  min-width: 46rem;
+}
+
+.ct-cell-strong {
+  font-weight: var(--unik-weight-medium);
+  color: var(--unik-text);
+}
+
+.ct-cell-sub {
+  display: block;
+  font-size: var(--unik-text-xs);
+  color: var(--unik-text-muted);
+  overflow-wrap: anywhere;
+}
+
+.ct-numeric {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* --------------------------------------------------------------- Filtros */
+
+.ct-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--unik-space-3);
+  min-width: 0;
+}
+
+.ct-filter {
+  display: grid;
+  gap: var(--unik-space-1, 0.25rem);
+  min-width: 10rem;
+}
+
+.ct-filter > label {
+  font-size: var(--unik-text-xs);
+  color: var(--unik-text-secondary);
+}
+
+.ct-filter-grow {
+  flex: 1 1 14rem;
+}
+
+.ct-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--unik-space-2);
+  min-width: 0;
+}
+
+.ct-chip-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--unik-space-2);
+}
+
+.ct-chip-group-label {
+  font-size: var(--unik-text-xs);
+  color: var(--unik-text-muted);
+}
+
+.ct-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--unik-space-2);
+  padding: 0.2rem 0.65rem;
+  border: 1px solid var(--unik-border);
+  border-radius: var(--unik-radius-full);
+  background: var(--unik-surface);
+  color: var(--unik-text-secondary);
+  font-size: var(--unik-text-xs);
+  white-space: nowrap;
+  text-decoration: none;
+  transition: var(--unik-transition);
+}
+
+.ct-chip:hover {
+  background: var(--unik-surface-hover);
+  color: var(--unik-text);
+}
+
+.ct-chip-active {
+  border-color: var(--unik-brand);
+  background: var(--unik-brand-subtle);
+  color: var(--unik-brand-text, var(--unik-brand));
+  font-weight: var(--unik-weight-medium);
+}
+
+/* ---------------------------------------------------------- Excepciones */
+
+.ct-exceptions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--unik-space-3);
+  min-width: 0;
+}
+
+.ct-row-actions {
+  display: inline-flex;
+  justify-content: flex-end;
+}
+
+/* --------------------------------------------------------- Aprobaciones */
+
+.ct-approvals {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--unik-space-4);
+  min-width: 0;
+}
+
+.ct-approval-list {
+  display: grid;
+  gap: var(--unik-space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ct-approval-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--unik-space-2);
+  padding: var(--unik-space-3);
+  border: 1px solid var(--unik-border);
+  border-radius: var(--unik-radius-md);
+  background: var(--unik-surface);
+  min-width: 0;
+}
+
+.ct-approval-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--unik-space-2);
+  min-width: 0;
+}
+
+/* ------------------------------------------------------- Configuración */
+
+.ct-settings {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--unik-space-4);
+  min-width: 0;
+}
+
+.ct-settings-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--unik-space-3) var(--unik-space-4);
+  min-width: 0;
+}
+
+.ct-settings-grid-3 {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--unik-space-3) var(--unik-space-4);
+  min-width: 0;
+}
+
+.ct-flag-list {
+  display: grid;
+  gap: var(--unik-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ct-flag {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--unik-space-3);
+  padding: var(--unik-space-3);
+  border: 1px solid var(--unik-border);
+  border-radius: var(--unik-radius-md);
+  background: var(--unik-surface);
+  min-width: 0;
+}
+
+.ct-flag-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.ct-flag-name {
+  font-size: var(--unik-text-sm);
+  font-weight: var(--unik-weight-medium);
+  color: var(--unik-text);
+}
+
+.ct-flag-desc {
+  font-size: var(--unik-text-xs);
+  color: var(--unik-text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.ct-flag-off {
+  border-color: var(--unik-warning);
+}
+
+.ct-ladder {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--unik-space-2);
+}
+
+.ct-sticky-bar {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--unik-space-2) var(--unik-space-3);
+  padding: var(--unik-space-3);
+  border: 1px solid var(--unik-border);
+  border-radius: var(--unik-radius-md);
+  background: var(--unik-bg-card, var(--unik-surface));
+  box-shadow: var(--unik-shadow-sm);
+  z-index: 5;
+}
+
+.ct-sticky-note {
+  margin-right: auto;
+  font-size: var(--unik-text-xs);
+  color: var(--unik-text-secondary);
+}
+
+.ct-policy-preview {
+  display: grid;
+  gap: var(--unik-space-2);
+  padding: var(--unik-space-3);
+  border: 1px dashed var(--unik-border);
+  border-radius: var(--unik-radius-md);
+  background: var(--unik-surface);
+  font-size: var(--unik-text-sm);
+  color: var(--unik-text-secondary);
+}
+
+.ct-role-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--unik-space-2);
+  max-height: 11rem;
+  overflow-y: auto;
+  padding: var(--unik-space-2);
+  border: 1px solid var(--unik-border);
+  border-radius: var(--unik-radius-md);
+}
+
+/* ---------------------------------------------------------------- Vacío */
+
+.ct-empty {
+  display: grid;
+  gap: var(--unik-space-2);
+  padding: var(--unik-space-6);
+  border: 1px dashed var(--unik-border);
+  border-radius: var(--unik-radius-md);
+  background: var(--unik-surface);
+  text-align: center;
+  color: var(--unik-text-secondary);
+  font-size: var(--unik-text-sm);
+}
+
+.ct-empty strong {
+  color: var(--unik-text);
+}
+
+.ct-pagination {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--unik-space-2) var(--unik-space-3);
+  font-size: var(--unik-text-xs);
+  color: var(--unik-text-secondary);
+}
+
+/* ---------------------------------------------------------- Responsive */
+
+@media (max-width: 1279px) {
+  .ct-overview {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .ct-overview-aside {
+    display: none;
+  }
+}
+
+@media (max-width: 1023px) {
+  .ct-charts,
+  .ct-health,
+  .ct-settings-grid-3 {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 767px) {
+  .ct-settings-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .ct-filter {
+    min-width: 0;
+    flex: 1 1 100%;
+  }
+
+  .ct-table-scroll table {
+    min-width: 38rem;
+  }
+
+  .ct-sticky-bar {
+    padding-bottom: calc(var(--unik-space-3) + env(safe-area-inset-bottom, 0px));
+  }
+
+  .ct-sticky-note {
+    margin-right: 0;
+    flex: 1 1 100%;
+  }
+}
+
+@media (max-width: 400px) {
+  .ct-chip {
+    font-size: var(--unik-text-xs);
+    padding: 0.25rem 0.5rem;
+  }
+}

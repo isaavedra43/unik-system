@@ -26,7 +26,14 @@ import {
   type QualityCheckDTO,
   type WorkCenterDTO,
 } from './manufacturing-dto';
-import { addDays, itemLabel, num, productInfo, qtyText, unitsResolver } from './manufacturing-helpers';
+import {
+  addDays,
+  itemLabel,
+  num,
+  productInfo,
+  qtyText,
+  unitsResolver,
+} from './manufacturing-helpers';
 import {
   BOM_STATUSES,
   MANUFACTURING_OBJECT_TYPES,
@@ -73,9 +80,15 @@ export interface Page<T> {
   pageCount: number;
 }
 
-export function normalizeManufacturingPage(input: PageInput = {}): { page: number; pageSize: number; skip: number } {
+function normalizeManufacturingPage(input: PageInput = {}): {
+  page: number;
+  pageSize: number;
+  skip: number;
+} {
   const page = Math.max(1, Math.trunc(Number.isFinite(input.page) ? Number(input.page) : 1));
-  const size = Math.trunc(Number.isFinite(input.pageSize) ? Number(input.pageSize) : DEFAULT_PAGE_SIZE);
+  const size = Math.trunc(
+    Number.isFinite(input.pageSize) ? Number(input.pageSize) : DEFAULT_PAGE_SIZE
+  );
   const pageSize = Math.min(Math.max(size, 1), MAX_PAGE_SIZE);
   return { page, pageSize, skip: (page - 1) * pageSize };
 }
@@ -88,7 +101,10 @@ function parseFilters<S extends z.ZodTypeAny>(schema: S, value: unknown): z.outp
   const parsed = schema.safeParse(value ?? {});
   if (!parsed.success) {
     const issue = parsed.error.issues[0];
-    throw new OperationsError('invalid_payload', `Filtros inválidos: ${issue?.path.join('.') || 'filtros'} ${issue?.message ?? ''}`.trim());
+    throw new OperationsError(
+      'invalid_payload',
+      `Filtros inválidos: ${issue?.path.join('.') || 'filtros'} ${issue?.message ?? ''}`.trim()
+    );
   }
   return parsed.data;
 }
@@ -125,8 +141,10 @@ function mayAny(actor: CurrentUser, keys: readonly string[]): boolean {
 }
 
 /** Actions the actor may run on an order in `status` (state machine ∩ permissions). */
-export function actionsForActor(actor: CurrentUser, status: string): ProductionOrderAction[] {
-  return allowedOrderActions(status).filter((action) => mayAny(actor, ORDER_ACTION_PERMISSIONS[action]));
+function actionsForActor(actor: CurrentUser, status: string): ProductionOrderAction[] {
+  return allowedOrderActions(status).filter((action) =>
+    mayAny(actor, ORDER_ACTION_PERMISSIONS[action])
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -135,7 +153,10 @@ export function actionsForActor(actor: CurrentUser, status: string): ProductionO
 
 export const productionOrderFiltersSchema = z.object({
   scope: z.enum(['open', 'closed', 'all']).default('open'),
-  status: z.array(z.enum(PRODUCTION_ORDER_STATUSES)).max(PRODUCTION_ORDER_STATUSES.length).optional(),
+  status: z
+    .array(z.enum(PRODUCTION_ORDER_STATUSES))
+    .max(PRODUCTION_ORDER_STATUSES.length)
+    .optional(),
   kind: z.enum(PRODUCTION_ORDER_KINDS).optional(),
   workCenterId: idText.optional(),
   caseId: idText.optional(),
@@ -154,14 +175,34 @@ export interface ProductionOrderRow extends ProductionOrderDTO {
   allowedActions: ProductionOrderAction[];
 }
 
-async function toOrderRows(actor: CurrentUser, orders: readonly ProductionOrder[]): Promise<ProductionOrderRow[]> {
+async function toOrderRows(
+  actor: CurrentUser,
+  orders: readonly ProductionOrder[]
+): Promise<ProductionOrderRow[]> {
   if (orders.length === 0) return [];
-  const centerIds = [...new Set(orders.map((order) => order.workCenterId).filter((id): id is string => Boolean(id)))];
-  const caseIds = [...new Set(orders.map((order) => order.caseId).filter((id): id is string => Boolean(id)))];
+  const centerIds = [
+    ...new Set(orders.map((order) => order.workCenterId).filter((id): id is string => Boolean(id))),
+  ];
+  const caseIds = [
+    ...new Set(orders.map((order) => order.caseId).filter((id): id is string => Boolean(id))),
+  ];
   const [centers, cases, products] = await Promise.all([
-    centerIds.length ? prisma.workCenter.findMany({ where: { id: { in: centerIds } }, select: { id: true, name: true } }) : [],
-    caseIds.length ? prisma.operationalCase.findMany({ where: { id: { in: caseIds } }, select: { id: true, caseNumber: true } }) : [],
-    productInfo(prisma, orders.map((order) => order.outputZohoItemId)),
+    centerIds.length
+      ? prisma.workCenter.findMany({
+          where: { id: { in: centerIds } },
+          select: { id: true, name: true },
+        })
+      : [],
+    caseIds.length
+      ? prisma.operationalCase.findMany({
+          where: { id: { in: caseIds } },
+          select: { id: true, caseNumber: true },
+        })
+      : [],
+    productInfo(
+      prisma,
+      orders.map((order) => order.outputZohoItemId)
+    ),
   ]);
   const centerNames = new Map(centers.map((center) => [center.id, center.name]));
   const caseNumbers = new Map(cases.map((row) => [row.id, row.caseNumber]));
@@ -236,13 +277,29 @@ export interface ProductionOrderDetail {
   balance: MaterialBalance;
   release: ReleaseEvaluation;
   pendingSubstitutionIds: string[];
-  requests: Array<{ id: string; kind: string; status: string; title: string; toAreaKey: string; createdAt: string }>;
+  requests: Array<{
+    id: string;
+    kind: string;
+    status: string;
+    title: string;
+    toAreaKey: string;
+    createdAt: string;
+  }>;
   workCenter: WorkCenterDTO | null;
   bom: BomDTO | null;
-  case: { id: string; caseNumber: string; salesOrderNumber: string | null; customerName: string | null; status: string } | null;
+  case: {
+    id: string;
+    caseNumber: string;
+    salesOrderNumber: string | null;
+    customerName: string | null;
+    status: string;
+  } | null;
 }
 
-export async function getProductionOrderDetail(actor: CurrentUser, productionOrderId: string): Promise<ProductionOrderDetail> {
+export async function getProductionOrderDetail(
+  actor: CurrentUser,
+  productionOrderId: string
+): Promise<ProductionOrderDetail> {
   assertPermission(actor, VIEW);
   const order = await prisma.productionOrder.findUnique({ where: { id: productionOrderId } });
   if (!order) throw new OperationsError('not_found', 'No se encontró la orden de producción');
@@ -250,11 +307,22 @@ export async function getProductionOrderDetail(actor: CurrentUser, productionOrd
   const [rows, center, bom, opCase, requests] = await Promise.all([
     toOrderRows(actor, [order]),
     order.workCenterId ? prisma.workCenter.findUnique({ where: { id: order.workCenterId } }) : null,
-    order.bomId ? prisma.bom.findUnique({ where: { id: order.bomId }, include: { lines: true, operations: true } }) : null,
+    order.bomId
+      ? prisma.bom.findUnique({
+          where: { id: order.bomId },
+          include: { lines: true, operations: true },
+        })
+      : null,
     order.caseId
       ? prisma.operationalCase.findUnique({
           where: { id: order.caseId },
-          select: { id: true, caseNumber: true, salesOrderNumber: true, customerName: true, status: true },
+          select: {
+            id: true,
+            caseNumber: true,
+            salesOrderNumber: true,
+            customerName: true,
+            status: true,
+          },
         })
       : null,
     prisma.areaRequest.findMany({
@@ -264,7 +332,10 @@ export async function getProductionOrderDetail(actor: CurrentUser, productionOrd
       select: { id: true, kind: true, status: true, title: true, toAreaKey: true, createdAt: true },
     }),
   ]);
-  const products = await productInfo(prisma, facts.requirements.map((line) => line.zohoItemId));
+  const products = await productInfo(
+    prisma,
+    facts.requirements.map((line) => line.zohoItemId)
+  );
   return {
     order: rows[0],
     operations: facts.operations.map(toOperationDTO),
@@ -289,7 +360,10 @@ export async function getProductionOrderDetail(actor: CurrentUser, productionOrd
     balance: facts.balance,
     release: evaluateRelease(releaseFactsOf(facts)),
     pendingSubstitutionIds: facts.pendingSubstitutionIds,
-    requests: requests.map((request) => ({ ...request, createdAt: request.createdAt.toISOString() })),
+    requests: requests.map((request) => ({
+      ...request,
+      createdAt: request.createdAt.toISOString(),
+    })),
     workCenter: center ? toWorkCenterDTO(center) : null,
     bom: bom ? toBomDTO(bom) : null,
     case: opCase,
@@ -313,7 +387,7 @@ export interface ShiftLoadDTO {
   operationIds: string[];
 }
 
-export function toShiftLoadDTO(load: ShiftLoad): ShiftLoadDTO {
+function toShiftLoadDTO(load: ShiftLoad): ShiftLoadDTO {
   return {
     shiftName: load.shiftName,
     day: load.day,
@@ -348,10 +422,22 @@ export type ProductionBoardInput = z.input<typeof productionBoardInputSchema>;
 
 export interface ProductionBoard {
   generatedAt: string;
-  columns: Array<{ status: ProductionOrderStatus; label: string; count: number; orders: ProductionOrderRow[] }>;
+  columns: Array<{
+    status: ProductionOrderStatus;
+    label: string;
+    count: number;
+    orders: ProductionOrderRow[];
+  }>;
   workCenters: Array<{
     workCenter: WorkCenterDTO;
-    running: Array<{ operationId: string; productionOrderId: string; number: string; name: string; startedAt: string | null; assignedUserId: string | null }>;
+    running: Array<{
+      operationId: string;
+      productionOrderId: string;
+      number: string;
+      name: string;
+      startedAt: string | null;
+      assignedUserId: string | null;
+    }>;
     queued: number;
     windows: ShiftLoadDTO[];
     summary: LoadSummary;
@@ -372,7 +458,11 @@ export async function getProductionBoard(
   };
   const [grouped, orders, centers] = await Promise.all([
     prisma.productionOrder.groupBy({ by: ['status'], where, _count: { _all: true } }),
-    prisma.productionOrder.findMany({ where, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }], take: 500 }),
+    prisma.productionOrder.findMany({
+      where,
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      take: 500,
+    }),
     prisma.workCenter.findMany({
       where: { status: 'active', ...(parsed.workCenterId ? { id: parsed.workCenterId } : {}) },
       orderBy: [{ key: 'asc' }],
@@ -419,7 +509,9 @@ export async function getProductionBoard(
         .map((op) => ({
           operationId: op.id,
           productionOrderId: op.productionOrderId,
-          number: (op as typeof op & { productionOrder?: { number: string } | null }).productionOrder?.number ?? '',
+          number:
+            (op as typeof op & { productionOrder?: { number: string } | null }).productionOrder
+              ?.number ?? '',
           name: op.name,
           startedAt: op.startedAt?.toISOString() ?? null,
           assignedUserId: op.assignedUserId,
@@ -434,7 +526,13 @@ export async function getProductionBoard(
 
 export const workCenterLoadInputSchema = z.object({
   workCenterId: idText,
-  from: z.string().trim().min(10).max(40).refine((value) => !Number.isNaN(Date.parse(value)), 'Fecha inválida').optional(),
+  from: z
+    .string()
+    .trim()
+    .min(10)
+    .max(40)
+    .refine((value) => !Number.isNaN(Date.parse(value)), 'Fecha inválida')
+    .optional(),
   days: z.number().int().min(1).max(31).default(7),
 });
 export type WorkCenterLoadInput = z.input<typeof workCenterLoadInputSchema>;
@@ -447,19 +545,36 @@ export async function getWorkCenterLoad(
   workCenter: WorkCenterDTO;
   windows: ShiftLoadDTO[];
   summary: LoadSummary;
-  operations: Array<{ operationId: string; productionOrderId: string; number: string; name: string; status: string; plannedStartAt: string; plannedMinutes: number | null; load: number }>;
+  operations: Array<{
+    operationId: string;
+    productionOrderId: string;
+    number: string;
+    name: string;
+    status: string;
+    plannedStartAt: string;
+    plannedMinutes: number | null;
+    load: number;
+  }>;
 }> {
   assertPermission(actor, VIEW);
   const parsed = parseFilters(workCenterLoadInputSchema, input);
   const center = await prisma.workCenter.findUnique({ where: { id: parsed.workCenterId } });
   if (!center) throw new OperationsError('not_found', 'No se encontró el centro de trabajo');
   const from = parsed.from ? new Date(parsed.from) : (options.now ?? new Date());
-  const { loads, operations } = await loadWorkCenterLoads(prisma, center, from, addDays(from, parsed.days));
+  const { loads, operations } = await loadWorkCenterLoads(
+    prisma,
+    center,
+    from,
+    addDays(from, parsed.days)
+  );
   return {
     workCenter: toWorkCenterDTO(center),
     windows: loads.map(toShiftLoadDTO),
     summary: summarizeShiftLoads(loads),
-    operations: operations.map((op) => ({ ...op, plannedStartAt: op.plannedStartAt.toISOString() })),
+    operations: operations.map((op) => ({
+      ...op,
+      plannedStartAt: op.plannedStartAt.toISOString(),
+    })),
   };
 }
 
@@ -476,14 +591,24 @@ export async function listWorkCenters(
   filters: { status?: (typeof WORK_CENTER_STATUSES)[number] } = {}
 ): Promise<WorkCenterRow[]> {
   assertPermission(actor, VIEW);
-  const status = filters.status && (WORK_CENTER_STATUSES as readonly string[]).includes(filters.status) ? filters.status : undefined;
+  const status =
+    filters.status && (WORK_CENTER_STATUSES as readonly string[]).includes(filters.status)
+      ? filters.status
+      : undefined;
   const centers = await prisma.workCenter.findMany({
     where: status ? { status } : {},
     orderBy: [{ status: 'asc' }, { key: 'asc' }],
   });
-  const warehouseIds = [...new Set(centers.map((center) => center.warehouseId).filter((id): id is string => Boolean(id)))];
+  const warehouseIds = [
+    ...new Set(
+      centers.map((center) => center.warehouseId).filter((id): id is string => Boolean(id))
+    ),
+  ];
   const warehouses = warehouseIds.length
-    ? await prisma.warehouse.findMany({ where: { id: { in: warehouseIds } }, select: { id: true, name: true } })
+    ? await prisma.warehouse.findMany({
+        where: { id: { in: warehouseIds } },
+        select: { id: true, name: true },
+      })
     : [];
   const names = new Map(warehouses.map((warehouse) => [warehouse.id, warehouse.name]));
   return centers.map((center) => ({
@@ -506,7 +631,10 @@ export interface BomRow extends BomDTO {
   outputSku: string | null;
 }
 
-export async function listBoms(actor: CurrentUser, filters: BomFilters = {}): Promise<Page<BomRow>> {
+export async function listBoms(
+  actor: CurrentUser,
+  filters: BomFilters = {}
+): Promise<Page<BomRow>> {
   assertPermission(actor, VIEW);
   const input = parseFilters(bomFiltersSchema, filters);
   const where: Prisma.BomWhereInput = {};
@@ -514,11 +642,18 @@ export async function listBoms(actor: CurrentUser, filters: BomFilters = {}): Pr
   if (input.outputZohoItemId) where.outputZohoItemId = input.outputZohoItemId;
   if (input.q) {
     const matches = await prisma.product.findMany({
-      where: { OR: [{ name: { contains: input.q, mode: 'insensitive' } }, { sku: { contains: input.q, mode: 'insensitive' } }] },
+      where: {
+        OR: [
+          { name: { contains: input.q, mode: 'insensitive' } },
+          { sku: { contains: input.q, mode: 'insensitive' } },
+        ],
+      },
       select: { zohoItemId: true },
       take: 200,
     });
-    where.outputZohoItemId = { in: [...new Set([input.q, ...matches.map((row) => row.zohoItemId)])] };
+    where.outputZohoItemId = {
+      in: [...new Set([input.q, ...matches.map((row) => row.zohoItemId)])],
+    };
   }
   const { page, pageSize, skip } = normalizeManufacturingPage(input);
   const [total, boms] = await Promise.all([
@@ -531,7 +666,10 @@ export async function listBoms(actor: CurrentUser, filters: BomFilters = {}): Pr
       include: { lines: true, operations: true },
     }),
   ]);
-  const products = await productInfo(prisma, boms.map((bom) => bom.outputZohoItemId));
+  const products = await productInfo(
+    prisma,
+    boms.map((bom) => bom.outputZohoItemId)
+  );
   return pageOf(
     boms.map((bom) => ({
       ...toBomDTO(bom),
@@ -542,36 +680,6 @@ export async function listBoms(actor: CurrentUser, filters: BomFilters = {}): Pr
     page,
     pageSize
   );
-}
-
-export interface BomDetail extends BomRow {
-  lineLabels: Record<string, string>;
-  workCenterNames: Record<string, string>;
-  openOrders: number;
-}
-
-export async function getBomDetail(actor: CurrentUser, bomId: string): Promise<BomDetail> {
-  assertPermission(actor, VIEW);
-  const bom = await prisma.bom.findUnique({ where: { id: bomId }, include: { lines: true, operations: true } });
-  if (!bom) throw new OperationsError('not_found', 'No se encontró la lista de materiales');
-  const itemIds = [
-    bom.outputZohoItemId,
-    ...bom.lines.flatMap((line) => [line.inputZohoItemId, ...line.substituteZohoItemIds]),
-  ];
-  const centerIds = [...new Set(bom.operations.map((op) => op.workCenterId))];
-  const [products, centers, openOrders] = await Promise.all([
-    productInfo(prisma, itemIds),
-    centerIds.length ? prisma.workCenter.findMany({ where: { id: { in: centerIds } }, select: { id: true, name: true } }) : [],
-    prisma.productionOrder.count({ where: { bomId: bom.id, status: { in: [...PRODUCTION_ORDER_OPEN_STATUSES] } } }),
-  ]);
-  return {
-    ...toBomDTO(bom),
-    outputName: products.get(bom.outputZohoItemId)?.name ?? null,
-    outputSku: products.get(bom.outputZohoItemId)?.sku ?? null,
-    lineLabels: Object.fromEntries([...new Set(itemIds)].map((id) => [id, itemLabel(products, id)])),
-    workCenterNames: Object.fromEntries(centers.map((center) => [center.id, center.name])),
-    openOrders,
-  };
 }
 
 // ---------------------------------------------------------------------------
@@ -618,20 +726,36 @@ export interface ProductionTrace {
     movementId: string | null;
     dimensions: Record<string, unknown> | null;
   }>;
-  reservations: Array<{ id: string; demandId: string; allocationId: string | null; quantity: string; status: string }>;
+  reservations: Array<{
+    id: string;
+    demandId: string;
+    allocationId: string | null;
+    quantity: string;
+    status: string;
+  }>;
 }
 
 /** Raw materials, outputs and sale of a production order. */
-export async function getProductionTrace(actor: CurrentUser, productionOrderId: string): Promise<ProductionTrace> {
+export async function getProductionTrace(
+  actor: CurrentUser,
+  productionOrderId: string
+): Promise<ProductionTrace> {
   assertAnyPermission(actor, [VIEW, 'inventory.view']);
   const order = await prisma.productionOrder.findUnique({ where: { id: productionOrderId } });
   if (!order) throw new OperationsError('not_found', 'No se encontró la orden de producción');
   const [consumptions, outputs, opCase, reservations] = await Promise.all([
     prisma.materialConsumption.findMany({
-      where: { productionOrderId: order.id, kind: { in: ['actual', 'substitution'] }, stockMovementId: { not: null } },
+      where: {
+        productionOrderId: order.id,
+        kind: { in: ['actual', 'substitution'] },
+        stockMovementId: { not: null },
+      },
       orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
     }),
-    prisma.productionOutput.findMany({ where: { productionOrderId: order.id }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] }),
+    prisma.productionOutput.findMany({
+      where: { productionOrderId: order.id },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+    }),
     order.caseId
       ? prisma.operationalCase.findUnique({
           where: { id: order.caseId },
@@ -639,7 +763,10 @@ export async function getProductionTrace(actor: CurrentUser, productionOrderId: 
         })
       : null,
     order.demandAllocationId
-      ? prisma.stockReservation.findMany({ where: { allocationId: order.demandAllocationId }, orderBy: { createdAt: 'asc' } })
+      ? prisma.stockReservation.findMany({
+          where: { allocationId: order.demandAllocationId },
+          orderBy: { createdAt: 'asc' },
+        })
       : [],
   ]);
   const movementIds = [
@@ -651,9 +778,22 @@ export async function getProductionTrace(actor: CurrentUser, productionOrderId: 
     ...outputs.map((row) => row.stockItemId),
   ].filter((id): id is string => Boolean(id));
   const [movements, stocks, products] = await Promise.all([
-    movementIds.length ? prisma.stockMovement.findMany({ where: { id: { in: movementIds } }, select: { id: true, occurredAt: true, warehouseId: true } }) : [],
-    stockIds.length ? prisma.stockItem.findMany({ where: { id: { in: stockIds } }, select: { id: true, containerKey: true, warehouseId: true } }) : [],
-    productInfo(prisma, [...consumptions.map((row) => row.inputZohoItemId), ...outputs.map((row) => row.zohoItemId)]),
+    movementIds.length
+      ? prisma.stockMovement.findMany({
+          where: { id: { in: movementIds } },
+          select: { id: true, occurredAt: true, warehouseId: true },
+        })
+      : [],
+    stockIds.length
+      ? prisma.stockItem.findMany({
+          where: { id: { in: stockIds } },
+          select: { id: true, containerKey: true, warehouseId: true },
+        })
+      : [],
+    productInfo(prisma, [
+      ...consumptions.map((row) => row.inputZohoItemId),
+      ...outputs.map((row) => row.zohoItemId),
+    ]),
   ]);
   const movementById = new Map(movements.map((movement) => [movement.id, movement]));
   const stockById = new Map(stocks.map((stock) => [stock.id, stock]));
@@ -716,9 +856,20 @@ export async function traceStockItem(
   actor: CurrentUser,
   stockItemId: string
 ): Promise<{
-  stockItem: { id: string; zohoItemId: string; warehouseId: string; containerKey: string; originProductionOrderId: string | null };
+  stockItem: {
+    id: string;
+    zohoItemId: string;
+    warehouseId: string;
+    containerKey: string;
+    originProductionOrderId: string | null;
+  };
   /** Every production order that produced into this row (latest first), with its quantity. */
-  productions: Array<{ productionOrderId: string; number: string | null; quantity: string; lastProducedAt: string }>;
+  productions: Array<{
+    productionOrderId: string;
+    number: string | null;
+    quantity: string;
+    lastProducedAt: string;
+  }>;
   /** Trace of the latest producing order (the row groups output of several orders). */
   production: ProductionTrace | null;
 }> {
@@ -726,7 +877,12 @@ export async function traceStockItem(
   const stock = await prisma.stockItem.findUnique({ where: { id: stockItemId } });
   if (!stock) throw new OperationsError('not_found', 'No se encontró la existencia');
   const movements = await prisma.stockMovement.findMany({
-    where: { stockItemId: stock.id, kind: 'produce', referenceType: 'production_order', referenceId: { not: null } },
+    where: {
+      stockItemId: stock.id,
+      kind: 'produce',
+      referenceType: 'production_order',
+      referenceId: { not: null },
+    },
     orderBy: [{ occurredAt: 'desc' }, { id: 'desc' }],
     select: { referenceId: true, quantity: true, occurredAt: true },
     take: 500,
@@ -741,7 +897,10 @@ export async function traceStockItem(
     });
   }
   const orders = byOrder.size
-    ? await prisma.productionOrder.findMany({ where: { id: { in: [...byOrder.keys()] } }, select: { id: true, number: true } })
+    ? await prisma.productionOrder.findMany({
+        where: { id: { in: [...byOrder.keys()] } },
+        select: { id: true, number: true },
+      })
     : [];
   const productions = [...byOrder.entries()].map(([productionOrderId, value]) => ({
     productionOrderId,

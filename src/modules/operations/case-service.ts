@@ -73,6 +73,7 @@ import {
   CONDITION_LABELS,
   QTY_EPSILON,
   evaluateCondition,
+  isCarrierDelivery,
   isConditionKey,
   isCustomerPickup,
   uncoveredQuantity,
@@ -1546,11 +1547,15 @@ async function enginePlanDelivery(run: AdvanceRun): Promise<EngineOutcome> {
   }
   const so = state.salesOrder;
   const pickup = isCustomerPickup(state.opCase.deliveryMethod);
+  // Plan §4: el método de entrega de Zoho decide cómo nace la entrega. Cuando
+  // dice paquetería o transportista nace `carrier` (sin unidad ni chofer
+  // nuestros); Logística puede cambiarlo al asignar transporte.
+  const carrier = !pickup && isCarrierDelivery(state.opCase.deliveryMethod);
   const address = [so?.shippingAddressLine1, so?.shippingAddressLine2].filter(Boolean).join(', ');
   const input: CreateDeliveryOrderInput = {
     caseId: state.opCase.id,
     allocationIds: eligible.map((allocation) => allocation.id),
-    mode: pickup ? 'customer_pickup' : 'own_fleet',
+    mode: pickup ? 'customer_pickup' : carrier ? 'carrier' : 'own_fleet',
     addressLine: pickup ? null : truncate(address, 500),
     city: pickup ? null : truncate(so?.shippingCity, 120),
     state: pickup ? null : truncate(so?.shippingState, 120),

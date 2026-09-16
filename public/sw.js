@@ -9,11 +9,22 @@
  * - Web Push: shows the OS notification and opens/focuses the app on tap
  */
 
-const CACHE_VERSION = 'unik-v2';
+const CACHE_VERSION = 'unik-v3';
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
 const RUNTIME_CACHE = `${CACHE_VERSION}-runtime`;
 
 // Assets to pre-cache on install (app shell essentials)
+/**
+ * Sólo el cascarón y los iconos: NINGUNA página autenticada.
+ *
+ * `/app/areas/logistica/chofer` estaba aquí para que la PWA del chofer abriera
+ * sin señal, pero el precaché se ejecuta para TODA la gente que instala la app y
+ * el HTML que guarda lleva nombres de cliente, direcciones y paradas de quien
+ * tenía la sesión abierta. En un teléfono compartido de bodega el siguiente
+ * chofer, sin señal, recibía las paradas del anterior. La página se sigue
+ * guardando en el caché de ejecución cuando SU dueño la visita, y ese caché se
+ * purga al cerrar sesión (mensaje `clear-private-cache`).
+ */
 const PRECACHE_URLS = [
   '/',
   '/app',
@@ -40,7 +51,9 @@ self.addEventListener('install', (event) => {
   event.waitUntil(
     caches
       .open(STATIC_CACHE)
-      .then((cache) => cache.addAll(PRECACHE_URLS))
+      // One by one: a URL that answers 401/404 for this session (the driver PWA
+      // when the person is not signed in yet) must not drop the whole precache.
+      .then((cache) => Promise.all(PRECACHE_URLS.map((url) => cache.add(url).catch(() => {}))))
       .then(() => self.skipWaiting())
       .catch(() => {
         // If precache fails, continue anyway — don't block install
@@ -129,6 +142,13 @@ self.addEventListener('fetch', (event) => {
 self.addEventListener('message', (event) => {
   if (event.data === 'skipWaiting') {
     self.skipWaiting();
+    return;
+  }
+  // Cerrar sesión borra el HTML que se guardó de las páginas de esa persona:
+  // en un teléfono compartido nadie debe recibir del caché las paradas, los
+  // clientes ni los expedientes de quien usó el equipo antes.
+  if (event.data === 'clear-private-cache') {
+    event.waitUntil(caches.delete(RUNTIME_CACHE));
   }
 });
 
@@ -242,4 +262,157 @@ self.addEventListener('pushsubscriptionchange', (event) => {
       }
     })()
   );
+});
+
+// ---------------------------------------------------------------------------
+// Background Sync de los comandos operativos (cola offline de la PWA de chofer)
+// ---------------------------------------------------------------------------
+//
+// La cola vive en IndexedDB (`unik-commands`, ver src/lib/offline-commands.ts).
+// Cuando el teléfono recupera señal, el navegador dispara este sync aunque la
+// pestaña esté cerrada y reenviamos los comandos al mismo endpoint de lote que
+// usa la app. Cada comando lleva su `commandId`, así que repetirlo nunca aplica
+// la entrega dos veces: el motor devuelve el resultado que ya había guardado.
+
+const LOGISTICS_SYNC_TAG = 'logistics-commands';
+const COMMANDS_DB_NAME = 'unik-commands';
+const COMMANDS_STORE_NAME = 'commands';
+const COMMANDS_BATCH_ENDPOINT = '/app/operations/api/commands/batch';
+const SYNC_BATCH_SIZE = 50;
+// Mismo tope que el cliente: un comando que el servidor rechaza una y otra vez
+// espera a que la persona decida (reintentar o descartar).
+const SYNC_MAX_FAILURES = 20;
+const SYNC_FINAL_STATUSES = ['completed', 'pending_external', 'rejected'];
+
+/**
+ * MISMA versión y MISMO esquema que `src/lib/offline-commands.ts`.
+ *
+ * Abrir sin versión creaba la base en la 1 SIN el almacén `commands` cuando el
+ * `sync` llegaba antes que el cliente (las etiquetas de Background Sync
+ * sobreviven entre sesiones): después el cliente abría la 1, no disparaba
+ * `onupgradeneeded`, y la cola se caía a memoria en silencio — un comando
+ * encolado sin señal se perdía al cerrar la pestaña.
+ */
+const COMMANDS_DB_VERSION = 1;
+
+function openCommandsDb() {
+  return new Promise((resolve, reject) => {
+    let request;
+    try {
+      request = indexedDB.open(COMMANDS_DB_NAME, COMMANDS_DB_VERSION);
+    } catch (error) {
+      reject(error);
+      return;
+    }
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(COMMANDS_STORE_NAME)) {
+        const store = db.createObjectStore(COMMANDS_STORE_NAME, { keyPath: 'commandId' });
+        store.createIndex('queuedAt', 'queuedAt');
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error || new Error('IndexedDB no disponible'));
+    request.onblocked = () => reject(new Error('IndexedDB bloqueado'));
+  });
+}
+
+function readQueuedCommands(db) {
+  return new Promise((resolve, reject) => {
+    if (!db.objectStoreNames.contains(COMMANDS_STORE_NAME)) {
+      resolve([]);
+      return;
+    }
+    const tx = db.transaction(COMMANDS_STORE_NAME, 'readonly');
+    const request = tx.objectStore(COMMANDS_STORE_NAME).getAll();
+    request.onsuccess = () => resolve(request.result || []);
+    request.onerror = () => reject(request.error || new Error('No se pudo leer la cola'));
+  });
+}
+
+function removeQueuedCommands(db, ids) {
+  if (ids.length === 0) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(COMMANDS_STORE_NAME, 'readwrite');
+    const store = tx.objectStore(COMMANDS_STORE_NAME);
+    for (const id of ids) store.delete(id);
+    tx.oncomplete = () => resolve();
+    tx.onabort = () => reject(tx.error || new Error('No se pudo limpiar la cola'));
+    tx.onerror = () => reject(tx.error || new Error('No se pudo limpiar la cola'));
+  });
+}
+
+function toWireCommand(command) {
+  const wire = {
+    commandId: command.commandId,
+    type: command.type,
+    aggregate: command.aggregate,
+    payload: command.payload,
+    occurredAt: command.occurredAt,
+  };
+  if (typeof command.expectedVersion === 'number') wire.expectedVersion = command.expectedVersion;
+  return wire;
+}
+
+async function flushOperationalCommands() {
+  let db;
+  try {
+    db = await openCommandsDb();
+  } catch {
+    // Sin IndexedDB no hay cola que reenviar: no tiene caso reintentar.
+    return;
+  }
+
+  const queued = (await readQueuedCommands(db)).filter(
+    (command) => command && command.userId && (command.failures || 0) < SYNC_MAX_FAILURES
+  );
+  if (queued.length === 0) return;
+
+  // Cada comando pertenece a quien lo registró: el lote viaja por usuario y el
+  // servidor responde `actor_mismatch` (sin ejecutar nada) si la sesión es de
+  // otra persona, así que esos comandos se quedan esperando a su dueño.
+  const byUser = new Map();
+  for (const command of queued) {
+    const list = byUser.get(command.userId) || [];
+    list.push(command);
+    byUser.set(command.userId, list);
+  }
+
+  let stillPending = 0;
+  for (const [userId, commands] of byUser) {
+    const ordered = commands.slice().sort((a, b) => (a.queuedAt || 0) - (b.queuedAt || 0));
+    const chunk = ordered.slice(0, SYNC_BATCH_SIZE);
+    const response = await fetch(COMMANDS_BATCH_ENDPOINT, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        deviceId: 'service-worker',
+        userId,
+        commands: chunk.map(toWireCommand),
+      }),
+    });
+    // Sesión expirada o de otra persona: lo resuelve la app al abrirse.
+    if (response.status === 401 || response.status === 403) return;
+    if (!response.ok) throw new Error(`El servidor respondió ${response.status}`);
+
+    const body = await response.json().catch(() => null);
+    const results = (body && body.results) || [];
+    const done = results
+      .filter(
+        (result) =>
+          SYNC_FINAL_STATUSES.includes(result.status) && result.errorCode !== 'actor_mismatch'
+      )
+      .map((result) => result.commandId);
+    await removeQueuedCommands(db, done);
+    stillPending += ordered.length - done.length;
+  }
+
+  // Quedan comandos: pedimos al navegador que reprograme el envío.
+  if (stillPending > 0) throw new Error('Quedan comandos operativos por enviar');
+}
+
+self.addEventListener('sync', (event) => {
+  if (event.tag !== LOGISTICS_SYNC_TAG) return;
+  event.waitUntil(flushOperationalCommands());
 });

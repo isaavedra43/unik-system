@@ -1,0 +1,1122 @@
+/*
+ * UNIK Neural Operations (plan 7.8): visor de procesos, variantes, grafo,
+ * replay y simulación.
+ *
+ * SÓLO TOKENS (`--unik-*`): ningún color literal, ningún tamaño mágico de
+ * marca. Se importa desde `src/app/app/admin/control-tower/neural/layout.tsx`
+ * (Next permite CSS global en un layout) junto con la hoja de React Flow.
+ *
+ * Prefijo único `.neural-*` para no pisar `area-shell.css`, `case-360.css` ni
+ * ninguna hoja de área.
+ */
+
+/* ------------------------------------------------------------------ Shell */
+
+.neural-shell {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--unik-space-4);
+  min-width: 0;
+  /* Ruta full-bleed (`.app-content-flush` pone padding 0): sin esto las tarjetas
+     y el deslizador se cortaban contra el borde derecho de la ventana. */
+  padding: var(--unik-space-8) var(--unik-space-8) var(--unik-space-12);
+}
+
+@media (max-width: 1024px) {
+  .neural-shell {
+    padding: var(--unik-space-5) var(--unik-space-4) var(--unik-space-8);
+  }
+}
+
+@media (max-width: 768px) {
+  .neural-shell {
+    padding: var(--unik-space-4) var(--unik-space-3) var(--unik-space-6);
+  }
+}
+
+.neural-intro {
+  /* El icono iba en línea con la frase y se veía suelto sobre el texto. */
+  display: flex;
+  align-items: center;
+  gap: var(--unik-space-2);
+  margin: 0;
+  font-size: var(--unik-text-sm);
+  color: var(--unik-text-secondary);
+  max-width: 68ch;
+}
+
+.neural-intro svg {
+  flex: 0 0 auto;
+  color: var(--unik-text-muted);
+}
+
+.neural-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--unik-space-2) var(--unik-space-4);
+  padding-top: var(--unik-space-3);
+  border-top: 1px solid var(--unik-border-subtle);
+  font-size: var(--unik-text-xs);
+  color: var(--unik-text-secondary);
+}
+
+.neural-footer-stale {
+  color: var(--unik-warning);
+  font-weight: 600;
+}
+
+/* Barra de filtros de cada herramienta */
+.neural-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--unik-space-3);
+  padding: var(--unik-space-3);
+  border: 1px solid var(--unik-border);
+  border-radius: var(--unik-radius-md);
+  background: var(--unik-surface);
+  min-width: 0;
+}
+
+.neural-toolbar-field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--unik-space-1);
+  min-width: 0;
+}
+
+.neural-toolbar-field > label,
+.neural-field-label {
+  font-size: var(--unik-text-xs);
+  font-weight: 600;
+  color: var(--unik-text-secondary);
+}
+
+.neural-toolbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--unik-space-2);
+  margin-left: auto;
+}
+
+.neural-toolbar-note {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: var(--unik-text-xs);
+  color: var(--unik-text-secondary);
+}
+
+/* ---------------------------------------------------------------- Bloques */
+
+.neural-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--unik-space-3);
+  padding: var(--unik-space-4);
+  border: 1px solid var(--unik-border);
+  border-radius: var(--unik-radius-md);
+  background: var(--unik-surface);
+  min-width: 0;
+}
+
+.neural-panel-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--unik-space-2) var(--unik-space-3);
+}
+
+.neural-panel-title {
+  margin: 0;
+  font-size: var(--unik-text-base);
+  font-weight: 600;
+  color: var(--unik-text);
+}
+
+.neural-panel-hint {
+  margin: 0;
+  font-size: var(--unik-text-xs);
+  color: var(--unik-text-secondary);
+}
+
+.neural-empty {
+  display: grid;
+  gap: var(--unik-space-2);
+  padding: var(--unik-space-6);
+  border: 1px dashed var(--unik-border);
+  border-radius: var(--unik-radius-md);
+  background: var(--unik-surface);
+  text-align: center;
+  color: var(--unik-text-secondary);
+  font-size: var(--unik-text-sm);
+}
+
+.neural-empty strong {
+  color: var(--unik-text);
+  font-size: var(--unik-text-base);
+}
+
+.neural-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--unik-space-2);
+  padding: var(--unik-space-2) var(--unik-space-3);
+  border: 1px solid var(--unik-border);
+  border-left: 3px solid var(--unik-warning);
+  border-radius: var(--unik-radius-sm);
+  background: var(--unik-warning-bg);
+  color: var(--unik-text);
+  font-size: var(--unik-text-xs);
+}
+
+/* Partición lienzo + panel lateral */
+.neural-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 20rem;
+  gap: var(--unik-space-4);
+  align-items: start;
+  min-width: 0;
+}
+
+.neural-split-aside {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--unik-space-3);
+  min-width: 0;
+  position: sticky;
+  top: var(--unik-space-4);
+}
+
+/* ---------------------------------------------------------------- Lienzo */
+
+.neural-canvas {
+  position: relative;
+  height: clamp(20rem, 58vh, 40rem);
+  border: 1px solid var(--unik-border);
+  border-radius: var(--unik-radius-md);
+  background: var(--unik-bg);
+  overflow: hidden;
+
+  /* React Flow: su paleta se mapea a los tokens de UNIK. */
+  --xy-background-color: var(--unik-bg);
+  --xy-edge-stroke: var(--unik-border);
+  --xy-edge-stroke-selected: var(--unik-brand);
+  --xy-edge-stroke-width: 1.5;
+  --xy-connectionline-stroke: var(--unik-brand);
+  --xy-handle-background-color: var(--unik-surface);
+  --xy-handle-border-color: var(--unik-border);
+  --xy-node-background-color: var(--unik-surface);
+  --xy-node-border: 1px solid var(--unik-border);
+  --xy-node-color: var(--unik-text);
+  --xy-node-border-radius: var(--unik-radius-md);
+  --xy-node-boxshadow-hover: var(--unik-shadow-md);
+  --xy-node-boxshadow-selected: var(--unik-shadow-md);
+  --xy-selection-background-color: var(--unik-brand-subtle);
+  --xy-selection-border: 1px dashed var(--unik-brand);
+  --xy-controls-button-background-color: var(--unik-surface);
+  --xy-controls-button-background-color-hover: var(--unik-surface-hover);
+  --xy-controls-button-color: var(--unik-text);
+  --xy-controls-button-color-hover: var(--unik-brand);
+  --xy-controls-button-border-color: var(--unik-border);
+  --xy-minimap-background-color: var(--unik-surface);
+  --xy-attribution-background-color: transparent;
+}
+
+.neural-canvas .react-flow__attribution {
+  font-size: 0.625rem;
+  color: var(--unik-text-muted);
+}
+
+.neural-canvas .react-flow__node {
+  font-family: inherit;
+}
+
+.neural-canvas .react-flow__node:focus-visible,
+.neural-canvas .react-flow__node.selected {
+  outline: 2px solid var(--unik-brand);
+  outline-offset: 2px;
+}
+
+.neural-canvas .react-flow__controls-button {
+  border-radius: var(--unik-radius-sm);
+}
+
+.neural-canvas .react-flow__edge-path {
+  stroke: var(--unik-border);
+}
+
+.neural-canvas .react-flow__edge.neural-edge-path .react-flow__edge-path {
+  stroke: var(--unik-brand);
+  stroke-width: 2.5;
+}
+
+.neural-canvas .react-flow__edge.neural-edge-dim .react-flow__edge-path {
+  stroke: var(--unik-border-subtle);
+  opacity: 0.5;
+}
+
+.neural-canvas-loading {
+  display: grid;
+  place-items: center;
+  height: clamp(20rem, 58vh, 40rem);
+  border: 1px solid var(--unik-border);
+  border-radius: var(--unik-radius-md);
+  background: var(--unik-surface);
+  color: var(--unik-text-secondary);
+  font-size: var(--unik-text-sm);
+  gap: var(--unik-space-2);
+}
+
+/* Leyenda de áreas y de estados */
+.neural-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--unik-space-2) var(--unik-space-4);
+  font-size: var(--unik-text-xs);
+  color: var(--unik-text-secondary);
+}
+
+.neural-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--unik-space-2);
+  white-space: nowrap;
+}
+
+.neural-legend-dot {
+  width: 0.625rem;
+  height: 0.625rem;
+  border-radius: var(--unik-radius-sm);
+  background: var(--neural-accent, var(--unik-text-muted));
+  flex: 0 0 auto;
+}
+
+/* Paleta por área (los mismos colores en visor, grafo y simulación) */
+.neural-area-brand {
+  --neural-accent: var(--unik-chart-1);
+}
+.neural-area-info {
+  --neural-accent: var(--unik-chart-2);
+}
+.neural-area-success {
+  --neural-accent: var(--unik-chart-3);
+}
+.neural-area-warning {
+  --neural-accent: var(--unik-chart-4);
+}
+.neural-area-danger {
+  --neural-accent: var(--unik-chart-5);
+}
+.neural-area-muted {
+  --neural-accent: var(--unik-chart-6);
+}
+
+/* --------------------------------------------------------- Nodo del paso */
+
+.neural-step-node {
+  display: grid;
+  gap: var(--unik-space-1);
+  width: 13.75rem;
+  min-height: 5.25rem;
+  padding: var(--unik-space-2) var(--unik-space-3);
+  border: 1px solid var(--unik-border);
+  border-left: 4px solid var(--neural-accent, var(--unik-text-muted));
+  border-radius: var(--unik-radius-md);
+  background: var(--unik-surface);
+  color: var(--unik-text);
+  text-align: left;
+  box-shadow: var(--unik-shadow-sm);
+  transition: box-shadow var(--unik-transition);
+}
+
+.neural-step-node-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--unik-space-2);
+}
+
+.neural-step-node-title {
+  font-size: var(--unik-text-sm);
+  font-weight: 600;
+  line-height: 1.25;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.neural-step-node-order {
+  font-size: var(--unik-text-xs);
+  font-weight: 700;
+  color: var(--unik-brand);
+  background: var(--unik-brand-subtle);
+  border-radius: var(--unik-radius-full);
+  padding: 0 0.4rem;
+  flex: 0 0 auto;
+}
+
+.neural-step-node-area {
+  font-size: var(--unik-text-xs);
+  color: var(--unik-text-secondary);
+}
+
+.neural-step-node-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+
+.neural-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.05rem 0.35rem;
+  border: 1px solid var(--unik-border);
+  border-radius: var(--unik-radius-sm);
+  background: var(--unik-surface-hover);
+  font-size: 0.6875rem;
+  line-height: 1.5;
+  color: var(--unik-text-secondary);
+  white-space: nowrap;
+}
+
+.neural-badge-label {
+  color: var(--unik-text-muted);
+}
+
+.neural-badge-info {
+  border-color: var(--unik-info);
+  background: var(--unik-info-bg);
+  color: var(--unik-info);
+}
+
+.neural-badge-success {
+  border-color: var(--unik-success);
+  background: var(--unik-success-bg);
+  color: var(--unik-success);
+}
+
+.neural-badge-warning {
+  border-color: var(--unik-warning);
+  background: var(--unik-warning-bg);
+  color: var(--unik-warning);
+}
+
+.neural-badge-danger {
+  border-color: var(--unik-danger);
+  background: var(--unik-danger-bg);
+  color: var(--unik-danger);
+}
+
+.neural-badge-info .neural-badge-label,
+.neural-badge-success .neural-badge-label,
+.neural-badge-warning .neural-badge-label,
+.neural-badge-danger .neural-badge-label {
+  color: inherit;
+  opacity: 0.75;
+}
+
+.neural-step-node-empty {
+  font-size: 0.6875rem;
+  color: var(--unik-text-muted);
+}
+
+.neural-step-node-path {
+  border-color: var(--unik-brand);
+  box-shadow: 0 0 0 2px var(--unik-brand-subtle);
+}
+
+.neural-step-node-dim {
+  opacity: 0.45;
+}
+
+/* -------------------------------------------------------- Nodo del grafo */
+
+.neural-graph-node {
+  display: grid;
+  gap: 0.15rem;
+  width: 13rem;
+  padding: var(--unik-space-2);
+  border: 1px solid var(--unik-border);
+  border-left: 4px solid var(--neural-accent, var(--unik-text-muted));
+  border-radius: var(--unik-radius-md);
+  background: var(--unik-surface);
+  color: var(--unik-text);
+  text-align: left;
+  box-shadow: var(--unik-shadow-sm);
+}
+
+.neural-graph-node-type {
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: var(--unik-text-muted);
+}
+
+.neural-graph-node-label {
+  font-size: var(--unik-text-sm);
+  font-weight: 600;
+  line-height: 1.25;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.neural-graph-node-sub {
+  font-size: var(--unik-text-xs);
+  color: var(--unik-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.neural-graph-node-root {
+  border-color: var(--unik-brand);
+  box-shadow: 0 0 0 2px var(--unik-brand-subtle);
+}
+
+.neural-graph-node-selected {
+  outline: 2px solid var(--unik-brand);
+  outline-offset: 2px;
+}
+
+.neural-graph-node-flags {
+  display: flex;
+  gap: 0.25rem;
+  align-items: center;
+  font-size: 0.6875rem;
+  color: var(--unik-text-muted);
+}
+
+/* ------------------------------------------------------ Listas y tablas */
+
+.neural-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--unik-border);
+  border-radius: var(--unik-radius-md);
+  background: var(--unik-surface);
+}
+
+.neural-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--unik-text-sm);
+  min-width: 36rem;
+}
+
+.neural-table th,
+.neural-table td {
+  padding: var(--unik-space-2) var(--unik-space-3);
+  text-align: left;
+  border-bottom: 1px solid var(--unik-border-subtle);
+  vertical-align: middle;
+}
+
+.neural-table th {
+  font-size: var(--unik-text-xs);
+  font-weight: 600;
+  color: var(--unik-text-secondary);
+  white-space: nowrap;
+  position: sticky;
+  top: 0;
+  background: var(--unik-surface);
+  z-index: 1;
+}
+
+.neural-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.neural-table tbody tr:hover {
+  background: var(--unik-surface-hover);
+}
+
+.neural-table-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.neural-table-row-active > td {
+  background: var(--unik-brand-subtle);
+}
+
+.neural-row-button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--unik-space-2);
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: var(--unik-brand-text);
+  text-align: left;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.neural-row-button:hover {
+  color: var(--unik-brand-hover);
+}
+
+.neural-row-button:focus-visible {
+  outline: 2px solid var(--unik-brand);
+  outline-offset: 2px;
+  border-radius: var(--unik-radius-sm);
+}
+
+.neural-node-button {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.neural-node-button:focus-visible {
+  outline: 2px solid var(--unik-brand);
+  outline-offset: 2px;
+  border-radius: var(--unik-radius-md);
+}
+
+.neural-sequence {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  align-items: center;
+  font-size: var(--unik-text-xs);
+  color: var(--unik-text-secondary);
+}
+
+.neural-sequence-step {
+  padding: 0.05rem 0.35rem;
+  border: 1px solid var(--unik-border);
+  border-radius: var(--unik-radius-sm);
+  background: var(--unik-surface-hover);
+  white-space: nowrap;
+}
+
+.neural-sequence-arrow {
+  color: var(--unik-text-muted);
+}
+
+/* Barra proporcional dentro de una celda */
+.neural-bar {
+  display: block;
+  height: 0.375rem;
+  border-radius: var(--unik-radius-full);
+  background: var(--unik-surface-pressed);
+  overflow: hidden;
+  min-width: 4rem;
+}
+
+.neural-bar-fill {
+  display: block;
+  height: 100%;
+  border-radius: var(--unik-radius-full);
+  background: var(--neural-accent, var(--unik-brand));
+}
+
+.neural-bar-danger .neural-bar-fill {
+  background: var(--unik-danger);
+}
+
+.neural-bar-warning .neural-bar-fill {
+  background: var(--unik-warning);
+}
+
+/* ------------------------------------------------- Matriz de traspasos */
+
+.neural-matrix {
+  border-collapse: collapse;
+  font-size: var(--unik-text-sm);
+  min-width: 40rem;
+}
+
+.neural-matrix th,
+.neural-matrix td {
+  border: 1px solid var(--unik-border-subtle);
+  padding: var(--unik-space-2);
+  text-align: center;
+  white-space: nowrap;
+}
+
+.neural-matrix th[scope='row'] {
+  text-align: left;
+  font-weight: 600;
+  background: var(--unik-surface);
+  position: sticky;
+  left: 0;
+  z-index: 1;
+}
+
+.neural-matrix-cell {
+  font-variant-numeric: tabular-nums;
+}
+
+.neural-matrix-cell-empty {
+  color: var(--unik-text-muted);
+}
+
+.neural-matrix-cell-expired {
+  color: var(--unik-danger);
+  font-weight: 600;
+}
+
+.neural-matrix-diagonal {
+  background: var(--unik-surface-hover);
+}
+
+.neural-matrix-detail {
+  display: block;
+  font-size: 0.6875rem;
+  color: var(--unik-text-secondary);
+  font-weight: 400;
+}
+
+/* --------------------------------------------------------- Deslizador */
+
+.neural-slider {
+  display: grid;
+  gap: var(--unik-space-2);
+}
+
+.neural-slider-row {
+  display: flex;
+  align-items: center;
+  gap: var(--unik-space-3);
+  flex-wrap: wrap;
+}
+
+.neural-slider input[type='range'] {
+  flex: 1 1 12rem;
+  min-width: 8rem;
+  accent-color: var(--unik-brand);
+  height: 1.75rem;
+  cursor: pointer;
+}
+
+.neural-slider input[type='range']:focus-visible {
+  outline: 2px solid var(--unik-brand);
+  outline-offset: 2px;
+  border-radius: var(--unik-radius-sm);
+}
+
+.neural-slider-value {
+  font-size: var(--unik-text-sm);
+  font-weight: 600;
+  color: var(--unik-text);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.neural-slider-ends {
+  display: flex;
+  justify-content: space-between;
+  font-size: var(--unik-text-xs);
+  color: var(--unik-text-muted);
+  gap: var(--unik-space-2);
+}
+
+/* ---------------------------------------------------------- Cronología */
+
+.neural-timeline {
+  display: grid;
+  gap: var(--unik-space-1);
+  max-height: 24rem;
+  overflow-y: auto;
+  padding-right: var(--unik-space-1);
+  margin: 0;
+  list-style: none;
+}
+
+.neural-timeline-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--unik-space-2);
+  padding: var(--unik-space-1) var(--unik-space-2);
+  border-left: 2px solid var(--unik-border);
+  font-size: var(--unik-text-sm);
+  color: var(--unik-text);
+}
+
+.neural-timeline-item-future {
+  color: var(--unik-text-muted);
+  border-left-color: var(--unik-border-subtle);
+}
+
+.neural-timeline-item-current {
+  border-left-color: var(--unik-brand);
+  background: var(--unik-brand-subtle);
+  border-radius: var(--unik-radius-sm);
+  font-weight: 600;
+}
+
+.neural-timeline-clock {
+  font-variant-numeric: tabular-nums;
+  color: var(--unik-text-secondary);
+  font-size: var(--unik-text-xs);
+  padding-top: 0.15rem;
+}
+
+.neural-timeline-line {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* ------------------------------------------------------- Mini visor */
+
+.neural-mini-grid {
+  display: grid;
+  /* `min(11rem, 100%)`: en una columna estrecha la pista no puede exigir
+     11 rem y sacar la lista de su caja. */
+  grid-template-columns: repeat(auto-fill, minmax(min(11rem, 100%), 1fr));
+  gap: var(--unik-space-2);
+  min-width: 0;
+}
+
+/* Una celda de rejilla nace con `min-width: auto`: sin esto no puede encogerse
+   por debajo de su contenido y se sale de su pista. */
+.neural-mini-grid > li {
+  min-width: 0;
+}
+
+/* El ancho fijo de estos nodos (13,75 rem / 13 rem) es del LIENZO, donde el
+   acomodo los posiciona. En la lista de móvil el nodo llena su celda: sin esto,
+   a 768 px —donde la rejilla ya reparte varias pistas de 11 rem— la tarjeta se
+   salía de su pista y sus insignias quedaban fuera de la caja. */
+.neural-mini-grid .neural-step-node,
+.neural-mini-grid .neural-graph-node {
+  width: auto;
+  min-width: 0;
+}
+
+.neural-mini-grid .neural-step-node-title {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.neural-mini-step {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.15rem;
+  padding: var(--unik-space-2);
+  border: 1px solid var(--unik-border);
+  border-left: 4px solid var(--neural-accent, var(--unik-text-muted));
+  border-radius: var(--unik-radius-sm);
+  background: var(--unik-surface);
+  font-size: var(--unik-text-xs);
+}
+
+.neural-mini-step-title {
+  font-size: var(--unik-text-sm);
+  font-weight: 600;
+  color: var(--unik-text);
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.neural-mini-step-meta {
+  color: var(--unik-text-secondary);
+}
+
+/* Mini visor: el tono viene del ESTADO, no del área */
+.neural-state-brand {
+  --neural-accent: var(--unik-chart-1);
+}
+.neural-state-info {
+  --neural-accent: var(--unik-chart-2);
+}
+.neural-state-success {
+  --neural-accent: var(--unik-chart-3);
+}
+.neural-state-warning {
+  --neural-accent: var(--unik-chart-4);
+}
+.neural-state-danger {
+  --neural-accent: var(--unik-chart-5);
+}
+.neural-state-muted {
+  --neural-accent: var(--unik-chart-6);
+}
+
+/* -------------------------------------------------------- Simulación */
+
+.neural-sim-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 20rem) minmax(0, 1fr);
+  gap: var(--unik-space-4);
+  align-items: start;
+}
+
+.neural-sim-form {
+  display: grid;
+  gap: var(--unik-space-3);
+}
+
+.neural-sim-entry {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--unik-space-2);
+  align-items: end;
+}
+
+.neural-sim-list {
+  display: grid;
+  gap: var(--unik-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.neural-sim-chip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--unik-space-2);
+  padding: var(--unik-space-1) var(--unik-space-2);
+  border: 1px solid var(--unik-border);
+  border-radius: var(--unik-radius-sm);
+  background: var(--unik-surface-hover);
+  font-size: var(--unik-text-xs);
+}
+
+.neural-sim-path {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  align-items: center;
+  font-size: var(--unik-text-xs);
+  color: var(--unik-text-secondary);
+}
+
+/* --------------------------------------------------------- Inspector */
+
+.neural-inspector-fields {
+  display: grid;
+  gap: var(--unik-space-2);
+  margin: 0;
+}
+
+.neural-inspector-field {
+  display: grid;
+  gap: 0.1rem;
+}
+
+.neural-inspector-field dt {
+  font-size: var(--unik-text-xs);
+  color: var(--unik-text-secondary);
+}
+
+.neural-inspector-field dd {
+  margin: 0;
+  font-size: var(--unik-text-sm);
+  color: var(--unik-text);
+  overflow-wrap: anywhere;
+}
+
+.neural-inspector-masked dd {
+  color: var(--unik-warning);
+}
+
+.neural-neighbours {
+  display: grid;
+  gap: var(--unik-space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: 14rem;
+  overflow-y: auto;
+}
+
+.neural-neighbour {
+  display: grid;
+  gap: 0.1rem;
+  padding: var(--unik-space-1) var(--unik-space-2);
+  border: 1px solid var(--unik-border-subtle);
+  border-radius: var(--unik-radius-sm);
+  font-size: var(--unik-text-xs);
+}
+
+.neural-neighbour-relation {
+  color: var(--unik-text-muted);
+}
+
+/* ------------------------------------------------------------ Escenas */
+
+.neural-scenes {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--unik-space-2);
+  min-width: 0;
+}
+
+.neural-scene-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--unik-space-1);
+  padding: 0.15rem 0.5rem;
+  border: 1px solid var(--unik-border);
+  border-radius: var(--unik-radius-full);
+  background: var(--unik-surface);
+  font-size: var(--unik-text-xs);
+  color: var(--unik-text-secondary);
+  max-width: 14rem;
+}
+
+.neural-scene-chip-active {
+  border-color: var(--unik-brand);
+  background: var(--unik-brand-subtle);
+  color: var(--unik-brand-text);
+  font-weight: 600;
+}
+
+.neural-scene-chip-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Lista de chips seleccionables (tipos de nodo, relaciones) */
+.neural-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--unik-space-1);
+}
+
+.neural-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.15rem 0.5rem;
+  border: 1px solid var(--unik-border);
+  border-radius: var(--unik-radius-full);
+  background: var(--unik-surface);
+  color: var(--unik-text-secondary);
+  font-size: var(--unik-text-xs);
+  cursor: pointer;
+}
+
+.neural-chip:hover {
+  background: var(--unik-surface-hover);
+}
+
+.neural-chip:focus-visible {
+  outline: 2px solid var(--unik-brand);
+  outline-offset: 2px;
+}
+
+.neural-chip[aria-pressed='true'] {
+  border-color: var(--unik-brand);
+  background: var(--unik-brand-subtle);
+  color: var(--unik-brand-text);
+  font-weight: 600;
+}
+
+/* --------------------------------------------------------- Responsive */
+
+@media (max-width: 1280px) {
+  .neural-split {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .neural-split-aside {
+    position: static;
+  }
+
+  .neural-sim-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 1024px) {
+  .neural-canvas,
+  .neural-canvas-loading {
+    height: clamp(18rem, 50vh, 30rem);
+  }
+}
+
+@media (max-width: 768px) {
+  .neural-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+    /* En columna, `wrap` reparte los hijos en COLUMNAS y se salían por la
+       derecha (`.neural-toolbar-note` con `flex-basis: 100%` acababa a 653 px
+       en una pantalla de 390). En columna no hay nada que envolver. */
+    flex-wrap: nowrap;
+  }
+
+  .neural-toolbar-actions {
+    margin-left: 0;
+  }
+
+  .neural-toolbar-field select,
+  .neural-toolbar-field input {
+    width: 100%;
+  }
+
+  /* En teléfono no hay lienzo: listas. */
+  .neural-canvas,
+  .neural-canvas-loading {
+    display: none;
+  }
+
+  .neural-panel {
+    padding: var(--unik-space-3);
+  }
+
+  .neural-table {
+    min-width: 28rem;
+  }
+
+  .neural-timeline {
+    max-height: none;
+  }
+
+  .neural-sim-entry {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* Áreas táctiles cómodas */
+  .neural-chip,
+  .neural-scene-chip {
+    min-height: 2.25rem;
+    padding-inline: var(--unik-space-3);
+  }
+
+  .neural-row-button {
+    min-height: 2.25rem;
+  }
+}
+
+@media (max-width: 400px) {
+  .neural-mini-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .neural-legend {
+    gap: var(--unik-space-1) var(--unik-space-2);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .neural-step-node,
+  .neural-graph-node {
+    transition: none;
+  }
+}

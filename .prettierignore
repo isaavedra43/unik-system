@@ -1,0 +1,26 @@
+# Qué NO revisa `npm run format:check` (puerta de cada entrega).
+#
+# Motivo: `prettier --check .` recorría `.claude/worktrees/`, que son COPIAS de
+# trabajo de otras sesiones de agente (475 de los 1 317 archivos señalados no
+# eran del repositorio). Un árbol de trabajo ajeno no es código de UNIK y
+# formatearlo no arregla nada, así que la puerta mentía.
+
+# Copias de trabajo de sesiones de agente (ya ignoradas por git).
+.claude/
+
+# Artefactos de construcción y de pruebas.
+.next/
+out/
+build/
+dist/
+storybook-static/
+coverage/
+test-results/
+playwright-report/
+node_modules/
+*.tsbuildinfo
+
+# Datos y binarios: prettier no los formatea y sólo hacen ruido.
+package-lock.json
+public/
+prisma/migrations/

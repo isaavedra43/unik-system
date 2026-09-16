@@ -500,6 +500,28 @@ describe('advanceCase tras completar pasos', () => {
     expect(stepOf('entregar')!.status).toBe('ready');
   });
 
+  /**
+   * Plan §4: `DeliveryOrder.mode` incluye `carrier`. Cuando Zoho dice que el
+   * pedido sale por paquetería, la entrega nace así y no como «Flotilla
+   * propia»: conserva su domicilio y sigue pidiendo asignar transporte, pero ya
+   * no reclama unidad ni chofer nuestros.
+   */
+  it('un pedido por paquetería nace como entrega de transportista', async () => {
+    seedItemStock(fake, { zohoItemId: 'item-1', quantity: 25 });
+    seedSalesOrder(fake, { deliveryMethod: 'PAQUETERÍA', lines: [{ quantity: 3 }] });
+    await systemStart();
+    await completeWorkItem(
+      team.byArea.inventario,
+      itemOf(stepOf('preparar_pedido'))!.id,
+      { result: { issue_movements: 'listo' } },
+      { now: NOW }
+    );
+    const delivery = fake.rows('deliveryOrder')[0];
+    expect(delivery).toMatchObject({ mode: 'carrier', vehicleId: null, driverId: null });
+    expect(delivery.addressLine).not.toBeNull();
+    expect(stepOf('asignar_transporte')!.status).not.toBe('skipped');
+  });
+
   it('sin trabajo abierto de un paso listo, el avance vuelve a crearlo (huérfano)', async () => {
     seedItemStock(fake, { zohoItemId: 'item-1', quantity: 25 });
     seedSalesOrder(fake, { lines: [{ quantity: 10 }] });

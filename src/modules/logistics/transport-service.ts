@@ -23,6 +23,7 @@ import {
   idText,
   loadDeliveryOrder,
   logisticsError,
+  notifyDeliveryUpdate,
   publishDeliveryChange,
   readShipmentInput,
   requireDay,
@@ -30,6 +31,7 @@ import {
   bumpDeliveryOrder,
 } from './logistics-helpers';
 import {
+  DELIVERY_MODE_LABELS,
   DELIVERY_ORDER_STATUS_LABELS,
   LOGISTICS_EVENTS,
   LOGISTICS_JOB_TYPES,
@@ -39,6 +41,8 @@ import {
   TRANSPORT_ASSIGNABLE_STATUSES,
   isDeliveryOrderStatus,
   zohoShipRequestKey,
+  type DeliveryMode,
+  type ShippingMode,
 } from './types';
 import {
   compareShipment,
@@ -54,6 +58,11 @@ import {
 
 /**
  * Transport assignment and its Zoho mirror (plan sections 4.2 and 6.3).
+ *
+ * `assignTransport` also decides HOW it ships (plan §4 `mode`): `own_fleet`
+ * demands a unit and a driver of ours, `carrier` (a courier or an external
+ * haulier) travels with its tracking number and neither of the two. Switching
+ * between the two is only possible while the delivery is not loaded on a trip.
  *
  * `assignTransport` never calls Zoho: it stores what must be written
  * (`shipmentInput` with its `requestKey`), leaves the order `pending_external`
@@ -81,6 +90,12 @@ export const assignTransportSchema = z.object({
   trackingNumber: z.string().trim().max(100).nullable().optional(),
   vehicleId: idText.nullable().optional(),
   driverId: idText.nullable().optional(),
+  /**
+   * Plan §4: how it ships. `own_fleet` needs a unit and a driver of ours;
+   * `carrier` (a courier or an external haulier) travels with its tracking
+   * number and none of the two. Omitted keeps the mode the order already has.
+   */
+  mode: z.enum(SHIPPING_MODES).optional(),
 });
 export type AssignTransportInput = z.infer<typeof assignTransportSchema>;
 
@@ -161,6 +176,8 @@ export function toShipmentReadback(
 export interface AssignTransportResult {
   deliveryOrderId: string;
   status: string;
+  /** How it ships after the assignment (`own_fleet` | `carrier`). */
+  mode: string;
   zohoSyncState: string;
   requestKey: string;
   unchanged: boolean;
@@ -192,9 +209,20 @@ export async function assignTransport(
   }
   const day = requireDay(input.date, 'la fecha de envío');
 
+  // Plan §4: transport decides HOW it ships. Only own fleet ↔ carrier; a pickup
+  // or a direct supplier delivery was already rejected above.
+  const mode: ShippingMode = input.mode ?? (order.mode as ShippingMode);
+  const modeChanged = mode !== order.mode;
+  if (modeChanged && order.tripId) {
+    throw new OperationsError(
+      'invalid_state',
+      'La entrega está cargada en un viaje de la flotilla; quítala del viaje antes de cambiar cómo se envía'
+    );
+  }
+
   let vehicleId: string | null = null;
   let driverId: string | null = null;
-  if (order.mode === 'own_fleet') {
+  if (mode === 'own_fleet') {
     if (!input.vehicleId || !input.driverId) {
       throw new OperationsError('invalid_payload', 'Con flotilla propia indica vehículo y chofer');
     }
@@ -217,6 +245,9 @@ export async function assignTransport(
     vehicleId = input.vehicleId;
     driverId = input.driverId;
   }
+  // A carrier shipment travels with its own tracking number: vehicleId and
+  // driverId stay null (whatever the caller sent) so the board, the dispatch
+  // tiles and Zoho stop showing a unit of ours that never carried it.
 
   let linkedNow = false;
   if (!order.packageId) {
@@ -244,6 +275,7 @@ export async function assignTransport(
   const current = readShipmentInput(order.shipmentInput);
   const unchanged =
     !linkedNow &&
+    !modeChanged &&
     current !== null &&
     (order.status === 'pending_external' || order.status === 'assigned') &&
     (order.vehicleId ?? null) === vehicleId &&
@@ -259,6 +291,7 @@ export async function assignTransport(
       data: {
         deliveryOrderId: order.id,
         status: order.status,
+        mode: order.mode,
         zohoSyncState: order.zohoSyncState,
         requestKey: current.requestKey,
         unchanged: true,
@@ -266,23 +299,49 @@ export async function assignTransport(
     };
   }
 
+  const eventOptions = {
+    caseId: order.caseId,
+    areaKey: 'logistica',
+    objectType: ORDER,
+    objectId: order.id,
+  } as const;
+  if (modeChanged) {
+    ctx.emit(
+      LOGISTICS_EVENTS.delivery.modeChanged,
+      {
+        deliveryOrderId: order.id,
+        previousMode: order.mode,
+        mode,
+        previousModeLabel: DELIVERY_MODE_LABELS[order.mode as DeliveryMode] ?? order.mode,
+        modeLabel: DELIVERY_MODE_LABELS[mode],
+      },
+      eventOptions
+    );
+  }
   ctx.emit(
     LOGISTICS_EVENTS.delivery.transportAssigned,
     {
       deliveryOrderId: order.id,
-      mode: order.mode,
+      mode,
       carrier: input.carrier,
       vehicleId,
       driverId,
       date: input.date,
     },
-    { caseId: order.caseId, areaKey: 'logistica', objectType: ORDER, objectId: order.id }
+    eventOptions
   );
   // The engine already bumped the version: one key per assignment.
   const updated = await queueShipmentWrite(
     ctx,
     order,
-    { carrier: input.carrier, shipmentDate: input.date, trackingNumber, vehicleId, driverId },
+    {
+      carrier: input.carrier,
+      shipmentDate: input.date,
+      trackingNumber,
+      vehicleId,
+      driverId,
+      ...(modeChanged ? { mode } : {}),
+    },
     { bump: false }
   );
   const requestKey = readShipmentInput(updated.shipmentInput)!.requestKey;
@@ -300,6 +359,7 @@ export async function assignTransport(
     data: {
       deliveryOrderId: order.id,
       status: updated.status,
+      mode: updated.mode,
       zohoSyncState: updated.zohoSyncState,
       requestKey,
       unchanged: false,
@@ -314,6 +374,8 @@ export interface ShipmentWriteFields {
   trackingNumber: string | null;
   vehicleId: string | null;
   driverId: string | null;
+  /** Only when the assignment changes how it ships (own fleet ↔ carrier). */
+  mode?: ShippingMode;
 }
 
 /**
@@ -340,6 +402,7 @@ export async function queueShipmentWrite(
     requestedAt: ctx.now.toISOString(),
   };
   const data = {
+    ...(fields.mode ? { mode: fields.mode } : {}),
     carrier: fields.carrier,
     vehicleId: fields.vehicleId,
     driverId: fields.driverId,
@@ -676,6 +739,15 @@ export async function reconcileShipment(
       caseId: order.caseId,
       objectType: ORDER,
       objectId: order.id,
+    });
+    // Plan 6.6: el dueño del expediente se entera del conflicto con Zoho, no
+    // sólo Logística (que lo ve como incidencia y trabajo de sincronización).
+    await notifyDeliveryUpdate(ctx, order.caseId, {
+      type: 'delivery_zoho_conflict',
+      title: (reference) => `Zoho guardó otro embarque en ${reference}`,
+      body: describeDifferences(differences),
+      entityId: order.id,
+      dedupeKey: `delivery_zoho_conflict:${order.id}:${shipment.requestKey}`,
     });
   }
   if (!repeated) {

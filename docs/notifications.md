@@ -24,28 +24,36 @@ productor (chat, bandeja, voz, IA, seguimiento)
 
 ## Configuración
 
-| Variable | Descripción |
-|---|---|
+| Variable                                 | Descripción                                                                             |
+| ---------------------------------------- | --------------------------------------------------------------------------------------- |
 | `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` | `npx web-push generate-vapid-keys`. Sin ellas el push queda desactivado (in-app sigue). |
-| `VAPID_SUBJECT` | `mailto:` o `https:` de contacto (default: `APP_URL`). |
-| `AI_NOTIFY_MIN_SECONDS` | Segundos mínimos de un turno del asistente para avisar "la IA terminó" (default 20). |
+| `VAPID_SUBJECT`                          | `mailto:` o `https:` de contacto (default: `APP_URL`).                                  |
+| `AI_NOTIFY_MIN_SECONDS`                  | Segundos mínimos de un turno del asistente para avisar "la IA terminó" (default 20).    |
 
 Producción requiere HTTPS. El SW ya está en scope `/` (`src/app/layout.tsx`).
 
 ## Catálogo de categorías (`catalog.ts`)
 
-| Categoría | Cuándo | Productor |
-|---|---|---|
-| `call_incoming` (urgente) | Llamada entrante que debe atender una persona, transferencia (humana o de la IA) | `voice-service.registerInboundCall`, `transferToHuman`, `voice-agent-service` (transfer_requested) |
-| `call_missed` | Llamada entrante no contestada | `voice-service.finishCall('missed')` |
-| `call_summary` | Resumen IA de la llamada listo | `voice-ai-service.summarizeCall` |
-| `chat_message` / `chat_mention` | Mensaje / mención en chat interno (respeta preferencia `all/mentions/none` y mute por canal) | `chat-service.sendMessage`, `broadcastMessage` → `chat-notifications.ts` |
-| `inbox_message` | Cliente escribe (asignado → solo asignado; sin asignar → agentes del equipo de la cuenta) | `comms-service.recordInboundMessage` → `comms-notifications.ts` |
-| `inbox_assigned` | Te asignan una conversación | `comms-service.updateConversation` |
-| `ai_task_done` | Turno del asistente ≥ umbral o `notifyWhenDone: true` en el request | `ai-orchestrator` → `ai-notifications.ts` |
-| `ai_user_message` | Tool `notifyUser` ("avísale a Karla que…") | `tools/notifications-tools.ts` |
-| `entity_change` | Cambio en un registro seguido (11 tipos: OV, cotización, factura, paquete, pago, OC, bill, nota de crédito, producto, cliente, proveedor) | `entity-change-service.ts` + `<módulo>-change-events.ts` desde cada normalizer Zoho |
-| `system` | Avisos administrativos | — |
+| Categoría                                                          | Cuándo                                                                                                                                                               | Productor                                                                                                                           |
+| ------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `call_incoming` (urgente)                                          | Llamada entrante que debe atender una persona, transferencia (humana o de la IA)                                                                                     | `voice-service.registerInboundCall`, `transferToHuman`, `voice-agent-service` (transfer_requested)                                  |
+| `call_missed`                                                      | Llamada entrante no contestada                                                                                                                                       | `voice-service.finishCall('missed')`                                                                                                |
+| `call_summary`                                                     | Resumen IA de la llamada listo                                                                                                                                       | `voice-ai-service.summarizeCall`                                                                                                    |
+| `chat_message` / `chat_mention`                                    | Mensaje / mención en chat interno (respeta preferencia `all/mentions/none` y mute por canal)                                                                         | `chat-service.sendMessage`, `broadcastMessage` → `chat-notifications.ts`                                                            |
+| `inbox_message`                                                    | Cliente escribe (asignado → solo asignado; sin asignar → agentes del equipo de la cuenta)                                                                            | `comms-service.recordInboundMessage` → `comms-notifications.ts`                                                                     |
+| `inbox_assigned`                                                   | Te asignan una conversación                                                                                                                                          | `comms-service.updateConversation`                                                                                                  |
+| `ai_task_done`                                                     | Turno del asistente ≥ umbral o `notifyWhenDone: true` en el request                                                                                                  | `ai-orchestrator` → `ai-notifications.ts`                                                                                           |
+| `ai_user_message`                                                  | Tool `notifyUser` ("avísale a Karla que…")                                                                                                                           | `tools/notifications-tools.ts`                                                                                                      |
+| `entity_change`                                                    | Cambio en un registro seguido (11 tipos: OV, cotización, factura, paquete, pago, OC, bill, nota de crédito, producto, cliente, proveedor)                            | `entity-change-service.ts` + `<módulo>-change-events.ts` desde cada normalizer Zoho                                                 |
+| `ops_workitem` / `ops_escalation` / `ops_incident` / `ops_request` | Trabajo asignado, vencido o escalado, incidencia del área, solicitud de otra área                                                                                    | `operations/work-items-service.ts`, `supervisor.ts`, `incidents-service.ts`, `area-requests-service.ts`                             |
+| `approval_requested` / `approval_decided`                          | Firma pendiente y resultado de lo que solicitaste                                                                                                                    | `operations/approvals-service.ts`                                                                                                   |
+| `purchase_update`                                                  | Cotización respondida, orden aprobada o rechazada, diferencias en una recepción                                                                                      | `purchases/orders-service.ts`, `rfq-service.ts`, `receipts-service.ts` (categoría vía `purchaseNotificationCategory()`)             |
+| `delivery_update`                                                  | Viaje que sale, parada entregada (completa o parcial), entrega fallida, conflicto de embarque con Zoho. Va al **dueño del expediente**, no al chofer que la registra | `logistics/trips-service.ts`, `delivery-service.ts`, `transport-service.ts` (categoría y destinatario vía `notifyDeliveryUpdate()`) |
+| `production_update`                                                | Orden de producción liberada y merma fuera de tolerancia. Va a quien abrió la orden y al dueño del expediente                                                        | `manufacturing/production-service.ts`, `production-floor-service.ts` (vía `notifyProductionUpdate()`)                               |
+| `finance_alert`                                                    | Obligaciones vencidas o por vencer y cierre del día pendiente                                                                                                        | `finance/finance-jobs.ts`                                                                                                           |
+| `radar_signal` (push apagado por omisión)                          | Señal NUEVA del radar comercial con puntaje ≥ `RADAR_NOTIFY_MIN_SCORE` (70), una por vendedor y refresco                                                             | `crm/radar-service.ts` (`refreshRadar`)                                                                                             |
+| `agent_request` / `agent_proposal` / `agent_budget`                | La IA de un área anuncia una solicitud, propone una acción o llegó a su presupuesto                                                                                  | `agents/`                                                                                                                           |
+| `system`                                                           | Avisos administrativos                                                                                                                                               | —                                                                                                                                   |
 
 Las categorías `urgent` (llamada entrante) ignoran mute y horario silencioso.
 

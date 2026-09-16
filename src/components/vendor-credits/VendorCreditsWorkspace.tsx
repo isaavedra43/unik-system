@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { CurrentUser } from '@/modules/auth/authorization';
+import type { CurrentUser } from '@/modules/auth/authorization';
 import { EntityWorkspace } from '@/components/common/EntityWorkspace';
 import {
   VENDOR_CREDIT_COLUMNS,
@@ -60,10 +60,7 @@ export interface VendorCreditsWorkspaceProps {
   exportAction: ExportAction;
 }
 
-function renderCell(
-  row: VendorCreditListRow,
-  column: EntityColumnDefinition
-): React.ReactNode {
+function renderCell(row: VendorCreditListRow, column: EntityColumnDefinition): React.ReactNode {
   const value = (row as unknown as Record<string, unknown>)[column.id];
   if (column.formatter === 'currency') {
     return (

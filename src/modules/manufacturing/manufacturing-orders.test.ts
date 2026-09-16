@@ -15,7 +15,13 @@ const mocks = await vi.hoisted(async () => {
     fake,
     locks: inventory.createLockEmulation(fake),
     notifyUser: vi.fn(async () => ({ id: 'n', inApp: true, push: false, suppressed: false })),
-    publishRealtime: vi.fn(async () => ({ id: '1', channel: '', type: '', payload: {}, createdAt: '' })),
+    publishRealtime: vi.fn(async () => ({
+      id: '1',
+      channel: '',
+      type: '',
+      payload: {},
+      createdAt: '',
+    })),
   };
 });
 
@@ -34,7 +40,9 @@ vi.mock('@/modules/jobs/job-queue', async (importOriginal) => ({
 vi.mock('@/modules/jobs/scheduled-jobs', () => ({ registerRecurringJob: vi.fn() }));
 vi.mock('@/modules/auth/permissions', async (importOriginal) => {
   const { withManufacturingPermissions } = await import('./testing/permissions-mock');
-  return withManufacturingPermissions(await importOriginal<typeof import('@/modules/auth/permissions')>());
+  return withManufacturingPermissions(
+    await importOriginal<typeof import('@/modules/auth/permissions')>()
+  );
 });
 
 import { AuthorizationError } from '@/modules/auth/authorization';
@@ -60,7 +68,13 @@ import {
   updateBomDraft,
 } from './manufacturing-commands';
 import { runCapacityAlertsJob, runIntakeRequestJob } from './manufacturing-jobs';
-import { getProductionBoard, getWorkCenterLoad, listBoms, listProductionOrders, listWorkCenters } from './manufacturing-queries';
+import {
+  getProductionBoard,
+  getWorkCenterLoad,
+  listBoms,
+  listProductionOrders,
+  listWorkCenters,
+} from './manufacturing-queries';
 import { MANUFACTURING_COMMANDS } from './manufacturing-types';
 import {
   D,
@@ -85,15 +99,21 @@ const row = (model: string, id: string) => {
   return found;
 };
 const num = (value: unknown) => Number(String(value));
-const eventsOf = (type: string) => fake.rows('operationalEvent').filter((event) => event.type === type);
+const eventsOf = (type: string) =>
+  fake.rows('operationalEvent').filter((event) => event.type === type);
 
 async function ok<D>(promise: Promise<CommandResult<D>>): Promise<D> {
   const result = await promise;
-  if (result.status === 'rejected') throw new Error(`Comando rechazado ${result.errorCode}: ${result.message}`);
+  if (result.status === 'rejected')
+    throw new Error(`Comando rechazado ${result.errorCode}: ${result.message}`);
   return result.data as D;
 }
 
-function event(input: { type: string; caseId?: string | null; payload: Record<string, unknown> }): OperationalEventRecord {
+function event(input: {
+  type: string;
+  caseId?: string | null;
+  payload: Record<string, unknown>;
+}): OperationalEventRecord {
   return {
     id: '1',
     type: input.type,
@@ -111,7 +131,12 @@ function event(input: { type: string; caseId?: string | null; payload: Record<st
 }
 
 function seedPlacaAndLamina(material = 500) {
-  seedMaterial(fake, { zohoItemId: 'lamina', quantity: material, name: 'Lámina MDF', sku: 'LAMINA' });
+  seedMaterial(fake, {
+    zohoItemId: 'lamina',
+    quantity: material,
+    name: 'Lámina MDF',
+    sku: 'LAMINA',
+  });
   seedProduct(fake, { zohoItemId: 'placa', name: 'Placa 60x60', sku: 'PLACA-60', unit: 'm2' });
   seedProfile(fake, { zohoItemId: 'placa', baseUnit: 'm2', confidence: 'CONTROLLED' });
 }
@@ -128,10 +153,23 @@ beforeEach(() => {
 describe('intake of transformation requests', () => {
   it('plans the intake job inside the transaction and turns the request into a linked order', async () => {
     seedPlacaAndLamina();
-    const { allocation, request } = seedManufactureAllocation(fake, { zohoItemId: 'placa', quantity: 100, sourceSku: 'LAMINA', targetSku: 'PLACA-60' });
+    const { allocation, request } = seedManufactureAllocation(fake, {
+      zohoItemId: 'placa',
+      quantity: 100,
+      sourceSku: 'LAMINA',
+      targetSku: 'PLACA-60',
+    });
     const jobs = await planManufacturingJobs(fake.client as never, [
-      event({ type: 'request.created', caseId: 'case_1', payload: { requestId: request!.id, kind: 'transformation', toAreaKey: 'manufactura' } }),
-      event({ type: 'request.created', caseId: 'case_1', payload: { requestId: 'other', kind: 'purchase_shortfall', toAreaKey: 'compras' } }),
+      event({
+        type: 'request.created',
+        caseId: 'case_1',
+        payload: { requestId: request!.id, kind: 'transformation', toAreaKey: 'manufactura' },
+      }),
+      event({
+        type: 'request.created',
+        caseId: 'case_1',
+        payload: { requestId: 'other', kind: 'purchase_shortfall', toAreaKey: 'compras' },
+      }),
       event({ type: 'stock.received', payload: { zohoItemId: 'lamina' } }),
     ]);
     expect(jobs).toEqual([
@@ -143,7 +181,10 @@ describe('intake of transformation requests', () => {
       }),
     ]);
 
-    const outcome = await runIntakeRequestJob(makeManufacturingJob({ requestId: request!.id as string }), at(0));
+    const outcome = await runIntakeRequestJob(
+      makeManufacturingJob({ requestId: request!.id as string }),
+      at(0)
+    );
     expect(outcome).toMatchObject({ outcome: 'created', requestId: request!.id });
     const [order] = rows('productionOrder');
     expect(order).toMatchObject({
@@ -155,8 +196,13 @@ describe('intake of transformation requests', () => {
       inputs: [expect.objectContaining({ zohoItemId: 'lamina', qty: 100, unit: 'm2' })],
     });
     expect(row('areaRequest', request!.id as string).status).toBe('accepted');
-    expect(rows('objectRelation').find((relation) => relation.relation === 'answers')).toMatchObject({ fromId: order.id, toId: request!.id });
-    expect(row('demandAllocation', allocation.id as string)).toMatchObject({ linkedType: 'area_request', linkedId: request!.id });
+    expect(
+      rows('objectRelation').find((relation) => relation.relation === 'answers')
+    ).toMatchObject({ fromId: order.id, toId: request!.id });
+    expect(row('demandAllocation', allocation.id as string)).toMatchObject({
+      linkedType: 'area_request',
+      linkedId: request!.id,
+    });
 
     const again = await runManufacturingSystemCommand({
       type: MANUFACTURING_COMMANDS.orderIntakeRequest,
@@ -170,16 +216,30 @@ describe('intake of transformation requests', () => {
 
   it('blocks a request whose product is not in the catalog', async () => {
     seedPlacaAndLamina();
-    const { request } = seedManufactureAllocation(fake, { zohoItemId: 'placa', quantity: 10, sourceSku: 'NO-EXISTE', targetSku: 'placa' });
-    const outcome = await runIntakeRequestJob(makeManufacturingJob({ requestId: request!.id as string }), at(0));
+    const { request } = seedManufactureAllocation(fake, {
+      zohoItemId: 'placa',
+      quantity: 10,
+      sourceSku: 'NO-EXISTE',
+      targetSku: 'placa',
+    });
+    const outcome = await runIntakeRequestJob(
+      makeManufacturingJob({ requestId: request!.id as string }),
+      at(0)
+    );
     expect(outcome).toMatchObject({ outcome: 'request_blocked', productionOrderId: null });
     expect(row('areaRequest', request!.id as string).status).toBe('blocked');
     expect(rows('productionOrder')).toHaveLength(0);
-    expect(await runIntakeRequestJob(makeManufacturingJob({}), at(0))).toMatchObject({ outcome: 'skipped' });
+    expect(await runIntakeRequestJob(makeManufacturingJob({}), at(0))).toMatchObject({
+      outcome: 'skipped',
+    });
   });
 
   it('only retries blocked orders when stock arrives or a shortfall request is resolved', async () => {
-    expect(await planManufacturingJobs(fake.client as never, [event({ type: 'stock.received', payload: { zohoItemId: 'x' } })])).toEqual([]);
+    expect(
+      await planManufacturingJobs(fake.client as never, [
+        event({ type: 'stock.received', payload: { zohoItemId: 'x' } }),
+      ])
+    ).toEqual([]);
     fake.seed('productionOrder', {
       id: 'po_blocked',
       number: 'OP-000900',
@@ -203,22 +263,59 @@ describe('capacity', () => {
   it('flags an order bigger than a shift and warns once per shift', async () => {
     seedPlacaAndLamina();
     const created = await ok(
-      createTransformationOrder(team.planner, { outputZohoItemId: 'placa', plannedQty: 150, inputs: [{ zohoItemId: 'lamina', qty: 155 }], workCenterId: 'wc_corte' }, at(0))
+      createTransformationOrder(
+        team.planner,
+        {
+          outputZohoItemId: 'placa',
+          plannedQty: 150,
+          inputs: [{ zohoItemId: 'lamina', qty: 155 }],
+          workCenterId: 'wc_corte',
+        },
+        at(0)
+      )
     );
-    expect(created).toMatchObject({ status: 'draft', outputWarehouseId: WAREHOUSE_ID, schedule: { overloaded: true } });
+    expect(created).toMatchObject({
+      status: 'draft',
+      outputWarehouseId: WAREHOUSE_ID,
+      schedule: { overloaded: true },
+    });
     const alert = row('workItem', created.schedule!.alertWorkItemIds[0]);
-    expect(alert).toMatchObject({ areaKey: 'manufactura', objectType: 'work_center_shift', ownerUserId: 'u_manufactura' });
+    expect(alert).toMatchObject({
+      areaKey: 'manufactura',
+      objectType: 'work_center_shift',
+      ownerUserId: 'u_manufactura',
+    });
     expect(alert.title).toMatch(/Sobrecarga en Corte: turno Matutino del 2026-09-15/);
     expect(eventsOf('manufacturing.capacity_overloaded')).toHaveLength(1);
   });
 
   it('plans the next free shift when the current one is full', async () => {
     seedPlacaAndLamina();
-    const first = await ok(createTransformationOrder(team.planner, { outputZohoItemId: 'placa', plannedQty: 80, inputs: [{ zohoItemId: 'lamina', qty: 84 }] }, at(0)));
-    expect(first.schedule).toMatchObject({ plannedStartAt: MFG_NOW.toISOString(), overloaded: false });
-    const second = await ok(createTransformationOrder(team.planner, { outputZohoItemId: 'placa', plannedQty: 40, inputs: [{ zohoItemId: 'lamina', qty: 42 }] }, at(0)));
-    expect(second.schedule).toMatchObject({ plannedStartAt: '2026-09-16T14:00:00.000Z', overloaded: false });
-    expect(rows('workItem').filter((item) => item.objectType === 'work_center_shift')).toHaveLength(0);
+    const first = await ok(
+      createTransformationOrder(
+        team.planner,
+        { outputZohoItemId: 'placa', plannedQty: 80, inputs: [{ zohoItemId: 'lamina', qty: 84 }] },
+        at(0)
+      )
+    );
+    expect(first.schedule).toMatchObject({
+      plannedStartAt: MFG_NOW.toISOString(),
+      overloaded: false,
+    });
+    const second = await ok(
+      createTransformationOrder(
+        team.planner,
+        { outputZohoItemId: 'placa', plannedQty: 40, inputs: [{ zohoItemId: 'lamina', qty: 42 }] },
+        at(0)
+      )
+    );
+    expect(second.schedule).toMatchObject({
+      plannedStartAt: '2026-09-16T14:00:00.000Z',
+      overloaded: false,
+    });
+    expect(rows('workItem').filter((item) => item.objectType === 'work_center_shift')).toHaveLength(
+      0
+    );
   });
 
   it('raises the hourly alert for an overloaded shift only once', async () => {
@@ -237,16 +334,33 @@ describe('capacity', () => {
         status: 'reserved',
         workCenterId: 'wc_corte',
       });
-      fake.seed('productionOperation', { id: `op_${id}`, productionOrderId: id, seq: 1, workCenterId: 'wc_corte', name: 'Corte', status: 'pending', plannedStartAt: MFG_NOW });
+      fake.seed('productionOperation', {
+        id: `op_${id}`,
+        productionOrderId: id,
+        seq: 1,
+        workCenterId: 'wc_corte',
+        name: 'Corte',
+        status: 'pending',
+        plannedStartAt: MFG_NOW,
+      });
     }
     const summary = await runCapacityAlertsJob(makeManufacturingJob({}), at(0));
     expect(summary).toMatchObject({ workCenters: 1, overloadedWindows: 1, alerts: 1, rejected: 0 });
     const again = await runCapacityAlertsJob(makeManufacturingJob({}, 'job_2'), at(60));
     expect(again).toMatchObject({ overloadedWindows: 1, alerts: 0 });
-    expect(rows('workItem').filter((item) => item.objectType === 'work_center_shift')).toHaveLength(1);
+    expect(rows('workItem').filter((item) => item.objectType === 'work_center_shift')).toHaveLength(
+      1
+    );
 
     const load = await getWorkCenterLoad(team.viewer, { workCenterId: 'wc_corte', days: 1 }, at(0));
-    expect(load.windows[0]).toMatchObject({ shiftName: 'Matutino', day: '2026-09-15', load: 140, capacity: 100, overloaded: true, utilizationPct: 140 });
+    expect(load.windows[0]).toMatchObject({
+      shiftName: 'Matutino',
+      day: '2026-09-15',
+      load: 140,
+      capacity: 100,
+      overloaded: true,
+      utilizationPct: 140,
+    });
     expect(load.operations.map((op) => op.number).sort()).toEqual(['OP-po_a', 'OP-po_b']);
   });
 });
@@ -259,17 +373,35 @@ describe('bills of materials', () => {
     outputUnit: 'pz',
     scrapAllowancePct: 3,
     lines: [
-      { inputZohoItemId: 'tablero', qtyPerOutput: 1.2, unit: 'm2', substituteZohoItemIds: ['tablero-b'] },
+      {
+        inputZohoItemId: 'tablero',
+        qtyPerOutput: 1.2,
+        unit: 'm2',
+        substituteZohoItemIds: ['tablero-b'],
+      },
       { inputZohoItemId: 'tornillo', qtyPerOutput: 8, unit: 'pz' },
     ],
     operations: [
-      { seq: 10, workCenterId: 'wc_corte', name: 'Corte', stdMinutes: 20, setupMinutes: 10, qcRequired: true },
+      {
+        seq: 10,
+        workCenterId: 'wc_corte',
+        name: 'Corte',
+        stdMinutes: 20,
+        setupMinutes: 10,
+        qcRequired: true,
+      },
       { seq: 20, workCenterId: 'wc_armado', name: 'Armado', stdMinutes: 15 },
     ],
   };
 
   function seedAssembly() {
-    seedWorkCenterRow(fake, { id: 'wc_armado', key: 'armado', name: 'Armado', capacityUnit: 'minutes', capacityPerShift: D(480) });
+    seedWorkCenterRow(fake, {
+      id: 'wc_armado',
+      key: 'armado',
+      name: 'Armado',
+      capacityUnit: 'minutes',
+      capacityPerShift: D(480),
+    });
     seedProduct(fake, { zohoItemId: 'mesa', name: 'Mesa', unit: 'pz' });
     seedProfile(fake, { zohoItemId: 'mesa', baseUnit: 'pz', confidence: 'CONTROLLED' });
     seedMaterial(fake, { zohoItemId: 'tablero', quantity: 50, unit: 'm2', sku: 'TABLERO' });
@@ -280,7 +412,11 @@ describe('bills of materials', () => {
     seedAssembly();
     const v1 = await ok(createBom(team.planner, definition, at(0)));
     expect(v1).toMatchObject({ version: 1, status: 'draft', kind: 'assembly' });
-    expect(v1.lines[0]).toMatchObject({ inputZohoItemId: 'tablero', qtyPerOutput: '1.2', substituteZohoItemIds: ['tablero-b'] });
+    expect(v1.lines[0]).toMatchObject({
+      inputZohoItemId: 'tablero',
+      qtyPerOutput: '1.2',
+      substituteZohoItemIds: ['tablero-b'],
+    });
     expect(v1.operations.map((op) => [op.seq, op.qcRequired])).toEqual([
       [10, true],
       [20, false],
@@ -288,22 +424,47 @@ describe('bills of materials', () => {
     const v2 = await ok(createBom(team.planner, definition, at(1)));
     expect(v2.version).toBe(2);
 
-    const invalid = await createBom(team.planner, { ...definition, lines: [{ inputZohoItemId: 'tablero', qtyPerOutput: 1, unit: 'm2', substituteZohoItemIds: ['tablero'] }] });
+    const invalid = await createBom(team.planner, {
+      ...definition,
+      lines: [
+        {
+          inputZohoItemId: 'tablero',
+          qtyPerOutput: 1,
+          unit: 'm2',
+          substituteZohoItemIds: ['tablero'],
+        },
+      ],
+    });
     expect(invalid).toMatchObject({ status: 'rejected', errorCode: 'bom_invalid' });
-    expect(await createBom(team.planner, { ...definition, operations: [{ seq: 1, workCenterId: 'wc_x', name: 'X', stdMinutes: 1 }] })).toMatchObject({
+    expect(
+      await createBom(team.planner, {
+        ...definition,
+        operations: [{ seq: 1, workCenterId: 'wc_x', name: 'X', stdMinutes: 1 }],
+      })
+    ).toMatchObject({
       status: 'rejected',
       errorCode: 'bom_invalid',
     });
-    expect(await createBom(team.operator, definition)).toMatchObject({ status: 'rejected', errorCode: 'forbidden' });
+    expect(await createBom(team.operator, definition)).toMatchObject({
+      status: 'rejected',
+      errorCode: 'forbidden',
+    });
 
-    const edited = await ok(updateBomDraft(team.planner, { ...definition, bomId: v2.id, scrapAllowancePct: 4 }, at(2)));
+    const edited = await ok(
+      updateBomDraft(team.planner, { ...definition, bomId: v2.id, scrapAllowancePct: 4 }, at(2))
+    );
     expect(edited.scrapAllowancePct).toBe('4');
     await ok(activateBom(team.planner, { bomId: v1.id }, at(3)));
     expect((await ok(activateBom(team.planner, { bomId: v2.id }, at(4)))).status).toBe('active');
     expect(row('bom', v1.id).status).toBe('retired');
     expect(eventsOf('manufacturing.bom_retired')).toHaveLength(1);
-    expect(await activateBom(team.planner, { bomId: v1.id }, at(5))).toMatchObject({ status: 'rejected', errorCode: 'invalid_state' });
-    expect(await updateBomDraft(team.planner, { ...definition, bomId: v2.id }, at(6))).toMatchObject({ status: 'rejected', errorCode: 'invalid_state' });
+    expect(await activateBom(team.planner, { bomId: v1.id }, at(5))).toMatchObject({
+      status: 'rejected',
+      errorCode: 'invalid_state',
+    });
+    expect(
+      await updateBomDraft(team.planner, { ...definition, bomId: v2.id }, at(6))
+    ).toMatchObject({ status: 'rejected', errorCode: 'invalid_state' });
 
     const page = await listBoms(team.viewer, { outputZohoItemId: 'mesa' });
     expect(page.rows.map((bom) => [bom.version, bom.status])).toEqual([
@@ -316,7 +477,13 @@ describe('bills of materials', () => {
     seedAssembly();
     const bom = await ok(createBom(team.planner, definition, at(0)));
     await ok(activateBom(team.planner, { bomId: bom.id }, at(0)));
-    const created = await ok(createProductionOrderFromBom(team.planner, { outputZohoItemId: 'mesa', plannedQty: 10, reserveNow: true }, at(1)));
+    const created = await ok(
+      createProductionOrderFromBom(
+        team.planner,
+        { outputZohoItemId: 'mesa', plannedQty: 10, reserveNow: true },
+        at(1)
+      )
+    );
     expect(created).toMatchObject({ kind: 'bom', status: 'reserved', workCenterId: 'wc_corte' });
     const orderId = created.productionOrderId;
     const ops = rows('productionOperation').sort((a, b) => Number(a.seq) - Number(b.seq));
@@ -324,63 +491,156 @@ describe('bills of materials', () => {
       [10, 'Corte', 'wc_corte', 210],
       [20, 'Armado', 'wc_armado', 150],
     ]);
-    const stock = (item: string) => rows('stockItem').find((candidate) => candidate.zohoItemId === item)!;
-    expect([num(stock('tablero').assignedToProduction), num(stock('tornillo').assignedToProduction)]).toEqual([12, 80]);
+    const stock = (item: string) =>
+      rows('stockItem').find((candidate) => candidate.zohoItemId === item)!;
+    expect([
+      num(stock('tablero').assignedToProduction),
+      num(stock('tornillo').assignedToProduction),
+    ]).toEqual([12, 80]);
 
     await ok(prepareProductionOrder(team.planner, { productionOrderId: orderId }, at(2)));
     const first = await ok(startOperation(team.operator, { productionOrderId: orderId }, at(3)));
     expect(first.operationId).toBe(ops[0].id);
-    await ok(finishOperation(team.operator, { productionOrderId: orderId, operationId: first.operationId }, at(30)));
-    expect(rows('workItem').find((item) => item.objectType === 'production_operation')).toMatchObject({ kind: 'verification', objectId: first.operationId });
-    expect(await startOperation(team.operator, { productionOrderId: orderId, operationId: ops[1].id as string }, at(31))).toMatchObject({
+    await ok(
+      finishOperation(
+        team.operator,
+        { productionOrderId: orderId, operationId: first.operationId },
+        at(30)
+      )
+    );
+    expect(
+      rows('workItem').find((item) => item.objectType === 'production_operation')
+    ).toMatchObject({ kind: 'verification', objectId: first.operationId });
+    expect(
+      await startOperation(
+        team.operator,
+        { productionOrderId: orderId, operationId: ops[1].id as string },
+        at(31)
+      )
+    ).toMatchObject({
       status: 'rejected',
       errorCode: 'operation_sequence',
     });
-    await ok(inspectProductionOrder(team.inspector, { productionOrderId: orderId, operationId: first.operationId, result: 'pass' }, at(32)));
-    expect((await ok(startOperation(team.operator, { productionOrderId: orderId }, at(33)))).operationId).toBe(ops[1].id);
+    await ok(
+      inspectProductionOrder(
+        team.inspector,
+        { productionOrderId: orderId, operationId: first.operationId, result: 'pass' },
+        at(32)
+      )
+    );
+    expect(
+      (await ok(startOperation(team.operator, { productionOrderId: orderId }, at(33)))).operationId
+    ).toBe(ops[1].id);
 
     // A substitute listed in the BOM is consumed without approval.
     seedMaterial(fake, { zohoItemId: 'tablero-b', quantity: 5, unit: 'm2', sku: 'TABLERO-B' });
-    const consumption = await ok(recordConsumption(team.operator, { productionOrderId: orderId, lines: [{ zohoItemId: 'tablero-b', qty: 2 }] }, at(34)));
-    expect(consumption.lines[0]).toMatchObject({ role: 'declared_substitute', approvalRequestId: null });
+    const consumption = await ok(
+      recordConsumption(
+        team.operator,
+        { productionOrderId: orderId, lines: [{ zohoItemId: 'tablero-b', qty: 2 }] },
+        at(34)
+      )
+    );
+    expect(consumption.lines[0]).toMatchObject({
+      role: 'declared_substitute',
+      approvalRequestId: null,
+    });
   });
 });
 
 describe('release to logistics, queries and permissions', () => {
   async function completedOrder(releaseTarget: 'inventory' | 'logistics') {
     seedPlacaAndLamina();
-    const { allocation } = seedManufactureAllocation(fake, { zohoItemId: 'placa', quantity: 20, withRequest: false });
+    const { allocation } = seedManufactureAllocation(fake, {
+      zohoItemId: 'placa',
+      quantity: 20,
+      withRequest: false,
+    });
     const created = await ok(
       createTransformationOrder(
         team.planner,
-        { demandAllocationId: allocation.id as string, inputs: [{ zohoItemId: 'lamina', qty: 20 }], workCenterId: 'wc_corte', releaseTarget, reserveNow: true },
+        {
+          demandAllocationId: allocation.id as string,
+          inputs: [{ zohoItemId: 'lamina', qty: 20 }],
+          workCenterId: 'wc_corte',
+          releaseTarget,
+          reserveNow: true,
+        },
         at(0)
       )
     );
     const orderId = created.productionOrderId;
-    expect(row('demandAllocation', allocation.id as string)).toMatchObject({ linkedType: 'production_order', linkedId: orderId });
+    expect(row('demandAllocation', allocation.id as string)).toMatchObject({
+      linkedType: 'production_order',
+      linkedId: orderId,
+    });
     await ok(prepareProductionOrder(team.planner, { productionOrderId: orderId }, at(1)));
     const started = await ok(startOperation(team.operator, { productionOrderId: orderId }, at(2)));
-    await ok(recordConsumption(team.operator, { productionOrderId: orderId, lines: [{ zohoItemId: 'lamina', qty: 20 }] }, at(3)));
-    await ok(finishOperation(team.operator, { productionOrderId: orderId, operationId: started.operationId }, at(4)));
-    await ok(inspectProductionOrder(team.inspector, { productionOrderId: orderId, result: 'pass' }, at(5)));
-    await ok(recordOutput(team.operator, { productionOrderId: orderId, kind: 'finished', qty: 20 }, at(6)));
+    await ok(
+      recordConsumption(
+        team.operator,
+        { productionOrderId: orderId, lines: [{ zohoItemId: 'lamina', qty: 20 }] },
+        at(3)
+      )
+    );
+    await ok(
+      finishOperation(
+        team.operator,
+        { productionOrderId: orderId, operationId: started.operationId },
+        at(4)
+      )
+    );
+    await ok(
+      inspectProductionOrder(team.inspector, { productionOrderId: orderId, result: 'pass' }, at(5))
+    );
+    await ok(
+      recordOutput(team.operator, { productionOrderId: orderId, kind: 'finished', qty: 20 }, at(6))
+    );
     return { orderId, allocation };
   }
 
   it('released to logistics: the allocation is ready and the case engine plans the whole delivery (no partial order)', async () => {
     const { orderId, allocation } = await completedOrder('logistics');
-    const released = await ok(releaseProductionOrder(team.planner, { productionOrderId: orderId }, at(10)));
-    expect(released).toMatchObject({ released: true, finishedGoodsRequestId: null, deliveryOrderId: null });
+    const released = await ok(
+      releaseProductionOrder(team.planner, { productionOrderId: orderId }, at(10))
+    );
+    expect(released).toMatchObject({ released: true, finishedGoodsRequestId: null });
+    // Liberar NUNCA crea la orden de entrega (el motor de expedientes la planea),
+    // así que el resultado ni siquiera tiene ese campo.
+    expect(released).not.toHaveProperty('deliveryOrderId');
     expect(rows('deliveryOrder')).toHaveLength(0);
     expect(row('demandAllocation', allocation.id as string).status).toBe('ready');
-    expect(rows('operationalEvent').find((event) => event.type === 'production.released')?.payload).toMatchObject({ releaseTarget: 'logistics' });
+    expect(
+      rows('operationalEvent').find((event) => event.type === 'production.released')?.payload
+    ).toMatchObject({ releaseTarget: 'logistics' });
   });
 
   it('lists orders with the actions each person may take and builds the floor board', async () => {
     seedPlacaAndLamina(30);
-    const reserved = await ok(createTransformationOrder(team.planner, { outputZohoItemId: 'placa', plannedQty: 20, inputs: [{ zohoItemId: 'lamina', qty: 21 }], reserveNow: true }, at(0)));
-    const blocked = await ok(createTransformationOrder(team.planner, { outputZohoItemId: 'placa', plannedQty: 20, inputs: [{ zohoItemId: 'lamina', qty: 21 }], reserveNow: true }, at(1)));
+    const reserved = await ok(
+      createTransformationOrder(
+        team.planner,
+        {
+          outputZohoItemId: 'placa',
+          plannedQty: 20,
+          inputs: [{ zohoItemId: 'lamina', qty: 21 }],
+          reserveNow: true,
+        },
+        at(0)
+      )
+    );
+    const blocked = await ok(
+      createTransformationOrder(
+        team.planner,
+        {
+          outputZohoItemId: 'placa',
+          plannedQty: 20,
+          inputs: [{ zohoItemId: 'lamina', qty: 21 }],
+          reserveNow: true,
+        },
+        at(1)
+      )
+    );
     expect([reserved.status, blocked.status]).toEqual(['reserved', 'blocked']);
 
     const forOperator = await listProductionOrders(team.operator, { sort: 'created' });
@@ -391,12 +651,25 @@ describe('release to logistics, queries and permissions', () => {
     ]);
     const forPlanner = await listProductionOrders(team.planner, { status: ['reserved'] });
     expect(forPlanner.rows).toHaveLength(1);
-    expect(forPlanner.rows[0]).toMatchObject({ number: 'OP-000001', workCenterName: 'Corte', outputSku: 'PLACA-60', allowedActions: ['schedule', 'reserve_materials', 'prepare', 'cancel'] });
-    expect((await listProductionOrders(team.viewer, { q: 'op-000002' })).rows.map((order) => order.number)).toEqual(['OP-000002']);
+    expect(forPlanner.rows[0]).toMatchObject({
+      number: 'OP-000001',
+      workCenterName: 'Corte',
+      outputSku: 'PLACA-60',
+      allowedActions: ['schedule', 'reserve_materials', 'prepare', 'cancel'],
+    });
+    expect(
+      (await listProductionOrders(team.viewer, { q: 'op-000002' })).rows.map(
+        (order) => order.number
+      )
+    ).toEqual(['OP-000002']);
     await expect(listProductionOrders(team.stranger)).rejects.toBeInstanceOf(AuthorizationError);
 
-    await ok(prepareProductionOrder(team.planner, { productionOrderId: reserved.productionOrderId }, at(2)));
-    await ok(startOperation(team.operator, { productionOrderId: reserved.productionOrderId }, at(3)));
+    await ok(
+      prepareProductionOrder(team.planner, { productionOrderId: reserved.productionOrderId }, at(2))
+    );
+    await ok(
+      startOperation(team.operator, { productionOrderId: reserved.productionOrderId }, at(3))
+    );
     const board = await getProductionBoard(team.viewer, { days: 1 }, at(3));
     expect(board.columns.map((column) => [column.status, column.count])).toEqual([
       ['blocked', 1],
@@ -407,17 +680,30 @@ describe('release to logistics, queries and permissions', () => {
       ['inspection', 0],
       ['completed', 0],
     ]);
-    expect(board.workCenters[0]).toMatchObject({ workCenter: { key: 'corte' }, queued: 1, running: [{ number: 'OP-000001' }] });
+    expect(board.workCenters[0]).toMatchObject({
+      workCenter: { key: 'corte' },
+      queued: 1,
+      running: [{ number: 'OP-000001' }],
+    });
     expect(board.workCenters[0].windows[0]).toMatchObject({ day: '2026-09-15', capacity: 100 });
     expect((await listWorkCenters(team.viewer)).map((center) => center.key)).toEqual(['corte']);
   });
 
   it('rejects commands without permission, from the wrong actor or on another order', async () => {
     seedPlacaAndLamina();
-    const input = { outputZohoItemId: 'placa', plannedQty: 5, inputs: [{ zohoItemId: 'lamina', qty: 5 }] };
-    expect(await createTransformationOrder(team.stranger, input, at(0))).toMatchObject({ status: 'rejected', errorCode: 'forbidden' });
+    const input = {
+      outputZohoItemId: 'placa',
+      plannedQty: 5,
+      inputs: [{ zohoItemId: 'lamina', qty: 5 }],
+    };
+    expect(await createTransformationOrder(team.stranger, input, at(0))).toMatchObject({
+      status: 'rejected',
+      errorCode: 'forbidden',
+    });
     const created = await ok(createTransformationOrder(team.planner, input, at(0)));
-    expect(await reserveMaterials(team.operator, { productionOrderId: created.productionOrderId }, at(1))).toMatchObject({ status: 'rejected', errorCode: 'forbidden' });
+    expect(
+      await reserveMaterials(team.operator, { productionOrderId: created.productionOrderId }, at(1))
+    ).toMatchObject({ status: 'rejected', errorCode: 'forbidden' });
     const mismatch = await executeCommand(
       {
         commandId: 'mismatch-1',
@@ -429,7 +715,13 @@ describe('release to logistics, queries and permissions', () => {
       team.planner
     );
     expect(mismatch).toMatchObject({ status: 'rejected', errorCode: 'invalid_payload' });
-    expect(await reserveMaterials(team.planner, { productionOrderId: created.productionOrderId, allowProvisional: true }, at(2))).toMatchObject({
+    expect(
+      await reserveMaterials(
+        team.planner,
+        { productionOrderId: created.productionOrderId, allowProvisional: true },
+        at(2)
+      )
+    ).toMatchObject({
       status: 'completed',
     });
     const intakeByUser = await executeCommand(

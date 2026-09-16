@@ -286,6 +286,8 @@ async function publishToTeams(
 
 export const conversationFiltersSchema = z.object({
   accountId: z.string().optional(),
+  /** Scope of accounts (e.g. the channels of one area); combined with `accountId` as an intersection. */
+  accountIds: z.array(z.string()).max(50).optional(),
   status: z.enum([...CONVERSATION_STATUSES, 'all']).optional(),
   assigned: z.enum(['me', 'unassigned', 'team', 'all']).optional(),
   assignedToUserId: z.string().optional(),
@@ -319,7 +321,17 @@ export async function listConversations(
   assertInboxUse(user);
   const limit = filters.limit ?? 30;
   const where: Prisma.CommConversationWhereInput = { account: visibleAccountsWhere(user) };
-  if (filters.accountId) where.accountId = filters.accountId;
+  // An explicit scope always wins: passing `accountIds: []` lists nothing (an area
+  // without external channels), never everything the person could otherwise see.
+  if (filters.accountIds) {
+    where.accountId = {
+      in: filters.accountId
+        ? filters.accountIds.filter((id) => id === filters.accountId)
+        : filters.accountIds,
+    };
+  } else if (filters.accountId) {
+    where.accountId = filters.accountId;
+  }
   if (filters.status && filters.status !== 'all') where.status = filters.status;
   else if (!filters.status) where.status = { not: 'resolved' };
   if (filters.assigned === 'me') where.assignedToUserId = user.id;

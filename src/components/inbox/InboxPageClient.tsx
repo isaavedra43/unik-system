@@ -9,7 +9,7 @@ import { CopilotPanel } from './copilot/CopilotPanel';
 import type { ComposerAttachment } from './MessageComposer';
 import { NewConversationDialog } from './NewConversationDialog';
 import { useInboxRealtime } from './useInboxRealtime';
-import { useIsMobile } from './useIsMobile';
+import { useIsMobile } from '@/hooks/use-is-mobile';
 import {
   apiJson,
   type CommAccountDTO,
@@ -46,7 +46,9 @@ export function InboxPageClient({ user }: { user: InboxUserInfo }) {
   const [listLoading, setListLoading] = useState(true);
   const [listError, setListError] = useState<string | null>(null);
   const searchParams = useSearchParams();
-  const [selectedId, setSelectedId] = useState<string | null>(() => searchParams.get('conversation'));
+  const [selectedId, setSelectedId] = useState<string | null>(() =>
+    searchParams.get('conversation')
+  );
   const [mobileView, setMobileView] = useState<MobileView>(() =>
     searchParams.get('conversation') ? 'conversation' : 'list'
   );
@@ -153,7 +155,9 @@ export function InboxPageClient({ user }: { user: InboxUserInfo }) {
     const conversationId =
       typeof event.payload.conversationId === 'string' ? event.payload.conversationId : null;
     if (!conversationId) return;
-    if (['message', 'message_status', 'message_media', 'conversation', 'note'].includes(event.type)) {
+    if (
+      ['message', 'message_status', 'message_media', 'conversation', 'note'].includes(event.type)
+    ) {
       refreshConversation(conversationId);
       if (conversationId === selectedRef.current) setThreadVersion((v) => v + 1);
     }

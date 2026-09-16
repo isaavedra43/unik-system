@@ -1,14 +1,27 @@
-import { type GoodsReceipt, type GoodsReceiptLine, type ProcurementOrder, type ProcurementOrderLine } from '@prisma/client';
+import {
+  type GoodsReceipt,
+  type GoodsReceiptLine,
+  type ProcurementOrder,
+  type ProcurementOrderLine,
+} from '@prisma/client';
 import { z } from 'zod';
+import { procurementOrderLink } from '@/modules/areas/area-links';
 import { recordInventoryMovement, reserveStock } from '@/modules/inventory/inventory-service';
 import { getOrCreateProfile, toUnitProfile } from '@/modules/inventory/profiles-service';
 import { createDeliveryOrder, recordDelivery } from '@/modules/logistics/delivery-service';
 import { DELIVERY_ORDER_OPEN_STATUSES } from '@/modules/logistics/types';
-import { isAreaRequestOpenStatus, transitionAreaRequestInTx } from '@/modules/operations/area-requests-service';
+import {
+  isAreaRequestOpenStatus,
+  transitionAreaRequestInTx,
+} from '@/modules/operations/area-requests-service';
 import type { CommandContext } from '@/modules/operations/commands';
 import { OperationsError, isOperationsError } from '@/modules/operations/errors';
 import { transitionIncidentInTx } from '@/modules/operations/incidents-service';
-import { INCIDENT_OPEN_STATUSES, OPS_EVENTS, WORK_ITEM_OPEN_STATUSES } from '@/modules/operations/types';
+import {
+  INCIDENT_OPEN_STATUSES,
+  OPS_EVENTS,
+  WORK_ITEM_OPEN_STATUSES,
+} from '@/modules/operations/types';
 import { completeWorkItemInTx } from '@/modules/operations/work-items-service';
 import {
   QTY_EPS,
@@ -21,7 +34,12 @@ import {
   statusAfterReceipt,
   type OrderStatus,
 } from './orders-state';
-import { loadOrder, loadOrderLines, orderCaseIds, releaseAllocationsExpectation } from './orders-service';
+import {
+  loadOrder,
+  loadOrderLines,
+  orderCaseIds,
+  releaseAllocationsExpectation,
+} from './orders-service';
 import {
   D,
   actorUserId,
@@ -38,7 +56,14 @@ import {
   truncate,
   type Db,
 } from './purchases-helpers';
-import { idText, isoDateText, nonNegativeQty, optionalText, positiveQty, toDate } from './purchases-schemas';
+import {
+  idText,
+  isoDateText,
+  nonNegativeQty,
+  optionalText,
+  positiveQty,
+  toDate,
+} from './purchases-schemas';
 import {
   DIFFERENCE_KINDS,
   DIFFERENCE_KIND_LABELS,
@@ -146,7 +171,13 @@ export const directDeliveryPlanSchema = z.object({
   note: z.string().max(1000).nullish(),
   evidenceObjectIds: z.array(idText).max(20),
   deliveries: z
-    .array(z.object({ caseId: idText, allocationId: idText, deliveredQty: z.number().finite().positive() }))
+    .array(
+      z.object({
+        caseId: idText,
+        allocationId: idText,
+        deliveredQty: z.number().finite().positive(),
+      })
+    )
     .max(400),
 });
 export type DirectDeliveryPlan = z.output<typeof directDeliveryPlanSchema>;
@@ -169,7 +200,10 @@ export async function assertReceiptEvidence(
 ): Promise<void> {
   const ids = [...new Set(objectIds)];
   if (ids.length === 0) return;
-  const objects = await tx.storageObject.findMany({ where: { id: { in: ids } }, select: { id: true, status: true, createdBy: true } });
+  const objects = await tx.storageObject.findMany({
+    where: { id: { in: ids } },
+    select: { id: true, status: true, createdBy: true },
+  });
   const links = await tx.evidenceLink.findMany({
     where: { objectType: OBJ.order, objectId: orderId, storageObjectId: { in: ids } },
     select: { storageObjectId: true },
@@ -178,10 +212,16 @@ export async function assertReceiptEvidence(
   for (const id of ids) {
     const object = objects.find((o) => o.id === id);
     if (!object || !RECEIPT_OBJECT_STATUSES_OK.includes(object.status)) {
-      throw new OperationsError('evidence_invalid', 'Alguna evidencia no está disponible; vuelve a subirla');
+      throw new OperationsError(
+        'evidence_invalid',
+        'Alguna evidencia no está disponible; vuelve a subirla'
+      );
     }
     if (!linked.has(id) && object.createdBy !== ctx.actor.id) {
-      throw new OperationsError('evidence_invalid', 'Alguna evidencia no pertenece a esta orden de compra');
+      throw new OperationsError(
+        'evidence_invalid',
+        'Alguna evidencia no pertenece a esta orden de compra'
+      );
     }
   }
 }
@@ -189,18 +229,44 @@ export async function assertReceiptEvidence(
 interface LineAllocationContext {
   procurementAllocationId: string;
   procurementQty: number;
+  /** Base units this order line already committed to this allocation in earlier direct deliveries. */
+  directDeliveredQty: number;
   requestLineId: string | null;
-  demand: { id: string; caseId: string; variantKey: string; baseUnit: string; name: string; zohoItemId: string | null };
-  allocation: { id: string; status: string; source: string; quantity: number; deliveredQuantity: number; stockReservationId: string | null; linkedId: string | null } | null;
+  demand: {
+    id: string;
+    caseId: string;
+    variantKey: string;
+    baseUnit: string;
+    name: string;
+    zohoItemId: string | null;
+  };
+  allocation: {
+    id: string;
+    status: string;
+    source: string;
+    quantity: number;
+    deliveredQuantity: number;
+    stockReservationId: string | null;
+    linkedId: string | null;
+  } | null;
   promisedAt: Date | null;
 }
 
 async function lineAllocations(tx: Db, orderLineId: string): Promise<LineAllocationContext[]> {
-  const rows = await tx.procurementAllocation.findMany({ where: { orderLineId }, orderBy: { createdAt: 'asc' } });
+  const rows = await tx.procurementAllocation.findMany({
+    where: { orderLineId },
+    orderBy: { createdAt: 'asc' },
+  });
   if (rows.length === 0) return [];
-  const demands = await tx.caseDemand.findMany({ where: { id: { in: rows.map((r) => r.demandId) } } });
-  const allocationIds = rows.map((r) => r.demandAllocationId).filter((id): id is string => Boolean(id));
-  const allocations = allocationIds.length ? await tx.demandAllocation.findMany({ where: { id: { in: allocationIds } } }) : [];
+  const demands = await tx.caseDemand.findMany({
+    where: { id: { in: rows.map((r) => r.demandId) } },
+  });
+  const allocationIds = rows
+    .map((r) => r.demandAllocationId)
+    .filter((id): id is string => Boolean(id));
+  const allocations = allocationIds.length
+    ? await tx.demandAllocation.findMany({ where: { id: { in: allocationIds } } })
+    : [];
   const cases = await tx.operationalCase.findMany({
     where: { id: { in: [...new Set(demands.map((d) => d.caseId))] } },
     select: { id: true, promisedAt: true },
@@ -213,6 +279,7 @@ async function lineAllocations(tx: Db, orderLineId: string): Promise<LineAllocat
     out.push({
       procurementAllocationId: row.id,
       procurementQty: num(row.qty),
+      directDeliveredQty: num(row.directDeliveredQty),
       requestLineId: row.requestLineId,
       demand: {
         id: demand.id,
@@ -237,7 +304,11 @@ async function lineAllocations(tx: Db, orderLineId: string): Promise<LineAllocat
     });
   }
   // The sale promised first gets the material first.
-  return out.sort((a, b) => (a.promisedAt?.getTime() ?? Number.MAX_SAFE_INTEGER) - (b.promisedAt?.getTime() ?? Number.MAX_SAFE_INTEGER));
+  return out.sort(
+    (a, b) =>
+      (a.promisedAt?.getTime() ?? Number.MAX_SAFE_INTEGER) -
+      (b.promisedAt?.getTime() ?? Number.MAX_SAFE_INTEGER)
+  );
 }
 
 async function reservedForAllocation(tx: Db, allocationId: string): Promise<number> {
@@ -255,7 +326,10 @@ async function openDifferenceCount(tx: Db, orderId: string): Promise<number> {
   });
   if (lines.length === 0) return 0;
   return tx.incident.count({
-    where: { id: { in: lines.map((l) => l.incidentId!) }, status: { in: [...INCIDENT_OPEN_STATUSES] } },
+    where: {
+      id: { in: lines.map((l) => l.incidentId!) },
+      status: { in: [...INCIDENT_OPEN_STATUSES] },
+    },
   });
 }
 
@@ -275,7 +349,11 @@ async function refreshOrderStatus(tx: Db, order: ProcurementOrder): Promise<Proc
 const RECEIPT_RESERVATION_RELATION = 'reserved_for';
 
 /** Base quantity reserved per allocation by earlier receipts of an order line (active or already consumed). */
-async function suppliedByOrderLine(tx: Db, orderLineId: string, excludeReceiptLineId: string): Promise<Map<string, number>> {
+async function suppliedByOrderLine(
+  tx: Db,
+  orderLineId: string,
+  excludeReceiptLineId: string
+): Promise<Map<string, number>> {
   const supplied = new Map<string, number>();
   const receiptLines = await tx.goodsReceiptLine.findMany({
     where: { orderLineId, id: { not: excludeReceiptLineId } },
@@ -294,12 +372,18 @@ async function suppliedByOrderLine(tx: Db, orderLineId: string, excludeReceiptLi
   });
   if (relations.length === 0) return supplied;
   const reservations = await tx.stockReservation.findMany({
-    where: { id: { in: relations.map((relation) => relation.toId) }, status: { in: ['active', 'consumed'] } },
+    where: {
+      id: { in: relations.map((relation) => relation.toId) },
+      status: { in: ['active', 'consumed'] },
+    },
     select: { allocationId: true, quantity: true },
   });
   for (const reservation of reservations) {
     if (!reservation.allocationId) continue;
-    supplied.set(reservation.allocationId, round4((supplied.get(reservation.allocationId) ?? 0) + num(reservation.quantity)));
+    supplied.set(
+      reservation.allocationId,
+      round4((supplied.get(reservation.allocationId) ?? 0) + num(reservation.quantity))
+    );
   }
   return supplied;
 }
@@ -317,17 +401,31 @@ async function resolveReceivedShortfalls(
 ): Promise<string[]> {
   const resolved: string[] = [];
   for (const request of await openShortfallRequests(tx, { requestLineIds })) {
-    const tracked = await tx.demandAllocation.count({ where: { linkedType: 'area_request', linkedId: request.id } });
+    const tracked = await tx.demandAllocation.count({
+      where: { linkedType: 'area_request', linkedId: request.id },
+    });
     if (tracked > 0) continue;
     const relations = await tx.objectRelation.findMany({
-      where: { fromType: 'area_request', fromId: request.id, toType: OBJ.requestLine, relation: SHORTFALL_LINE_RELATION, validTo: null },
+      where: {
+        fromType: 'area_request',
+        fromId: request.id,
+        toType: OBJ.requestLine,
+        relation: SHORTFALL_LINE_RELATION,
+        validTo: null,
+      },
       select: { toId: true },
     });
     const lines = relations.length
-      ? await tx.purchaseRequestLine.findMany({ where: { id: { in: relations.map((relation) => relation.toId) } } })
+      ? await tx.purchaseRequestLine.findMany({
+          where: { id: { in: relations.map((relation) => relation.toId) } },
+        })
       : [];
     const live = lines.filter((line) => line.status !== 'cancelled');
-    if (live.length === 0 || !live.every((line) => num(line.qtyReceived) + QTY_EPS >= num(line.qty))) continue;
+    if (
+      live.length === 0 ||
+      !live.every((line) => num(line.qtyReceived) + QTY_EPS >= num(line.qty))
+    )
+      continue;
     await transitionAreaRequestInTx(tx, request, 'resolve', { answer, data });
     resolved.push(request.id);
   }
@@ -406,7 +504,10 @@ async function openReceiptDifferenceInTx(
     const item = await ctx.createWorkItem({
       areaKey: PURCHASES_AREA_KEY,
       kind: 'incident_followup',
-      title: truncate(`Resolver ${label.toLowerCase()} de ${receipt.number} (${order.number})`, 200),
+      title: truncate(
+        `Resolver ${label.toLowerCase()} de ${receipt.number} (${order.number})`,
+        200
+      ),
       description: `${orderLine.description}: pedido ${num(orderLine.qty)} ${orderLine.unit}, recibido ${num(receiptLine.qtyReceived)}, aceptado ${input.accepted}`,
       objectType: OBJ.receiptLine,
       objectId: receiptLine.id,
@@ -416,7 +517,14 @@ async function openReceiptDifferenceInTx(
   emitPurchases(
     ctx,
     EV.difference,
-    { receiptId: receipt.id, receiptLineId: receiptLine.id, orderId: order.id, kind, incidentId: incident.id, areaRequestId },
+    {
+      receiptId: receipt.id,
+      receiptLineId: receiptLine.id,
+      orderId: order.id,
+      kind,
+      incidentId: incident.id,
+      areaRequestId,
+    },
     { caseId, objectType: OBJ.receipt, objectId: receipt.id }
   );
   return { incidentId: incident.id, areaRequestId, workItemId };
@@ -431,8 +539,12 @@ async function resolveCoveredShortfalls(
 ): Promise<string[]> {
   const resolved: string[] = [];
   for (const request of await openShortfallRequests(tx, { allocationIds })) {
-    const linked = await tx.demandAllocation.findMany({ where: { linkedType: 'area_request', linkedId: request.id } });
-    const done = linked.length > 0 && linked.every((a) => ['ready', 'released', 'delivered', 'cancelled'].includes(a.status));
+    const linked = await tx.demandAllocation.findMany({
+      where: { linkedType: 'area_request', linkedId: request.id },
+    });
+    const done =
+      linked.length > 0 &&
+      linked.every((a) => ['ready', 'released', 'delivered', 'cancelled'].includes(a.status));
     if (!done || !isAreaRequestOpenStatus(request.status)) continue;
     await transitionAreaRequestInTx(tx, request, 'resolve', { answer, data });
     resolved.push(request.id);
@@ -481,7 +593,13 @@ export interface PostReceiptResult {
   movementIds: string[];
   reservations: Array<{ allocationId: string; reservationId: string; quantity: string }>;
   readyAllocationIds: string[];
-  differences: Array<{ receiptLineId: string; kind: string; incidentId: string; areaRequestId: string | null; workItemId: string | null }>;
+  differences: Array<{
+    receiptLineId: string;
+    kind: string;
+    incidentId: string;
+    areaRequestId: string | null;
+    workItemId: string | null;
+  }>;
   customerNoticeRequestIds: string[];
   resolvedRequestIds: string[];
   conflicts: Array<{ allocationId: string; code: string; message: string }>;
@@ -493,18 +611,25 @@ export async function recordReceiptInTx(
   ctx: CommandContext
 ): Promise<{ receipt: GoodsReceipt; lines: GoodsReceiptLine[]; posted: PostReceiptResult | null }> {
   const order = await loadOrder(tx, input.orderId);
-  throwCheck(checkReceiveOrder({ status: order.status, deliveryMode: order.deliveryMode, mode: 'warehouse' }));
+  throwCheck(
+    checkReceiveOrder({ status: order.status, deliveryMode: order.deliveryMode, mode: 'warehouse' })
+  );
   const orderLines = await loadOrderLines(tx, order.id);
   const seen = new Set<string>();
   for (const line of input.lines) {
-    if (seen.has(line.orderLineId)) throw new OperationsError('invalid_payload', 'Una partida aparece dos veces en la recepción');
+    if (seen.has(line.orderLineId))
+      throw new OperationsError('invalid_payload', 'Una partida aparece dos veces en la recepción');
     seen.add(line.orderLineId);
   }
   const classified = input.lines.map((line) => {
     const orderLine = orderLines.find((l) => l.id === line.orderLineId);
-    if (!orderLine) throw new OperationsError('invalid_payload', 'Alguna partida no pertenece a la orden');
+    if (!orderLine)
+      throw new OperationsError('invalid_payload', 'Alguna partida no pertenece a la orden');
     if (orderLine.status === 'cancelled' || orderLine.status === 'closed') {
-      throw new OperationsError('invalid_state', `La partida "${truncate(orderLine.description, 60)}" ya está cerrada`);
+      throw new OperationsError(
+        'invalid_state',
+        `La partida "${truncate(orderLine.description, 60)}" ya está cerrada`
+      );
     }
     const result = classifyReceiptLine({
       ordered: num(orderLine.qty),
@@ -514,16 +639,28 @@ export async function recordReceiptInTx(
       rejected: line.qtyRejected ?? null,
       declared: line.differenceKind ?? null,
     });
-    if (!result.ok) throw new OperationsError(result.code, `${truncate(orderLine.description, 60)}: ${result.message}`);
+    if (!result.ok)
+      throw new OperationsError(
+        result.code,
+        `${truncate(orderLine.description, 60)}: ${result.message}`
+      );
     return { input: line, orderLine, result };
   });
   const warehouseId = input.warehouseId ?? order.warehouseId;
-  if (!warehouseId) throw new OperationsError('invalid_payload', 'Indica la bodega donde se recibe el material');
-  const warehouse = await tx.warehouse.findUnique({ where: { id: warehouseId }, select: { id: true, active: true, name: true } });
+  if (!warehouseId)
+    throw new OperationsError('invalid_payload', 'Indica la bodega donde se recibe el material');
+  const warehouse = await tx.warehouse.findUnique({
+    where: { id: warehouseId },
+    select: { id: true, active: true, name: true },
+  });
   if (!warehouse) throw new OperationsError('not_found', 'No se encontró la bodega');
-  if (!warehouse.active) throw new OperationsError('invalid_state', `La bodega ${warehouse.name} está desactivada`);
+  if (!warehouse.active)
+    throw new OperationsError('invalid_state', `La bodega ${warehouse.name} está desactivada`);
   if (input.locationId) {
-    const location = await tx.storageLocation.findUnique({ where: { id: input.locationId }, select: { warehouseId: true } });
+    const location = await tx.storageLocation.findUnique({
+      where: { id: input.locationId },
+      select: { warehouseId: true },
+    });
     if (!location || location.warehouseId !== warehouse.id) {
       throw new OperationsError('invalid_payload', 'La ubicación no pertenece a la bodega');
     }
@@ -567,22 +704,46 @@ export async function recordReceiptInTx(
   emitPurchases(
     ctx,
     EV.created,
-    { receiptId: receipt.id, number, orderId: order.id, orderNumber: order.number, lines: lines.length, draft: !input.post },
+    {
+      receiptId: receipt.id,
+      number,
+      orderId: order.id,
+      orderNumber: order.number,
+      lines: lines.length,
+      draft: !input.post,
+    },
     { caseId: caseIds[0] ?? null, objectType: OBJ.receipt, objectId: receipt.id }
   );
   const posted = input.post ? await postReceiptInTx(tx, receipt.id, ctx) : null;
-  return { receipt: (await tx.goodsReceipt.findUnique({ where: { id: receipt.id } })) ?? receipt, lines, posted };
+  return {
+    receipt: (await tx.goodsReceipt.findUnique({ where: { id: receipt.id } })) ?? receipt,
+    lines,
+    posted,
+  };
 }
 
-export async function postReceiptInTx(tx: Db, receiptId: string, ctx: CommandContext): Promise<PostReceiptResult> {
-  const receipt = assertFoundRow(await tx.goodsReceipt.findUnique({ where: { id: receiptId } }), 'No se encontró la recepción');
-  if (receipt.status !== 'draft') throw new OperationsError('invalid_state', 'La recepción ya fue registrada');
+export async function postReceiptInTx(
+  tx: Db,
+  receiptId: string,
+  ctx: CommandContext
+): Promise<PostReceiptResult> {
+  const receipt = assertFoundRow(
+    await tx.goodsReceipt.findUnique({ where: { id: receiptId } }),
+    'No se encontró la recepción'
+  );
+  if (receipt.status !== 'draft')
+    throw new OperationsError('invalid_state', 'La recepción ya fue registrada');
   if (receipt.mode !== 'warehouse' || !receipt.warehouseId) {
     throw new OperationsError('invalid_state', 'La recepción no es de bodega');
   }
   let order = await loadOrder(tx, receipt.orderId);
-  throwCheck(checkReceiveOrder({ status: order.status, deliveryMode: order.deliveryMode, mode: 'warehouse' }));
-  const receiptLines = await tx.goodsReceiptLine.findMany({ where: { receiptId: receipt.id }, orderBy: { createdAt: 'asc' } });
+  throwCheck(
+    checkReceiveOrder({ status: order.status, deliveryMode: order.deliveryMode, mode: 'warehouse' })
+  );
+  const receiptLines = await tx.goodsReceiptLine.findMany({
+    where: { receiptId: receipt.id },
+    orderBy: { createdAt: 'asc' },
+  });
   const result: PostReceiptResult = {
     receiptId: receipt.id,
     number: receipt.number,
@@ -655,7 +816,9 @@ export async function postReceiptInTx(tx: Db, receiptId: string, ctx: CommandCon
       for (const entry of allocations) {
         if (!entry.allocation || entry.allocation.source !== 'purchase') continue;
         if (!RESERVABLE_ALLOCATION_STATUSES.includes(entry.allocation.status)) continue;
-        const need = round4(entry.allocation.quantity - (await reservedForAllocation(tx, entry.allocation.id)));
+        const need = round4(
+          entry.allocation.quantity - (await reservedForAllocation(tx, entry.allocation.id))
+        );
         caps.push({
           id: entry.procurementAllocationId,
           cap: receiptReservationCap({
@@ -692,11 +855,19 @@ export async function postReceiptInTx(tx: Db, receiptId: string, ctx: CommandCon
             quantity: reservation.quantityBase.toString(),
           });
           for (const row of reservation.reservations) {
-            await ctx.relate({ type: OBJ.receiptLine, id: receiptLine.id }, { type: 'stock_reservation', id: row.id }, RECEIPT_RESERVATION_RELATION);
+            await ctx.relate(
+              { type: OBJ.receiptLine, id: receiptLine.id },
+              { type: 'stock_reservation', id: row.id },
+              RECEIPT_RESERVATION_RELATION
+            );
           }
           const reserved = await reservedForAllocation(tx, allocation.id);
           const current = await tx.demandAllocation.findUnique({ where: { id: allocation.id } });
-          if (current && reserved + QTY_EPS >= num(current.quantity) && RESERVABLE_ALLOCATION_STATUSES.includes(current.status)) {
+          if (
+            current &&
+            reserved + QTY_EPS >= num(current.quantity) &&
+            RESERVABLE_ALLOCATION_STATUSES.includes(current.status)
+          ) {
             const ready = await tx.demandAllocation.update({
               where: { id: current.id },
               data: {
@@ -718,17 +889,29 @@ export async function postReceiptInTx(tx: Db, receiptId: string, ctx: CommandCon
                 movementIds: [movementId],
                 quantity: ready.quantity.toString(),
               },
-              { caseId: ready.caseId, areaKey: PURCHASES_AREA_KEY, objectType: 'demand_allocation', objectId: ready.id }
+              {
+                caseId: ready.caseId,
+                areaKey: PURCHASES_AREA_KEY,
+                objectType: 'demand_allocation',
+                objectId: ready.id,
+              }
             );
           }
         } catch (err) {
           if (!isOperationsError(err)) throw err;
-          result.conflicts.push({ allocationId: allocation.id, code: err.code, message: err.message });
+          result.conflicts.push({
+            allocationId: allocation.id,
+            code: err.code,
+            message: err.message,
+          });
           await ctx.openIncident({
             kind: 'stock_conflict',
             areaKey: 'inventario',
             severity: 'medium',
-            title: truncate(`No se pudo reservar lo recibido de ${order.number} para ${entry.demand.name}`, 200),
+            title: truncate(
+              `No se pudo reservar lo recibido de ${order.number} para ${entry.demand.name}`,
+              200
+            ),
             dedupeKey: `purchases.receipt_reserve:${receiptLine.id}:${allocation.id}`,
             caseId: entry.demand.caseId,
             detail: { receiptId: receipt.id, movementId, code: err.code, message: err.message },
@@ -780,8 +963,10 @@ export async function postReceiptInTx(tx: Db, receiptId: string, ctx: CommandCon
           const allocation = entry.allocation;
           if (allocation) {
             if (result.readyAllocationIds.includes(allocation.id)) continue;
-            if (['ready', 'released', 'delivered', 'cancelled'].includes(allocation.status)) continue;
-            if ((await reservedForAllocation(tx, allocation.id)) + QTY_EPS >= allocation.quantity) continue;
+            if (['ready', 'released', 'delivered', 'cancelled'].includes(allocation.status))
+              continue;
+            if ((await reservedForAllocation(tx, allocation.id)) + QTY_EPS >= allocation.quantity)
+              continue;
           }
           const list = delayedCases.get(entry.demand.caseId) ?? [];
           list.push(entry.demand.name);
@@ -791,13 +976,25 @@ export async function postReceiptInTx(tx: Db, receiptId: string, ctx: CommandCon
     }
     await tx.goodsReceiptLine.update({
       where: { id: receiptLine.id },
-      data: { stockMovementId: movementId, incidentId, qtyAccepted: D(accepted), qtyRejected: D(classification.rejected), differenceKind: classification.differenceKind },
+      data: {
+        stockMovementId: movementId,
+        incidentId,
+        qtyAccepted: D(accepted),
+        qtyRejected: D(classification.rejected),
+        differenceKind: classification.differenceKind,
+      },
     });
   }
 
   for (const [caseId, names] of delayedCases) {
     const existing = await tx.areaRequest.findFirst({
-      where: { caseId, kind: 'customer_notice', objectType: OBJ.order, objectId: order.id, status: { in: ['sent', 'acknowledged', 'accepted', 'blocked'] } },
+      where: {
+        caseId,
+        kind: 'customer_notice',
+        objectType: OBJ.order,
+        objectId: order.id,
+        status: { in: ['sent', 'acknowledged', 'accepted', 'blocked'] },
+      },
       select: { id: true },
     });
     if (existing) continue;
@@ -808,10 +1005,16 @@ export async function postReceiptInTx(tx: Db, receiptId: string, ctx: CommandCon
       kind: 'customer_notice',
       objectType: OBJ.order,
       objectId: order.id,
-      title: truncate(`Avisar al cliente: llegó incompleta la compra de ${[...new Set(names)].join(', ')}`, 200),
+      title: truncate(
+        `Avisar al cliente: llegó incompleta la compra de ${[...new Set(names)].join(', ')}`,
+        200
+      ),
       payload: {
         caseId,
-        reason: truncate(`La recepción ${receipt.number} de la orden ${order.number} llegó con diferencias; Compras la está resolviendo con el proveedor`, 500),
+        reason: truncate(
+          `La recepción ${receipt.number} de la orden ${order.number} llegó con diferencias; Compras la está resolviendo con el proveedor`,
+          500
+        ),
       },
     });
     result.customerNoticeRequestIds.push(request.id);
@@ -820,8 +1023,18 @@ export async function postReceiptInTx(tx: Db, receiptId: string, ctx: CommandCon
   await recomputeRequestStatuses(tx, requestIds, ctx);
   const receivedAnswer = `Material recibido en ${receipt.number} (orden ${order.number})`;
   const receivedData = { receiptId: receipt.id, movementIds: result.movementIds };
-  result.resolvedRequestIds = await resolveCoveredShortfalls(tx, result.readyAllocationIds, receivedAnswer, receivedData);
-  for (const id of await resolveReceivedShortfalls(tx, [...creditedLineIds], receivedAnswer, receivedData)) {
+  result.resolvedRequestIds = await resolveCoveredShortfalls(
+    tx,
+    result.readyAllocationIds,
+    receivedAnswer,
+    receivedData
+  );
+  for (const id of await resolveReceivedShortfalls(
+    tx,
+    [...creditedLineIds],
+    receivedAnswer,
+    receivedData
+  )) {
     if (!result.resolvedRequestIds.includes(id)) result.resolvedRequestIds.push(id);
   }
   order = await refreshOrderStatus(tx, order);
@@ -853,7 +1066,7 @@ export async function postReceiptInTx(tx: Db, receiptId: string, ctx: CommandCon
       type: 'purchase_receipt_difference',
       title: `Diferencias en ${receipt.number} (orden ${order.number})`,
       body: result.differences.map((d) => labelOf(DIFFERENCE_KIND_LABELS, d.kind)).join(', '),
-      url: `/app/purchases/orders/${order.id}`,
+      url: procurementOrderLink(order.id),
       entityType: OBJ.receipt,
       entityId: receipt.id,
     });
@@ -871,20 +1084,33 @@ export async function resolveReceiptDifferenceInTx(
   input: z.output<typeof resolveDifferenceSchema>,
   ctx: CommandContext
 ): Promise<{ orderId: string; orderStatus: string; creditedQty: number }> {
-  const receiptLine = assertFoundRow(await tx.goodsReceiptLine.findUnique({ where: { id: input.receiptLineId } }), 'No se encontró la partida de la recepción');
+  const receiptLine = assertFoundRow(
+    await tx.goodsReceiptLine.findUnique({ where: { id: input.receiptLineId } }),
+    'No se encontró la partida de la recepción'
+  );
   if (receiptLine.differenceKind === 'none' || !receiptLine.incidentId) {
     throw new OperationsError('invalid_state', 'La partida no tiene una diferencia abierta');
   }
-  const incident = assertFoundRow(await tx.incident.findUnique({ where: { id: receiptLine.incidentId } }), 'No se encontró la incidencia');
+  const incident = assertFoundRow(
+    await tx.incident.findUnique({ where: { id: receiptLine.incidentId } }),
+    'No se encontró la incidencia'
+  );
   if (!(INCIDENT_OPEN_STATUSES as readonly string[]).includes(incident.status)) {
     throw new OperationsError('invalid_state', 'La diferencia ya está resuelta');
   }
-  const receipt = assertFoundRow(await tx.goodsReceipt.findUnique({ where: { id: receiptLine.receiptId } }), 'No se encontró la recepción');
+  const receipt = assertFoundRow(
+    await tx.goodsReceipt.findUnique({ where: { id: receiptLine.receiptId } }),
+    'No se encontró la recepción'
+  );
   let order = await loadOrder(tx, receipt.orderId);
-  const orderLine = assertFoundRow(await tx.procurementOrderLine.findUnique({ where: { id: receiptLine.orderLineId } }), 'No se encontró la partida de la orden');
+  const orderLine = assertFoundRow(
+    await tx.procurementOrderLine.findUnique({ where: { id: receiptLine.orderLineId } }),
+    'No se encontró la partida de la orden'
+  );
   const pending = Math.max(0, round4(num(orderLine.qty) - num(orderLine.qtyAccepted)));
   let creditedQty = 0;
-  const credit = input.resolution === 'credit' || (input.resolution === 'accept' && pending > QTY_EPS);
+  const credit =
+    input.resolution === 'credit' || (input.resolution === 'accept' && pending > QTY_EPS);
   if (credit) {
     // Reducing what is bought and its total is a commercial decision, not a warehouse one.
     assertActorHasAny(
@@ -894,7 +1120,10 @@ export async function resolveReceiptDifferenceInTx(
     );
     creditedQty = input.creditQty ?? pending;
     if (creditedQty > pending + QTY_EPS) {
-      throw new OperationsError('invalid_quantity', `Sólo quedan ${pending} ${orderLine.unit} pendientes en la partida`);
+      throw new OperationsError(
+        'invalid_quantity',
+        `Sólo quedan ${pending} ${orderLine.unit} pendientes en la partida`
+      );
     }
     if (creditedQty > QTY_EPS) {
       const newQty = round4(num(orderLine.qty) - creditedQty);
@@ -908,7 +1137,10 @@ export async function resolveReceiptDifferenceInTx(
         },
       });
       const lines = await loadOrderLines(tx, order.id);
-      const totals = computeOrderTotals(lines.map((l) => ({ qty: l.qty, unitPrice: l.unitPrice, taxRate: l.taxRate })), order.freight);
+      const totals = computeOrderTotals(
+        lines.map((l) => ({ qty: l.qty, unitPrice: l.unitPrice, taxRate: l.taxRate })),
+        order.freight
+      );
       order = await tx.procurementOrder.update({
         where: { id: order.id },
         data: { subtotal: totals.subtotal, taxTotal: totals.taxTotal, total: totals.total },
@@ -920,7 +1152,9 @@ export async function resolveReceiptDifferenceInTx(
       const allocations = await lineAllocations(tx, orderLine.id);
       await releaseAllocationsExpectation(
         tx,
-        allocations.filter((a) => a.allocation && a.allocation.status === 'in_progress').map((a) => a.allocation!.id),
+        allocations
+          .filter((a) => a.allocation && a.allocation.status === 'in_progress')
+          .map((a) => a.allocation!.id),
         ctx,
         `Nota de crédito en ${order.number}`,
         order.id
@@ -944,27 +1178,55 @@ export async function resolveReceiptDifferenceInTx(
   });
   for (const request of requests) {
     if (isAreaRequestOpenStatus(request.status)) {
-      await transitionAreaRequestInTx(tx, request, 'resolve', { answer: resolution, data: { creditedQty } });
+      await transitionAreaRequestInTx(tx, request, 'resolve', {
+        answer: resolution,
+        data: { creditedQty },
+      });
     }
   }
   const items = await tx.workItem.findMany({
-    where: { objectType: OBJ.receiptLine, objectId: receiptLine.id, status: { in: [...WORK_ITEM_OPEN_STATUSES] } },
+    where: {
+      objectType: OBJ.receiptLine,
+      objectId: receiptLine.id,
+      status: { in: [...WORK_ITEM_OPEN_STATUSES] },
+    },
   });
   for (const item of items) {
-    await completeWorkItemInTx(tx, item, { result: { resolution: input.resolution, creditedQty }, skipEvidenceCheck: true });
+    await completeWorkItemInTx(tx, item, {
+      result: { resolution: input.resolution, creditedQty },
+      skipEvidenceCheck: true,
+    });
   }
   order = await refreshOrderStatus(tx, order);
-  const stillOpen = await tx.goodsReceiptLine.findMany({ where: { receiptId: receipt.id, incidentId: { not: null } }, select: { incidentId: true } });
+  const stillOpen = await tx.goodsReceiptLine.findMany({
+    where: { receiptId: receipt.id, incidentId: { not: null } },
+    select: { incidentId: true },
+  });
   const openCount = stillOpen.length
-    ? await tx.incident.count({ where: { id: { in: stillOpen.map((l) => l.incidentId!) }, status: { in: [...INCIDENT_OPEN_STATUSES] } } })
+    ? await tx.incident.count({
+        where: {
+          id: { in: stillOpen.map((l) => l.incidentId!) },
+          status: { in: [...INCIDENT_OPEN_STATUSES] },
+        },
+      })
     : 0;
   if (openCount === 0 && receipt.status === 'disputed') {
-    await tx.goodsReceipt.update({ where: { id: receipt.id }, data: { status: 'posted', version: { increment: 1 } } });
+    await tx.goodsReceipt.update({
+      where: { id: receipt.id },
+      data: { status: 'posted', version: { increment: 1 } },
+    });
   }
   emitPurchases(
     ctx,
     EV.differenceResolved,
-    { receiptId: receipt.id, receiptLineId: receiptLine.id, orderId: order.id, resolution: input.resolution, creditedQty, orderStatus: order.status },
+    {
+      receiptId: receipt.id,
+      receiptLineId: receiptLine.id,
+      orderId: order.id,
+      resolution: input.resolution,
+      creditedQty,
+      orderStatus: order.status,
+    },
     { caseId: incident.caseId, objectType: OBJ.receipt, objectId: receipt.id }
   );
   publishBoard(ctx, { orderId: order.id, receiptId: receipt.id });
@@ -990,7 +1252,13 @@ export async function confirmDirectDeliveryInTx(
   ctx: CommandContext
 ): Promise<ConfirmDirectDeliveryData> {
   let order = await loadOrder(tx, input.orderId);
-  throwCheck(checkReceiveOrder({ status: order.status, deliveryMode: order.deliveryMode, mode: 'direct_delivery' }));
+  throwCheck(
+    checkReceiveOrder({
+      status: order.status,
+      deliveryMode: order.deliveryMode,
+      mode: 'direct_delivery',
+    })
+  );
   await assertReceiptEvidence(tx, order.id, input.evidenceObjectIds, ctx);
   const orderLines = await loadOrderLines(tx, order.id);
   const number = await nextFolio(tx, 'receipt');
@@ -1019,12 +1287,17 @@ export async function confirmDirectDeliveryInTx(
   const seen = new Set<string>();
   let differences = 0;
   for (const entry of input.lines) {
-    if (seen.has(entry.orderLineId)) throw new OperationsError('invalid_payload', 'Una partida aparece dos veces');
+    if (seen.has(entry.orderLineId))
+      throw new OperationsError('invalid_payload', 'Una partida aparece dos veces');
     seen.add(entry.orderLineId);
     const orderLine = orderLines.find((l) => l.id === entry.orderLineId);
-    if (!orderLine) throw new OperationsError('invalid_payload', 'Alguna partida no pertenece a la orden');
+    if (!orderLine)
+      throw new OperationsError('invalid_payload', 'Alguna partida no pertenece a la orden');
     if (orderLine.status === 'cancelled' || orderLine.status === 'closed') {
-      throw new OperationsError('invalid_state', `La partida "${truncate(orderLine.description, 60)}" ya está cerrada`);
+      throw new OperationsError(
+        'invalid_state',
+        `La partida "${truncate(orderLine.description, 60)}" ya está cerrada`
+      );
     }
     const damaged = entry.difference === 'damaged';
     const classification = classifyReceiptLine({
@@ -1060,7 +1333,8 @@ export async function confirmDirectDeliveryInTx(
       },
     });
     const allocations = await lineAllocations(tx, orderLine.id);
-    for (const id of (await creditRequestLines(tx, orderLine, allocations, delivered)).requestIds) requestIds.add(id);
+    for (const id of (await creditRequestLines(tx, orderLine, allocations, delivered)).requestIds)
+      requestIds.add(id);
     if (classification.differenceKind !== 'none') {
       // Differences of a direct delivery follow the same flow as the warehouse: incident + resolve_difference.
       const opened = await openReceiptDifferenceInTx(tx, ctx, {
@@ -1076,14 +1350,23 @@ export async function confirmDirectDeliveryInTx(
         rejected: classification.rejected,
         overQty: classification.overQty,
       });
-      await tx.goodsReceiptLine.update({ where: { id: receiptLine.id }, data: { incidentId: opened.incidentId } });
+      await tx.goodsReceiptLine.update({
+        where: { id: receiptLine.id },
+        data: { incidentId: opened.incidentId },
+      });
       differences += 1;
     }
     const caps: Array<{ id: string; cap: number }> = [];
     const factors = new Map<string, number>();
     for (const allocationEntry of allocations) {
       const allocation = allocationEntry.allocation;
-      if (!allocation || allocation.source !== 'direct_supplier' || allocation.status === 'delivered' || allocation.status === 'cancelled') continue;
+      if (
+        !allocation ||
+        allocation.source !== 'direct_supplier' ||
+        allocation.status === 'delivered' ||
+        allocation.status === 'cancelled'
+      )
+        continue;
       const profile = allocationEntry.demand.zohoItemId
         ? toUnitProfile(await getOrCreateProfile(tx, allocationEntry.demand.zohoItemId))
         : null;
@@ -1097,7 +1380,13 @@ export async function confirmDirectDeliveryInTx(
       factors.set(allocationEntry.procurementAllocationId, factor);
       caps.push({
         id: allocationEntry.procurementAllocationId,
-        cap: Math.min(round4(allocation.quantity - allocation.deliveredQuantity), round4(allocationEntry.procurementQty * factor)),
+        // Same rule as the warehouse receipt: what this line still owes THIS sale,
+        // never the share it already handed over to it in an earlier delivery.
+        cap: receiptReservationCap({
+          need: round4(allocation.quantity - allocation.deliveredQuantity),
+          promised: round4(allocationEntry.procurementQty * factor),
+          suppliedByLine: allocationEntry.directDeliveredQty,
+        }),
       });
     }
     // Spread in base units: each allocation converts the delivered quantity with its own factor.
@@ -1109,12 +1398,23 @@ export async function confirmDirectDeliveryInTx(
       const base = round4(Math.min(cap.cap, baseAvailable));
       if (base <= QTY_EPS) continue;
       const allocationEntry = allocations.find((a) => a.procurementAllocationId === cap.id)!;
-      plan.deliveries.push({ caseId: allocationEntry.demand.caseId, allocationId: allocationEntry.allocation!.id, deliveredQty: base });
+      plan.deliveries.push({
+        caseId: allocationEntry.demand.caseId,
+        allocationId: allocationEntry.allocation!.id,
+        deliveredQty: base,
+      });
+      // The delivery order is recorded by the sync job: the line notes here what it
+      // already committed, so a later partial delivery cannot hand it over twice.
+      await tx.procurementAllocation.update({
+        where: { id: cap.id },
+        data: { directDeliveredQty: D(round4(allocationEntry.directDeliveredQty + base)) },
+      });
       remainingLineQty = round4(remainingLineQty - base / factor);
     }
   }
   await recomputeRequestStatuses(tx, requestIds, ctx);
-  if (differences > 0) await tx.goodsReceipt.update({ where: { id: receipt.id }, data: { status: 'disputed' } });
+  if (differences > 0)
+    await tx.goodsReceipt.update({ where: { id: receipt.id }, data: { status: 'disputed' } });
   order = await refreshOrderStatus(tx, order);
   const syncQueued = plan.deliveries.length > 0;
   if (syncQueued) {
@@ -1127,7 +1427,11 @@ export async function confirmDirectDeliveryInTx(
       createdBy: actorUserId(ctx) ?? 'purchases',
     });
   }
-  await ctx.relate({ type: OBJ.receipt, id: receipt.id }, { type: OBJ.order, id: order.id }, 'receipt_of');
+  await ctx.relate(
+    { type: OBJ.receipt, id: receipt.id },
+    { type: OBJ.order, id: order.id },
+    'receipt_of'
+  );
   emitPurchases(
     ctx,
     EV.directConfirmed,
@@ -1143,7 +1447,14 @@ export async function confirmDirectDeliveryInTx(
     { caseId: order.directDeliveryCaseId, objectType: OBJ.receipt, objectId: receipt.id }
   );
   publishBoard(ctx, { orderId: order.id, receiptId: receipt.id });
-  return { receiptId: receipt.id, number, orderId: order.id, orderStatus: order.status, plan, syncQueued };
+  return {
+    receiptId: receipt.id,
+    number,
+    orderId: order.id,
+    orderStatus: order.status,
+    plan,
+    syncQueued,
+  };
 }
 
 function evidenceKindForMime(mime: string): 'photo' | 'signature' {
@@ -1160,7 +1471,10 @@ export async function syncDirectDeliveryInTx(
   plan: DirectDeliveryPlan,
   ctx: CommandContext
 ): Promise<{ deliveryOrderIds: string[]; resolvedRequestIds: string[] }> {
-  const receipt = assertFoundRow(await tx.goodsReceipt.findUnique({ where: { id: plan.receiptId } }), 'No se encontró la recepción');
+  const receipt = assertFoundRow(
+    await tx.goodsReceipt.findUnique({ where: { id: plan.receiptId } }),
+    'No se encontró la recepción'
+  );
   const byCase = new Map<string, Array<{ allocationId: string; deliveredQty: number }>>();
   for (const delivery of plan.deliveries) {
     const list = byCase.get(delivery.caseId) ?? [];
@@ -1170,7 +1484,10 @@ export async function syncDirectDeliveryInTx(
     byCase.set(delivery.caseId, list);
   }
   const objects = plan.evidenceObjectIds.length
-    ? await tx.storageObject.findMany({ where: { id: { in: plan.evidenceObjectIds } }, select: { id: true, declaredMimeType: true } })
+    ? await tx.storageObject.findMany({
+        where: { id: { in: plan.evidenceObjectIds } },
+        select: { id: true, declaredMimeType: true },
+      })
     : [];
   const deliveryOrderIds: string[] = [];
   const allocationIds: string[] = [];
@@ -1184,11 +1501,22 @@ export async function syncDirectDeliveryInTx(
     if (pendingLines.length === 0) continue;
     const pendingIds = pendingLines.map((l) => l.allocationId);
     let deliveryOrder = await tx.deliveryOrder.findFirst({
-      where: { caseId, mode: 'direct_supplier', status: { in: [...DELIVERY_ORDER_OPEN_STATUSES] }, allocationIds: { hasSome: pendingIds } },
+      where: {
+        caseId,
+        mode: 'direct_supplier',
+        status: { in: [...DELIVERY_ORDER_OPEN_STATUSES] },
+        allocationIds: { hasSome: pendingIds },
+      },
       orderBy: { createdAt: 'asc' },
     });
     if (!deliveryOrder) {
-      deliveryOrder = (await createDeliveryOrder(tx, { caseId, allocationIds: pendingIds, mode: 'direct_supplier' })).deliveryOrder;
+      deliveryOrder = (
+        await createDeliveryOrder(tx, {
+          caseId,
+          allocationIds: pendingIds,
+          mode: 'direct_supplier',
+        })
+      ).deliveryOrder;
     }
     const existingEvidence = await tx.deliveryEvidence.findMany({
       where: { deliveryOrderId: deliveryOrder.id, storageObjectId: { in: plan.evidenceObjectIds } },
@@ -1207,12 +1535,17 @@ export async function syncDirectDeliveryInTx(
         },
       });
     }
-    const coveredLines = pendingLines.filter((line) => deliveryOrder!.allocationIds.includes(line.allocationId));
+    const coveredLines = pendingLines.filter((line) =>
+      deliveryOrder!.allocationIds.includes(line.allocationId)
+    );
     await recordDelivery(
       tx,
       {
         deliveryOrderId: deliveryOrder.id,
-        lines: coveredLines.map((line) => ({ allocationId: line.allocationId, deliveredQty: line.deliveredQty })),
+        lines: coveredLines.map((line) => ({
+          allocationId: line.allocationId,
+          deliveredQty: line.deliveredQty,
+        })),
         receivedBy: plan.receivedBy,
         evidenceObjectIds: plan.evidenceObjectIds,
         note: plan.note ?? undefined,
@@ -1221,7 +1554,11 @@ export async function syncDirectDeliveryInTx(
     );
     deliveryOrderIds.push(deliveryOrder.id);
     allocationIds.push(...coveredLines.map((l) => l.allocationId));
-    await ctx.relate({ type: OBJ.receipt, id: receipt.id }, { type: 'delivery_order', id: deliveryOrder.id }, 'confirmed_delivery');
+    await ctx.relate(
+      { type: OBJ.receipt, id: receipt.id },
+      { type: 'delivery_order', id: deliveryOrder.id },
+      'confirmed_delivery'
+    );
   }
   const resolvedRequestIds = await resolveCoveredShortfalls(
     tx,
@@ -1237,13 +1574,19 @@ export async function recordDirectSyncFailureInTx(
   input: z.output<typeof directSyncFailedSchema>,
   ctx: CommandContext
 ): Promise<{ incidentId: string; workItemId: string | null }> {
-  const receipt = assertFoundRow(await tx.goodsReceipt.findUnique({ where: { id: input.receiptId } }), 'No se encontró la recepción');
+  const receipt = assertFoundRow(
+    await tx.goodsReceipt.findUnique({ where: { id: input.receiptId } }),
+    'No se encontró la recepción'
+  );
   const order = await loadOrder(tx, receipt.orderId);
   const { incident, created } = await ctx.openIncident({
     kind: 'purchase_difference',
     areaKey: 'logistica',
     severity: 'medium',
-    title: truncate(`No se pudo registrar la entrega directa de ${receipt.number} (${order.number})`, 200),
+    title: truncate(
+      `No se pudo registrar la entrega directa de ${receipt.number} (${order.number})`,
+      200
+    ),
     dedupeKey: `purchases.direct_sync:${receipt.id}`,
     caseId: order.directDeliveryCaseId,
     detail: { receiptId: receipt.id, orderId: order.id, message: input.message },
@@ -1254,7 +1597,10 @@ export async function recordDirectSyncFailureInTx(
       areaKey: 'logistica',
       kind: 'action',
       title: truncate(`Registrar la entrega directa de ${order.number}`, 200),
-      description: truncate(`Compras confirmó la entrega (${receipt.number}) pero no se pudo registrar en logística: ${input.message}`, 1000),
+      description: truncate(
+        `Compras confirmó la entrega (${receipt.number}) pero no se pudo registrar en logística: ${input.message}`,
+        1000
+      ),
       caseId: order.directDeliveryCaseId,
       objectType: OBJ.receipt,
       objectId: receipt.id,

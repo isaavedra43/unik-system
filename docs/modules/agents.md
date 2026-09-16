@@ -49,23 +49,26 @@ Principios:
 `ensureAgentIdentities()` corre al arrancar (`src/instrumentation-node.ts`, tras `ensureOperationsSeed`) y crea o
 repara, de forma idempotente y segura con varias instancias:
 
-| Identidad (`AgentIdentity.key`) | Usuario bot | Rol de sistema | Cubre |
-|---|---|---|---|
-| `area:ventas` | `ia_ventas` | `agent_ventas` | Ventas |
-| `area:compras` | `ia_compras` | `agent_compras` | Compras |
-| `area:inventario` | `ia_inventario` | `agent_inventario` | Inventario |
-| `area:manufactura` | `ia_manufactura` | `agent_manufactura` | Manufactura |
-| `area:logistica` | `ia_logistica` | `agent_logistica` | Logística |
-| `area:contabilidad` | `ia_contabilidad` | `agent_contabilidad` | Contabilidad |
-| `admin` | `ia_admin` | `agent_admin` | Administración y toda la empresa (Control Tower) |
+| Identidad (`AgentIdentity.key`) | Usuario bot       | Rol de sistema       | Cubre                                            |
+| ------------------------------- | ----------------- | -------------------- | ------------------------------------------------ |
+| `area:ventas`                   | `ia_ventas`       | `agent_ventas`       | Ventas                                           |
+| `area:compras`                  | `ia_compras`      | `agent_compras`      | Compras                                          |
+| `area:inventario`               | `ia_inventario`   | `agent_inventario`   | Inventario                                       |
+| `area:manufactura`              | `ia_manufactura`  | `agent_manufactura`  | Manufactura                                      |
+| `area:logistica`                | `ia_logistica`    | `agent_logistica`    | Logística                                        |
+| `area:contabilidad`             | `ia_contabilidad` | `agent_contabilidad` | Contabilidad                                     |
+| `admin`                         | `ia_admin`        | `agent_admin`        | Administración y toda la empresa (Control Tower) |
 
 - `User.isBot = true`, contraseña inutilizable (no es bcrypt). El login rechaza bots con el mensaje genérico y
   `getCurrentSession` tampoco acepta una sesión de bot. No hay DMs con bots.
 - Cada bot tiene **un solo rol** con permisos fijos: `chat.use`, `operations.view` y las lecturas/acciones de su
-  área que existan en el registro (lista explícita en `AGENT_AREA_PERMISSION_CANDIDATES`; hoy, por ejemplo, Inventario
-  suma `inventory.view|count|reserve` y `products.view`; Logística `logistics.view|dispatch` y `packages.view`; la IA
-  administradora sólo `operations.manage`). Nunca `super_admin`, `operations.admin`, usuarios/roles ni `*.admin`: el
-  arranque quita cualquier otro rol y lo audita; `buildBotActor` falla si encuentra `super_admin`.
+  área que existan en el registro (lista explícita en `AGENT_AREA_PERMISSION_CANDIDATES`). Las siete áreas tienen hoy
+  `act` poblado: Ventas `crm.manage` (nunca `crm.create_sales_order`); Compras `purchases.request`,
+  `purchases.manage_orders` y `purchases.sourcing`; Inventario `inventory.count` e `inventory.reserve`; Manufactura
+  `manufacturing.manage_orders` y `manufacturing.operate`; Logística `logistics.dispatch`; Contabilidad
+  `finance.capture_expense` y `finance.manage_obligations` (nunca aprobar, contabilizar, cerrar, nómina, catálogo ni
+  exportar); y la IA administradora sólo `operations.manage`. Nunca `super_admin`, `operations.admin`, usuarios/roles
+  ni `*.admin`: el arranque quita cualquier otro rol y lo audita; `buildBotActor` falla si encuentra `super_admin`.
 - La IA administradora lee las tools de Control Tower (`getCompanyPulse`, `findStuckCases`, `whoIsBlocking`,
   `simulateDelay`) por la regla `allowActor` del registro (`isAdministratorBot`), sin tener `operations.admin`.
 - Lo que edita un administrador no se sobrescribe en el arranque: modo, presupuestos, nombre y si el bot está activo.
@@ -77,12 +80,12 @@ repara, de forma idempotente y segura con varias instancias:
 Misma IA, mismo `CopilotPanel`, un hilo por superficie. El modo de cada usuario vive en
 `AiUserPreference.surfaceModes` (Asistente IA → Preferencias y memoria).
 
-| Superficie | Ruta del turno | Hilo (`context.kind` / llave) | Acceso | Modo inicial | Adaptador |
-|---|---|---|---|---|---|
-| Área | `GET/POST /app/operations/api/areas/[key]/copilot` | `area_copilot` / `areaKey` | `operations.view`, permiso del módulo del área o persona del área | a petición | `AreaCopilotPanel` |
-| Expediente (sala) | `GET/POST /app/operations/api/cases/[id]/copilot` | `case_copilot` / `caseId` | `authorizeOperationsChannel` | a petición | `CaseRoomCopilotPanel` |
-| Mi trabajo | `GET/POST /app/operations/api/mywork/copilot` (página `/app/mywork`) | `mywork_copilot` / `userId` | cualquier sesión | activo | `MyWorkCopilotPanel` |
-| Control Tower | `GET/POST /app/admin/control-tower/api/copilot` | `control_tower_copilot` / `scope` | `operations.admin` | a petición | `ControlTowerCopilotPanel` |
+| Superficie        | Ruta del turno                                                       | Hilo (`context.kind` / llave)     | Acceso                                                            | Modo inicial | Adaptador                  |
+| ----------------- | -------------------------------------------------------------------- | --------------------------------- | ----------------------------------------------------------------- | ------------ | -------------------------- |
+| Área              | `GET/POST /app/operations/api/areas/[key]/copilot`                   | `area_copilot` / `areaKey`        | `operations.view`, permiso del módulo del área o persona del área | a petición   | `AreaCopilotPanel`         |
+| Expediente (sala) | `GET/POST /app/operations/api/cases/[id]/copilot`                    | `case_copilot` / `caseId`         | `authorizeOperationsChannel`                                      | a petición   | `CaseRoomCopilotPanel`     |
+| Mi trabajo        | `GET/POST /app/operations/api/mywork/copilot` (página `/app/mywork`) | `mywork_copilot` / `userId`       | cualquier sesión                                                  | activo       | `MyWorkCopilotPanel`       |
+| Control Tower     | `GET/POST /app/admin/control-tower/api/copilot`                      | `control_tower_copilot` / `scope` | `operations.admin`                                                | a petición   | `ControlTowerCopilotPanel` |
 
 - Prompts cortos en `prompts/` (base de agente ≤2.4k caracteres; superficie ≤4.8k), con todo dato variable
   envuelto con `wrapUntrusted`. En turnos de fondo `buildAgentBasePrompt` sustituye al prompt general.
@@ -92,6 +95,17 @@ Misma IA, mismo `CopilotPanel`, un hilo por superficie. El modo de cada usuario 
   envuelto como dato.
 - Las acciones rápidas del chat usan `POST /app/operations/api/requests/[id]/respond` y
   `POST /app/operations/api/proposals/[id]` (el servidor valida el alcance; el cliente sólo oculta botones).
+- **Qué propuestas muestra cada superficie** (plan 5.4: «`listProposalsForScope(actor, caseId)` alimenta la sala»).
+  `surfaceProposals` en `src/app/app/operations/api/_copilot-shared.ts` une dos fuentes:
+  - siempre `listPendingProposals(userId, conversationId)`: las del hilo propio de esa persona aquí;
+  - en **Expediente** y **Área**, además `listProposalsForScope(actor, {caseId|areaKey})`: las del alcance que esa
+    persona todavía puede decidir (responsable, suplente, permiso del alcance, o segunda firma que puede dar). Una
+    propuesta de agente nace en la conversación del BOT, así que sin esto sólo era decidible desde la tarjeta del chat
+    o desde Mi trabajo, nunca desde la sala del expediente ni desde el centro de trabajo del área.
+  - Mi trabajo y la Torre de Control no tienen alcance de sala: siguen con su hilo (Mi trabajo ya lista lo decidible
+    por su propia página).
+  - El panel muestra `pending` y `awaiting_second_approval` (`isDecidableProposal`); dar la primera de dos firmas ya
+    no se reporta como fallo ni dispara el turno `action_failed`.
 
 ## Protocolo IA↔IA (≤1 llamada al modelo; normalmente 0)
 
@@ -113,23 +127,23 @@ Ejemplo "Inventario avisa a Compras que faltan 4 pz":
 
 ### Matriz de disparo (`trigger-matrix.ts`)
 
-| Evento | Modo | Agente | Disparo |
-|---|---|---|---|
-| `case.created` / `case.started` | regla | admin | `ensure_case_room` (sala + plantilla) |
-| `demand.shortfall_confirmed` | regla | inventario | `shortfall_to_purchase_request` |
-| `request.created` | regla | área origen | `announce_request` |
-| `request.created` con texto libre o `info` | LLM | área destino | `interpret_request` |
-| `request.acknowledged|accepted|resolved|rejected|cancelled|expired|blocked` | regla | área destino | `announce_request_update` |
-| `request.overdue` | LLM | área destino | `unblock` |
-| `request.blocked` | LLM | área origen | `replan_check` |
-| `workitem.overdue|escalated` nivel 0–1 (o por solicitud vencida) | regla | área | `notify_workitem_overdue` |
-| `workitem.escalated` nivel ≥2 | LLM | área | `unblock` |
-| `incident.opened` sin texto / con texto | regla / LLM | área | `announce_incident` / `triage` |
-| `case.replanned` con nota de una persona | LLM | ventas | `replan_check` |
-| `case.stuck` (24 h sin eventos, sin entrega) | LLM | admin | `stuck_review` |
-| `chat.mention_agent` | LLM | bot mencionado | `mention` |
-| `proposal.failed` | LLM | bot proponente | `action_failed` |
-| `case.delivered` | regla (+ resumen una vez si hubo incidencias) | admin | `announce_case_delivered` / `case_summary` |
+| Evento                                       | Modo                                           | Agente         | Disparo                                    |
+| -------------------------------------------- | ---------------------------------------------- | -------------- | ------------------------------------------ |
+| `case.created` / `case.started`              | regla                                          | admin          | `ensure_case_room` (sala + plantilla)      |
+| `demand.shortfall_confirmed`                 | regla                                          | inventario     | `shortfall_to_purchase_request`            |
+| `request.created`                            | regla                                          | área origen    | `announce_request`                         |
+| `request.created` con texto libre o `info`   | LLM                                            | área destino   | `interpret_request`                        |
+| `request.acknowledged                        | accepted                                       | resolved       | rejected                                   | cancelled                 | expired | blocked` | regla | área destino | `announce_request_update` |
+| `request.overdue`                            | LLM                                            | área destino   | `unblock`                                  |
+| `request.blocked`                            | LLM                                            | área origen    | `replan_check`                             |
+| `workitem.overdue                            | escalated` nivel 0–1 (o por solicitud vencida) | regla          | área                                       | `notify_workitem_overdue` |
+| `workitem.escalated` nivel ≥2                | LLM                                            | área           | `unblock`                                  |
+| `incident.opened` sin texto / con texto      | regla / LLM                                    | área           | `announce_incident` / `triage`             |
+| `case.replanned` con nota de una persona     | LLM                                            | ventas         | `replan_check`                             |
+| `case.stuck` (24 h sin eventos, sin entrega) | LLM                                            | admin          | `stuck_review`                             |
+| `chat.mention_agent`                         | LLM                                            | bot mencionado | `mention`                                  |
+| `proposal.failed`                            | LLM                                            | bot proponente | `action_failed`                            |
+| `case.delivered`                             | regla (+ resumen una vez si hubo incidencias)  | admin          | `announce_case_delivered` / `case_summary` |
 
 ### Guardas de una decisión LLM (`dispatcher.ts`)
 
@@ -185,12 +199,43 @@ páginas para llegar a los siguientes.
 
 ## Aprobaciones (`extensions/proposals-service.ts`)
 
-- `approverScope {caseId, areaKey, userIds: [responsable, suplente], permission?}` se fija en cada turno de agente.
-  Deciden el proponente humano o una persona del alcance (listada o con el permiso). Un ajeno recibe 404; un bot 403.
+- `approverScope {caseId, areaKey, userIds: [responsable, suplente], permissions?}` se fija en cada turno de agente.
+  Deciden el proponente humano o una persona del alcance (listada o con **cualquiera** de los permisos). Un ajeno
+  recibe 404; un bot 403. Las filas guardadas antes de este campo traían `permission` (singular) y se siguen leyendo.
+- `permissions` sale de `AREA_APPROVER_PERMISSION_CANDIDATES` (`agent-runner.ts`), que **no copia la tabla: la deriva**
+  de `AREA_REGISTRY[...].permissions.approve` (columna «Aprobar» de `docs/modules/areas.md` §3), y se queda sólo con
+  las llaves que existen en el registro de permisos. **No se inventó ninguna llave `<área>.approve`**: se crearon las
+  dos que faltaban de verdad (`purchases.approve`, `finance.approve`) y las otras cuatro áreas usan la o las llaves que
+  ya concentran sus decisiones. `operations.admin` NO entra aquí (sí en `areaApprovePermissions`, que gobierna las
+  aprobaciones de negocio del área): administrar operaciones no firma las decisiones de la IA.
+
+  | Área           | Permisos de aprobador del turno        |
+  | -------------- | -------------------------------------- |
+  | Ventas         | `crm.manage`                           |
+  | Compras        | `purchases.approve`                    |
+  | Inventario     | `inventory.adjust`, `inventory.manage` |
+  | Manufactura    | `manufacturing.approve_incidents`      |
+  | Logística      | `logistics.manage_fleet`               |
+  | Contabilidad   | `finance.approve`                      |
+  | Administración | — (sólo responsable y suplente)        |
+
 - La propuesta se ejecuta con la persona que aprueba como actor y `agentAreaKey` = área de la propuesta: las tools de
   operaciones exigen que la acción caiga en esa área.
 - Tools con `requiresSecondApproval`: primera firma → `awaiting_second_approval`; la segunda la da otra persona con
   permiso. Los pagos de negocio mantienen su doble firma en `ApprovalRequest` (`authorizePayment` no la marca).
+- **Primera firma de negocio heredada (plan 5.4).** Si la tool aprobada abre una `ApprovalRequest` (orden de compra,
+  gasto, incidencia…), la decisión que se acaba de tomar en la tarjeta se registra como el PRIMER VOTO de esa
+  solicitud —siempre que esa persona cumpla la política del alcance—, para no pedirle dos clics por lo mismo. Antes
+  quedaba excluida por ser la solicitante (`checkVote` → `self_approval`) y su propia orden esperaba firmas ajenas.
+  - La firma viaja por contexto asíncrono (`runWithApprovalFirstSignature` en
+    `src/modules/operations/approval-first-signature.ts`), no por los argumentos de cada módulo: vale para toda tool
+    que abra una aprobación de negocio, sin tocar Compras, Contabilidad ni Manufactura.
+  - Se consume UNA vez por decisión y sólo la toma la aprobación cuyo solicitante es esa misma persona.
+  - Con una firma requerida la solicitud queda aprobada en la misma transacción; con dos, queda pendiente con una
+    firma registrada y sólo se pide la que falta (`RequestApprovalOutcome.firstSignatureByUserId` lo reporta).
+  - `ApprovalDecidedEvent.auto` pasa a significar «decidida en la transacción que la pidió» (auto-aprobación de la
+    política, `decidedByUserId` null, o firma heredada, `decidedByUserId` con el id): los módulos lo usan para no
+    volver a subir la versión de su agregado.
 - Si una propuesta de un bot aprobada **falla al ejecutarse**, `approveProposal` encola el turno `action_failed` del
   bot (una vez por propuesta), desde cualquier ruta de decisión (asistente, bandeja, chat, operaciones).
 
@@ -220,11 +265,11 @@ páginas para llegar a los siguientes.
 
 ## Jobs (`agents-jobs.ts`, registrado en `src/modules/jobs/register-handlers.ts`)
 
-| Job | Cuándo | Qué hace |
-|---|---|---|
-| `agents.dispatch` | lo encolan los productores | matriz, reglas y decisiones LLM con guardas (1 intento) |
-| `agents.stuck_scan` | cada hora | expedientes abiertos sin entrega ni eventos en 24 h → `stuck_review` (una vez al día por expediente) |
-| `agents.control_tower_digest` | revisa cada 15 min | desde las 07:30 (hora de los agentes), una vez al día: KPIs con plantilla en el canal de Administración y, opcional, tres líneas con el modelo `utility` |
+| Job                           | Cuándo                     | Qué hace                                                                                                                                                 |
+| ----------------------------- | -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `agents.dispatch`             | lo encolan los productores | matriz, reglas y decisiones LLM con guardas (1 intento)                                                                                                  |
+| `agents.stuck_scan`           | cada hora                  | expedientes abiertos sin entrega ni eventos en 24 h → `stuck_review` (una vez al día por expediente)                                                     |
+| `agents.control_tower_digest` | revisa cada 15 min         | desde las 07:30 (hora de los agentes), una vez al día: KPIs con plantilla en el canal de Administración y, opcional, tres líneas con el modelo `utility` |
 
 Al importarse, `agents-jobs.ts` suscribe el despachador a `onOperationalEvents`, `onCaseStarted` y `onBotMentioned`.
 
@@ -273,12 +318,6 @@ Al importarse, `agents-jobs.ts` suscribe el despachador a `onOperationalEvents`,
 
 ## Límites conocidos
 
-- Las páginas `/app/operations/cases/[id]` (Expediente 360), `/app/areas/[área]/…` y `/app/admin/control-tower`
-  llegan en la fase de experiencia: hasta entonces los enlaces "Ver expediente" y "Abrir centro de trabajo" dan 404.
-- Compras, Manufactura, Contabilidad y CRM aún no registran permisos de módulo: sus bots sólo leen y sus canales se
-  forman con responsable, suplente y líder. Al registrarlos, agrégalos a `AGENT_AREA_PERMISSION_CANDIDATES`
-  (`agents/permissions.ts`) y a `AREA_ACT_PERMISSION_CANDIDATES` (`ai/tools/operations-tool-kit.ts`).
-- Todavía no hay permisos `<módulo>.approve`: el alcance de aprobación es responsable + suplente.
 - Al crearse una solicitud llegan dos avisos al responsable (`ops_request` del núcleo y `agent_request`), por diseño.
 - El tope de ~1.2k tokens de los prompts se controla por caracteres, no con un tokenizador.
 - Las carreras de `chatChannelId` y del dedupe por `triggerHash` sólo tienen prueba secuencial.

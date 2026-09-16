@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 
 // ---------------------------------------------------------------------------
 // Web Speech API types (not in standard TS lib.dom.d.ts)
@@ -104,6 +104,30 @@ export interface VoiceDictationState {
  * });
  * ```
  */
+/** Nothing to subscribe to: whether the browser speaks Web Speech never changes mid-session. */
+const subscribeToNothing = () => () => {};
+
+/**
+ * Whether this browser has the Web Speech API.
+ *
+ * It must NOT be read as `typeof window !== 'undefined'` during render: the
+ * server said "no" and the browser said "yes" on its very first render, so the
+ * dictation button appeared out of nowhere and React threw away the whole
+ * surrounding tree (hydration error #418 — it hit the copilot, the assistant
+ * and the chat composers). `useSyncExternalStore` answers `false` on the server
+ * AND during hydration, then commits the real value, so the markup always
+ * matches and the button simply appears a tick later.
+ */
+function useSpeechRecognitionSupported(): boolean {
+  return useSyncExternalStore(
+    subscribeToNothing,
+    () =>
+      !!(window as WindowWithSpeechRecognition).SpeechRecognition ||
+      !!(window as WindowWithSpeechRecognition).webkitSpeechRecognition,
+    () => false
+  );
+}
+
 export function useVoiceDictation(options: VoiceDictationOptions = {}): VoiceDictationState {
   const { lang = 'es-MX', onTranscript, onStart, onEnd, onError } = options;
 
@@ -128,10 +152,7 @@ export function useVoiceDictation(options: VoiceDictationOptions = {}): VoiceDic
   const [interimTranscript, setInterimTranscript] = useState('');
   const [error, setError] = useState<string | null>(null);
 
-  const isSupported =
-    typeof window !== 'undefined' &&
-    (!!(window as WindowWithSpeechRecognition).SpeechRecognition ||
-      !!(window as WindowWithSpeechRecognition).webkitSpeechRecognition);
+  const isSupported = useSpeechRecognitionSupported();
 
   // Create the recognition instance once (lazy on first start).
   const ensureRecognition = useCallback((): SpeechRecognition | null => {
@@ -174,11 +195,12 @@ export function useVoiceDictation(options: VoiceDictationOptions = {}): VoiceDic
     recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
       // 'no-speech' and 'aborted' are benign — don't surface them as errors.
       if (event.error !== 'no-speech' && event.error !== 'aborted') {
-        const msg = event.error === 'not-allowed'
-          ? 'Permiso de micrófono denegado'
-          : event.error === 'network'
-            ? 'Error de red en el dictado'
-            : `Error de dictado: ${event.error}`;
+        const msg =
+          event.error === 'not-allowed'
+            ? 'Permiso de micrófono denegado'
+            : event.error === 'network'
+              ? 'Error de red en el dictado'
+              : `Error de dictado: ${event.error}`;
         setError(msg);
         onErrorRef.current?.(event.error);
       }

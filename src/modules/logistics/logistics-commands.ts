@@ -56,6 +56,8 @@ import {
   arriveStopSchema,
   buildTrip,
   buildTripSchema,
+  cancelTrip,
+  cancelTripSchema,
   closeTrip,
   completeStop,
   completeStopSchema,
@@ -66,6 +68,7 @@ import {
   startTrip,
   tripOnlySchema,
   type BuildTripResult,
+  type CancelTripResult,
 } from './trips-service';
 import { LOGISTICS_COMMANDS, LOGISTICS_OBJECT_TYPES, LOGISTICS_SYSTEM_ACTOR_ID } from './types';
 
@@ -83,6 +86,7 @@ import { LOGISTICS_COMMANDS, LOGISTICS_OBJECT_TYPES, LOGISTICS_SYSTEM_ACTOR_ID }
  * | trip.build | none | logistics.dispatch |
  * | trip.add_stop / reorder | trip | logistics.dispatch |
  * | trip.start / arrive_stop / complete_stop / fail_stop / close | trip | dispatcher or the trip's driver |
+ * | trip.cancel | trip | logistics.dispatch |
  * | fleet.vehicle.create / update, fleet.driver.create / update | none | logistics.manage_fleet |
  *
  * Import this file from `operations/register-commands.ts` so every entry
@@ -312,6 +316,18 @@ registerCommand(LOGISTICS_COMMANDS.tripClose, {
   },
 });
 
+// Calling off a trip is a planning decision (it releases every delivery on it),
+// so it asks for `logistics.dispatch` and not for the driver of the trip.
+registerCommand(LOGISTICS_COMMANDS.tripCancel, {
+  schema: cancelTripSchema,
+  permission: 'logistics.dispatch',
+  aggregate: tripAggregate,
+  async handler(tx, cmd) {
+    await assertLogisticsEnabled();
+    return cancelTrip(tx, { ...cmd.payload, tripId: cmd.aggregate.id });
+  },
+});
+
 // ---------------------------------------------------------------------------
 // Fleet
 // ---------------------------------------------------------------------------
@@ -534,6 +550,9 @@ export const closeTripCommand = tripCommand<
   typeof tripOnlySchema,
   { tripId: string; status: string; delivered: number; failed: number }
 >(LOGISTICS_COMMANDS.tripClose);
+export const cancelTripCommand = tripCommand<typeof cancelTripSchema, CancelTripResult>(
+  LOGISTICS_COMMANDS.tripCancel
+);
 
 export const createVehicleCommand = (
   actor: CurrentUser,

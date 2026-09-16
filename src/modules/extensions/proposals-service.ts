@@ -8,6 +8,7 @@ import type {
   ToolExecutionContext,
   ToolExecutionResult,
 } from '@/modules/ai/tools/registry';
+import { runWithApprovalFirstSignature } from '@/modules/operations/approval-first-signature';
 import { canonicalJson } from './json-schema-to-zod';
 import { redactDeep } from './secrets';
 
@@ -22,15 +23,21 @@ import { redactDeep } from './secrets';
  *
  * Who decides (plan 5.4 / 5.8):
  * - the proposing user, or a human inside the proposal's `approverScope`
- *   (listed in `userIds` — responsible, backup… — or holding its `permission`);
+ *   (listed in `userIds` — responsible, backup… — or holding ANY of its
+ *   `permissions`: an area can have more than one approval key);
  * - a bot user (`User.isBot`, or an `agent_*` role) never approves nor rejects,
  *   not even its own proposals: agent proposals are decided by the humans of
  *   the scope and run with the approving human as actor;
  * - tools marked `requiresSecondApproval` go `pending → awaiting_second_approval`
  *   on the first approval; the second signer must be a different person holding
- *   the second-approval permission (scope permission → tool permission →
+ *   one of the second-approval permissions (scope permissions → tool permission →
  *   `operations.admin`), and only then the tool runs.
  * Anyone outside that set gets "not found", so proposals of others stay hidden.
+ *
+ * Firma de negocio (plan 5.4): si la herramienta aprobada abre una aprobación de
+ * negocio (`ApprovalRequest`, sección 6.0), la decisión que acaba de tomarse se
+ * registra como su PRIMERA FIRMA cuando esa persona cumple la política, para no
+ * pedirle dos clics por lo mismo (`runWithApprovalFirstSignature`).
  */
 
 const PROPOSAL_TTL_MS = 24 * 60 * 60 * 1000;
@@ -42,6 +49,7 @@ export const DECIDABLE_PROPOSAL_STATUSES = ['pending', 'awaiting_second_approval
 export const SECOND_APPROVAL_FALLBACK_PERMISSION = 'operations.admin';
 
 const MAX_SCOPE_USER_IDS = 50;
+const MAX_SCOPE_PERMISSIONS = 10;
 
 export class ProposalError extends Error {
   constructor(
@@ -59,8 +67,13 @@ export interface ApproverScope {
   areaKey?: string;
   /** Humans who may decide (area responsible, backup, case owner…). */
   userIds: string[];
-  /** Holders of this permission may also decide; it is also the second-signature permission. */
-  permission?: string;
+  /**
+   * Holders of ANY of these permissions may also decide; they are also the
+   * second-signature permissions. An area can name more than one approval key
+   * (Inventario: `inventory.adjust` and `inventory.manage`). Rows written
+   * before this field carried a single `permission`, which is still read.
+   */
+  permissions?: string[];
 }
 
 function shortString(value: unknown, max = 200): string | undefined {
@@ -83,11 +96,19 @@ export function normalizeApproverScope(value: unknown): ApproverScope | null {
   const scope: ApproverScope = { userIds };
   const caseId = shortString(raw.caseId);
   const areaKey = shortString(raw.areaKey, 64);
-  const permission = shortString(raw.permission, 120);
+  // `permission` (singular) is the legacy shape of rows written before areas
+  // could name more than one approval key; both are read, one is kept.
+  const permissions = [
+    ...new Set(
+      [...(Array.isArray(raw.permissions) ? raw.permissions : []), raw.permission]
+        .map((key) => shortString(key, 120))
+        .filter((key): key is string => Boolean(key))
+    ),
+  ].slice(0, MAX_SCOPE_PERMISSIONS);
   if (caseId) scope.caseId = caseId;
   if (areaKey) scope.areaKey = areaKey;
-  if (permission) scope.permission = permission;
-  if (!caseId && !areaKey && !permission && userIds.length === 0) return null;
+  if (permissions.length > 0) scope.permissions = permissions;
+  if (!caseId && !areaKey && permissions.length === 0 && userIds.length === 0) return null;
   return scope;
 }
 
@@ -95,10 +116,16 @@ function holdsKnownPermission(actor: CurrentUser, permission: string | null | un
   return Boolean(permission && isKnownPermission(permission) && hasPermission(actor, permission));
 }
 
-/** The actor is listed in the scope or holds its (known) permission. Pure. */
+function holdsAnyKnownPermission(actor: CurrentUser, permissions: readonly string[]): boolean {
+  return permissions.some((permission) => holdsKnownPermission(actor, permission));
+}
+
+/** The actor is listed in the scope or holds any of its (known) permissions. Pure. */
 export function isInApproverScope(actor: CurrentUser, scope: ApproverScope | null): boolean {
   if (!scope) return false;
-  return scope.userIds.includes(actor.id) || holdsKnownPermission(actor, scope.permission);
+  return (
+    scope.userIds.includes(actor.id) || holdsAnyKnownPermission(actor, scope.permissions ?? [])
+  );
 }
 
 type ToolWithSecondApproval = ToolDefinition & { requiresSecondApproval?: boolean };
@@ -108,15 +135,19 @@ export function toolRequiresSecondApproval(tool: ToolDefinition | undefined): bo
   return (tool as ToolWithSecondApproval | undefined)?.requiresSecondApproval === true;
 }
 
-/** Permission of the second signature: scope → tool → `operations.admin` (only known keys). Pure. */
-export function secondApprovalPermissionFor(
+/**
+ * Permissions of the second signature, any of which signs: scope → tool →
+ * `operations.admin` (only known keys). Never empty. Pure.
+ */
+export function secondApprovalPermissionsFor(
   scope: ApproverScope | null,
   tool: Pick<ToolDefinition, 'requiredPermission'> | undefined
-): string {
-  if (scope?.permission && isKnownPermission(scope.permission)) return scope.permission;
+): string[] {
+  const fromScope = (scope?.permissions ?? []).filter((key) => isKnownPermission(key));
+  if (fromScope.length > 0) return fromScope;
   if (tool?.requiredPermission && isKnownPermission(tool.requiredPermission))
-    return tool.requiredPermission;
-  return SECOND_APPROVAL_FALLBACK_PERMISSION;
+    return [tool.requiredPermission];
+  return [SECOND_APPROVAL_FALLBACK_PERMISSION];
 }
 
 export interface ProposalDecisionSubject {
@@ -140,13 +171,15 @@ export function evaluateProposalDecision(input: {
   proposal: ProposalDecisionSubject;
   decision: 'approve' | 'reject';
   requiresSecondApproval: boolean;
-  secondApprovalPermission: string;
+  /** Any of these signs the second approval (`secondApprovalPermissionsFor`). */
+  secondApprovalPermissions: readonly string[];
 }): ProposalDecisionAccess {
   const { actor, proposal, decision } = input;
   const scope = normalizeApproverScope(proposal.approverScope);
   const eligible = actor.id === proposal.userId || isInApproverScope(actor, scope);
   const awaitingSecond = proposal.status === 'awaiting_second_approval';
-  const canSignSecond = awaitingSecond && holdsKnownPermission(actor, input.secondApprovalPermission);
+  const canSignSecond =
+    awaitingSecond && holdsAnyKnownPermission(actor, input.secondApprovalPermissions);
 
   if (!eligible && !canSignSecond) {
     return { ok: false, status: 404, message: 'Propuesta no encontrada' };
@@ -167,7 +200,7 @@ export function evaluateProposalDecision(input: {
     return {
       ok: false,
       status: 403,
-      message: `La segunda firma requiere el permiso ${input.secondApprovalPermission}`,
+      message: `La segunda firma requiere el permiso ${input.secondApprovalPermissions.join(' o ')}`,
     };
   }
   return { ok: true, kind: 'second' };
@@ -229,6 +262,15 @@ export interface CreateProposalInput {
   approverScope?: ApproverScope | null;
 }
 
+/**
+ * La fila guarda los argumentos TAL CUAL se propusieron, que son los mismos sobre los que se
+ * calcula `argsHash` y los mismos que ejecuta `approveProposal`. No se redactan al guardarlos:
+ * redactar aquí rompía las dos cosas a la vez — el hash recalculado al aprobar ya no coincidía
+ * (la propuesta quedaba `invalidated` sin que nadie hubiera cambiado nada) y, de no existir esa
+ * guardia, la herramienta se habría ejecutado con los argumentos mutilados. La redacción es de
+ * SALIDA y vive en `toProposalDTO`, que es por donde pasan todas las superficies (asistente,
+ * bandeja, chat, operaciones, Mi trabajo y la Torre de Control).
+ */
 export async function createProposal(input: CreateProposalInput) {
   const fileIds = input.fileIds ?? [];
   const argsHash = computeProposalHash({
@@ -251,7 +293,7 @@ export async function createProposal(input: CreateProposalInput) {
       capabilityId: input.tool.capabilityId ?? null,
       connectionId: input.connectionId ?? null,
       argsHash,
-      args: redactDeep(input.args) as Prisma.InputJsonValue,
+      args: input.args as Prisma.InputJsonValue,
       summary: input.summary.slice(0, 2000),
       recipient: input.recipient ?? null,
       fileIds,
@@ -275,7 +317,8 @@ type ProposalRow = Awaited<ReturnType<typeof prisma.aiProposal.findMany>>[number
 async function toolsForSecondPermission(rows: ProposalRow[]): Promise<Map<string, ToolDefinition>> {
   const needed = rows.filter(
     (r) =>
-      r.status === 'awaiting_second_approval' && !normalizeApproverScope(r.approverScope)?.permission
+      r.status === 'awaiting_second_approval' &&
+      !normalizeApproverScope(r.approverScope)?.permissions?.length
   );
   const tools = new Map<string, ToolDefinition>();
   if (needed.length === 0) return tools;
@@ -301,7 +344,7 @@ async function filterVisibleTo(
       proposal: row,
       decision: 'reject',
       requiresSecondApproval: false,
-      secondApprovalPermission: secondApprovalPermissionFor(scope, tools.get(row.toolName)),
+      secondApprovalPermissions: secondApprovalPermissionsFor(scope, tools.get(row.toolName)),
     });
     if (access.ok) return true;
     return !decidableOnly && access.status === 409;
@@ -358,7 +401,8 @@ export async function listProposalsForScope(
   const limit = Math.min(Math.max(filter.limit ?? 50, 1), 100);
   const now = new Date();
   const scopeFilters: Prisma.AiProposalWhereInput[] = [];
-  if (filter.caseId) scopeFilters.push({ approverScope: { path: ['caseId'], equals: filter.caseId } });
+  if (filter.caseId)
+    scopeFilters.push({ approverScope: { path: ['caseId'], equals: filter.caseId } });
   if (filter.areaKey)
     scopeFilters.push({ approverScope: { path: ['areaKey'], equals: filter.areaKey } });
   const rows = await prisma.aiProposal.findMany({
@@ -404,10 +448,13 @@ export function toProposalDTO(p: {
     summary: p.summary,
     effect: p.effect,
     status: p.status,
-    args: p.args,
+    // Única salida de los argumentos hacia la UI, las APIs y el modelo: aquí sí se redactan.
+    // La fila guarda los argumentos crudos porque son los que se ejecutan y los que se hashean
+    // (ver el comentario de `createProposal`).
+    args: redactDeep(p.args),
     recipient: p.recipient,
     fileIds: p.fileIds,
-    result: p.result,
+    result: redactDeep(p.result),
     error: p.error,
     expiresAt: p.expiresAt.toISOString(),
     createdAt: p.createdAt.toISOString(),
@@ -461,7 +508,7 @@ export async function approveProposal(
     proposal,
     decision: 'approve',
     requiresSecondApproval: toolRequiresSecondApproval(tool),
-    secondApprovalPermission: secondApprovalPermissionFor(scope, tool),
+    secondApprovalPermissions: secondApprovalPermissionsFor(scope, tool),
   });
   if (!access.ok) throw new ProposalError(access.message, access.status);
   await assertHumanDecider(actor);
@@ -509,10 +556,17 @@ export async function approveProposal(
     const updated = await prisma.aiProposal.findUnique({ where: { id } });
     await addThreadMessage(
       proposal.conversationId,
-      `[Sistema] ${deciderLabel(actor, proposal.userId)} dio la PRIMERA FIRMA de la propuesta ${id} (${proposal.toolName}). Aún no se ejecuta: falta la segunda firma de otra persona con el permiso ${secondApprovalPermissionFor(scope, tool)}. Acción: ${proposal.summary.slice(0, 200)}`
+      `[Sistema] ${deciderLabel(actor, proposal.userId)} dio la PRIMERA FIRMA de la propuesta ${id} (${proposal.toolName}). Aún no se ejecuta: falta la segunda firma de otra persona con el permiso ${secondApprovalPermissionsFor(scope, tool).join(' o ')}. Acción: ${proposal.summary.slice(0, 200)}`
     );
     return {
-      proposal: toProposalDTO(updated ?? { ...proposal, status: 'awaiting_second_approval', decisionBy: actor.id, decidedAt: now }),
+      proposal: toProposalDTO(
+        updated ?? {
+          ...proposal,
+          status: 'awaiting_second_approval',
+          decisionBy: actor.id,
+          decidedAt: now,
+        }
+      ),
       execution: {
         success: false,
         needsApproval: true,
@@ -547,7 +601,13 @@ export async function approveProposal(
       ? { approverScope: scope, ...(scope.areaKey ? { agentAreaKey: scope.areaKey } : {}) }
       : {}),
   } as ToolExecutionContext;
-  const execution = await executeApproved(tool.name, actor, proposal.args, executionContext);
+  // Plan 5.4: si la ejecución abre una aprobación de negocio (`ApprovalRequest`), esta misma
+  // decisión cuenta como la PRIMERA FIRMA de quien la tomó (si cumple la política), para no
+  // pedirle dos clics por lo mismo. La firma viaja por contexto asíncrono, no por argumentos.
+  const execution = await runWithApprovalFirstSignature(
+    { userId: actor.id, proposalId: id, toolName: tool.name },
+    () => executeApproved(tool.name, actor, proposal.args, executionContext)
+  );
 
   const status = execution.uncertain ? 'pending_review' : execution.success ? 'executed' : 'failed';
   const updated = await prisma.aiProposal.update({
@@ -579,7 +639,9 @@ export async function approveProposal(
       ? 'ejecutada correctamente'
       : `falló: ${execution.error ?? 'error'}`;
   const resultText =
-    execution.result !== undefined ? JSON.stringify(redactDeep(execution.result)).slice(0, 600) : '';
+    execution.result !== undefined
+      ? JSON.stringify(redactDeep(execution.result)).slice(0, 600)
+      : '';
   const verb = access.kind === 'second' ? 'dio la SEGUNDA FIRMA y APROBÓ' : 'APROBÓ';
   await addThreadMessage(
     proposal.conversationId,
@@ -637,7 +699,7 @@ export async function rejectProposal(actor: CurrentUser, id: string, reason?: st
   if (!proposal) throw new ProposalError('Propuesta no encontrada', 404);
   const scope = normalizeApproverScope(proposal.approverScope);
   let tool: ToolDefinition | undefined;
-  if (proposal.status === 'awaiting_second_approval' && !scope?.permission) {
+  if (proposal.status === 'awaiting_second_approval' && !scope?.permissions?.length) {
     const { getToolDefinition } = await import('@/modules/ai/tools/registry');
     tool = getToolDefinition(proposal.toolName);
   }
@@ -646,7 +708,7 @@ export async function rejectProposal(actor: CurrentUser, id: string, reason?: st
     proposal,
     decision: 'reject',
     requiresSecondApproval: false,
-    secondApprovalPermission: secondApprovalPermissionFor(scope, tool),
+    secondApprovalPermissions: secondApprovalPermissionsFor(scope, tool),
   });
   if (!access.ok) throw new ProposalError(access.message, access.status);
   await assertHumanDecider(actor);
@@ -668,7 +730,13 @@ export async function rejectProposal(actor: CurrentUser, id: string, reason?: st
     `[Sistema] ${deciderLabel(actor, proposal.userId)} RECHAZÓ la propuesta ${id} (${proposal.toolName})${reason ? `: ${reason}` : ''}.`
   );
   return toProposalDTO(
-    updated ?? { ...proposal, status: 'rejected', decisionBy: actor.id, decidedAt: now, error: note }
+    updated ?? {
+      ...proposal,
+      status: 'rejected',
+      decisionBy: actor.id,
+      decidedAt: now,
+      error: note,
+    }
   );
 }
 

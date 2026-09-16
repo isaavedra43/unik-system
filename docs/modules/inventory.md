@@ -5,9 +5,12 @@ que Zoho tenga el inventario correcto**. La confianza se gana contando: lo que n
 contado una vez se promete sólo con una decisión humana; lo contado bien dos veces se promete solo. Las existencias
 de Zoho se muestran como referencia, nunca deciden.
 
-Estado: implementado y validado localmente (FakePrisma con emulación de candados y escenarios contra PostgreSQL real).
-Migración `20260916130000_add_inventory_logistics_core` **no aplicada** en producción. Flag `inventory` de la
-configuración de operaciones (ver [operaciones](./operations.md)).
+Estado: núcleo **y pantallas del área** implementados y validados localmente (FakePrisma con emulación de candados,
+escenarios contra PostgreSQL real y un recorrido visual de las rutas contra el build). Migración
+`20260916130000_add_inventory_logistics_core` **no aplicada** en producción. Flag `inventory` de la configuración de
+operaciones (ver [operaciones](./operations.md)). Las superficies del área están en
+[«Área Inventario (pantallas)»](#área-inventario-pantallas); nada del módulo se ha probado contra Zoho real ni con
+volumen de producción (ver [limitaciones](#limitaciones-conocidas)).
 
 ## Modelos
 
@@ -94,7 +97,8 @@ Canónicos del núcleo (`stock.counted`, `stock.reserved`, `stock.reserved_provi
 `stock.received`, `stock.issued`, `stock.adjusted`, `stock.transferred`) y propios: `stock.baseline`,
 `stock.returned`, `stock.produced`, `stock.consumed`, `stock.blocked`, `stock.unblocked`,
 `stock.reservation_consumed`, `stock.controlled`, `stock.count_started|closed|cancelled|disputed`,
-`stock.adjustment_pending|decided`, `stock.dispute_line_resolved`, `stock.dispute_resolved`, `stock.negative`,
+`stock.adjustment_pending|approval_requested|decided`, `stock.dispute_line_resolved`, `stock.dispute_resolved`,
+`stock.negative`,
 `stock.container_created`, `stock.legacy_claimed|confirmed|released|expired`, `inventory.profile_updated`,
 `inventory.warehouse_created|updated`, `inventory.location_created|updated`. Se publican en `area:inventario` y en
 `case:{id}` cuando hay expediente. `stock.reserved` y `stock.controlled` despiertan el avance de los expedientes.
@@ -107,40 +111,98 @@ disputas), `inventory.reserve` (reservar y reclamos), `inventory.manage` (bodega
 ## Errores
 
 `insufficient_stock`, `stock_uncounted`, `stock_disputed`, `provisional_not_allowed`, `provisional_verification_stale`,
-`duplicate`, `module_disabled`, `empty_count`, `legacy_claim_expired`, `negative_stock` (409);
+`duplicate`, `module_disabled`, `empty_count`, `legacy_claim_expired`, `negative_stock`, `demand_over_reserved` (409);
 `provisional_requires_human` (403); `invalid_quantity`, `invalid_unit`, `invalid_variant` (422). Están en
-`OPERATIONS_ERROR_HTTP_STATUS` y en `inventoryHttpStatus(code)`.
+`OPERATIONS_ERROR_HTTP_STATUS` y en `inventoryHttpStatus(code)` (`INVENTORY_ERROR_HTTP_STATUS` es la lista completa).
 
 ## Integración con los demás módulos
 
 - **Expediente:** `verifyAvailability` decide si la necesidad requiere conteo (`requiresCount`) y si se puede
   prometer; el motor reserva con `reserveStock` y guarda `DemandAllocation.stockReservationId`.
-- **Compras (entrega 3):** recepción con `recordInventoryMovement({kind: 'receipt', …})` y luego `reserveStock`.
-- **Manufactura (entrega 6):** consumo con `consumeReservation({kind: 'consume'})`; terminado, sobrante (contenedor
-  `CT-` con dimensiones) y merma (`locationCode: 'SCRAP'`, siempre bloqueada) con `kind: 'produce'`.
+- **[Compras](./purchases.md):** recepción con `recordInventoryMovement({kind: 'receipt', …})` y luego `reserveStock`.
+- **[Manufactura](./manufacturing.md):** compromete el material en `StockItem.assignedToProduction`
+  (`production-materials.ts`, que es quien escribe ese contador de la fórmula de disponible) y consume con
+  `consumeReservation({kind: 'consume'})`; terminado, sobrante (contenedor `CT-` con dimensiones) y merma
+  (`locationCode: 'SCRAP'`, siempre bloqueada) con `kind: 'produce'`.
+- **Aprobaciones:** decidir la diferencia de una línea resuelve la política `inventory_adjustment` por monto
+  (`resolveApprovalRequirement`): con una firma —la de quien tiene `inventory.adjust`— el ajuste se aplica en el acto;
+  con dos o más se abre `ApprovalRequest`, la línea sigue pendiente (`stock.adjustment_approval_requested`) y el
+  ajuste lo aplica la reacción a esa firma.
 - **Logística:** consumo automático al entregar (`delivery-consumption.ts`).
 - **Supervisor:** reservas viejas sin preparar y reclamos vencidos (reglas 5).
+
+## Área Inventario (pantallas)
+
+El área existe y está registrada: el servidor en `src/modules/areas/inventario/` (`register.ts` → renglones de
+trabajo, panel y detalle; `dashboard.ts` con sus tiles «en vivo»; `inventory-area-queries.ts` con las lecturas de las
+pantallas) y el cliente en `src/components/areas/inventario/` (`register-client.tsx`). Los barriles
+`src/modules/areas/register-all.ts` y `src/components/areas/register-all-client.tsx` los cargan; ninguna pantalla
+consulta Prisma desde el cliente y toda lectura exige `inventory.view` en servidor.
+
+| Superficie                | Ruta                                             | Qué es                                                                                                                                                             |
+| ------------------------- | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Panel y centro de trabajo | `/app/areas/inventario` (`dashboard`, `trabajo`) | Pendientes del área (`verification`, `stock_count`, `reservation`, `movement`, `legacy_claim`) con las columnas propias SKU y Confianza.                           |
+| Mapa de ubicaciones       | `/app/areas/inventario/mapa`                     | `LocationsMap`: bodegas y ubicaciones coloreadas por confianza, `LocationDrawer` para el detalle y `CountCapture` (con `ScanInput`) para contar desde el teléfono. |
+| Existencias               | `/app/areas/inventario/existencias`              | `StockTable`: conocido, disponible, reservado y bloqueado por artículo, Zoho como columna informativa, «Por llegar» de Compras aparte y `StockActionsDialog`.      |
+| Conteos y Movimientos     | `/app/areas/inventario/conteos`, `/movimientos`  | Vistas del centro de trabajo filtradas por tipo de renglón.                                                                                                        |
+| Ubicaciones               | `/app/areas/inventario/ubicaciones`              | `LocationsAdmin`: bodegas, ubicaciones y `LabelSheet` (QR propio de `qr-code.ts`, folios `RL-`/`PL-`/`CT-`).                                                       |
+| Perfil de artículo        | `/app/areas/inventario/perfiles/{zohoItemId}`    | `ProfileForm`: unidad base, conversiones, tolerancia, ejes de variante y política de rastreo.                                                                      |
+
+Decisiones que no caben en el diálogo genérico de un renglón (`DetailExtras` del registro de cliente):
+`CountDecisionsPanel` (decidir línea por línea las diferencias de un conteo) y `LegacyClaimPanel` (confirmar o liberar
+un compromiso previo contra una necesidad del expediente).
+
+Lecturas de la UI (todas bajo el área, con permiso en servidor):
+`GET /app/areas/inventario/api/inventario/{map, counts/{countId}, stock/{zohoItemId}, locations/{locationId},
+claims/{claimId}}`, y el escaneo comparte `GET /app/operations/api/scan`. Las escrituras no tienen endpoint propio:
+son los comandos de este módulo por la cola offline (`useOfflineCommandQueue` → `/app/operations/api/commands/batch`),
+así que contar sin señal es normal y el `commandId` evita duplicados.
+
+Por IA: `recordCount` (`inventory.count`, `mywork-tools.ts`), `requestStockVerification` y `reserveStock`
+(`inventory.reserve`, `agents-tools.ts`). Las de `src/modules/ai/tools/inventory-tools.ts` (`getProductCatalog`,
+`getStockMovement`, `getLowStockAlerts`, `getProductDetails`) leen **Zoho**, no este libro de existencias.
 
 ## Pruebas
 
 Unitarias en `src/modules/inventory/*.test.ts` con `createInventoryFake()` y `createLockEmulation(fake)`
 (`testing/inventory-fixtures.ts`). Escenarios contra PostgreSQL real en
 `tests/integration/operations-scenarios.int.test.ts` (conteo → provisional → promesa humana, división existencia +
-compra, reclamo legado, dos órdenes compitiendo con FOR UPDATE, entrega parcial con consumo parcial).
+compra, reclamo legado, dos órdenes compitiendo con FOR UPDATE, entrega parcial con consumo parcial). Del área:
+`src/modules/areas/inventario/work-rows.test.ts`, `src/components/areas/inventario/inventario-model.test.ts` y
+`qr-code.test.ts` (invariantes del símbolo impreso). `src/modules/areas/module-docs.test.ts` ata este documento al
+código: si aparece un comando, un error, una tool o una pantalla que aquí no está, falla.
 
 ## Cómo operar
 
-1. Revisar la bodega creada automáticamente y sus ubicaciones; crear racks o bins si se van a usar.
+1. Revisar la bodega creada automáticamente y sus ubicaciones en `/app/areas/inventario/ubicaciones`; crear racks o
+   bins si se van a usar e imprimir sus etiquetas.
 2. Contar primero los artículos que más se venden: el primer conteo deja `PROVISIONAL`, el segundo conteo dentro de
    tolerancia los vuelve `CONTROLLED` y desde entonces se prometen solos.
-3. Registrar como reclamo legado lo prometido antes del corte; confirmarlo cuando la venta tenga expediente.
-4. Atender incidencias `count_dispute` y `stock_conflict` y las líneas de conteo pendientes de decisión.
+3. Registrar como reclamo legado lo prometido antes del corte desde `/app/areas/inventario/existencias`
+   (botón «Registrar» → «Compromiso previo al corte», permiso `inventory.reserve`); confirmarlo contra la necesidad
+   del expediente —o liberarlo— desde el renglón «Compromiso previo» del centro de trabajo, que abre
+   `LegacyClaimPanel`. Si nadie lo hace, el supervisor lo expira por TTL y la cantidad vuelve al disponible.
+4. Atender incidencias `count_dispute` y `stock_conflict` y las líneas de conteo pendientes de decisión: se deciden
+   una por una en el conteo (`/app/areas/inventario/conteos/{id}`, panel «Diferencias por decidir», permiso
+   `inventory.adjust`), que es también a donde lleva el aviso de «Autorizar ajuste de conteo». Mientras quede una
+   línea en disputa el artículo sigue `DISPUTED` y ninguna necesidad de ese SKU se puede prometer.
+5. Registrar a mano lo que no viene de Compras ni de Manufactura —entradas, salidas, devoluciones, traspasos, ajustes
+   y bloqueos— desde el mismo botón «Registrar» de Existencias (`inventory.manage`; ajuste y bloqueo,
+   `inventory.adjust`).
 
 ## Limitaciones conocidas
 
 - Una existencia `CONTROLLED` reservada no se puede transferir de ubicación (sólo lo disponible se mueve).
-- Los ajustes de conteo se autorizan con `inventory.adjust`, no con `ApprovalRequest` por monto.
-- `assignedToProduction` está en la fórmula pero nadie lo escribe todavía (manufactura usará reservas).
+- El valor de un ajuste, que es lo que decide la política `inventory_adjustment`, se calcula con `Product.purchaseRate`
+  —el único costo que UNIK guarda—: sin ese dato el monto es 0 y manda el rango `[0, …)` de la política.
 - `getStockSnapshot` devuelve hasta 1000 renglones; dos consultas de UI paginan en memoria (20 000 y 1000 filas).
-- Las fotos HEIC de iPhone no se aceptan como evidencia (el validador de almacenamiento no las detecta).
-- Falta la UI del área Inventario (dashboard, centro de trabajo, mapa de ubicaciones, captura de conteos móvil).
+- Las fotos HEIC de iPhone no se aceptan como evidencia: `file-validation.ts` lee la firma `ftyp` y, sin marca para
+  `heic`, la resuelve como `video/mp4`, así que la subida se rechaza con «Tipo declarado (image/heic) no coincide con
+  el contenido (video/mp4)» (comprobado ejecutando `validateFileContent` con una cabecera HEIC real).
+- El mapa dibuja hasta 500 ubicaciones y cada hoja imprime hasta 500 etiquetas (`MAX_LOCATIONS`, `MAX_LABELS`, con
+  bandera `truncated`); esos topes se eligieron a ojo y no se han medido con volumen real.
+- **El QR de las etiquetas nunca se ha escaneado.** Es un codificador propio (`qr-code.ts`) validado sólo por
+  invariantes de la norma; leerlo con teléfono y con pistola es casilla explícita del runbook antes de imprimir un
+  lote (el componente imprime el texto del folio como respaldo).
+- Las pantallas del área se recorrieron contra el build con datos de demostración, nunca contra Zoho real ni con
+  volumen de producción.

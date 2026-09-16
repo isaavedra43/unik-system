@@ -234,6 +234,8 @@ export const INVENTORY_EVENTS = {
   countCancelled: 'stock.count_cancelled',
   countDisputed: 'stock.count_disputed',
   adjustmentPending: 'stock.adjustment_pending',
+  /** El ajuste espera la firma de la aprobación de negocio `inventory_adjustment`. */
+  adjustmentApprovalRequested: 'stock.adjustment_approval_requested',
   adjustmentDecided: 'stock.adjustment_decided',
   disputeLineResolved: 'stock.dispute_line_resolved',
   disputeResolved: 'stock.dispute_resolved',

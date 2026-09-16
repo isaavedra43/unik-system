@@ -16,7 +16,11 @@ import {
   type SurfaceRef,
 } from '@/modules/ai/copilot-surfaces';
 import { areaMemberPermissionKeys } from '@/modules/agents/permissions';
-import { listPendingProposals, toProposalDTO } from '@/modules/extensions/proposals-service';
+import {
+  listPendingProposals,
+  listProposalsForScope,
+  toProposalDTO,
+} from '@/modules/extensions/proposals-service';
 import { authorizeOperationsChannel } from '@/modules/operations/events-service';
 import { myWorkOthersActivityAt } from '@/modules/operations/mywork-activity';
 import { isAreaKey, type AreaKey } from '@/modules/operations/types';
@@ -261,6 +265,41 @@ export function checkControlTowerAccess(user: CurrentUser): NextResponse | null 
 // GET / POST
 // ---------------------------------------------------------------------------
 
+/**
+ * Propuestas de IA que la superficie muestra a esta persona (plan 5.4:
+ * «`listProposalsForScope(actor, caseId)` alimenta la sala»).
+ *
+ * - siempre las de su propio hilo aquí (`listPendingProposals(userId, conv)`);
+ * - en expediente y área, además las del ALCANCE que todavía puede decidir
+ *   (responsable, suplente o permiso del alcance, y las que esperan una segunda
+ *   firma que ella puede dar). Sin esto, la propuesta de un agente —que nace en
+ *   la conversación del bot— sólo era decidible desde la tarjeta del chat o
+ *   desde Mi trabajo, nunca desde la sala que el plan designa.
+ *
+ * «Mi trabajo» y la Torre de Control no tienen alcance de sala: siguen igual.
+ */
+export async function surfaceProposals(
+  user: CurrentUser,
+  spec: OperationsSurfaceSpec,
+  conversationId: string
+): Promise<ReturnType<typeof toProposalDTO>[]> {
+  const scopeFilter =
+    spec.surface.kind === 'case'
+      ? { caseId: spec.surface.id }
+      : spec.surface.kind === 'area'
+        ? { areaKey: spec.surface.id }
+        : null;
+  const [own, scoped] = await Promise.all([
+    listPendingProposals(user.id, conversationId),
+    scopeFilter ? listProposalsForScope(user, scopeFilter) : Promise.resolve([]),
+  ]);
+  const byId = new Map<string, (typeof own)[number]>();
+  for (const row of [...own, ...scoped]) if (!byId.has(row.id)) byId.set(row.id, row);
+  return [...byId.values()]
+    .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+    .map(toProposalDTO);
+}
+
 /** GET — thread of this user on the surface (`?list=1`, `?thread=<id>`, `?new=1`). */
 export async function handleSurfaceGet(
   request: Request,
@@ -281,13 +320,13 @@ export async function handleSurfaceGet(
     ]);
     const [thread, proposals] = await Promise.all([
       getAiConversation(conversationId, user.id),
-      listPendingProposals(user.id, conversationId),
+      surfaceProposals(user, spec, conversationId),
     ]);
     return NextResponse.json({
       conversationId,
       mode,
       messages: thread.messages,
-      proposals: proposals.map(toProposalDTO),
+      proposals,
     });
   } catch (err) {
     return operationsCopilotErrorResponse(err);
@@ -320,7 +359,10 @@ export async function planSurfaceTurn(
     }
     const input = parsed.data;
     if (input.model && !(await isSelectableModel(input.model))) {
-      return { kind: 'response', response: jsonError(400, 'Ese modelo no está disponible', 'invalid_model') };
+      return {
+        kind: 'response',
+        response: jsonError(400, 'Ese modelo no está disponible', 'invalid_model'),
+      };
     }
     const mode = await getSurfaceMode(user.id, spec.surface.kind);
     if (mode === 'paused') {
@@ -401,7 +443,10 @@ export async function handleSurfacePost(
           send(event);
         }
       } catch (e) {
-        send({ type: 'error', data: { message: e instanceof Error ? e.message : 'Error desconocido' } });
+        send({
+          type: 'error',
+          data: { message: e instanceof Error ? e.message : 'Error desconocido' },
+        });
       } finally {
         clearInterval(heartbeat);
         try {

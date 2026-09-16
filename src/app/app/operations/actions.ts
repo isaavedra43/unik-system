@@ -5,16 +5,48 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
-import { getCurrentSession, hasPermission } from '@/modules/auth/authorization';
+import {
+  CASE_ENTITY_TYPE,
+  CASE_EXPORT_COLUMNS,
+  CASES_TABLE_KEY,
+  caseExportValue,
+} from '@/components/operations/case/cases-columns';
+import {
+  CasesQueryError,
+  caseViewConfigSchema,
+  parseCasesQuery,
+} from '@/components/operations/case/cases-filters';
+import { recordAuditEvent } from '@/modules/auth/audit-service';
+import {
+  AuthorizationError,
+  getCurrentSession,
+  hasPermission,
+  type CurrentUser,
+} from '@/modules/auth/authorization';
 import { startCaseManually } from '@/modules/operations/case-service';
 import type { CommandResult } from '@/modules/operations/commands';
 import { getOperationsConfig } from '@/modules/operations/operations-config';
 import { CASE_KIND } from '@/modules/operations/sales-order-hooks';
 // Every module registers its commands (and cross-module reactions) through this barrel.
 import '@/modules/operations/register-commands';
+import {
+  bulkUnwatchEntities,
+  bulkWatchEntities,
+  unwatchEntity,
+  watchEntity,
+} from '@/modules/sales/entity-watch-service';
+import { tablePreferenceConfigSchema } from '@/modules/sales/sales-orders-filters';
+import {
+  deleteUserTablePreference,
+  upsertUserTablePreference,
+} from '@/modules/sales/table-preferences-service';
+import { createTableView } from '@/modules/sales/table-views-service';
+import type { TablePreferenceConfig } from '@/modules/shared/entity-workspace-types';
+import { exportCaseRows } from './_cases-data';
 
 const BASE_PATH = '/app/operations';
 const MANAGE_PERMISSION = 'operations.manage';
+const VIEW_PERMISSION = 'operations.view';
 
 const salesOrderSchema = z.string().trim().min(1).max(60);
 
@@ -125,4 +157,273 @@ export async function startTrackingAction(formData: FormData): Promise<void> {
 
   revalidatePath(BASE_PATH);
   redirect(noticeUrl(notice, caseNumber));
+}
+
+// ---------------------------------------------------------------------------
+// Case list: preferences, views, watch and export
+// ---------------------------------------------------------------------------
+
+/**
+ * Server actions of the case list (`EntityWorkspace`). Every one of them
+ * re-checks `operations.view`: the page gate is not the control.
+ */
+async function requireCaseActor(): Promise<CurrentUser> {
+  const session = await getCurrentSession();
+  if (!session) redirect('/login');
+  if (!hasPermission(session.user, VIEW_PERMISSION)) throw new AuthorizationError();
+  return session.user;
+}
+
+function errorMessage(error: unknown): string {
+  if (error instanceof CasesQueryError) return error.message;
+  if (error instanceof AuthorizationError) return error.message;
+  if (error instanceof Error) return error.message;
+  return 'Ocurrió un error inesperado';
+}
+
+export async function saveCasePreferenceAction(
+  config: TablePreferenceConfig
+): Promise<{ error: string | null; success: boolean }> {
+  try {
+    const user = await requireCaseActor();
+    await upsertUserTablePreference(
+      user.id,
+      CASES_TABLE_KEY,
+      tablePreferenceConfigSchema.parse(config)
+    );
+    return { error: null, success: true };
+  } catch (error) {
+    return { error: errorMessage(error), success: false };
+  }
+}
+
+export async function resetCasePreferenceAction(): Promise<{
+  error: string | null;
+  success: boolean;
+}> {
+  try {
+    const user = await requireCaseActor();
+    await deleteUserTablePreference(user.id, CASES_TABLE_KEY);
+    revalidatePath(BASE_PATH);
+    return { error: null, success: true };
+  } catch (error) {
+    return { error: errorMessage(error), success: false };
+  }
+}
+
+const createViewSchema = z.object({
+  name: z.string().trim().min(1, 'El nombre es requerido').max(100),
+  visibility: z.enum(['private', 'shared']).default('private'),
+  config: z.string(),
+  isDefault: z.boolean().default(false),
+});
+
+export async function createCaseViewAction(
+  _prevState: { error: string | null; success: boolean; viewId: string | null },
+  formData: FormData
+): Promise<{ error: string | null; success: boolean; viewId: string | null }> {
+  try {
+    const user = await requireCaseActor();
+    const parsed = createViewSchema.safeParse({
+      name: formData.get('name'),
+      visibility: formData.get('visibility') ?? 'private',
+      config: formData.get('config'),
+      isDefault: formData.get('isDefault') === 'true',
+    });
+    if (!parsed.success) {
+      return {
+        error: parsed.error.issues[0]?.message ?? 'Datos inválidos',
+        success: false,
+        viewId: null,
+      };
+    }
+    if (parsed.data.visibility === 'shared' && !hasPermission(user, MANAGE_PERMISSION)) {
+      return { error: 'No puedes compartir vistas de expedientes', success: false, viewId: null };
+    }
+    let config: unknown;
+    try {
+      config = JSON.parse(parsed.data.config);
+    } catch {
+      return { error: 'Configuración inválida', success: false, viewId: null };
+    }
+    const view = await createTableView(user, {
+      tableKey: CASES_TABLE_KEY,
+      name: parsed.data.name,
+      visibility: parsed.data.visibility,
+      config,
+      isDefault: parsed.data.isDefault,
+      // The case list has its own filterable fields and its own share rule.
+      configSchema: caseViewConfigSchema,
+      sharePermission: MANAGE_PERMISSION,
+    });
+    revalidatePath(BASE_PATH);
+    return { error: null, success: true, viewId: view.id };
+  } catch (error) {
+    return { error: errorMessage(error), success: false, viewId: null };
+  }
+}
+
+const watchSchema = z.object({ entityId: z.string().min(1).max(200) });
+
+export async function watchCaseAction(
+  _prevState: { error: string | null; success: boolean; isWatched: boolean },
+  formData: FormData
+): Promise<{ error: string | null; success: boolean; isWatched: boolean }> {
+  try {
+    const user = await requireCaseActor();
+    const parsed = watchSchema.safeParse({ entityId: formData.get('entityId') });
+    if (!parsed.success) return { error: 'Datos inválidos', success: false, isWatched: false };
+    await watchEntity(user, CASE_ENTITY_TYPE, parsed.data.entityId);
+    return { error: null, success: true, isWatched: true };
+  } catch (error) {
+    return { error: errorMessage(error), success: false, isWatched: false };
+  }
+}
+
+export async function unwatchCaseAction(
+  _prevState: { error: string | null; success: boolean; isWatched: boolean },
+  formData: FormData
+): Promise<{ error: string | null; success: boolean; isWatched: boolean }> {
+  try {
+    const user = await requireCaseActor();
+    const parsed = watchSchema.safeParse({ entityId: formData.get('entityId') });
+    if (!parsed.success) return { error: 'Datos inválidos', success: false, isWatched: true };
+    await unwatchEntity(user, CASE_ENTITY_TYPE, parsed.data.entityId);
+    return { error: null, success: true, isWatched: false };
+  } catch (error) {
+    return { error: errorMessage(error), success: false, isWatched: true };
+  }
+}
+
+const bulkWatchSchema = z.object({
+  entityIds: z.array(z.string().max(200)).max(500).default([]),
+  action: z.enum(['watch', 'unwatch']),
+});
+
+export async function bulkWatchCasesAction(
+  _prevState: { error: string | null; success: boolean; isWatched: boolean },
+  formData: FormData
+): Promise<{ error: string | null; success: boolean; isWatched: boolean }> {
+  try {
+    const user = await requireCaseActor();
+    const parsed = bulkWatchSchema.safeParse({
+      entityIds: formData.getAll('entityIds').map(String),
+      action: formData.get('action'),
+    });
+    if (!parsed.success) return { error: 'Datos inválidos', success: false, isWatched: false };
+    if (parsed.data.action === 'watch') {
+      await bulkWatchEntities(user, CASE_ENTITY_TYPE, parsed.data.entityIds);
+    } else {
+      await bulkUnwatchEntities(user, CASE_ENTITY_TYPE, parsed.data.entityIds);
+    }
+    return { error: null, success: true, isWatched: parsed.data.action === 'watch' };
+  } catch (error) {
+    return { error: errorMessage(error), success: false, isWatched: false };
+  }
+}
+
+const exportSchema = z.object({
+  format: z.enum(['csv', 'xlsx']),
+  scope: z.enum(['current_page', 'selected', 'filtered']),
+  selectedIds: z.array(z.string().max(200)).max(500).optional(),
+  query: z.string(),
+});
+
+type ExportState = {
+  error: string | null;
+  success: boolean;
+  content: string | null;
+  filename: string | null;
+  format: string | null;
+};
+
+const EMPTY_EXPORT: ExportState = {
+  error: null,
+  success: false,
+  content: null,
+  filename: null,
+  format: null,
+};
+
+export async function exportCasesAction(
+  _prevState: ExportState,
+  formData: FormData
+): Promise<ExportState> {
+  try {
+    const user = await requireCaseActor();
+    const parsed = exportSchema.safeParse({
+      format: formData.get('format'),
+      scope: formData.get('scope'),
+      selectedIds: formData.getAll('selectedIds').map(String),
+      query: formData.get('query'),
+    });
+    if (!parsed.success) return { ...EMPTY_EXPORT, error: 'Datos inválidos' };
+    let raw: unknown;
+    try {
+      raw = JSON.parse(parsed.data.query);
+    } catch {
+      return { ...EMPTY_EXPORT, error: 'Consulta inválida' };
+    }
+
+    const query = parseCasesQuery(raw);
+    const rows = await exportCaseRows(user, query, {
+      scope: parsed.data.scope,
+      ...(parsed.data.selectedIds ? { selectedIds: parsed.data.selectedIds } : {}),
+    });
+    const columns = CASE_EXPORT_COLUMNS;
+    const base = `expedientes-${new Date().toISOString().split('T')[0]}`;
+
+    await recordAuditEvent({
+      actorUserId: user.id,
+      action: 'operations.cases_exported',
+      // El vocabulario de la auditoría de la Torre es snake_case y su filtro es
+      // exacto (`targetType: { in: [...] }`): escrito 'OperationalCase' este
+      // renglón no se podía leer desde ninguna pantalla.
+      targetType: 'operational_case',
+      targetId: CASES_TABLE_KEY,
+      metadata: { format: parsed.data.format, rowCount: rows.length, scope: parsed.data.scope },
+    });
+
+    if (parsed.data.format === 'csv') {
+      const header = columns.map((column) => `"${column.label.replace(/"/g, '""')}"`).join(',');
+      const lines = rows.map((row) =>
+        columns
+          .map((column) => `"${caseExportValue(row, column.id).replace(/"/g, '""')}"`)
+          .join(',')
+      );
+      const csv = [header, ...lines].join('\r\n');
+      return {
+        error: null,
+        success: true,
+        content: Buffer.from(`﻿${csv}`, 'utf-8').toString('base64'),
+        filename: `${base}.csv`,
+        format: 'csv',
+      };
+    }
+
+    const ExcelJS = (await import('exceljs')).default;
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet('Expedientes');
+    sheet.columns = columns.map((column) => ({
+      header: column.label,
+      key: column.id,
+      width: Math.min(Math.max(column.defaultWidth / 8, 12), 40),
+    }));
+    for (const row of rows) {
+      sheet.addRow(
+        Object.fromEntries(columns.map((column) => [column.id, caseExportValue(row, column.id)]))
+      );
+    }
+    sheet.getRow(1).font = { bold: true };
+    const buffer = await workbook.xlsx.writeBuffer();
+    return {
+      error: null,
+      success: true,
+      content: Buffer.from(buffer).toString('base64'),
+      filename: `${base}.xlsx`,
+      format: 'xlsx',
+    };
+  } catch (error) {
+    return { ...EMPTY_EXPORT, error: errorMessage(error) };
+  }
 }

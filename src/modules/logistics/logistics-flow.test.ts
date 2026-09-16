@@ -85,6 +85,7 @@ import { completeWorkItem } from '@/modules/operations/work-items-service';
 import {
   makeJob,
   seedEvidence,
+  seedFleet,
   seedLogisticsBase,
   seedPackage,
   type LogisticsScenario,
@@ -537,6 +538,121 @@ describe('assignTransport + ops.zoho.ship_package', () => {
     });
     expect(result).toMatchObject({ status: 'rejected', errorCode: 'forbidden' });
     expect(jobsOf('ops.zoho.ship_package')).toHaveLength(0);
+  });
+});
+
+/**
+ * Plan §4: `DeliveryOrder.mode` incluye `carrier` (paquetería o transportista
+ * externo) y `assignTransport` recibe el transportista sin vehículo ni chofer,
+ * que es justamente ese caso. Antes ningún camino de código escribía `carrier`:
+ * un envío por paquetería quedaba registrado como «Flotilla propia».
+ */
+describe('assignTransport · cómo se envía (modo)', () => {
+  async function createOwnFleetOrder(): Promise<string> {
+    seedPackage(fake);
+    const result = await createDeliveryOrderCommand(
+      scenario.dispatcher,
+      {
+        caseId: scenario.caseId,
+        allocationIds: scenario.allocationIds,
+        mode: 'own_fleet',
+        plannedDate: '2026-09-16',
+      },
+      { commandId: 'cmd-create-own' }
+    );
+    expect(result.status).toBe('completed');
+    return result.data!.deliveryOrderId;
+  }
+
+  it('pasa una entrega de flotilla propia a paquetería y suelta unidad y chofer', async () => {
+    seedFleet(fake);
+    const id = await createOwnFleetOrder();
+    // Con flotilla propia el motor exige unidad y chofer.
+    expect(
+      await assignTransportCommand(scenario.dispatcher, transport(id), {
+        commandId: 'cmd-mode-missing',
+      })
+    ).toMatchObject({ status: 'rejected', errorCode: 'invalid_payload' });
+
+    const own = await assignTransportCommand(
+      scenario.dispatcher,
+      { ...transport(id), vehicleId: 'veh_1', driverId: 'drv_1' },
+      { commandId: 'cmd-mode-own' }
+    );
+    expect(own.status).toBe('pending_external');
+    expect(order(id)).toMatchObject({
+      mode: 'own_fleet',
+      vehicleId: 'veh_1',
+      driverId: 'drv_1',
+    });
+
+    // Mismo transportista y misma fecha, pero ahora viaja por paquetería: no es
+    // «sin cambios», y la unidad de la flotilla deja de aparecer en la entrega.
+    const switched = await assignTransportCommand(
+      scenario.dispatcher,
+      { ...transport(id), mode: 'carrier', vehicleId: 'veh_1', driverId: 'drv_1' },
+      { commandId: 'cmd-mode-carrier' }
+    );
+    expect(switched.status).toBe('pending_external');
+    expect(switched.data).toMatchObject({ mode: 'carrier', unchanged: false });
+    expect(order(id)).toMatchObject({
+      mode: 'carrier',
+      vehicleId: null,
+      driverId: null,
+      carrier: 'Paquetexpress',
+      status: 'pending_external',
+    });
+    expect(eventsOf('delivery.mode_changed')).toHaveLength(1);
+    expect(eventsOf('delivery.mode_changed')[0].payload).toMatchObject({
+      previousMode: 'own_fleet',
+      mode: 'carrier',
+      modeLabel: 'Paquetería o transportista',
+    });
+    // Una segunda escritura idéntica ya no cambia el modo: es «sin cambios».
+    const again = await assignTransportCommand(
+      scenario.dispatcher,
+      { ...transport(id), mode: 'carrier' },
+      { commandId: 'cmd-mode-carrier-2' }
+    );
+    expect(again.data).toMatchObject({ unchanged: true, mode: 'carrier' });
+  });
+
+  it('no cambia el modo de una entrega cargada en un viaje de la flotilla', async () => {
+    seedFleet(fake);
+    const id = await createOwnFleetOrder();
+    order(id).tripId = 'trip_1';
+    order(id).vehicleId = 'veh_1';
+    order(id).driverId = 'drv_1';
+    const rejected = await assignTransportCommand(
+      scenario.dispatcher,
+      { ...transport(id), mode: 'carrier' },
+      { commandId: 'cmd-mode-on-trip' }
+    );
+    expect(rejected).toMatchObject({ status: 'rejected', errorCode: 'invalid_state' });
+    expect(rejected.message).toContain('quítala del viaje');
+    expect(order(id)).toMatchObject({ mode: 'own_fleet' });
+  });
+
+  it('una entrega que recoge el cliente sigue sin llevar orden de envío', async () => {
+    seedPackage(fake);
+    const created = await createDeliveryOrderCommand(
+      scenario.dispatcher,
+      {
+        caseId: scenario.caseId,
+        allocationIds: scenario.allocationIds,
+        mode: 'customer_pickup',
+        plannedDate: '2026-09-16',
+      },
+      { commandId: 'cmd-create-pickup' }
+    );
+    const id = created.data!.deliveryOrderId;
+    const rejected = await assignTransportCommand(
+      scenario.dispatcher,
+      { ...transport(id), mode: 'carrier' },
+      { commandId: 'cmd-mode-pickup' }
+    );
+    expect(rejected).toMatchObject({ status: 'rejected', errorCode: 'invalid_state' });
+    expect(order(id)).toMatchObject({ mode: 'customer_pickup' });
   });
 });
 

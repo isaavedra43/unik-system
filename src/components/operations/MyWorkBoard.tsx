@@ -1,10 +1,28 @@
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { AlertTriangle, ArrowUpRight, CheckCircle2, Clock, ListChecks, PauseCircle, Play, Sparkles, Timer } from 'lucide-react';
+import {
+  AlertTriangle,
+  ArrowUpRight,
+  CheckCircle2,
+  Clock,
+  ListChecks,
+  PauseCircle,
+  Play,
+  Sparkles,
+  Timer,
+} from 'lucide-react';
 import { toast } from 'sonner';
+import { OfflineBadgeView } from '@/components/areas/OfflineBadge';
 import { KpiGrid } from '@/components/patterns/dashboard/KpiGrid';
 import { StatCard } from '@/components/patterns/dashboard/StatCard';
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@/components/shadcn/sheet';
@@ -83,7 +101,11 @@ const ACTION_ICONS: Record<WorkItemUiAction, React.ReactNode> = {
   escalate: <ArrowUpRight size={14} />,
 };
 
-const DUE_TONE_CLASS = { danger: 'font-medium text-destructive', warning: 'font-medium text-warning', default: '' } as const;
+const DUE_TONE_CLASS = {
+  danger: 'font-medium text-destructive',
+  warning: 'font-medium text-warning',
+  default: '',
+} as const;
 
 const fmt = (n: number) => n.toLocaleString('es-MX');
 
@@ -129,7 +151,16 @@ export function MyWorkBoard({
   focusNotice,
 }: MyWorkBoardProps) {
   const router = useRouter();
-  const { submit, pending: pendingCommands, online, lastFlushAt } = useOfflineCommandQueue(user.id);
+  const {
+    submit,
+    pending: pendingCommands,
+    pendingOtherUsers,
+    stuck,
+    flushing,
+    flush,
+    online,
+    lastFlushAt,
+  } = useOfflineCommandQueue(user.id);
   const [now, setNow] = useState(() => new Date(nowIso));
   const [dialog, setDialog] = useState<PendingWorkAction | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -182,7 +213,10 @@ export function MyWorkBoard({
   useOperationsRealtime([`user:${user.id}`], MYWORK_REALTIME_TYPES, onRealtime);
 
   const runCommand = useCallback(
-    async (input: OfflineCommandInput<Record<string, unknown>>, successMessage: string): Promise<boolean> => {
+    async (
+      input: OfflineCommandInput<Record<string, unknown>>,
+      successMessage: string
+    ): Promise<boolean> => {
       let feedback: SubmitFeedback;
       try {
         feedback = describeSubmitOutcome(await submit(input), successMessage);
@@ -216,7 +250,10 @@ export function MyWorkBoard({
     [runCommand]
   );
 
-  const summary = useMemo(() => summarizeMyWork(openItems, user.id, now), [openItems, user.id, now]);
+  const summary = useMemo(
+    () => summarizeMyWork(openItems, user.id, now),
+    [openItems, user.id, now]
+  );
   const next = useMemo(() => pickNextAction(openItems, user.id, now), [openItems, user.id, now]);
   const rows = view === 'closed' ? (closedItems ?? []) : openItems;
 
@@ -224,9 +261,9 @@ export function MyWorkBoard({
   useEffect(() => {
     if (!focusWorkItemId) return;
     const anchor = myWorkItemAnchorId(focusWorkItemId);
-    const target = Array.from(document.querySelectorAll<HTMLElement>(`[data-anchor="${anchor}"]`)).find(
-      (el) => el.offsetParent !== null
-    );
+    const target = Array.from(
+      document.querySelectorAll<HTMLElement>(`[data-anchor="${anchor}"]`)
+    ).find((el) => el.offsetParent !== null);
     target?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }, [focusWorkItemId, wide]);
 
@@ -235,7 +272,12 @@ export function MyWorkBoard({
     contextSource.current = { items: openItems, view };
   }, [openItems, view]);
   const copilotContext = useCallback(
-    () => buildMyWorkCopilotContext(contextSource.current.items, contextSource.current.view, new Date()),
+    () =>
+      buildMyWorkCopilotContext(
+        contextSource.current.items,
+        contextSource.current.view,
+        new Date()
+      ),
     []
   );
 
@@ -264,12 +306,17 @@ export function MyWorkBoard({
           .join(' ')}
       >
         <div className="grid min-w-0 gap-4">
-          {!online || pendingCommands > 0 ? (
-            <Alert variant={online ? 'info' : 'warning'}>
-              {online
-                ? `${pendingCommands} ${pendingCommands === 1 ? 'acción pendiente' : 'acciones pendientes'} de enviar.`
-                : `Sin conexión${pendingCommands > 0 ? ` · ${pendingCommands} pendientes` : ''}. Tus acciones se enviarán al reconectar.`}
-            </Alert>
+          {!online || pendingCommands > 0 || stuck > 0 ? (
+            <div>
+              <OfflineBadgeView
+                online={online}
+                pending={pendingCommands}
+                pendingOtherUsers={pendingOtherUsers}
+                stuck={stuck}
+                flushing={flushing}
+                onFlush={() => void flush()}
+              />
+            </div>
           ) : null}
           {warnings.map((warning) => (
             <Alert key={warning} variant="warning">
@@ -293,7 +340,9 @@ export function MyWorkBoard({
             <StatCard
               label="Pendientes"
               value={fmt(summary.total)}
-              hint={summary.asBackup > 0 ? `${fmt(summary.asBackup)} como suplente` : 'Todos a tu cargo'}
+              hint={
+                summary.asBackup > 0 ? `${fmt(summary.asBackup)} como suplente` : 'Todos a tu cargo'
+              }
               icon={<ListChecks size={20} />}
             />
             <StatCard
@@ -317,12 +366,21 @@ export function MyWorkBoard({
             />
           </KpiGrid>
 
-          <NextActionCard next={next} now={now} busy={busyId !== null && busyId === next?.item.id} onAction={handleAction} />
+          <NextActionCard
+            next={next}
+            now={now}
+            busy={busyId !== null && busyId === next?.item.id}
+            onAction={handleAction}
+          />
 
           <TabNav
             activeId={view}
             tabs={[
-              { id: 'open', label: `Pendientes (${fmt(openItems.length)}${openTruncated ? '+' : ''})`, href: myWorkViewHref('open') },
+              {
+                id: 'open',
+                label: `Pendientes (${fmt(openItems.length)}${openTruncated ? '+' : ''})`,
+                href: myWorkViewHref('open'),
+              },
               { id: 'closed', label: 'Terminados recientes', href: myWorkViewHref('closed') },
             ]}
           />
@@ -342,8 +400,22 @@ export function MyWorkBoard({
             />
           ) : (
             <>
-              <WorkTable rows={rows} view={view} now={now} busyId={busyId} focusId={focusWorkItemId} onAction={handleAction} />
-              <WorkCards rows={rows} view={view} now={now} busyId={busyId} focusId={focusWorkItemId} onAction={handleAction} />
+              <WorkTable
+                rows={rows}
+                view={view}
+                now={now}
+                busyId={busyId}
+                focusId={focusWorkItemId}
+                onAction={handleAction}
+              />
+              <WorkCards
+                rows={rows}
+                view={view}
+                now={now}
+                busyId={busyId}
+                focusId={focusWorkItemId}
+                onAction={handleAction}
+              />
             </>
           )}
 
@@ -377,13 +449,19 @@ export function MyWorkBoard({
             IA
           </Button>
           <Sheet open={copilotOpen} onOpenChange={setCopilotOpen}>
-            <SheetContent side="right" className="w-full gap-0 p-0 sm:max-w-md" showCloseButton={false}>
+            <SheetContent
+              side="right"
+              className="w-full gap-0 p-0 sm:max-w-md"
+              showCloseButton={false}
+            >
               <SheetTitle className="sr-only">Copiloto de Mi trabajo</SheetTitle>
               <SheetDescription className="sr-only">
                 Pregúntale a la IA qué hacer primero o pídele registrar un avance.
               </SheetDescription>
               {copilotOpen ? (
-                <div className="flex min-h-0 flex-1 flex-col">{renderCopilot(() => setCopilotOpen(false))}</div>
+                <div className="flex min-h-0 flex-1 flex-col">
+                  {renderCopilot(() => setCopilotOpen(false))}
+                </div>
               ) : null}
             </SheetContent>
           </Sheet>
@@ -428,7 +506,9 @@ function NextActionCard({
         <h2 id="mywork-next-title" className="card-title">
           Estás al día
         </h2>
-        <p className="text-muted text-sm">No tienes trabajo pendiente a tu cargo. Cuando te asignen algo aparecerá aquí.</p>
+        <p className="text-muted text-sm">
+          No tienes trabajo pendiente a tu cargo. Cuando te asignen algo aparecerá aquí.
+        </p>
       </section>
     );
   }
@@ -444,7 +524,10 @@ function NextActionCard({
   const due = formatDueLabel(item.dueAt, now);
   const caseHref = operationsCaseHref(item.caseId);
   return (
-    <section className="card grid gap-3 border-l-4 border-l-primary" aria-labelledby="mywork-next-title">
+    <section
+      className="card grid gap-3 border-l-4 border-l-primary"
+      aria-labelledby="mywork-next-title"
+    >
       <div className="grid min-w-0 gap-1">
         <p className="text-muted text-xs font-medium uppercase">Mi siguiente acción</p>
         <h2 id="mywork-next-title" className="card-title break-words">
@@ -511,7 +594,9 @@ function WorkTitle({ item }: { item: MyWorkItem }) {
 }
 
 function StatusBadge({ item }: { item: MyWorkItem }) {
-  return <Badge variant={WORK_ITEM_STATUS_BADGE[item.status] ?? 'default'}>{item.statusLabel}</Badge>;
+  return (
+    <Badge variant={WORK_ITEM_STATUS_BADGE[item.status] ?? 'default'}>{item.statusLabel}</Badge>
+  );
 }
 
 function DueText({ item, now, view }: { item: MyWorkItem; now: Date; view: MyWorkView }) {
@@ -576,7 +661,9 @@ function RowActions({
             key={action}
             type="button"
             size="sm"
-            variant={action === 'complete' ? 'primary' : action === 'escalate' ? 'ghost' : 'secondary'}
+            variant={
+              action === 'complete' ? 'primary' : action === 'escalate' ? 'ghost' : 'secondary'
+            }
             icon={ACTION_ICONS[action]}
             isLoading={busy && action === 'start'}
             disabled={busy || (action === 'complete' && Boolean(blocked))}
@@ -634,7 +721,11 @@ function WorkTable({ rows, view, now, busyId, focusId, onAction }: ListProps) {
               key={item.id}
               data-anchor={myWorkItemAnchorId(item.id)}
               aria-current={focusId === item.id ? 'true' : undefined}
-              className={focusId === item.id ? 'bg-[var(--unik-brand-subtle)] outline outline-2 outline-[var(--unik-brand)]' : undefined}
+              className={
+                focusId === item.id
+                  ? 'bg-[var(--unik-brand-subtle)] outline outline-2 outline-[var(--unik-brand)]'
+                  : undefined
+              }
             >
               <td className="min-w-[220px]">
                 <WorkTitle item={item} />
@@ -650,7 +741,10 @@ function WorkTable({ rows, view, now, busyId, focusId, onAction }: ListProps) {
               </td>
               <td className="whitespace-nowrap">{item.areaLabel}</td>
               {view === 'open' ? (
-                <td>
+                // Without a floor, the five buttons wrapped one per line and every row grew to
+                // ~300 px: two pendientes filled the screen. The column asks for its width and
+                // `.table-wrap` scrolls sideways if the table no longer fits.
+                <td className="min-w-[300px]">
                   <RowActions item={item} busy={busyId === item.id} onAction={onAction} />
                 </td>
               ) : null}
@@ -664,7 +758,10 @@ function WorkTable({ rows, view, now, busyId, focusId, onAction }: ListProps) {
 
 function WorkCards({ rows, view, now, busyId, focusId, onAction }: ListProps) {
   return (
-    <ul className="grid gap-3 md:hidden" aria-label={view === 'open' ? 'Mis trabajos pendientes' : 'Mis trabajos terminados'}>
+    <ul
+      className="grid gap-3 md:hidden"
+      aria-label={view === 'open' ? 'Mis trabajos pendientes' : 'Mis trabajos terminados'}
+    >
       {rows.map((item) => (
         <li
           key={item.id}

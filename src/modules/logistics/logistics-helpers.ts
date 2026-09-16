@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { Prisma, type DeliveryOrder, type Trip, type TripStop } from '@prisma/client';
 import { hasPermission, type CurrentUser } from '@/modules/auth/authorization';
+import { isNotificationCategory, type NotificationCategory } from '@/modules/notifications/catalog';
 import { OperationsError, type CommandContext } from '@/modules/operations/commands';
 import { toOperationalJson } from '@/modules/operations/events-service';
 import { isOpsFlagEnabled } from '@/modules/operations/operations-config';
@@ -39,6 +40,8 @@ export const LOGISTICS_ERROR_HTTP_STATUS = {
   driver_user_taken: 409,
   in_use: 409,
   stops_pending: 409,
+  /** `trip.cancel` on a trip that already delivered something: it is closed, not cancelled. */
+  trip_has_deliveries: 409,
 } as const;
 
 export type LogisticsErrorCode = keyof typeof LOGISTICS_ERROR_HTTP_STATUS;
@@ -213,6 +216,77 @@ export async function caseReference(tx: Tx, caseId: string): Promise<string> {
   return found.salesOrderNumber
     ? `${found.caseNumber} · ${found.salesOrderNumber}`
     : found.caseNumber;
+}
+
+// ---------------------------------------------------------------------------
+// Notifications (plan 6.6: `delivery_update`)
+// ---------------------------------------------------------------------------
+
+/**
+ * Category every Logística notification uses, so a person turns deliveries on
+ * or off apart from the rest of the engine (plan 6.6). The catalogue is the
+ * source of truth; the fallback only survives a catalogue that dropped the key.
+ */
+export function deliveryNotificationCategory(): NotificationCategory {
+  return isNotificationCategory('delivery_update') ? 'delivery_update' : 'ops_workitem';
+}
+
+/** Expediente 360 of the case: where the owner sees the delivery and its evidence. */
+export function caseUrl(caseId: string): string {
+  return `/app/operations/cases/${caseId}`;
+}
+
+export interface DeliveryNotice {
+  /** Fine-grained type inside the category (`delivery_dispatched`, `delivery_confirmed`…). */
+  type: string;
+  /** Title, or a builder that receives «EXP-000123 · SO-00045». */
+  title: string | ((ref: string) => string);
+  body?: string | null;
+  url?: string | null;
+  entityType?: string | null;
+  entityId?: string | null;
+  /** Idempotency across retries of the same movement. */
+  dedupeKey?: string | null;
+}
+
+/**
+ * Tells the owner of the expediente that one of their deliveries moved
+ * (plan 6.6: "viajes que salen, paradas entregadas, entregas con conflicto o
+ * reprogramadas"). One read of the case gives both the recipient and the
+ * reference used in the title.
+ *
+ * `ctx.notify` never notifies the actor, so the chofer who closes a stop does
+ * not get a notice about their own tap; a system actor (Zoho jobs) has no user
+ * id, so the owner is always told about a conflict.
+ */
+export async function notifyDeliveryUpdate(
+  ctx: CommandContext,
+  caseId: string | null | undefined,
+  notice: DeliveryNotice
+): Promise<string | null> {
+  if (!caseId) return null;
+  const found = await ctx.tx.operationalCase.findUnique({
+    where: { id: caseId },
+    select: { ownerUserId: true, caseNumber: true, salesOrderNumber: true },
+  });
+  const owner = found?.ownerUserId ?? null;
+  // `system:{id}` owners are not people: nobody to notify.
+  if (!owner || owner.includes(':')) return null;
+  const ref = found?.salesOrderNumber
+    ? `${found.caseNumber} · ${found.salesOrderNumber}`
+    : (found?.caseNumber ?? caseId);
+  ctx.notify({
+    userId: owner,
+    category: deliveryNotificationCategory(),
+    type: notice.type,
+    title: (typeof notice.title === 'function' ? notice.title(ref) : notice.title).slice(0, 200),
+    body: notice.body ?? null,
+    url: notice.url ?? caseUrl(caseId),
+    entityType: notice.entityType ?? LOGISTICS_OBJECT_TYPES.deliveryOrder,
+    entityId: notice.entityId ?? null,
+    ...(notice.dedupeKey ? { dedupeKey: notice.dedupeKey } : {}),
+  });
+  return owner;
 }
 
 // ---------------------------------------------------------------------------

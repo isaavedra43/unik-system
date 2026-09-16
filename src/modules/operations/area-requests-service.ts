@@ -2,7 +2,12 @@ import { randomUUID } from 'crypto';
 import type { AreaRequest, Prisma, WorkItem } from '@prisma/client';
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
-import { hasPermission, type CurrentUser } from '@/modules/auth/authorization';
+import { hasAnyPermission, hasPermission, type CurrentUser } from '@/modules/auth/authorization';
+import {
+  OPERATIONS_MANAGE_PERMISSION,
+  OPERATIONS_OPERATOR_PERMISSIONS,
+  OPERATIONS_VIEW_PERMISSION,
+} from '@/modules/operations/permissions';
 import { resolveResponsible } from '@/modules/comms/responsibles-service';
 import { JOB_PRIORITY, type JobContext } from '@/modules/jobs/job-queue';
 import {
@@ -66,7 +71,8 @@ import {
  *   human owner (durable: a restart right after the commit loses nothing).
  * - `accept`, `block`, `resolve` and `reject` are decided only by a human
  *   responsible of the destination area (owner/backup of the request or of its
- *   work item, area lead, area responsible) or someone with `operations.manage`.
+ *   work item, area lead, area responsible) or whoever operates the core
+ *   (`OPERATIONS_OPERATOR_PERMISSIONS`: `operations.manage` / `operations.admin`).
  * - `cancel`: the same deciders, the human who created it, or a system actor.
  * - `expire`: system actors (case closed or cancelled) or `operations.manage`.
  *
@@ -96,8 +102,10 @@ export const AUTO_ACK_ACTOR: OperationsActor = {
   id: 'operations.request_auto_ack',
 };
 
-const MANAGE_PERMISSION = 'operations.manage';
-const VIEW_PERMISSION = 'operations.view';
+const MANAGE_PERMISSION = OPERATIONS_MANAGE_PERMISSION;
+const VIEW_PERMISSION = OPERATIONS_VIEW_PERMISSION;
+/** Quien opera el núcleo sin ser dueño de la fila: `operations.manage` u `operations.admin`. */
+const OPERATOR_PERMISSIONS = [...OPERATIONS_OPERATOR_PERMISSIONS];
 
 type Db = Prisma.TransactionClient;
 
@@ -224,7 +232,7 @@ export async function isAreaRequestResponsible(
 
 const HUMAN_ONLY_MESSAGE = 'Las solicitudes entre áreas sólo las decide una persona responsable';
 
-/** Human destination responsible or `operations.manage` (optionally the human requester). */
+/** Human destination responsible or an operator of the core (`operations.manage` / `operations.admin`; optionally the human requester). */
 async function assertHumanDecider(
   tx: Db,
   ctx: Pick<CommandContext, 'actor' | 'user'>,
@@ -239,7 +247,7 @@ async function assertHumanDecider(
   if (!(await isActiveHumanUser(tx, user.id))) {
     throw new OperationsError('forbidden', HUMAN_ONLY_MESSAGE);
   }
-  if (hasPermission(user, MANAGE_PERMISSION)) return;
+  if (hasAnyPermission(user, OPERATOR_PERMISSIONS)) return;
   if (await isAreaRequestResponsible(tx, user.id, request)) return;
   if (
     options.allowRequester &&
@@ -250,7 +258,7 @@ async function assertHumanDecider(
   }
   throw new OperationsError(
     'forbidden',
-    'Sólo el responsable del área destino o un gestor de operaciones puede decidir esta solicitud'
+    'Sólo el responsable del área destino o quien gestiona operaciones puede decidir esta solicitud'
   );
 }
 
@@ -673,6 +681,10 @@ registerRequestCommand('cancel', {
 
 registerRequestCommand('expire', {
   actorTypes: ['user', 'system'],
+  // `expire` sigue exigiendo `operations.manage` a secas: lo normal es que lo dé
+  // por vencido el job, ninguna superficie lo ofrece como botón y no es una de
+  // las acciones que la Torre declara sobre una excepción (7.7). Si alguna vez
+  // se ofrece en pantalla, hay que moverlo a OPERATOR_PERMISSIONS.
   async authorize(_tx, ctx) {
     if (ctx.actor.type === 'system') return;
     if (!ctx.user || !hasPermission(ctx.user, MANAGE_PERMISSION)) {
@@ -1180,7 +1192,7 @@ export async function getAreaRequest(
 
   const [dto] = await toAreaRequestDTOs([row], options.now ?? new Date());
   const responsible =
-    hasPermission(actor, MANAGE_PERMISSION) ||
+    hasAnyPermission(actor, OPERATOR_PERMISSIONS) ||
     (await isAreaRequestResponsible(prisma, actor.id, row));
   const can = (action: AreaRequestAction) => nextAreaRequestStatus(action, row.status) !== null;
   return {

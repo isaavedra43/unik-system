@@ -27,6 +27,10 @@ interface Props {
   onRetry: () => void;
   fullWidth?: boolean;
   onNewConversation?: () => void;
+  /** Hides the channel selector when the scope is already fixed (e.g. the accounts of one area). */
+  hideAccountFilter?: boolean;
+  /** Hides "Nueva" where starting a conversation from scratch does not belong. */
+  hideNewConversation?: boolean;
 }
 
 export function ConversationList({
@@ -43,6 +47,8 @@ export function ConversationList({
   onRetry,
   fullWidth,
   onNewConversation,
+  hideAccountFilter,
+  hideNewConversation,
 }: Props) {
   const set = <K extends keyof InboxFilters>(key: K, value: InboxFilters[K]) =>
     onFiltersChange({ ...filters, [key]: value });
@@ -61,7 +67,7 @@ export function ConversationList({
               {accounts.length} canal{accounts.length === 1 ? '' : 'es'}
             </p>
           </div>
-          {onNewConversation && (
+          {onNewConversation && !hideNewConversation && (
             <button
               type="button"
               className="btn btn-primary btn-sm"
@@ -97,20 +103,22 @@ export function ConversationList({
           />
         </div>
         <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
-          <select
-            className="select"
-            aria-label="Canal"
-            value={filters.accountId}
-            onChange={(e) => set('accountId', e.target.value)}
-            style={selectStyle}
-          >
-            <option value="">Todos los canales</option>
-            {accounts.map((a) => (
-              <option key={a.id} value={a.id}>
-                {PROVIDER_LABELS[a.provider] ?? a.provider} · {a.label}
-              </option>
-            ))}
-          </select>
+          {!hideAccountFilter && (
+            <select
+              className="select"
+              aria-label="Canal"
+              value={filters.accountId}
+              onChange={(e) => set('accountId', e.target.value)}
+              style={selectStyle}
+            >
+              <option value="">Todos los canales</option>
+              {accounts.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {PROVIDER_LABELS[a.provider] ?? a.provider} · {a.label}
+                </option>
+              ))}
+            </select>
+          )}
           <select
             className="select"
             aria-label="Estado"

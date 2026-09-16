@@ -9,6 +9,7 @@ import {
   type WorkItem,
 } from '@prisma/client';
 import { hasPermission } from '@/modules/auth/authorization';
+import { isNotificationCategory, type NotificationCategory } from '@/modules/notifications/catalog';
 import { DEFAULT_TOLERANCE_PCT, inventoryError } from '@/modules/inventory/inventory-types';
 import {
   DEFAULT_BASE_UNIT,
@@ -33,6 +34,7 @@ import {
   MANUFACTURING_FLOOR_CHANNEL,
   MANUFACTURING_OBJECT_TYPES,
   MANUFACTURING_REALTIME_TYPES,
+  productionOrderUrl,
 } from './manufacturing-types';
 
 /**
@@ -119,7 +121,10 @@ export async function loadOrder(tx: Db, orderId: string): Promise<ProductionOrde
   return order;
 }
 
-export function assertAggregateMatches(cmd: Pick<DomainCommand, 'aggregate'>, orderId: string): void {
+export function assertAggregateMatches(
+  cmd: Pick<DomainCommand, 'aggregate'>,
+  orderId: string
+): void {
   if (cmd.aggregate.id !== orderId) {
     throw new OperationsError(
       'invalid_payload',
@@ -196,7 +201,10 @@ export async function readItemUnits(db: Db, zohoItemId: string): Promise<ItemUni
     };
   }
   const product = await db.product.findUnique({ where: { zohoItemId }, select: { unit: true } });
-  const units = toUnitProfile({ baseUnit: normalizeUnit(product?.unit) || DEFAULT_BASE_UNIT, conversions: [] });
+  const units = toUnitProfile({
+    baseUnit: normalizeUnit(product?.unit) || DEFAULT_BASE_UNIT,
+    conversions: [],
+  });
   return {
     zohoItemId,
     baseUnit: units.baseUnit,
@@ -241,7 +249,10 @@ export function convertToBase(
 }
 
 /** Base units per one `unit` (1 when `unit` is the base unit). */
-export function unitFactor(unit: string | null | undefined, item: Pick<ItemUnits, 'units' | 'baseUnit' | 'zohoItemId'>): Decimal {
+export function unitFactor(
+  unit: string | null | undefined,
+  item: Pick<ItemUnits, 'units' | 'baseUnit' | 'zohoItemId'>
+): Decimal {
   return convertToBase(1, unit, item);
 }
 
@@ -294,7 +305,10 @@ export async function resolveItemRef(
   if (demand?.zohoItemId && (value === demand.zohoItemId || value === demand.sku)) {
     return demand.zohoItemId;
   }
-  const byId = await db.product.findUnique({ where: { zohoItemId: value }, select: { zohoItemId: true } });
+  const byId = await db.product.findUnique({
+    where: { zohoItemId: value },
+    select: { zohoItemId: true },
+  });
   if (byId) return byId.zohoItemId;
   const bySku = await db.product.findFirst({
     where: { sku: { equals: value, mode: 'insensitive' } },
@@ -329,7 +343,8 @@ export async function resolveDemandLink(
   let allocation: DemandAllocation | null = null;
   if (input.demandAllocationId) {
     allocation = await tx.demandAllocation.findUnique({ where: { id: input.demandAllocationId } });
-    if (!allocation) throw new OperationsError('not_found', 'No se encontró la asignación de la partida');
+    if (!allocation)
+      throw new OperationsError('not_found', 'No se encontró la asignación de la partida');
     if (allocation.source !== 'manufacture') {
       throw new OperationsError('invalid_payload', 'La asignación no se surte con manufactura');
     }
@@ -358,7 +373,10 @@ export async function resolveDemandLink(
     opCase = await tx.operationalCase.findUnique({ where: { id: caseId } });
     if (!opCase) throw new OperationsError('not_found', 'No se encontró el expediente');
     if (opCase.status === 'closed' || opCase.status === 'cancelled') {
-      throw new OperationsError('invalid_state', `El expediente ${opCase.caseNumber} está cerrado o cancelado`);
+      throw new OperationsError(
+        'invalid_state',
+        `El expediente ${opCase.caseNumber} está cerrado o cancelado`
+      );
     }
   }
   return { opCase, demand, allocation };
@@ -378,6 +396,64 @@ export function orderEventOptions(order: Pick<ProductionOrder, 'id' | 'caseId'>)
 }
 
 export const orderRef = (id: string) => ({ type: MANUFACTURING_OBJECT_TYPES.productionOrder, id });
+
+// ---------------------------------------------------------------------------
+// Notifications (plan 6.6: `production_update`)
+// ---------------------------------------------------------------------------
+
+/**
+ * Category every Manufactura notification uses, so a person turns production on
+ * or off apart from the rest of the engine (plan 6.6). The catalogue is the
+ * source of truth; the fallback only survives a catalogue that dropped the key.
+ */
+export function productionNotificationCategory(): NotificationCategory {
+  return isNotificationCategory('production_update') ? 'production_update' : 'ops_workitem';
+}
+
+/** `createdByUserId` holds `system:{id}` for jobs and sweeps: only people are notified. */
+function humanUserId(value: string | null | undefined): string | null {
+  return value && !value.includes(':') ? value : null;
+}
+
+/**
+ * Tells whoever is waiting for a production order that it moved (plan 6.6:
+ * "órdenes liberadas, material preparado, merma fuera de tolerancia"): the
+ * person who opened it and, when the order belongs to an expediente, its owner.
+ *
+ * `ctx.notify` never notifies the actor, so the operator who releases the order
+ * does not get a notice about their own action.
+ */
+export async function notifyProductionUpdate(
+  ctx: CommandContext,
+  order: Pick<ProductionOrder, 'id' | 'number' | 'caseId' | 'createdByUserId'>,
+  notice: { type: string; title: string; body?: string | null }
+): Promise<string[]> {
+  const owner = order.caseId
+    ? ((
+        await ctx.tx.operationalCase.findUnique({
+          where: { id: order.caseId },
+          select: { ownerUserId: true },
+        })
+      )?.ownerUserId ?? null)
+    : null;
+  const recipients = [...new Set([humanUserId(order.createdByUserId), humanUserId(owner)])].filter(
+    (id): id is string => id !== null
+  );
+  for (const userId of recipients) {
+    ctx.notify({
+      userId,
+      category: productionNotificationCategory(),
+      type: notice.type,
+      title: notice.title.slice(0, 200),
+      body: notice.body ?? null,
+      url: productionOrderUrl(order.id),
+      entityType: MANUFACTURING_OBJECT_TYPES.productionOrder,
+      entityId: order.id,
+      dedupeKey: `${notice.type}:${order.id}:${ctx.commandId}:${userId}`,
+    });
+  }
+  return recipients;
+}
 
 export function publishOrderChange(
   ctx: Pick<CommandContext, 'realtime' | 'commandId' | 'commandType'>,
@@ -438,7 +514,10 @@ export async function closeWorkItems(
   const closed: string[] = [];
   for (const item of items) {
     if (action === 'complete') {
-      await completeWorkItemInTx(tx, item, { result: { closedBy: 'manufacturing', reason }, skipEvidenceCheck: true });
+      await completeWorkItemInTx(tx, item, {
+        result: { closedBy: 'manufacturing', reason },
+        skipEvidenceCheck: true,
+      });
     } else {
       await cancelWorkItemInTx(tx, item, { reason });
     }

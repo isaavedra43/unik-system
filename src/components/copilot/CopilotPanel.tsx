@@ -33,7 +33,12 @@ import {
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { AssistantMarkdown } from '@/components/assistant/AssistantMarkdown';
-import { ArtifactRenderer, toAttachable, type ArtifactData, type AttachableArtifact } from '@/components/assistant/ArtifactRenderer';
+import {
+  ArtifactRenderer,
+  toAttachable,
+  type ArtifactData,
+  type AttachableArtifact,
+} from '@/components/assistant/ArtifactRenderer';
 import { ProposalCard } from './ProposalCard';
 import { PlanCard } from './PlanCard';
 import { ConfidenceBadge } from './ConfidenceBadge';
@@ -62,6 +67,7 @@ import {
   type LiveStep,
   type SuggestedActionsData,
   preferencePatchFor,
+  isDecidableProposal,
   isNewerActivity,
   type CopilotPreferenceKey,
 } from './copilot-types';
@@ -117,12 +123,18 @@ export interface CopilotPanelProps {
   minAutoIntervalMs?: number;
 }
 
-type TurnPayload = { message: string } | { trigger: 'open' | 'inbound' } | { trigger: 'action_failed'; detail: { tool: string; error: string } };
+type TurnPayload =
+  | { message: string }
+  | { trigger: 'open' | 'inbound' }
+  | { trigger: 'action_failed'; detail: { tool: string; error: string } };
 
 async function apiJson<T>(input: string, init?: RequestInit): Promise<T> {
   const res = await fetch(input, {
     ...init,
-    headers: { ...(init?.body ? { 'Content-Type': 'application/json' } : {}), ...(init?.headers ?? {}) },
+    headers: {
+      ...(init?.body ? { 'Content-Type': 'application/json' } : {}),
+      ...(init?.headers ?? {}),
+    },
   });
   const data = (await res.json().catch(() => ({}))) as T & { error?: string };
   if (!res.ok) throw new Error(data.error ?? `Error ${res.status}`);
@@ -130,7 +142,9 @@ async function apiJson<T>(input: string, init?: RequestInit): Promise<T> {
 }
 
 /** Evaluates the host context for this turn; a failing or non-object context is simply not sent. */
-function readTurnContext(fn: (() => Record<string, unknown>) | undefined): Record<string, unknown> | undefined {
+function readTurnContext(
+  fn: (() => Record<string, unknown>) | undefined
+): Record<string, unknown> | undefined {
   if (!fn) return undefined;
   try {
     const value = fn();
@@ -170,7 +184,15 @@ function Orb({ state }: { state: 'idle' | 'thinking' | 'paused' }) {
  * "Asistente IA → Preferencias y memoria" screen edits, so there is still one
  * configuration — this is only a shortcut for this surface.
  */
-function ModeBadge({ mode, onChange, busy }: { mode: CopilotMode; onChange: (mode: CopilotMode) => void; busy: boolean }) {
+function ModeBadge({
+  mode,
+  onChange,
+  busy,
+}: {
+  mode: CopilotMode;
+  onChange: (mode: CopilotMode) => void;
+  busy: boolean;
+}) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -196,7 +218,11 @@ function ModeBadge({ mode, onChange, busy }: { mode: CopilotMode; onChange: (mod
         <span>{MODE_META[mode].label}</span>
       </button>
       {open && (
-        <div className="copilot-mode-pop" role="menu" aria-label="Modo del copiloto en esta superficie">
+        <div
+          className="copilot-mode-pop"
+          role="menu"
+          aria-label="Modo del copiloto en esta superficie"
+        >
           {(Object.keys(MODE_META) as CopilotMode[]).map((m) => (
             <button
               key={m}
@@ -222,12 +248,25 @@ function ModeBadge({ mode, onChange, busy }: { mode: CopilotMode; onChange: (mod
   );
 }
 
-function ActionChips({ data, onPick, disabled, muted }: { data: SuggestedActionsData; onPick: (instruction: string) => void; disabled: boolean; muted?: boolean }) {
+function ActionChips({
+  data,
+  onPick,
+  disabled,
+  muted,
+}: {
+  data: SuggestedActionsData;
+  onPick: (instruction: string) => void;
+  disabled: boolean;
+  muted?: boolean;
+}) {
   return (
     <div className={cn('copilot-actions', muted && 'is-muted')}>
       {data.situation && (
         <div className="copilot-situation">
-          <span className={cn('copilot-urgency', `is-${data.urgency}`)} title={`Urgencia ${data.urgency}`} />
+          <span
+            className={cn('copilot-urgency', `is-${data.urgency}`)}
+            title={`Urgencia ${data.urgency}`}
+          />
           <span>{data.situation}</span>
           <span className={cn('copilot-sentiment', `is-${data.sentiment}`)}>{data.sentiment}</span>
         </div>
@@ -256,7 +295,15 @@ function ActionChips({ data, onPick, disabled, muted }: { data: SuggestedActions
   );
 }
 
-function DraftCard({ draft, onInsert, onSend }: { draft: DraftData; onInsert?: (text: string) => void; onSend?: (text: string) => Promise<void> }) {
+function DraftCard({
+  draft,
+  onInsert,
+  onSend,
+}: {
+  draft: DraftData;
+  onInsert?: (text: string) => void;
+  onSend?: (text: string) => Promise<void>;
+}) {
   const [text, setText] = useState(draft.draft);
   const [editing, setEditing] = useState(false);
   const [sending, setSending] = useState(false);
@@ -283,14 +330,27 @@ function DraftCard({ draft, onInsert, onSend }: { draft: DraftData; onInsert?: (
     }
   };
   return (
-    <motion.div className={cn('copilot-draft', sent && 'is-sent')} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={spring}>
+    <motion.div
+      className={cn('copilot-draft', sent && 'is-sent')}
+      initial={{ opacity: 0, y: 6 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={spring}
+    >
       <div className="copilot-draft-head">
         <MessageSquareReply size={13} />
         <span>{sent ? 'Enviado al cliente' : 'Respuesta propuesta'}</span>
-        {draft.rationale && !sent && <span className="copilot-draft-rationale">· {draft.rationale}</span>}
+        {draft.rationale && !sent && (
+          <span className="copilot-draft-rationale">· {draft.rationale}</span>
+        )}
       </div>
       {editing && !sent ? (
-        <textarea className="copilot-draft-edit" value={text} rows={Math.min(12, Math.max(3, text.split('\n').length + 1))} onChange={(e) => setText(e.target.value)} aria-label="Editar borrador" />
+        <textarea
+          className="copilot-draft-edit"
+          value={text}
+          rows={Math.min(12, Math.max(3, text.split('\n').length + 1))}
+          onChange={(e) => setText(e.target.value)}
+          aria-label="Editar borrador"
+        />
       ) : (
         <div className="copilot-draft-body">{text}</div>
       )}
@@ -299,7 +359,11 @@ function DraftCard({ draft, onInsert, onSend }: { draft: DraftData; onInsert?: (
           <button type="button" className="copilot-btn copilot-btn-ghost" onClick={copy}>
             <Copy size={13} /> Copiar
           </button>
-          <button type="button" className="copilot-btn copilot-btn-ghost" onClick={() => setEditing((v) => !v)}>
+          <button
+            type="button"
+            className="copilot-btn copilot-btn-ghost"
+            onClick={() => setEditing((v) => !v)}
+          >
             <Pencil size={13} /> {editing ? 'Listo' : 'Editar'}
           </button>
           {onInsert && (
@@ -315,8 +379,18 @@ function DraftCard({ draft, onInsert, onSend }: { draft: DraftData; onInsert?: (
             </button>
           )}
           {onSend && (
-            <button type="button" className="copilot-btn copilot-btn-primary" disabled={sending || !text.trim()} onClick={() => void send()}>
-              {sending ? <Loader2 size={13} className="copilot-spin" /> : <SendHorizontal size={13} />} Enviar
+            <button
+              type="button"
+              className="copilot-btn copilot-btn-primary"
+              disabled={sending || !text.trim()}
+              onClick={() => void send()}
+            >
+              {sending ? (
+                <Loader2 size={13} className="copilot-spin" />
+              ) : (
+                <SendHorizontal size={13} />
+              )}{' '}
+              Enviar
             </button>
           )}
         </div>
@@ -334,7 +408,12 @@ function Steps({ steps }: { steps: LiveStep[] }) {
       {steps.map((s) => (
         <motion.span
           key={s.id}
-          className={cn('copilot-step', `is-${s.status}`, s.detail && 'has-detail', open === s.id && 'is-open')}
+          className={cn(
+            'copilot-step',
+            `is-${s.status}`,
+            s.detail && 'has-detail',
+            open === s.id && 'is-open'
+          )}
           title={s.detail ?? undefined}
           role={s.detail ? 'button' : undefined}
           tabIndex={s.detail ? 0 : undefined}
@@ -349,8 +428,18 @@ function Steps({ steps }: { steps: LiveStep[] }) {
           animate={{ opacity: 1, x: 0 }}
           transition={spring}
         >
-          {s.status === 'running' ? <Loader2 size={11} className="copilot-spin" /> : s.status === 'done' ? <Check size={11} /> : s.status === 'pending' ? <Clock size={11} /> : <X size={11} />}
-          {s.status === 'pending' ? `${toolLabel(s.name, 'done')} · esperando tu aprobación` : toolLabel(s.name, s.status === 'running' ? 'running' : 'done')}
+          {s.status === 'running' ? (
+            <Loader2 size={11} className="copilot-spin" />
+          ) : s.status === 'done' ? (
+            <Check size={11} />
+          ) : s.status === 'pending' ? (
+            <Clock size={11} />
+          ) : (
+            <X size={11} />
+          )}
+          {s.status === 'pending'
+            ? `${toolLabel(s.name, 'done')} · esperando tu aprobación`
+            : toolLabel(s.name, s.status === 'running' ? 'running' : 'done')}
         </motion.span>
       ))}
       {detail && <div className="copilot-step-detail">{detail}</div>}
@@ -359,15 +448,36 @@ function Steps({ steps }: { steps: LiveStep[] }) {
 }
 
 /** "[Sistema] El usuario APROBÓ la propuesta … : ejecutada correctamente. Acción: … Resultado: {…}" → human event. */
-function parseSystemEvent(text: string): { kind: 'approved' | 'rejected' | 'other'; title: string; detail: string | null; failed: boolean } {
+function parseSystemEvent(text: string): {
+  kind: 'approved' | 'rejected' | 'other';
+  title: string;
+  detail: string | null;
+  failed: boolean;
+} {
   const clean = text.replace(/^\[Sistema\]\s*/, '');
   const approved = /APROBÓ/.test(clean);
   const rejected = /RECHAZÓ/.test(clean);
   const failed = /fall[oó]:/i.test(clean);
   const action = /Acción:\s*([^]*?)(?:\s+Resultado:|$)/.exec(clean)?.[1]?.trim() ?? null;
   const reason = failed ? extractFailureReason(clean) : null;
-  if (approved) return { kind: 'approved', title: failed ? 'Aprobaste la acción, pero falló' : /incierto/.test(clean) ? 'Aprobaste la acción · resultado por confirmar' : 'Aprobaste la acción · ejecutada', detail: failed && reason ? `${reason}${action ? ` — ${action}` : ''}` : action, failed };
-  if (rejected) return { kind: 'rejected', title: 'Rechazaste la acción', detail: /RECHAZÓ la propuesta [^\s]+ \([^)]+\)(?::\s*(.*))?/.exec(clean)?.[1] ?? null, failed: false };
+  if (approved)
+    return {
+      kind: 'approved',
+      title: failed
+        ? 'Aprobaste la acción, pero falló'
+        : /incierto/.test(clean)
+          ? 'Aprobaste la acción · resultado por confirmar'
+          : 'Aprobaste la acción · ejecutada',
+      detail: failed && reason ? `${reason}${action ? ` — ${action}` : ''}` : action,
+      failed,
+    };
+  if (rejected)
+    return {
+      kind: 'rejected',
+      title: 'Rechazaste la acción',
+      detail: /RECHAZÓ la propuesta [^\s]+ \([^)]+\)(?::\s*(.*))?/.exec(clean)?.[1] ?? null,
+      failed: false,
+    };
   return { kind: 'other', title: clean, detail: null, failed: false };
 }
 
@@ -375,7 +485,17 @@ function parseSystemEvent(text: string): { kind: 'approved' | 'rejected' | 'othe
 /* Panel                                                               */
 /* ------------------------------------------------------------------ */
 
-export function CopilotPanel({ surface, user, onInsertDraft, onInsertAttachment, onSendDraft, onAfterTurn, onBack, context, minAutoIntervalMs }: CopilotPanelProps) {
+export function CopilotPanel({
+  surface,
+  user,
+  onInsertDraft,
+  onInsertAttachment,
+  onSendDraft,
+  onAfterTurn,
+  onBack,
+  context,
+  minAutoIntervalMs,
+}: CopilotPanelProps) {
   const [mode, setMode] = useState<CopilotMode>('active');
   const [loading, setLoading] = useState(true);
   const [messages, setMessages] = useState<CopilotMessage[]>([]);
@@ -404,7 +524,10 @@ export function CopilotPanel({ surface, user, onInsertDraft, onInsertAttachment,
   const contextRef = useRef(context ?? surface.context);
   contextRef.current = context ?? surface.context;
   const minAutoIntervalRef = useRef(0);
-  minAutoIntervalRef.current = Math.max(0, Number(minAutoIntervalMs ?? surface.minAutoIntervalMs ?? 0) || 0);
+  minAutoIntervalRef.current = Math.max(
+    0,
+    Number(minAutoIntervalMs ?? surface.minAutoIntervalMs ?? 0) || 0
+  );
   /** When the last automatic analysis (open/inbound) started. */
   const lastAutoAtRef = useRef(0);
   /** Automatic analysis postponed by a hidden tab or the throttle window. */
@@ -413,7 +536,16 @@ export function CopilotPanel({ surface, user, onInsertDraft, onInsertAttachment,
   const requestAutoTurnRef = useRef<(trigger: 'open' | 'inbound') => void>(() => undefined);
 
   const loadThread = useCallback(async () => {
-    const data = await apiJson<{ conversationId: string; mode: CopilotMode; messages: CopilotMessage[]; proposals: CopilotProposal[] }>(threadIdRef.current ? `${threadUrl}?thread=${encodeURIComponent(threadIdRef.current)}` : threadUrl);
+    const data = await apiJson<{
+      conversationId: string;
+      mode: CopilotMode;
+      messages: CopilotMessage[];
+      proposals: CopilotProposal[];
+    }>(
+      threadIdRef.current
+        ? `${threadUrl}?thread=${encodeURIComponent(threadIdRef.current)}`
+        : threadUrl
+    );
     threadIdRef.current = data.conversationId;
     setMessages(data.messages);
     setProposals(data.proposals);
@@ -424,15 +556,25 @@ export function CopilotPanel({ surface, user, onInsertDraft, onInsertAttachment,
   const runTurn = useCallback(
     async (payload: TurnPayload) => {
       if (streamingRef.current) {
-        if ('trigger' in payload && payload.trigger !== 'action_failed') pendingTrigger.current = payload.trigger;
+        if ('trigger' in payload && payload.trigger !== 'action_failed')
+          pendingTrigger.current = payload.trigger;
         return;
       }
       setError(null);
       if ('message' in payload) {
-        setMessages((prev) => [...prev, { id: `temp-${Date.now()}`, role: 'user', content: payload.message, createdAt: new Date().toISOString() }]);
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `temp-${Date.now()}`,
+            role: 'user',
+            content: payload.message,
+            createdAt: new Date().toISOString(),
+          },
+        ]);
       }
       streamingRef.current = true;
-      if ('trigger' in payload && payload.trigger !== 'action_failed') lastAutoAtRef.current = Date.now();
+      if ('trigger' in payload && payload.trigger !== 'action_failed')
+        lastAutoAtRef.current = Date.now();
       setStreaming(true);
       setStreamText('');
       setLiveSteps([]);
@@ -446,7 +588,11 @@ export function CopilotPanel({ surface, user, onInsertDraft, onInsertAttachment,
         const res = await fetch(threadUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ...payload, threadId: threadIdRef.current ?? undefined, ...(turnContext ? { context: turnContext } : {}) }),
+          body: JSON.stringify({
+            ...payload,
+            threadId: threadIdRef.current ?? undefined,
+            ...(turnContext ? { context: turnContext } : {}),
+          }),
           signal: controller.signal,
         });
         const type = res.headers.get('content-type') ?? '';
@@ -495,7 +641,8 @@ export function CopilotPanel({ surface, user, onInsertDraft, onInsertAttachment,
                   if (surface.autoInsertDrafts && onInsertDraft) onInsertDraft(parsed.draft);
                 }
               }
-              if (name !== 'suggestNextActions') setLiveSteps((prev) => [...prev, { id, name, status: 'running' }]);
+              if (name !== 'suggestNextActions')
+                setLiveSteps((prev) => [...prev, { id, name, status: 'running' }]);
             } else if (event.type === 'tool_call_end') {
               const name = String(d.name ?? '');
               const pending = d.needsApproval === true;
@@ -503,13 +650,21 @@ export function CopilotPanel({ surface, user, onInsertDraft, onInsertAttachment,
                 const idx = prev.findIndex((s) => s.name === name && s.status === 'running');
                 if (idx < 0) return prev;
                 const next = [...prev];
-                next[idx] = { ...next[idx], status: pending ? 'pending' : d.success ? 'done' : 'failed', detail: typeof d.error === 'string' ? d.error : next[idx].detail ?? null };
+                next[idx] = {
+                  ...next[idx],
+                  status: pending ? 'pending' : d.success ? 'done' : 'failed',
+                  detail: typeof d.error === 'string' ? d.error : (next[idx].detail ?? null),
+                };
                 return next;
               });
               if (name === draftTool && !d.success) setLiveDraft(null);
             } else if (event.type === 'artifact') {
               const a = d as unknown as ArtifactData;
-              if (a.artifactId) setLiveArtifacts((prev) => [...prev.filter((x) => x.artifactId !== a.artifactId), a]);
+              if (a.artifactId)
+                setLiveArtifacts((prev) => [
+                  ...prev.filter((x) => x.artifactId !== a.artifactId),
+                  a,
+                ]);
               // An official quote PDF goes straight to the composer: the user only reviews and sends.
               if (a.quoteId && onInsertAttachment) {
                 const att = toAttachable(a);
@@ -531,7 +686,8 @@ export function CopilotPanel({ surface, user, onInsertDraft, onInsertAttachment,
         await loadThread().catch(() => undefined);
         onAfterTurnRef.current?.();
       } catch (e) {
-        if ((e as Error).name !== 'AbortError') setError(e instanceof Error ? e.message : 'Error de conexión');
+        if ((e as Error).name !== 'AbortError')
+          setError(e instanceof Error ? e.message : 'Error de conexión');
       } finally {
         streamingRef.current = false;
         setStreaming(false);
@@ -561,7 +717,8 @@ export function CopilotPanel({ surface, user, onInsertDraft, onInsertAttachment,
    * default interval (0) and a visible tab they run immediately, as always.
    */
   const requestAutoTurn = useCallback((trigger: 'open' | 'inbound') => {
-    const merged: 'open' | 'inbound' = deferredAutoRef.current === 'open' || trigger === 'open' ? 'open' : 'inbound';
+    const merged: 'open' | 'inbound' =
+      deferredAutoRef.current === 'open' || trigger === 'open' ? 'open' : 'inbound';
     if (typeof document !== 'undefined' && document.hidden) {
       deferredAutoRef.current = merged;
       return;
@@ -600,7 +757,10 @@ export function CopilotPanel({ surface, user, onInsertDraft, onInsertAttachment,
         if (!alive) return;
         if (data.mode === 'active') requestAutoTurnRef.current('open');
       })
-      .catch((err) => alive && setError(err instanceof Error ? err.message : 'No se pudo cargar el copiloto'))
+      .catch(
+        (err) =>
+          alive && setError(err instanceof Error ? err.message : 'No se pudo cargar el copiloto')
+      )
       .finally(() => alive && setLoading(false));
     return () => {
       alive = false;
@@ -642,15 +802,35 @@ export function CopilotPanel({ surface, user, onInsertDraft, onInsertAttachment,
 
   const decideProposal = useCallback(
     async (proposal: CopilotProposal, decision: 'approve' | 'reject') => {
-      const data = await apiJson<{ proposal: CopilotProposal; execution?: { success: boolean; error?: string; uncertain?: boolean; result?: unknown } }>(surface.endpoints.proposal(proposal.id), { method: 'POST', body: JSON.stringify({ decision }) });
+      const data = await apiJson<{
+        proposal: CopilotProposal;
+        execution?: {
+          success: boolean;
+          error?: string;
+          errorCode?: string;
+          needsApproval?: boolean;
+          uncertain?: boolean;
+          result?: unknown;
+        };
+      }>(surface.endpoints.proposal(proposal.id), {
+        method: 'POST',
+        body: JSON.stringify({ decision }),
+      });
       let failedError: string | null = null;
       if (decision === 'approve') {
         if (data.execution?.success) {
           toast.success('Acción ejecutada');
           const action = uiActionFromResult(proposal.toolName, data.execution.result);
           if (action) performUiAction(action);
-        } else if (data.execution?.uncertain) toast.warning('Sin confirmación del proveedor; se actualizará solo');
-        else {
+        } else if (data.execution?.uncertain)
+          toast.warning('Sin confirmación del proveedor; se actualizará solo');
+        // Primera de dos firmas: NO es un fallo — nada que el copiloto deba "arreglar".
+        else if (
+          data.execution?.needsApproval ||
+          data.execution?.errorCode === 'awaiting_second_approval'
+        ) {
+          toast.message('Primera firma registrada; falta la segunda de otra persona con permiso');
+        } else {
           failedError = data.execution?.error ?? 'La acción falló';
           toast.error(failedError);
         }
@@ -661,7 +841,11 @@ export function CopilotPanel({ surface, user, onInsertDraft, onInsertAttachment,
       await loadThread().catch(() => undefined);
       onAfterTurnRef.current?.();
       // The copilot reads the error and fixes it on its own (search the right product, adjust data, re-propose).
-      if (failedError) void runTurnRef.current({ trigger: 'action_failed', detail: { tool: proposal.toolName, error: failedError } });
+      if (failedError)
+        void runTurnRef.current({
+          trigger: 'action_failed',
+          detail: { tool: proposal.toolName, error: failedError },
+        });
       return data.execution;
     },
     [surface.endpoints, loadThread]
@@ -670,13 +854,25 @@ export function CopilotPanel({ surface, user, onInsertDraft, onInsertAttachment,
   /** "Al redactor": the proposed message and its files go to the composer; the user sends. */
   const handoffProposal = useCallback(
     (proposal: CopilotProposal) => {
-      const args = (proposal.args && typeof proposal.args === 'object' ? proposal.args : {}) as Record<string, unknown>;
-      const text = typeof args.message === 'string' ? args.message : typeof args.body === 'string' ? args.body : '';
-      const wanted = new Set<string>(((args.attachments as { artifactIds?: string[] } | undefined)?.artifactIds) ?? []);
+      const args = (
+        proposal.args && typeof proposal.args === 'object' ? proposal.args : {}
+      ) as Record<string, unknown>;
+      const text =
+        typeof args.message === 'string'
+          ? args.message
+          : typeof args.body === 'string'
+            ? args.body
+            : '';
+      const wanted = new Set<string>(
+        (args.attachments as { artifactIds?: string[] } | undefined)?.artifactIds ?? []
+      );
       const quoteId = typeof args.quoteId === 'string' ? args.quoteId : null;
       const all = messages.flatMap((m) => m.artifacts ?? []);
-      const picked = all.filter((a) => wanted.has(a.artifactId) || (quoteId && a.quoteId === quoteId));
-      if (text && onInsertDraft) onInsertDraft(text.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '$1'));
+      const picked = all.filter(
+        (a) => wanted.has(a.artifactId) || (quoteId && a.quoteId === quoteId)
+      );
+      if (text && onInsertDraft)
+        onInsertDraft(text.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '$1'));
       let attached = 0;
       for (const a of picked) {
         const att = toAttachable(a as ArtifactData);
@@ -685,13 +881,19 @@ export function CopilotPanel({ surface, user, onInsertDraft, onInsertAttachment,
           attached += 1;
         }
       }
-      toast.success(attached > 0 ? `Mensaje y ${attached} archivo(s) en el redactor: revisa y envía` : 'Mensaje en el redactor: revisa y envía');
+      toast.success(
+        attached > 0
+          ? `Mensaje y ${attached} archivo(s) en el redactor: revisa y envía`
+          : 'Mensaje en el redactor: revisa y envía'
+      );
     },
     [messages, onInsertDraft, onInsertAttachment]
   );
 
   const [modeBusy, setModeBusy] = useState(false);
-  const [threads, setThreads] = useState<Array<{ id: string; title: string; updatedAt: string; messageCount: number }>>([]);
+  const [threads, setThreads] = useState<
+    Array<{ id: string; title: string; updatedAt: string; messageCount: number }>
+  >([]);
   const [historyOpen, setHistoryOpen] = useState(false);
   const historyRef = useRef<HTMLDivElement>(null);
   const [threadBusy, setThreadBusy] = useState(false);
@@ -700,7 +902,12 @@ export function CopilotPanel({ surface, user, onInsertDraft, onInsertAttachment,
     if (streamingRef.current) return;
     setThreadBusy(true);
     try {
-      const data = await apiJson<{ conversationId: string; mode: CopilotMode; messages: CopilotMessage[]; proposals: CopilotProposal[] }>(`${threadUrl}?new=1`);
+      const data = await apiJson<{
+        conversationId: string;
+        mode: CopilotMode;
+        messages: CopilotMessage[];
+        proposals: CopilotProposal[];
+      }>(`${threadUrl}?new=1`);
       threadIdRef.current = data.conversationId;
       setMessages(data.messages);
       setProposals(data.proposals);
@@ -716,7 +923,9 @@ export function CopilotPanel({ surface, user, onInsertDraft, onInsertAttachment,
   const openHistory = useCallback(async () => {
     setHistoryOpen((v) => !v);
     try {
-      const data = await apiJson<{ threads: Array<{ id: string; title: string; updatedAt: string; messageCount: number }> }>(`${threadUrl}?list=1`);
+      const data = await apiJson<{
+        threads: Array<{ id: string; title: string; updatedAt: string; messageCount: number }>;
+      }>(`${threadUrl}?list=1`);
       setThreads(data.threads);
     } catch {
       /* keep whatever we had */
@@ -728,7 +937,9 @@ export function CopilotPanel({ surface, user, onInsertDraft, onInsertAttachment,
       if (streamingRef.current) return;
       threadIdRef.current = id;
       setHistoryOpen(false);
-      await loadThread().catch((err) => setError(err instanceof Error ? err.message : 'No se pudo abrir la conversación'));
+      await loadThread().catch((err) =>
+        setError(err instanceof Error ? err.message : 'No se pudo abrir la conversación')
+      );
     },
     [loadThread]
   );
@@ -736,7 +947,8 @@ export function CopilotPanel({ surface, user, onInsertDraft, onInsertAttachment,
   useEffect(() => {
     if (!historyOpen) return;
     const onDoc = (e: MouseEvent) => {
-      if (historyRef.current && !historyRef.current.contains(e.target as Node)) setHistoryOpen(false);
+      if (historyRef.current && !historyRef.current.contains(e.target as Node))
+        setHistoryOpen(false);
     };
     document.addEventListener('mousedown', onDoc);
     return () => document.removeEventListener('mousedown', onDoc);
@@ -745,7 +957,10 @@ export function CopilotPanel({ surface, user, onInsertDraft, onInsertAttachment,
     async (next: CopilotMode) => {
       setModeBusy(true);
       try {
-        await apiJson('/app/assistant/api/preferences', { method: 'PATCH', body: JSON.stringify(preferencePatchFor(surface.preferenceKey, next)) });
+        await apiJson('/app/assistant/api/preferences', {
+          method: 'PATCH',
+          body: JSON.stringify(preferencePatchFor(surface.preferenceKey, next)),
+        });
         setMode(next);
         toast.success(`Copiloto: ${MODE_META[next].label}`);
         if (next === 'active') void runTurnRef.current({ trigger: 'open' });
@@ -787,12 +1002,22 @@ export function CopilotPanel({ surface, user, onInsertDraft, onInsertAttachment,
   const items = useMemo(() => {
     let lastActionsIdx = -1;
     messages.forEach((m, i) => {
-      if (m.role === 'assistant' && m.toolCallRecords?.some((r) => r.toolName === 'suggestNextActions')) lastActionsIdx = i;
+      if (
+        m.role === 'assistant' &&
+        m.toolCallRecords?.some((r) => r.toolName === 'suggestNextActions')
+      )
+        lastActionsIdx = i;
     });
     return messages
       .map((m, i) => {
         if (m.role === 'tool') return null;
-        if (m.role === 'system') return { kind: 'system' as const, id: m.id, event: parseSystemEvent(m.content ?? ''), action: extractResultAction(m.content ?? '') };
+        if (m.role === 'system')
+          return {
+            kind: 'system' as const,
+            id: m.id,
+            event: parseSystemEvent(m.content ?? ''),
+            action: extractResultAction(m.content ?? ''),
+          };
         if (m.role === 'user') {
           const auto = autoKind(m.content);
           if (auto) return { kind: 'event' as const, id: m.id, auto };
@@ -801,20 +1026,58 @@ export function CopilotPanel({ surface, user, onInsertDraft, onInsertAttachment,
         const records = m.toolCallRecords ?? [];
         const actionsRecord = records.find((r) => r.toolName === 'suggestNextActions');
         const actions = actionsRecord ? parseSuggestedActions(actionsRecord.args) : null;
-        const drafts = records.filter((r) => r.toolName === draftTool && r.success).map((r) => parseDraft(r.args)).filter((d): d is DraftData => Boolean(d));
+        const drafts = records
+          .filter((r) => r.toolName === draftTool && r.success)
+          .map((r) => parseDraft(r.args))
+          .filter((d): d is DraftData => Boolean(d));
         const planRecord = records.find((r) => r.toolName === 'proposePlan' && r.success);
         const plan = planRecord ? parsePlan(planRecord.args) : null;
         const steps: LiveStep[] = records
-          .filter((r) => r.toolName !== 'suggestNextActions' && r.toolName !== draftTool && r.toolName !== 'proposePlan')
+          .filter(
+            (r) =>
+              r.toolName !== 'suggestNextActions' &&
+              r.toolName !== draftTool &&
+              r.toolName !== 'proposePlan'
+          )
           .map((r) => {
-            const resultError = r.result && typeof r.result === 'object' ? (r.result as { error?: unknown }).error : null;
-            const detail = !r.success && r.errorCode !== 'needs_approval' ? (typeof resultError === 'string' ? resultError : r.errorCode) : typeof resultError === 'string' ? resultError : null;
-            return { id: r.id, name: r.toolName, status: r.errorCode === 'needs_approval' ? 'pending' : r.success && !resultError ? 'done' : r.success ? 'failed' : 'failed', detail } as LiveStep;
+            const resultError =
+              r.result && typeof r.result === 'object'
+                ? (r.result as { error?: unknown }).error
+                : null;
+            const detail =
+              !r.success && r.errorCode !== 'needs_approval'
+                ? typeof resultError === 'string'
+                  ? resultError
+                  : r.errorCode
+                : typeof resultError === 'string'
+                  ? resultError
+                  : null;
+            return {
+              id: r.id,
+              name: r.toolName,
+              status:
+                r.errorCode === 'needs_approval'
+                  ? 'pending'
+                  : r.success && !resultError
+                    ? 'done'
+                    : r.success
+                      ? 'failed'
+                      : 'failed',
+              detail,
+            } as LiveStep;
           });
         const parsedText = parseConfidence(m.content);
         const text = parsedText.content.trim();
         const artifacts = m.artifacts ?? [];
-        if (!text && !actions && drafts.length === 0 && steps.length === 0 && artifacts.length === 0 && !plan) return null;
+        if (
+          !text &&
+          !actions &&
+          drafts.length === 0 &&
+          steps.length === 0 &&
+          artifacts.length === 0 &&
+          !plan
+        )
+          return null;
         return {
           kind: 'assistant' as const,
           id: m.id,
@@ -834,11 +1097,14 @@ export function CopilotPanel({ surface, user, onInsertDraft, onInsertAttachment,
       .filter((x): x is NonNullable<typeof x> => x !== null);
   }, [messages, draftTool]);
 
-  const pendingProposals = proposals.filter((p) => !p.status || p.status === 'pending');
+  // En expediente y área llegan también las propuestas del alcance (plan 5.4), que pueden venir
+  // esperando la segunda firma: siguen siendo decidibles aquí.
+  const pendingProposals = proposals.filter(isDecidableProposal);
   // A proposed plan stays actionable until the user writes something after it.
   const lastUserIndex = items.reduce((acc, it, i) => (it.kind === 'user' ? i : acc), -1);
   const isEmpty = items.length === 0 && !streaming && !loading;
-  const orbState: 'idle' | 'thinking' | 'paused' = mode === 'paused' ? 'paused' : streaming ? 'thinking' : 'idle';
+  const orbState: 'idle' | 'thinking' | 'paused' =
+    mode === 'paused' ? 'paused' : streaming ? 'thinking' : 'idle';
   const statusText =
     mode === 'paused'
       ? 'Apagado en esta superficie'
@@ -854,7 +1120,12 @@ export function CopilotPanel({ surface, user, onInsertDraft, onInsertAttachment,
     <div className={cn('copilot', `mode-${mode}`)}>
       <header className="copilot-header">
         {onBack && (
-          <button type="button" className="copilot-iconbtn" onClick={onBack} aria-label="Volver a la conversación">
+          <button
+            type="button"
+            className="copilot-iconbtn"
+            onClick={onBack}
+            aria-label="Volver a la conversación"
+          >
             <ArrowLeft size={16} />
           </button>
         )}
@@ -862,27 +1133,67 @@ export function CopilotPanel({ surface, user, onInsertDraft, onInsertAttachment,
         <div className="copilot-title">
           <strong>Copiloto</strong>
           <AnimatePresence mode="wait" initial={false}>
-            <motion.span key={statusText} className="copilot-status" initial={{ opacity: 0, y: 3 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -3 }} transition={{ duration: 0.18 }}>
+            <motion.span
+              key={statusText}
+              className="copilot-status"
+              initial={{ opacity: 0, y: 3 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -3 }}
+              transition={{ duration: 0.18 }}
+            >
               {statusText}
             </motion.span>
           </AnimatePresence>
         </div>
         <div className="copilot-threads" ref={historyRef}>
-          <button type="button" className="copilot-iconbtn" onClick={() => void startNewThread()} disabled={threadBusy || streaming} aria-label="Conversación nueva con el copiloto" title="Conversación nueva">
+          <button
+            type="button"
+            className="copilot-iconbtn"
+            onClick={() => void startNewThread()}
+            disabled={threadBusy || streaming}
+            aria-label="Conversación nueva con el copiloto"
+            title="Conversación nueva"
+          >
             <Plus size={16} />
           </button>
-          <button type="button" className={cn('copilot-iconbtn', historyOpen && 'is-active')} onClick={() => void openHistory()} aria-label="Conversaciones anteriores" aria-expanded={historyOpen} title="Conversaciones anteriores">
+          <button
+            type="button"
+            className={cn('copilot-iconbtn', historyOpen && 'is-active')}
+            onClick={() => void openHistory()}
+            aria-label="Conversaciones anteriores"
+            aria-expanded={historyOpen}
+            title="Conversaciones anteriores"
+          >
             <History size={16} />
           </button>
           {historyOpen && (
             <div className="copilot-threads-pop" role="menu" aria-label="Conversaciones anteriores">
               <div className="copilot-threads-head">Conversaciones con el copiloto aquí</div>
-              {threads.length === 0 && <div className="copilot-muted copilot-threads-empty">Aún no hay conversaciones anteriores.</div>}
+              {threads.length === 0 && (
+                <div className="copilot-muted copilot-threads-empty">
+                  Aún no hay conversaciones anteriores.
+                </div>
+              )}
               {threads.map((t) => (
-                <button key={t.id} type="button" role="menuitem" className={cn('copilot-thread-item', t.id === threadIdRef.current && 'is-current')} onClick={() => void openThread(t.id)}>
+                <button
+                  key={t.id}
+                  type="button"
+                  role="menuitem"
+                  className={cn(
+                    'copilot-thread-item',
+                    t.id === threadIdRef.current && 'is-current'
+                  )}
+                  onClick={() => void openThread(t.id)}
+                >
                   <span className="copilot-thread-title">{t.title}</span>
                   <span className="copilot-thread-meta">
-                    {new Date(t.updatedAt).toLocaleString('es-MX', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })} · {t.messageCount} msgs
+                    {new Date(t.updatedAt).toLocaleString('es-MX', {
+                      day: '2-digit',
+                      month: 'short',
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })}{' '}
+                    · {t.messageCount} msgs
                   </span>
                 </button>
               ))}
@@ -915,9 +1226,19 @@ export function CopilotPanel({ surface, user, onInsertDraft, onInsertAttachment,
           {items.map((it, itemIndex) => {
             if (it.kind === 'event') {
               return (
-                <motion.div key={it.id} className="copilot-event" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.2 }}>
+                <motion.div
+                  key={it.id}
+                  className="copilot-event"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ duration: 0.2 }}
+                >
                   <span />
-                  {it.auto === 'open' ? surface.copy.eventOpen : it.auto === 'inbound' ? surface.copy.eventInbound : AUTO_EVENT_LABELS[it.auto]}
+                  {it.auto === 'open'
+                    ? surface.copy.eventOpen
+                    : it.auto === 'inbound'
+                      ? surface.copy.eventInbound
+                      : AUTO_EVENT_LABELS[it.auto]}
                   <span />
                 </motion.div>
               );
@@ -925,14 +1246,41 @@ export function CopilotPanel({ surface, user, onInsertDraft, onInsertAttachment,
             if (it.kind === 'system') {
               const ev = it.event;
               return (
-                <motion.div key={it.id} className={cn('copilot-sysevent', `is-${ev.kind}`, ev.failed && 'is-failed')} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }}>
-                  {ev.kind === 'approved' ? (ev.failed ? <ShieldX size={14} /> : <ShieldCheck size={14} />) : ev.kind === 'rejected' ? <ShieldX size={14} /> : <Sparkles size={14} />}
+                <motion.div
+                  key={it.id}
+                  className={cn('copilot-sysevent', `is-${ev.kind}`, ev.failed && 'is-failed')}
+                  initial={{ opacity: 0, y: 4 }}
+                  animate={{ opacity: 1, y: 0 }}
+                >
+                  {ev.kind === 'approved' ? (
+                    ev.failed ? (
+                      <ShieldX size={14} />
+                    ) : (
+                      <ShieldCheck size={14} />
+                    )
+                  ) : ev.kind === 'rejected' ? (
+                    <ShieldX size={14} />
+                  ) : (
+                    <Sparkles size={14} />
+                  )}
                   <div>
                     <div className="copilot-sysevent-title">{ev.title}</div>
                     {ev.detail && <div className="copilot-sysevent-detail">{ev.detail}</div>}
                     {ev.kind === 'approved' && !ev.failed && it.action && (
-                      <button type="button" className="copilot-btn copilot-btn-primary copilot-sysevent-btn" onClick={() => performUiAction(it.action as UiAction)}>
-                        {it.action.kind === 'join_call' ? <><Phone size={13} /> Abrir la llamada</> : <><ExternalLink size={13} /> Abrir</>}
+                      <button
+                        type="button"
+                        className="copilot-btn copilot-btn-primary copilot-sysevent-btn"
+                        onClick={() => performUiAction(it.action as UiAction)}
+                      >
+                        {it.action.kind === 'join_call' ? (
+                          <>
+                            <Phone size={13} /> Abrir la llamada
+                          </>
+                        ) : (
+                          <>
+                            <ExternalLink size={13} /> Abrir
+                          </>
+                        )}
                       </button>
                     )}
                   </div>
@@ -941,13 +1289,25 @@ export function CopilotPanel({ surface, user, onInsertDraft, onInsertAttachment,
             }
             if (it.kind === 'user') {
               return (
-                <motion.div key={it.id} className="copilot-row is-user" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={spring}>
+                <motion.div
+                  key={it.id}
+                  className="copilot-row is-user"
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={spring}
+                >
                   <div className="copilot-bubble is-user">{it.text}</div>
                 </motion.div>
               );
             }
             return (
-              <motion.div key={it.id} className="copilot-row is-assistant" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={spring}>
+              <motion.div
+                key={it.id}
+                className="copilot-row is-assistant"
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={spring}
+              >
                 <Steps steps={it.steps} />
                 {it.text && (
                   <div className="copilot-bubble is-assistant">
@@ -968,17 +1328,46 @@ export function CopilotPanel({ surface, user, onInsertDraft, onInsertAttachment,
                 {it.artifacts.length > 0 && (
                   <div className="copilot-artifacts">
                     {it.artifacts.map((a) => (
-                      <ArtifactRenderer key={a.artifactId} artifact={a as ArtifactData} compact onAttach={onInsertAttachment ? (att) => { onInsertAttachment(att); toast.success('Archivo adjuntado al redactor'); } : undefined} />
+                      <ArtifactRenderer
+                        key={a.artifactId}
+                        artifact={a as ArtifactData}
+                        compact
+                        onAttach={
+                          onInsertAttachment
+                            ? (att) => {
+                                onInsertAttachment(att);
+                                toast.success('Archivo adjuntado al redactor');
+                              }
+                            : undefined
+                        }
+                      />
                     ))}
                   </div>
                 )}
                 {it.drafts.map((d, i) => (
-                  <DraftCard key={`${it.id}-draft-${i}`} draft={d} onInsert={onInsertDraft} onSend={onSendDraft} />
+                  <DraftCard
+                    key={`${it.id}-draft-${i}`}
+                    draft={d}
+                    onInsert={onInsertDraft}
+                    onSend={onSendDraft}
+                  />
                 ))}
-                {it.actions && <ActionChips data={it.actions} onPick={send} disabled={streaming || mode === 'paused'} muted={!it.actionsCurrent} />}
+                {it.actions && (
+                  <ActionChips
+                    data={it.actions}
+                    onPick={send}
+                    disabled={streaming || mode === 'paused'}
+                    muted={!it.actionsCurrent}
+                  />
+                )}
                 {it.text && (
                   <div className="copilot-msgfoot">
-                    <ConfidenceBadge level={it.confidence} note={it.confidenceNote} meta={it.meta} compact />
+                    <ConfidenceBadge
+                      level={it.confidence}
+                      note={it.confidenceNote}
+                      meta={it.meta}
+                      compact
+                    />
                     <MessageFeedback messageId={it.id} initial={it.feedback} compact />
                   </div>
                 )}
@@ -988,7 +1377,11 @@ export function CopilotPanel({ surface, user, onInsertDraft, onInsertAttachment,
         </AnimatePresence>
 
         {streaming && (
-          <motion.div className="copilot-row is-assistant" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+          <motion.div
+            className="copilot-row is-assistant"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+          >
             <Steps steps={liveSteps} />
             {streamText ? (
               <div className="copilot-bubble is-assistant copilot-streaming">{streamText}</div>
@@ -1002,17 +1395,36 @@ export function CopilotPanel({ surface, user, onInsertDraft, onInsertAttachment,
             {liveArtifacts.length > 0 && (
               <div className="copilot-artifacts">
                 {liveArtifacts.map((a) => (
-                  <ArtifactRenderer key={a.artifactId} artifact={a} compact onAttach={onInsertAttachment ? (att) => { onInsertAttachment(att); toast.success('Archivo adjuntado al redactor'); } : undefined} />
+                  <ArtifactRenderer
+                    key={a.artifactId}
+                    artifact={a}
+                    compact
+                    onAttach={
+                      onInsertAttachment
+                        ? (att) => {
+                            onInsertAttachment(att);
+                            toast.success('Archivo adjuntado al redactor');
+                          }
+                        : undefined
+                    }
+                  />
                 ))}
               </div>
             )}
-            {liveDraft && <DraftCard draft={liveDraft} onInsert={onInsertDraft} onSend={onSendDraft} />}
+            {liveDraft && (
+              <DraftCard draft={liveDraft} onInsert={onInsertDraft} onSend={onSendDraft} />
+            )}
             {liveActions && <ActionChips data={liveActions} onPick={send} disabled />}
           </motion.div>
         )}
 
         {pendingProposals.map((p) => (
-          <ProposalCard key={p.id} proposal={p} decide={(decision) => decideProposal(p, decision)} onHandoff={onInsertAttachment || onInsertDraft ? () => handoffProposal(p) : undefined} />
+          <ProposalCard
+            key={p.id}
+            proposal={p}
+            decide={(decision) => decideProposal(p, decision)}
+            onHandoff={onInsertAttachment || onInsertDraft ? () => handoffProposal(p) : undefined}
+          />
         ))}
 
         {error && (
@@ -1026,7 +1438,15 @@ export function CopilotPanel({ surface, user, onInsertDraft, onInsertAttachment,
         {isEmpty && mode !== 'paused' && (
           <div className="copilot-starters">
             {surface.starters.map((s, i) => (
-              <motion.button key={s} type="button" className="copilot-chip is-starter" onClick={() => send(s)} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} transition={{ ...spring, delay: 0.05 + i * 0.04 }}>
+              <motion.button
+                key={s}
+                type="button"
+                className="copilot-chip is-starter"
+                onClick={() => send(s)}
+                initial={{ opacity: 0, y: 4 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ ...spring, delay: 0.05 + i * 0.04 }}
+              >
                 {s}
               </motion.button>
             ))}
@@ -1039,7 +1459,11 @@ export function CopilotPanel({ surface, user, onInsertDraft, onInsertAttachment,
             rows={1}
             value={input}
             disabled={mode === 'paused'}
-            placeholder={mode === 'paused' ? 'Copiloto apagado en esta superficie' : `Dime qué hacer, ${user.name.split(' ')[0]}… (Enter para enviar)`}
+            placeholder={
+              mode === 'paused'
+                ? 'Copiloto apagado en esta superficie'
+                : `Dime qué hacer, ${user.name.split(' ')[0]}… (Enter para enviar)`
+            }
             aria-label="Mensaje para el copiloto"
             onChange={(e) => {
               setInput(e.target.value);
@@ -1058,16 +1482,29 @@ export function CopilotPanel({ surface, user, onInsertDraft, onInsertAttachment,
               className="copilot-dictate"
               iconSize={15}
               title="Dictar por voz"
-              onFinalTranscript={(t) => setInput((prev) => (prev.trim() ? `${prev.trimEnd()} ${t}` : t))}
+              onFinalTranscript={(t) =>
+                setInput((prev) => (prev.trim() ? `${prev.trimEnd()} ${t}` : t))
+              }
               onStart={() => textareaRef.current?.focus()}
             />
           )}
           {streaming ? (
-            <button type="button" className="copilot-send is-stop" onClick={stop} aria-label="Detener">
+            <button
+              type="button"
+              className="copilot-send is-stop"
+              onClick={stop}
+              aria-label="Detener"
+            >
               <Square size={14} />
             </button>
           ) : (
-            <button type="button" className="copilot-send" onClick={() => send(input)} disabled={!input.trim() || mode === 'paused'} aria-label="Enviar">
+            <button
+              type="button"
+              className="copilot-send"
+              onClick={() => send(input)}
+              disabled={!input.trim() || mode === 'paused'}
+              aria-label="Enviar"
+            >
               <SendHorizontal size={15} />
             </button>
           )}

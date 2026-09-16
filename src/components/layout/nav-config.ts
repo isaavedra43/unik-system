@@ -15,8 +15,10 @@ import {
   ClipboardList,
   CreditCard,
   Database,
+  Factory,
   FileSignature,
   FileText,
+  Gauge,
   HardDrive,
   Inbox,
   Megaphone,
@@ -27,6 +29,7 @@ import {
   Plug,
   Radio,
   Receipt,
+  ShoppingBag,
   ShoppingCart,
   SlidersHorizontal,
   Truck,
@@ -114,6 +117,122 @@ export function can(
   return keys.some((key) => user.permissionKeys.includes(key)) || user.isSuperAdmin;
 }
 
+// ---------------------------------------------------------------------------
+// Operational areas
+// ---------------------------------------------------------------------------
+
+/** Space of an area as the shell sees it: its slug, its crumb and whether it is full-bleed. */
+interface AreaNavSpace {
+  slug: string;
+  label: string;
+  flush: boolean;
+}
+
+interface AreaNavEntry {
+  key: string;
+  label: string;
+  icon: NavIcon;
+  /** Module permissions that reveal the area (plus `operations.admin`). */
+  anyOf: readonly PermissionKey[];
+  spaces: readonly AreaNavSpace[];
+}
+
+/** The three spaces every area has, before its specialized view and its detail pages. */
+const AREA_BASE_SPACES: readonly AreaNavSpace[] = [
+  { slug: 'dashboard', label: 'Panel', flush: false },
+  { slug: 'trabajo', label: 'Centro de trabajo', flush: true },
+  { slug: 'comunicaciones', label: 'Comunicaciones', flush: true },
+];
+
+/**
+ * Navigation data of the six operational areas (`/app/areas/<key>/<space>`).
+ * It mirrors `src/modules/areas/area-registry.ts`, which is the source of truth
+ * for permissions, spaces and flush routes; `nav-config.test.ts` compares both
+ * so they can never drift apart.
+ */
+export const AREA_NAV: readonly AreaNavEntry[] = [
+  {
+    key: 'ventas',
+    label: 'Ventas',
+    icon: ShoppingCart,
+    anyOf: ['crm.view', 'sales_orders.view', 'operations.admin'],
+    spaces: [
+      ...AREA_BASE_SPACES,
+      { slug: 'radar', label: 'Radar de cierre', flush: false },
+      { slug: 'oportunidades', label: 'Oportunidades', flush: false },
+      { slug: 'pipeline', label: 'Embudo', flush: false },
+    ],
+  },
+  {
+    key: 'compras',
+    label: 'Compras',
+    icon: ShoppingBag,
+    anyOf: ['purchases.view', 'operations.admin'],
+    spaces: [
+      ...AREA_BASE_SPACES,
+      { slug: 'sourcing', label: 'Laboratorio de sourcing', flush: false },
+      { slug: 'ordenes', label: 'Órdenes de compra', flush: false },
+      { slug: 'rfq', label: 'Cotizaciones', flush: false },
+      { slug: 'proveedores', label: 'Proveedores', flush: false },
+    ],
+  },
+  {
+    key: 'inventario',
+    label: 'Inventario',
+    icon: Boxes,
+    anyOf: ['inventory.view', 'operations.admin'],
+    spaces: [
+      ...AREA_BASE_SPACES,
+      { slug: 'mapa', label: 'Mapa de ubicaciones', flush: true },
+      { slug: 'existencias', label: 'Existencias', flush: false },
+      { slug: 'conteos', label: 'Conteos', flush: false },
+      { slug: 'movimientos', label: 'Movimientos', flush: false },
+      { slug: 'ubicaciones', label: 'Ubicaciones', flush: false },
+    ],
+  },
+  {
+    key: 'manufactura',
+    label: 'Manufactura',
+    icon: Factory,
+    anyOf: ['manufacturing.view', 'operations.admin'],
+    spaces: [
+      ...AREA_BASE_SPACES,
+      { slug: 'tablero', label: 'Tablero de producción', flush: true },
+      { slug: 'ordenes', label: 'Órdenes de producción', flush: false },
+    ],
+  },
+  {
+    key: 'logistica',
+    label: 'Logística',
+    icon: Truck,
+    anyOf: ['logistics.view', 'operations.admin'],
+    spaces: [
+      ...AREA_BASE_SPACES,
+      { slug: 'despacho', label: 'Despacho', flush: true },
+      { slug: 'viajes', label: 'Viajes', flush: false },
+    ],
+  },
+  {
+    key: 'contabilidad',
+    label: 'Contabilidad',
+    icon: Wallet,
+    anyOf: ['finance.view', 'operations.admin'],
+    spaces: [
+      ...AREA_BASE_SPACES,
+      { slug: 'libro', label: 'Libro de caja', flush: false },
+      { slug: 'gastos', label: 'Gastos', flush: false },
+    ],
+  },
+];
+
+/** One sidebar item per area, pointing at its panel. */
+const AREA_NAV_ITEMS: readonly NavItemConfig[] = AREA_NAV.map((area) => ({
+  href: `/app/areas/${area.key}/dashboard`,
+  label: area.label,
+  icon: area.icon,
+  anyOf: area.anyOf,
+}));
+
 /** Sidebar entries in display order. Sections or items are added here as data. */
 export const NAV_CONFIG: readonly NavEntryConfig[] = [
   {
@@ -127,6 +246,7 @@ export const NAV_CONFIG: readonly NavEntryConfig[] = [
   {
     title: 'Operaciones',
     items: [
+      ...AREA_NAV_ITEMS,
       {
         href: '/app/operations',
         label: 'Expedientes',
@@ -226,6 +346,12 @@ export const NAV_CONFIG: readonly NavEntryConfig[] = [
   {
     title: 'Administración',
     items: [
+      {
+        href: '/app/admin/control-tower',
+        label: 'Control Tower',
+        icon: Gauge,
+        anyOf: ['operations.admin'],
+      },
       {
         href: '/app/admin/access',
         label: 'Usuarios y permisos',
@@ -349,6 +475,191 @@ function entityRules(path: string, area: string, plural: string): BreadcrumbRule
   ];
 }
 
+/**
+ * Crumbs of the area spaces: `Operaciones / <Área> / <Espacio>` and, for a
+ * detail page under a space, `… / <Espacio> / Detalle`.
+ */
+function areaBreadcrumbRules(): BreadcrumbRule[] {
+  const operations = { label: 'Operaciones' };
+  return AREA_NAV.flatMap((area) => {
+    const home = `/app/areas/${area.key}/dashboard`;
+    const areaCrumb = { label: area.label, href: home };
+    return [
+      {
+        path: `/app/areas/${area.key}`,
+        match: 'exact' as const,
+        crumbs: [operations, { label: area.label }],
+      },
+      ...area.spaces.flatMap((space): BreadcrumbRule[] => {
+        const path = `/app/areas/${area.key}/${space.slug}`;
+        return [
+          { path, match: 'exact', crumbs: [operations, areaCrumb, { label: space.label }] },
+          {
+            path: `${path}/`,
+            match: 'prefix',
+            crumbs: [
+              operations,
+              areaCrumb,
+              { label: space.label, href: path },
+              { label: 'Detalle' },
+            ],
+          },
+        ];
+      }),
+    ];
+  });
+}
+
+/**
+ * Management pages that live under `/app/areas/<key>` but are NOT spaces of the
+ * registry (they have their own audience and their own second-level nav). They
+ * do not add a tab; they only need a trail, so the person never lands on a page
+ * the navigation does not recognize. `parentSlug` is the tab that stays
+ * underlined (see `AreaWorkspaceShell`).
+ */
+interface AreaExtraPage {
+  areaKey: string;
+  /** Path after `/app/areas/<key>/`. */
+  slug: string;
+  label: string;
+  /** Space it hangs from, shown as the previous crumb. */
+  parentSlug: string;
+  parentLabel: string;
+}
+
+export const AREA_EXTRA_PAGES: readonly AreaExtraPage[] = [
+  {
+    areaKey: 'contabilidad',
+    slug: 'obligaciones',
+    label: 'Obligaciones',
+    parentSlug: 'libro',
+    parentLabel: 'Libro de caja',
+  },
+  {
+    areaKey: 'contabilidad',
+    slug: 'nomina',
+    label: 'Nómina',
+    parentSlug: 'libro',
+    parentLabel: 'Libro de caja',
+  },
+  {
+    areaKey: 'contabilidad',
+    slug: 'cierre',
+    label: 'Cierre mensual',
+    parentSlug: 'libro',
+    parentLabel: 'Libro de caja',
+  },
+  {
+    areaKey: 'contabilidad',
+    slug: 'presupuestos',
+    label: 'Presupuestos',
+    parentSlug: 'libro',
+    parentLabel: 'Libro de caja',
+  },
+  {
+    areaKey: 'contabilidad',
+    slug: 'catalogos',
+    label: 'Catálogos',
+    parentSlug: 'libro',
+    parentLabel: 'Libro de caja',
+  },
+  {
+    areaKey: 'contabilidad',
+    slug: 'gastos/nuevo',
+    label: 'Capturar gasto',
+    parentSlug: 'gastos',
+    parentLabel: 'Gastos',
+  },
+  {
+    areaKey: 'logistica',
+    slug: 'flota',
+    label: 'Flotilla',
+    parentSlug: 'despacho',
+    parentLabel: 'Despacho',
+  },
+  {
+    areaKey: 'logistica',
+    slug: 'chofer',
+    label: 'Mis entregas',
+    parentSlug: 'despacho',
+    parentLabel: 'Despacho',
+  },
+  {
+    areaKey: 'inventario',
+    slug: 'perfiles',
+    label: 'Perfil de producto',
+    parentSlug: 'existencias',
+    parentLabel: 'Existencias',
+  },
+];
+
+function areaExtraPageRules(): BreadcrumbRule[] {
+  const operations = { label: 'Operaciones' };
+  return AREA_EXTRA_PAGES.flatMap((page): BreadcrumbRule[] => {
+    const area = AREA_NAV.find((entry) => entry.key === page.areaKey);
+    if (!area) return [];
+    const areaCrumb = { label: area.label, href: `/app/areas/${area.key}/dashboard` };
+    const parent = { label: page.parentLabel, href: `/app/areas/${area.key}/${page.parentSlug}` };
+    const path = `/app/areas/${area.key}/${page.slug}`;
+    return [
+      { path, match: 'exact', crumbs: [operations, areaCrumb, parent, { label: page.label }] },
+      {
+        path: `${path}/`,
+        match: 'prefix',
+        crumbs: [operations, areaCrumb, parent, { label: page.label, href: path }],
+      },
+    ];
+  });
+}
+
+/**
+ * Control Tower and Neural Operations. Both shells used to paint their own
+ * trail inside the page while the top bar painted a shorter one: two
+ * breadcrumbs stacked. The top bar is now the only place that shows it.
+ */
+const CONTROL_TOWER_BASE = '/app/admin/control-tower';
+
+export const CONTROL_TOWER_VIEW_CRUMBS: readonly { slug: string; label: string }[] = [
+  { slug: 'resumen', label: 'Resumen' },
+  { slug: 'personas', label: 'Personas' },
+  { slug: 'excepciones', label: 'Excepciones' },
+  { slug: 'aprobaciones', label: 'Aprobaciones' },
+  { slug: 'auditoria', label: 'Auditoría' },
+  { slug: 'configuracion', label: 'Configuración' },
+];
+
+export const NEURAL_TOOL_CRUMBS: readonly { slug: string; label: string }[] = [
+  { slug: 'procesos', label: 'Procesos' },
+  { slug: 'variantes', label: 'Variantes' },
+  { slug: 'grafo', label: 'Grafo' },
+  { slug: 'replay', label: 'Replay' },
+  { slug: 'simulacion', label: 'Simulación' },
+];
+
+function controlTowerBreadcrumbRules(): BreadcrumbRule[] {
+  const admin = { label: 'Administración' };
+  const tower = { label: 'Control Tower', href: `${CONTROL_TOWER_BASE}/resumen` };
+  const neuralBase = `${CONTROL_TOWER_BASE}/neural`;
+  const neural = { label: 'Neural Operations', href: `${neuralBase}/procesos` };
+  return [
+    ...NEURAL_TOOL_CRUMBS.map((tool): BreadcrumbRule => ({
+      path: `${neuralBase}/${tool.slug}`,
+      match: 'prefix',
+      crumbs: [admin, tower, neural, { label: tool.label }],
+    })),
+    {
+      path: neuralBase,
+      match: 'prefix',
+      crumbs: [admin, tower, { label: 'Neural Operations' }],
+    },
+    ...CONTROL_TOWER_VIEW_CRUMBS.map((view): BreadcrumbRule => ({
+      path: `${CONTROL_TOWER_BASE}/${view.slug}`,
+      match: 'prefix',
+      crumbs: [admin, tower, { label: view.label }],
+    })),
+  ];
+}
+
 /** Most specific rule first: longer path, then rules with a suffix, then exact matches. */
 function compareRules(a: BreadcrumbRule, b: BreadcrumbRule): number {
   if (a.path.length !== b.path.length) return b.path.length - a.path.length;
@@ -370,6 +681,69 @@ const DECLARED_BREADCRUMB_RULES: BreadcrumbRule[] = [
   pageRule('/app/admin/knowledge', 'Administración', 'Biblioteca aprobada'),
   pageRule('/app/admin/comms', 'Administración', 'Canales y responsables'),
   pageRule('/app/admin/voice', 'Administración', 'Telefonía'),
+  pageRule('/app/admin/control-tower', 'Administración', 'Control Tower'),
+
+  ...controlTowerBreadcrumbRules(),
+
+  ...areaBreadcrumbRules(),
+  ...areaExtraPageRules(),
+
+  // Expedientes: el rastro lo pinta la barra superior, no la página.
+  {
+    path: '/app/operations/cases/',
+    match: 'prefix',
+    crumbs: [{ label: 'Operaciones', href: '/app/operations' }, { label: 'Expediente' }],
+  },
+  { path: '/app/operations', match: 'prefix', crumbs: [{ label: 'Operaciones' }] },
+
+  // Manufactura: páginas de gestión fuera de `/app/areas`.
+  {
+    path: '/app/manufacturing/orders/nueva',
+    match: 'exact',
+    crumbs: [
+      { label: 'Operaciones' },
+      { label: 'Manufactura', href: '/app/areas/manufactura/dashboard' },
+      { label: 'Órdenes de producción', href: '/app/areas/manufactura/ordenes' },
+      { label: 'Nueva' },
+    ],
+  },
+  {
+    path: '/app/manufacturing/orders',
+    match: 'prefix',
+    crumbs: [
+      { label: 'Operaciones' },
+      { label: 'Manufactura', href: '/app/areas/manufactura/dashboard' },
+      { label: 'Órdenes de producción', href: '/app/areas/manufactura/ordenes' },
+      { label: 'Orden' },
+    ],
+  },
+  {
+    path: '/app/manufacturing/bom',
+    match: 'prefix',
+    crumbs: [
+      { label: 'Operaciones' },
+      { label: 'Manufactura', href: '/app/areas/manufactura/dashboard' },
+      { label: 'Listas de materiales' },
+    ],
+  },
+  {
+    path: '/app/manufacturing/centros',
+    match: 'prefix',
+    crumbs: [
+      { label: 'Operaciones' },
+      { label: 'Manufactura', href: '/app/areas/manufactura/dashboard' },
+      { label: 'Centros de trabajo' },
+    ],
+  },
+  {
+    path: '/app/manufacturing/trazabilidad',
+    match: 'prefix',
+    crumbs: [
+      { label: 'Operaciones' },
+      { label: 'Manufactura', href: '/app/areas/manufactura/dashboard' },
+      { label: 'Trazabilidad' },
+    ],
+  },
 
   pageRule('/app/inbox', 'Comunicaciones', 'Bandeja externa'),
   pageRule('/app/campaigns', 'Comunicaciones', 'Campañas'),
@@ -476,6 +850,17 @@ export const FLUSH_ROUTE_PREFIXES: readonly FlushRoutePrefix[] = [
   { prefix: '/app/assistant' },
   { prefix: '/app/chat' },
   { prefix: '/app/inbox' },
+  // Operational areas: work centre, communications and the full-bleed boards.
+  ...AREA_NAV.flatMap((area) =>
+    area.spaces
+      .filter((space) => space.flush)
+      .map((space) => ({ prefix: `/app/areas/${area.key}/${space.slug}`, excludeApi: true }))
+  ),
+  // Operations: the case list is a table and the 360 file is a three-column layout.
+  { prefix: '/app/operations', excludeApi: true },
+  // Control Tower: the exception table and the Neural canvases need the full width.
+  { prefix: '/app/admin/control-tower/excepciones', excludeApi: true },
+  { prefix: '/app/admin/control-tower/neural', excludeApi: true },
 ];
 
 export function isFlushRoute(pathname: string): boolean {

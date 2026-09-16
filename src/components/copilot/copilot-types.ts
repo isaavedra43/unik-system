@@ -15,7 +15,13 @@ export interface TurnMeta {
   routing?: { tier?: string; reason?: string; routed?: boolean };
   confidence?: 'verified' | 'estimate' | 'assumption' | null;
   confidenceNote?: string | null;
-  tools?: { calls?: number; cachedHits?: number; parallelBatches?: number; offered?: number; loadedMore?: number };
+  tools?: {
+    calls?: number;
+    cachedHits?: number;
+    parallelBatches?: number;
+    offered?: number;
+    loadedMore?: number;
+  };
   judge?: { score?: number; issues?: string[]; summary?: string };
   planFirst?: boolean;
   /** One-click follow-ups the assistant proposed at the end of the answer. */
@@ -67,7 +73,12 @@ export interface CopilotProposal {
   error?: string | null;
   /** Approver scope proposals (agents layer): who proposed and who may decide. */
   proposedBy?: string | null;
-  approverScope?: { caseId?: string; areaKey?: string; userIds: string[]; permission?: string } | null;
+  approverScope?: {
+    caseId?: string;
+    areaKey?: string;
+    userIds: string[];
+    permissions?: string[];
+  } | null;
   decisionBy?: string | null;
   secondDecisionBy?: string | null;
   /** First signature given; another person with permission must give the second one. */
@@ -76,7 +87,8 @@ export interface CopilotProposal {
   requiresSecondApproval?: boolean;
 }
 
-export type ActionKind = 'reply' | 'task' | 'lookup' | 'status' | 'note' | 'escalate' | 'send' | 'other';
+export type ActionKind =
+  'reply' | 'task' | 'lookup' | 'status' | 'note' | 'escalate' | 'send' | 'other';
 
 export interface SuggestedAction {
   label: string;
@@ -124,17 +136,24 @@ export function autoKind(content: string | null | undefined): AutoEventKind | nu
   if (!content || !content.startsWith(AUTO_PREFIX)) return null;
   const name = /^⟦auto:([a-z_]+)⟧/.exec(content)?.[1];
   // Unknown or malformed triggers keep the historical reading: an "open" analysis.
-  return name && (AUTO_EVENT_KINDS as readonly string[]).includes(name) ? (name as AutoEventKind) : 'open';
+  return name && (AUTO_EVENT_KINDS as readonly string[]).includes(name)
+    ? (name as AutoEventKind)
+    : 'open';
 }
 
 /** Surfaces whose proactivity is stored per kind in `AiUserPreference.surfaceModes`. */
-export type CopilotSurfaceModeKind = 'inbox' | 'chat' | 'area' | 'case' | 'mywork' | 'control_tower';
+export type CopilotSurfaceModeKind =
+  'inbox' | 'chat' | 'area' | 'case' | 'mywork' | 'control_tower';
 
 /** Where a copilot surface stores its proactivity: a literal column (inbox/chat) or `surfaceModes.<kind>`. */
-export type CopilotPreferenceKey = 'inboxCopilotMode' | 'chatCopilotMode' | `surfaceModes.${CopilotSurfaceModeKind}`;
+export type CopilotPreferenceKey =
+  'inboxCopilotMode' | 'chatCopilotMode' | `surfaceModes.${CopilotSurfaceModeKind}`;
 
 /** PATCH body for `/app/assistant/api/preferences` that changes only this surface's mode. */
-export function preferencePatchFor(key: CopilotPreferenceKey, mode: CopilotMode): Record<string, unknown> {
+export function preferencePatchFor(
+  key: CopilotPreferenceKey,
+  mode: CopilotMode
+): Record<string, unknown> {
   if (key.startsWith('surfaceModes.')) {
     return { surfaceModes: { [key.slice('surfaceModes.'.length)]: mode } };
   }
@@ -175,10 +194,19 @@ export function uiActionFromResult(toolName: string, result: unknown): UiAction 
   if (!result || typeof result !== 'object') return null;
   const r = result as Record<string, unknown>;
   if (r.error) return null;
-  if ((toolName === 'callContact' || toolName === 'startOutboundCall') && typeof r.callId === 'string') {
-    return { kind: 'join_call', callId: r.callId, label: (r.to as string | undefined) ?? (r.phone as string | undefined) ?? null, aiCall: r.mode === 'ai' };
+  if (
+    (toolName === 'callContact' || toolName === 'startOutboundCall') &&
+    typeof r.callId === 'string'
+  ) {
+    return {
+      kind: 'join_call',
+      callId: r.callId,
+      label: (r.to as string | undefined) ?? (r.phone as string | undefined) ?? null,
+      aiCall: r.mode === 'ai',
+    };
   }
-  if (toolName === 'startInternalCall' && typeof r.openUrl === 'string') return { kind: 'open_url', url: r.openUrl, reason: 'internal_call' };
+  if (toolName === 'startInternalCall' && typeof r.openUrl === 'string')
+    return { kind: 'open_url', url: r.openUrl, reason: 'internal_call' };
   return null;
 }
 
@@ -186,7 +214,15 @@ export function uiActionFromResult(toolName: string, result: unknown): UiAction 
 export function performUiAction(action: UiAction): void {
   if (typeof window === 'undefined') return;
   if (action.kind === 'join_call' && action.callId) {
-    window.dispatchEvent(new CustomEvent('unik:call:join', { detail: { callId: action.callId, label: action.label ?? null, aiCall: Boolean(action.aiCall) } }));
+    window.dispatchEvent(
+      new CustomEvent('unik:call:join', {
+        detail: {
+          callId: action.callId,
+          label: action.label ?? null,
+          aiCall: Boolean(action.aiCall),
+        },
+      })
+    );
   } else if (action.kind === 'open_url' && action.url) {
     const url = action.url.replace(/^https?:\/\/[^/]+/, '') || action.url;
     window.location.assign(url);
@@ -197,7 +233,8 @@ export function performUiAction(action: UiAction): void {
 export function extractResultAction(text: string): UiAction | null {
   const callId = /"callId"\s*:\s*"([^"]+)"/.exec(text)?.[1];
   if (callId) {
-    const to = /"to"\s*:\s*"([^"]+)"/.exec(text)?.[1] ?? /"phone"\s*:\s*"([^"]+)"/.exec(text)?.[1] ?? null;
+    const to =
+      /"to"\s*:\s*"([^"]+)"/.exec(text)?.[1] ?? /"phone"\s*:\s*"([^"]+)"/.exec(text)?.[1] ?? null;
     return { kind: 'join_call', callId, label: to, aiCall: /"mode"\s*:\s*"ai"/.test(text) };
   }
   const openUrl = /"openUrl"\s*:\s*"([^"]+)"/.exec(text)?.[1];
@@ -235,7 +272,10 @@ export const TOOL_LABELS: Record<string, { running: string; done: string }> = {
   suggestNextActions: { running: 'Preparando acciones', done: 'Acciones listas' },
   proposeInboxDraft: { running: 'Redactando respuesta', done: 'Borrador listo' },
   draftReply: { running: 'Redactando respuesta', done: 'Borrador listo' },
-  updateInboxConversation: { running: 'Actualizando la conversación', done: 'Conversación actualizada' },
+  updateInboxConversation: {
+    running: 'Actualizando la conversación',
+    done: 'Conversación actualizada',
+  },
   addInboxNote: { running: 'Guardando nota interna', done: 'Nota interna guardada' },
   sendInboxMessage: { running: 'Preparando envío', done: 'Envío propuesto' },
   getConversationMessages: { running: 'Releyendo la conversación', done: 'Conversación releída' },
@@ -253,7 +293,10 @@ export const TOOL_LABELS: Record<string, { running: string; done: string }> = {
   queryProducts: { running: 'Buscando productos', done: 'Productos revisados' },
   getProductSearch: { running: 'Buscando productos', done: 'Productos revisados' },
   searchKnowledgeLibrary: { running: 'Buscando en la biblioteca', done: 'Biblioteca consultada' },
-  findShareableDocument: { running: 'Buscando el archivo autorizado', done: 'Archivo autorizado revisado' },
+  findShareableDocument: {
+    running: 'Buscando el archivo autorizado',
+    done: 'Archivo autorizado revisado',
+  },
   universalSearch: { running: 'Buscando en todo UNIK', done: 'Búsqueda completa' },
   getDatabaseOverview: { running: 'Revisando datos disponibles', done: 'Datos revisados' },
   sendInternalChatMessage: { running: 'Preparando aviso al equipo', done: 'Aviso propuesto' },
@@ -287,35 +330,62 @@ export const TOOL_LABELS: Record<string, { running: string; done: string }> = {
   lookupSalesOrdersByNumber: { running: 'Cruzando folios con el sistema', done: 'Folios cruzados' },
   reviewAnswer: { running: 'Revisando la respuesta', done: 'Respuesta revisada' },
   draftAnswer: { running: 'Redactando la respuesta', done: 'Respuesta redactada' },
-  draftBillFromDocument: { running: 'Preparando factura de proveedor', done: 'Borrador de factura listo' },
+  draftBillFromDocument: {
+    running: 'Preparando factura de proveedor',
+    done: 'Borrador de factura listo',
+  },
   callContact: { running: 'Preparando llamada', done: 'Llamada propuesta' },
   startInternalCall: { running: 'Preparando llamada interna', done: 'Llamada interna lista' },
   sendMessageToContact: { running: 'Preparando mensaje', done: 'Mensaje propuesto' },
   sendBulkMessages: { running: 'Preparando envío masivo', done: 'Envío masivo propuesto' },
   draftQuoteFromRequest: { running: 'Armando cotización en Zoho', done: 'Cotización en borrador' },
-  sendQuoteToContact: { running: 'Preparando envío de cotización', done: 'Envío de cotización propuesto' },
+  sendQuoteToContact: {
+    running: 'Preparando envío de cotización',
+    done: 'Envío de cotización propuesto',
+  },
   getPickupLocation: { running: 'Buscando ubicación de bodega', done: 'Ubicación lista' },
   getWorkDigest: { running: 'Calculando tu digest', done: 'Digest listo' },
   // Operations layer
   getCaseSnapshot: { running: 'Revisando el expediente', done: 'Expediente revisado' },
   explainCase: { running: 'Explicando el expediente', done: 'Expediente explicado' },
-  listAreaWorkItems: { running: 'Revisando trabajos del área', done: 'Trabajos del área revisados' },
+  listAreaWorkItems: {
+    running: 'Revisando trabajos del área',
+    done: 'Trabajos del área revisados',
+  },
   findResponsible: { running: 'Buscando al responsable', done: 'Responsable encontrado' },
   summarizeAreaDay: { running: 'Resumiendo el día del área', done: 'Resumen del área listo' },
   proposeDeliveryPlan: { running: 'Armando plan de entrega', done: 'Plan de entrega propuesto' },
   createAreaRequest: { running: 'Enviando solicitud a otra área', done: 'Solicitud enviada' },
-  acknowledgeAreaRequest: { running: 'Confirmando recepción de la solicitud', done: 'Solicitud recibida' },
-  respondAreaRequest: { running: 'Preparando respuesta a la solicitud', done: 'Respuesta propuesta' },
+  acknowledgeAreaRequest: {
+    running: 'Confirmando recepción de la solicitud',
+    done: 'Solicitud recibida',
+  },
+  respondAreaRequest: {
+    running: 'Preparando respuesta a la solicitud',
+    done: 'Respuesta propuesta',
+  },
   openIncident: { running: 'Abriendo incidencia', done: 'Incidencia abierta' },
   escalateCase: { running: 'Escalando el expediente', done: 'Expediente escalado' },
   assignWorkItem: { running: 'Asignando el trabajo', done: 'Trabajo asignado' },
   completeWorkItem: { running: 'Preparando cierre del trabajo', done: 'Cierre propuesto' },
   postCaseNote: { running: 'Anotando en la sala del expediente', done: 'Nota publicada' },
-  requestStockVerification: { running: 'Pidiendo verificación de existencias', done: 'Verificación solicitada' },
+  requestStockVerification: {
+    running: 'Pidiendo verificación de existencias',
+    done: 'Verificación solicitada',
+  },
   reserveStock: { running: 'Preparando apartado de material', done: 'Apartado propuesto' },
-  createPurchaseRequest: { running: 'Preparando solicitud de compra', done: 'Solicitud de compra propuesta' },
-  createProductionOrder: { running: 'Preparando orden de producción', done: 'Orden de producción propuesta' },
-  assignCarrier: { running: 'Preparando asignación de transportista', done: 'Transportista propuesto' },
+  createPurchaseRequest: {
+    running: 'Preparando solicitud de compra',
+    done: 'Solicitud de compra propuesta',
+  },
+  createProductionOrder: {
+    running: 'Preparando orden de producción',
+    done: 'Orden de producción propuesta',
+  },
+  assignCarrier: {
+    running: 'Preparando asignación de transportista',
+    done: 'Transportista propuesto',
+  },
   recordExpense: { running: 'Preparando registro de gasto', done: 'Gasto propuesto' },
   authorizePayment: { running: 'Preparando autorización de pago', done: 'Autorización propuesta' },
   researchSourcing: { running: 'Investigando proveedores', done: 'Proveedores investigados' },
@@ -323,7 +393,10 @@ export const TOOL_LABELS: Record<string, { running: string; done: string }> = {
   startWorkItem: { running: 'Iniciando el trabajo', done: 'Trabajo iniciado' },
   recordCount: { running: 'Preparando el conteo', done: 'Conteo propuesto' },
   getCompanyPulse: { running: 'Tomando el pulso de la empresa', done: 'Pulso de la empresa listo' },
-  findStuckCases: { running: 'Buscando expedientes atorados', done: 'Expedientes atorados revisados' },
+  findStuckCases: {
+    running: 'Buscando expedientes atorados',
+    done: 'Expedientes atorados revisados',
+  },
   whoIsBlocking: { running: 'Buscando quién está bloqueando', done: 'Bloqueos identificados' },
   simulateDelay: { running: 'Simulando el retraso', done: 'Simulación lista' },
   concludeAgentTurn: { running: 'Cerrando el turno', done: 'Turno cerrado' },
@@ -366,13 +439,16 @@ export function parsePlan(args: unknown): PlanData | null {
   return {
     goal: obj.goal,
     steps,
-    assumptions: Array.isArray(obj.assumptions) ? obj.assumptions.filter((a): a is string => typeof a === 'string') : [],
+    assumptions: Array.isArray(obj.assumptions)
+      ? obj.assumptions.filter((a): a is string => typeof a === 'string')
+      : [],
     deliverable: typeof obj.deliverable === 'string' ? obj.deliverable : null,
   };
 }
 
 /** Message the host sends when the user confirms a plan. */
-export const RUN_PLAN_MESSAGE = 'Ejecuta el plan propuesto tal cual, paso por paso, e infórmame el avance de cada paso.';
+export const RUN_PLAN_MESSAGE =
+  'Ejecuta el plan propuesto tal cual, paso por paso, e infórmame el avance de cada paso.';
 
 /** Spanish titles of the approval cards of side-effecting tools. */
 export const PROPOSAL_TOOL_TITLES: Readonly<Record<string, string>> = {
@@ -403,6 +479,19 @@ export const PROPOSAL_TOOL_TITLES: Readonly<Record<string, string>> = {
   assignWorkItem: 'Asignar trabajo',
 };
 
+/**
+ * La propuesta todavía se puede decidir en la superficie: pendiente, o esperando
+ * la segunda firma (las del alcance de una sala llegan también en ese estado).
+ * Pura.
+ */
+export function isDecidableProposal(proposal: Pick<CopilotProposal, 'status'>): boolean {
+  return (
+    !proposal.status ||
+    proposal.status === 'pending' ||
+    proposal.status === 'awaiting_second_approval'
+  );
+}
+
 /** Spanish title of a proposal: known tools, their progress label, human text as is, else a generic title. Pure. */
 export function proposalTitle(toolName: string): string {
   const known = PROPOSAL_TOOL_TITLES[toolName];
@@ -432,7 +521,12 @@ export interface OperationsSurfaceAccess {
 }
 
 /** Without the API answer only the surfaces every person has are shown. */
-export const DEFAULT_SURFACE_ACCESS: OperationsSurfaceAccess = { mywork: true, case: true, controlTower: false, area: false };
+export const DEFAULT_SURFACE_ACCESS: OperationsSurfaceAccess = {
+  mywork: true,
+  case: true,
+  controlTower: false,
+  area: false,
+};
 
 /** Preference rows of the operations surfaces the person can use. Pure. */
 export function visibleSurfaceRows<T extends { key: 'mywork' | 'area' | 'case' | 'control_tower' }>(
@@ -440,7 +534,13 @@ export function visibleSurfaceRows<T extends { key: 'mywork' | 'area' | 'case' |
   access: OperationsSurfaceAccess
 ): T[] {
   return rows.filter((row) =>
-    row.key === 'control_tower' ? access.controlTower : row.key === 'area' ? access.area : row.key === 'case' ? access.case : access.mywork
+    row.key === 'control_tower'
+      ? access.controlTower
+      : row.key === 'area'
+        ? access.area
+        : row.key === 'case'
+          ? access.case
+          : access.mywork
   );
 }
 
@@ -469,24 +569,41 @@ const URGENCIES = new Set(['baja', 'media', 'alta']);
 export function parseSuggestedActions(args: unknown): SuggestedActionsData | null {
   const obj = asObject(args);
   if (!obj) return null;
-  const rawList = Array.isArray(obj.actions) ? obj.actions : Array.isArray(obj.suggestions) ? obj.suggestions : Array.isArray(obj.options) ? obj.options : null;
+  const rawList = Array.isArray(obj.actions)
+    ? obj.actions
+    : Array.isArray(obj.suggestions)
+      ? obj.suggestions
+      : Array.isArray(obj.options)
+        ? obj.options
+        : null;
   if (!rawList) return null;
   const actions = rawList
     .map((a) => {
-      if (typeof a === 'string') return { label: a.trim().slice(0, 60), instruction: a.trim(), kind: 'other' as ActionKind };
+      if (typeof a === 'string')
+        return { label: a.trim().slice(0, 60), instruction: a.trim(), kind: 'other' as ActionKind };
       const o = asObject(a);
       if (!o) return null;
       const label = String(o.label ?? o.title ?? o.name ?? o.action ?? '').trim();
-      const instruction = String(o.instruction ?? o.prompt ?? o.command ?? o.text ?? o.description ?? o.detail ?? label).trim();
-      return { label: (label || instruction).slice(0, 60), instruction, kind: (typeof o.kind === 'string' ? o.kind : 'other') as ActionKind };
+      const instruction = String(
+        o.instruction ?? o.prompt ?? o.command ?? o.text ?? o.description ?? o.detail ?? label
+      ).trim();
+      return {
+        label: (label || instruction).slice(0, 60),
+        instruction,
+        kind: (typeof o.kind === 'string' ? o.kind : 'other') as ActionKind,
+      };
     })
-    .filter((a): a is { label: string; instruction: string; kind: ActionKind } => Boolean(a && a.label && a.instruction));
+    .filter((a): a is { label: string; instruction: string; kind: ActionKind } =>
+      Boolean(a && a.label && a.instruction)
+    );
   if (actions.length === 0) return null;
   const sentiment = String(obj.sentiment ?? '').toLowerCase();
   const urgency = String(obj.urgency ?? '').toLowerCase();
   return {
     situation: String(obj.situation ?? obj.summary ?? obj.reading ?? ''),
-    sentiment: (SENTIMENTS.has(sentiment) ? sentiment : 'neutral') as SuggestedActionsData['sentiment'],
+    sentiment: (SENTIMENTS.has(sentiment)
+      ? sentiment
+      : 'neutral') as SuggestedActionsData['sentiment'],
     urgency: (URGENCIES.has(urgency) ? urgency : 'media') as SuggestedActionsData['urgency'],
     actions,
   };
@@ -495,7 +612,8 @@ export function parseSuggestedActions(args: unknown): SuggestedActionsData | nul
 export function parseDraft(args: unknown): DraftData | null {
   const obj = asObject(args);
   if (!obj) return null;
-  const body = typeof obj.body === 'string' ? obj.body : typeof obj.draft === 'string' ? obj.draft : null;
+  const body =
+    typeof obj.body === 'string' ? obj.body : typeof obj.draft === 'string' ? obj.draft : null;
   if (!body || !body.trim()) return null;
   return { draft: body, rationale: typeof obj.rationale === 'string' ? obj.rationale : null };
 }

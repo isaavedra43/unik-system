@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/prisma';
+import { obligationsLink, periodCloseLink } from '@/modules/areas/area-links';
 import { SUPER_ADMIN_ROLE_KEY } from '@/modules/auth/constants';
 import { isKnownPermission } from '@/modules/auth/permissions';
 import { JOB_PRIORITY, registerJobHandler, type JobContext } from '@/modules/jobs/job-queue';
@@ -7,10 +8,21 @@ import type { NotificationCategory } from '@/modules/notifications/catalog';
 import { notifyUser } from '@/modules/notifications/notification-service';
 import { isOpsFlagEnabled } from '@/modules/operations/operations-config';
 import { yesterdayKeyOf } from './close-service';
-import { reconcileCollections, registerCollectionsCaseListener, type ReconcileSummary } from './collections-service';
+import {
+  reconcileCollections,
+  registerCollectionsCaseListener,
+  type ReconcileSummary,
+} from './collections-service';
 import { proposeExpense, type ProposeExpenseOutcome } from './expenses-service';
 import { getFinanceSettings } from './finance-config';
-import { addDaysToKey, compareKeys, dateKeyOf, localDateKey, periodKeyOfKey, toDbDate } from './finance-dates';
+import {
+  addDaysToKey,
+  compareKeys,
+  dateKeyOf,
+  localDateKey,
+  periodKeyOfKey,
+  toDbDate,
+} from './finance-dates';
 import { runFinanceSystemCommand } from './finance-helpers';
 import { formatMxn } from './money';
 import { remainingOf } from './obligation-rules';
@@ -40,11 +52,11 @@ import {
  * Plus the `onCaseStarted` subscription that expects each case's receivable.
  * The recurring jobs do nothing while the `finance` flag is off.
  *
- * Notifications use the `finance_alert` category; until the notification
- * catalog lists it the delivery falls back to the defaults of `system`.
+ * Notifications use the `finance_alert` category of the notification catalogue,
+ * so a person configures them apart from the rest in /app/account/notifications.
  */
 
-const FINANCE_ALERT = FINANCE_ALERT_CATEGORY as unknown as NotificationCategory;
+const FINANCE_ALERT: NotificationCategory = FINANCE_ALERT_CATEGORY;
 const MAX_RECIPIENTS = 50;
 const MAX_CATCH_UP_RUNS = 62;
 
@@ -66,7 +78,11 @@ export async function usersWithPermission(permissionKey: string): Promise<string
   });
   if (holders.length > 0) return holders.map((u) => u.id);
   const admins = await prisma.user.findMany({
-    where: { isActive: true, isBot: false, roles: { some: { role: { isActive: true, key: SUPER_ADMIN_ROLE_KEY } } } },
+    where: {
+      isActive: true,
+      isBot: false,
+      roles: { some: { role: { isActive: true, key: SUPER_ADMIN_ROLE_KEY } } },
+    },
     select: { id: true },
     orderBy: { createdAt: 'asc' },
     take: 5,
@@ -74,7 +90,9 @@ export async function usersWithPermission(permissionKey: string): Promise<string
   return admins.map((u) => u.id);
 }
 
-export async function runExpenseProposeJob(job: Pick<JobContext<{ expenseId?: string }>, 'payload'>): Promise<ProposeExpenseOutcome> {
+export async function runExpenseProposeJob(
+  job: Pick<JobContext<{ expenseId?: string }>, 'payload'>
+): Promise<ProposeExpenseOutcome> {
   const expenseId = typeof job.payload?.expenseId === 'string' ? job.payload.expenseId : '';
   if (!expenseId) return { status: 'not_found' };
   return proposeExpense(expenseId);
@@ -86,8 +104,11 @@ export interface RecurringSummary {
   skipped?: string;
 }
 
-export async function runRecurringExpensesJob(options: { now?: Date } = {}): Promise<RecurringSummary> {
-  if (!(await isOpsFlagEnabled('finance'))) return { templates: 0, created: 0, skipped: 'disabled' };
+export async function runRecurringExpensesJob(
+  options: { now?: Date } = {}
+): Promise<RecurringSummary> {
+  if (!(await isOpsFlagEnabled('finance')))
+    return { templates: 0, created: 0, skipped: 'disabled' };
   const now = options.now ?? new Date();
   const todayKey = localDateKey(now);
   const templates = await prisma.expenseTemplate.findMany({
@@ -118,13 +139,18 @@ export async function runRecurringExpensesJob(options: { now?: Date } = {}): Pro
   return { templates: templates.length, created };
 }
 
-export async function runReconcileCollectionsJob(options: { now?: Date } = {}): Promise<ReconcileSummary | { skipped: string }> {
+export async function runReconcileCollectionsJob(
+  options: { now?: Date } = {}
+): Promise<ReconcileSummary | { skipped: string }> {
   if (!(await isOpsFlagEnabled('finance'))) return { skipped: 'disabled' };
   return reconcileCollections(options);
 }
 
-export async function runObligationsDueJob(options: { now?: Date } = {}): Promise<{ obligations: number; notified: number; skipped?: string }> {
-  if (!(await isOpsFlagEnabled('finance'))) return { obligations: 0, notified: 0, skipped: 'disabled' };
+export async function runObligationsDueJob(
+  options: { now?: Date } = {}
+): Promise<{ obligations: number; notified: number; skipped?: string }> {
+  if (!(await isOpsFlagEnabled('finance')))
+    return { obligations: 0, notified: 0, skipped: 'disabled' };
   const now = options.now ?? new Date();
   const todayKey = localDateKey(now);
   const settings = await getFinanceSettings();
@@ -142,7 +168,10 @@ export async function runObligationsDueJob(options: { now?: Date } = {}): Promis
   const receivables = due.length - payables;
   const lines = due
     .slice(0, 5)
-    .map((o) => `${o.number} ${o.kind === 'payable' ? 'por pagar' : 'por cobrar'} ${formatMxn(remainingOf(o), o.currency)} · vence ${o.dueAt ? dateKeyOf(o.dueAt) : 'sin fecha'}`);
+    .map(
+      (o) =>
+        `${o.number} ${o.kind === 'payable' ? 'por pagar' : 'por cobrar'} ${formatMxn(remainingOf(o), o.currency)} · vence ${o.dueAt ? dateKeyOf(o.dueAt) : 'sin fecha'}`
+    );
   const title =
     overdue.length > 0
       ? `${overdue.length} obligación(es) vencida(s) y ${due.length - overdue.length} por vencer`
@@ -156,7 +185,7 @@ export async function runObligationsDueJob(options: { now?: Date } = {}): Promis
       type: 'finance_obligations_due',
       title,
       body: `${payables} por pagar · ${receivables} por cobrar\n${lines.join('\n')}${due.length > 5 ? `\n… y ${due.length - 5} más` : ''}`,
-      url: '/app/finance/obligations?status=open&overdueOnly=true',
+      url: obligationsLink({ status: 'open', overdueOnly: true }),
       entityType: 'finance_obligations',
       metadata: { total: due.length, overdue: overdue.length, payables, receivables },
       dedupeKey: `finance_due:${userId}:${todayKey}`,
@@ -167,15 +196,23 @@ export async function runObligationsDueJob(options: { now?: Date } = {}): Promis
   return { obligations: due.length, notified };
 }
 
-export async function runDailyCloseReminderJob(options: { now?: Date } = {}): Promise<{ notified: number; skipped?: string }> {
+export async function runDailyCloseReminderJob(
+  options: { now?: Date } = {}
+): Promise<{ notified: number; skipped?: string }> {
   if (!(await isOpsFlagEnabled('finance'))) return { notified: 0, skipped: 'disabled' };
   const settings = await getFinanceSettings();
   if (!settings.dailyCloseReminder) return { notified: 0, skipped: 'off' };
   const now = options.now ?? new Date();
   const yesterday = yesterdayKeyOf(localDateKey(now));
   const [dayClose, monthClose, entries, expenses] = await Promise.all([
-    prisma.periodClose.findFirst({ where: { kind: 'daily', periodKey: yesterday, status: 'closed' }, select: { id: true } }),
-    prisma.periodClose.findFirst({ where: { kind: 'monthly', periodKey: periodKeyOfKey(yesterday), status: 'closed' }, select: { id: true } }),
+    prisma.periodClose.findFirst({
+      where: { kind: 'daily', periodKey: yesterday, status: 'closed' },
+      select: { id: true },
+    }),
+    prisma.periodClose.findFirst({
+      where: { kind: 'monthly', periodKey: periodKeyOfKey(yesterday), status: 'closed' },
+      select: { id: true },
+    }),
     prisma.ledgerEntry.count({ where: { date: toDbDate(yesterday) } }),
     prisma.expense.count({ where: { date: toDbDate(yesterday) } }),
   ]);
@@ -190,7 +227,7 @@ export async function runDailyCloseReminderJob(options: { now?: Date } = {}): Pr
       type: 'finance_daily_close_reminder',
       title: `Falta el cierre del ${yesterday}`,
       body: `${entries} asiento(s) y ${expenses} gasto(s) del día sin cierre ni arqueo`,
-      url: `/app/finance/closes?kind=daily&date=${yesterday}`,
+      url: periodCloseLink(),
       entityType: 'period_close',
       dedupeKey: `finance_close_reminder:${yesterday}:${userId}`,
     });
@@ -207,13 +244,25 @@ export function registerFinanceJobs(): void {
   if (scope.__unikFinanceJobsRegistered) return;
   scope.__unikFinanceJobsRegistered = true;
 
-  registerJobHandler<{ expenseId?: string }>(FINANCE_JOB_TYPES.expensePropose, (job) => runExpenseProposeJob(job), {
-    timeoutMs: 4 * 60_000,
+  registerJobHandler<{ expenseId?: string }>(
+    FINANCE_JOB_TYPES.expensePropose,
+    (job) => runExpenseProposeJob(job),
+    {
+      timeoutMs: 4 * 60_000,
+    }
+  );
+  registerJobHandler(FINANCE_JOB_TYPES.recurringExpenses, () => runRecurringExpensesJob(), {
+    timeoutMs: 10 * 60_000,
   });
-  registerJobHandler(FINANCE_JOB_TYPES.recurringExpenses, () => runRecurringExpensesJob(), { timeoutMs: 10 * 60_000 });
-  registerJobHandler(FINANCE_JOB_TYPES.reconcileCollections, () => runReconcileCollectionsJob(), { timeoutMs: 10 * 60_000 });
-  registerJobHandler(FINANCE_JOB_TYPES.obligationsDue, () => runObligationsDueJob(), { timeoutMs: 2 * 60_000 });
-  registerJobHandler(FINANCE_JOB_TYPES.dailyCloseReminder, () => runDailyCloseReminderJob(), { timeoutMs: 2 * 60_000 });
+  registerJobHandler(FINANCE_JOB_TYPES.reconcileCollections, () => runReconcileCollectionsJob(), {
+    timeoutMs: 10 * 60_000,
+  });
+  registerJobHandler(FINANCE_JOB_TYPES.obligationsDue, () => runObligationsDueJob(), {
+    timeoutMs: 2 * 60_000,
+  });
+  registerJobHandler(FINANCE_JOB_TYPES.dailyCloseReminder, () => runDailyCloseReminderJob(), {
+    timeoutMs: 2 * 60_000,
+  });
 
   registerRecurringJob({
     type: FINANCE_JOB_TYPES.recurringExpenses,

@@ -1,0 +1,299 @@
+/*
+ * Comunicaciones del área (plan 7.5): canal del área y salas de expediente a la
+ * izquierda, conversación o solicitudes en el centro y la IA a la derecha.
+ * Sólo tokens (--unik-*): ningún color literal. Reutiliza las clases del chat
+ * (.chat-sidebar, .chat-sidebar-item, .chat-page-main) para que una
+ * conversación se vea igual aquí que en el chat interno.
+ * Se importa desde src/components/areas/spaces/AreaCommsPage.tsx.
+ */
+
+.area-comms-shell {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 28rem;
+  height: calc(100dvh - var(--unik-topbar-height, 60px) - 16rem);
+}
+
+.area-comms-shell .tabs {
+  margin-bottom: var(--unik-space-3);
+}
+
+.area-comms-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--unik-space-2);
+  margin-bottom: var(--unik-space-2);
+  font-size: var(--unik-text-xs);
+  color: var(--unik-text-muted);
+}
+
+.area-comms-body {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  border: 1px solid var(--unik-border);
+  border-radius: var(--unik-radius-md);
+  background: var(--unik-surface);
+  overflow: hidden;
+}
+
+.area-comms-rail {
+  width: clamp(16rem, 24vw, 21rem);
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-right: 1px solid var(--unik-border);
+  overflow: hidden;
+}
+
+.area-comms-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.area-comms-aside {
+  width: clamp(20rem, 26vw, 24rem);
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-left: 1px solid var(--unik-border);
+  overflow: hidden;
+}
+
+.area-comms-aside > * {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.area-comms-placeholder {
+  margin: auto;
+  display: grid;
+  gap: var(--unik-space-2);
+  justify-items: center;
+  padding: var(--unik-space-8) var(--unik-space-6);
+  text-align: center;
+  color: var(--unik-text-secondary);
+  font-size: var(--unik-text-sm);
+}
+
+.area-comms-placeholder-title {
+  margin: 0;
+  color: var(--unik-text);
+  font-size: var(--unik-text-base);
+  font-weight: 600;
+}
+
+.area-comms-placeholder p {
+  margin: 0;
+  max-width: 46ch;
+}
+
+/* ------------------------------------------------- Lista de conversaciones */
+
+.area-comms-nav {
+  display: grid;
+  gap: var(--unik-space-1);
+  padding: var(--unik-space-2) var(--unik-space-3);
+  border-top: 1px solid var(--unik-border);
+}
+
+.area-comms-nav-item {
+  display: flex;
+  align-items: center;
+  gap: var(--unik-space-2);
+  padding: var(--unik-space-2);
+  border-radius: var(--unik-radius-sm);
+  color: var(--unik-text-secondary);
+  font-size: var(--unik-text-sm);
+  text-decoration: none;
+  min-height: 2.5rem;
+}
+
+.area-comms-nav-item:hover {
+  background: var(--unik-surface-hover);
+  color: var(--unik-text);
+  text-decoration: none;
+}
+
+.area-comms-nav-item:focus-visible {
+  outline: 2px solid var(--unik-brand);
+  outline-offset: 2px;
+}
+
+.area-comms-nav-item[aria-current='page'] {
+  background: var(--unik-surface-hover);
+  color: var(--unik-text);
+  font-weight: 600;
+}
+
+.area-comms-nav-count {
+  margin-left: auto;
+  font-size: var(--unik-text-xs);
+  color: var(--unik-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.area-comms-note {
+  padding: var(--unik-space-3);
+  font-size: var(--unik-text-xs);
+  color: var(--unik-text-secondary);
+}
+
+/* ---------------------------------------------------------- Solicitudes */
+
+.area-comms-requests {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--unik-space-4);
+  display: grid;
+  gap: var(--unik-space-5);
+  align-content: start;
+}
+
+.area-comms-request-group {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--unik-space-2);
+  min-width: 0;
+}
+
+.area-comms-section-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--unik-space-2);
+  margin: 0;
+  font-size: var(--unik-text-sm);
+  font-weight: 600;
+  color: var(--unik-text);
+}
+
+.area-comms-section-count {
+  font-size: var(--unik-text-xs);
+  font-weight: 400;
+  color: var(--unik-text-muted);
+}
+
+.area-comms-request {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--unik-space-2);
+  padding: var(--unik-space-3);
+  border: 1px solid var(--unik-border);
+  border-radius: var(--unik-radius-md);
+  background: var(--unik-surface);
+  min-width: 0;
+}
+
+.area-comms-request-overdue {
+  border-color: var(--unik-danger);
+}
+
+.area-comms-request-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--unik-space-2);
+  min-width: 0;
+}
+
+.area-comms-request-title {
+  font-size: var(--unik-text-sm);
+  font-weight: 500;
+  color: var(--unik-text);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.area-comms-request-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--unik-space-1);
+  margin-left: auto;
+}
+
+.area-comms-request-meta {
+  margin: 0;
+  font-size: var(--unik-text-xs);
+  color: var(--unik-text-muted);
+  overflow-wrap: anywhere;
+}
+
+.area-comms-request-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--unik-space-2);
+  align-items: center;
+}
+
+.area-comms-request-reason {
+  font-size: var(--unik-text-xs);
+  color: var(--unik-text-muted);
+}
+
+.area-comms-empty {
+  margin: 0;
+  padding: var(--unik-space-4);
+  border: 1px dashed var(--unik-border);
+  border-radius: var(--unik-radius-md);
+  font-size: var(--unik-text-sm);
+  color: var(--unik-text-secondary);
+  text-align: center;
+}
+
+/* ------------------------------------------------------------ Responsive */
+
+@media (max-width: 1280px) {
+  .area-comms-aside {
+    display: none;
+  }
+}
+
+@media (max-width: 768px) {
+  .area-comms-shell {
+    height: calc(100dvh - var(--unik-topbar-height, 60px) - 12rem);
+  }
+
+  .area-comms-rail,
+  .area-comms-main {
+    width: 100%;
+    flex: 1 1 auto;
+    border-right: none;
+  }
+
+  .area-comms-requests {
+    padding: var(--unik-space-3);
+  }
+
+  .area-comms-request-badges {
+    margin-left: 0;
+  }
+}
+
+/* ------------------------------------- Pestañas: sólo en teléfono */
+
+/*
+ * En escritorio el carril de conversaciones ya ofrece los tres destinos con sus
+ * conteos y marca el activo: la fila de pestañas de arriba repetía la misma
+ * navegación y gastaba una banda entera antes del primer mensaje.
+ */
+.area-comms-tabs {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  .area-comms-tabs {
+    display: block;
+  }
+}

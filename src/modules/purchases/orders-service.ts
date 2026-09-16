@@ -1,7 +1,16 @@
-import { Prisma, type ProcurementOrder, type ProcurementOrderLine, type Supplier } from '@prisma/client';
+import {
+  Prisma,
+  type ProcurementOrder,
+  type ProcurementOrderLine,
+  type Supplier,
+} from '@prisma/client';
 import { z } from 'zod';
+import { procurementOrderLink } from '@/modules/areas/area-links';
 import { requestApproval, type ApprovalDecidedEvent } from '@/modules/operations/approvals-service';
-import { isAreaRequestOpenStatus, transitionAreaRequestInTx } from '@/modules/operations/area-requests-service';
+import {
+  isAreaRequestOpenStatus,
+  transitionAreaRequestInTx,
+} from '@/modules/operations/area-requests-service';
 import type { CommandContext } from '@/modules/operations/commands';
 import { OperationsError } from '@/modules/operations/errors';
 import { OPS_EVENTS, WORK_ITEM_OPEN_STATUSES } from '@/modules/operations/types';
@@ -70,7 +79,11 @@ import {
   labelOf,
 } from './purchases-types';
 import { remainingToOrder } from './request-rules';
-import { adjustRequestLineOrdered, openShortfallRequests, recomputeRequestStatuses } from './requests-service';
+import {
+  adjustRequestLineOrdered,
+  openShortfallRequests,
+  recomputeRequestStatuses,
+} from './requests-service';
 import { touchSupplierProductPrice } from './suppliers-service';
 
 /**
@@ -116,7 +129,10 @@ export const orderLineInputSchema = z.object({
   taxRate: rateFraction.nullish(),
   allocations: z.array(lineAllocationInputSchema).max(50).optional(),
   /** Several request lines consolidated in one order line (each keeps its demand). */
-  sources: z.array(z.object({ requestLineId: idText, qty: positiveQty })).max(100).optional(),
+  sources: z
+    .array(z.object({ requestLineId: idText, qty: positiveQty }))
+    .max(100)
+    .optional(),
 });
 export type OrderLineInput = z.output<typeof orderLineInputSchema>;
 
@@ -193,7 +209,10 @@ export const followupFailedSchema = z.object({
 // ---------------------------------------------------------------------------
 
 export async function loadOrder(tx: Db, orderId: string): Promise<ProcurementOrder> {
-  return assertFoundRow(await tx.procurementOrder.findUnique({ where: { id: orderId } }), 'No se encontró la orden de compra');
+  return assertFoundRow(
+    await tx.procurementOrder.findUnique({ where: { id: orderId } }),
+    'No se encontró la orden de compra'
+  );
 }
 
 export async function loadOrderLines(tx: Db, orderId: string): Promise<ProcurementOrderLine[]> {
@@ -201,14 +220,26 @@ export async function loadOrderLines(tx: Db, orderId: string): Promise<Procureme
 }
 
 export async function loadSupplier(tx: Db, supplierId: string): Promise<Supplier> {
-  return assertFoundRow(await tx.supplier.findUnique({ where: { id: supplierId } }), 'No se encontró el proveedor');
+  return assertFoundRow(
+    await tx.supplier.findUnique({ where: { id: supplierId } }),
+    'No se encontró el proveedor'
+  );
 }
 
 /** Cases supplied by the order (direct delivery case first, then the allocated demands). */
-export async function orderCaseIds(tx: Db, order: Pick<ProcurementOrder, 'id' | 'directDeliveryCaseId'>): Promise<string[]> {
-  const lines = await tx.procurementOrderLine.findMany({ where: { orderId: order.id }, select: { id: true } });
+export async function orderCaseIds(
+  tx: Db,
+  order: Pick<ProcurementOrder, 'id' | 'directDeliveryCaseId'>
+): Promise<string[]> {
+  const lines = await tx.procurementOrderLine.findMany({
+    where: { orderId: order.id },
+    select: { id: true },
+  });
   const allocations = lines.length
-    ? await tx.procurementAllocation.findMany({ where: { orderLineId: { in: lines.map((l) => l.id) } }, select: { demandId: true } })
+    ? await tx.procurementAllocation.findMany({
+        where: { orderLineId: { in: lines.map((l) => l.id) } },
+        select: { demandId: true },
+      })
     : [];
   const demands = allocations.length
     ? await tx.caseDemand.findMany({
@@ -216,7 +247,13 @@ export async function orderCaseIds(tx: Db, order: Pick<ProcurementOrder, 'id' | 
         select: { caseId: true },
       })
     : [];
-  return [...new Set([order.directDeliveryCaseId, ...demands.map((d) => d.caseId)].filter((id): id is string => Boolean(id)))];
+  return [
+    ...new Set(
+      [order.directDeliveryCaseId, ...demands.map((d) => d.caseId)].filter((id): id is string =>
+        Boolean(id)
+      )
+    ),
+  ];
 }
 
 function isCommitted(status: string): boolean {
@@ -228,7 +265,10 @@ function isCommitted(status: string): boolean {
 // ---------------------------------------------------------------------------
 
 async function orderDemandAllocationIds(tx: Db, orderId: string): Promise<string[]> {
-  const lines = await tx.procurementOrderLine.findMany({ where: { orderId }, select: { id: true } });
+  const lines = await tx.procurementOrderLine.findMany({
+    where: { orderId },
+    select: { id: true },
+  });
   if (lines.length === 0) return [];
   const rows = await tx.procurementAllocation.findMany({
     where: { orderLineId: { in: lines.map((l) => l.id) }, demandAllocationId: { not: null } },
@@ -247,7 +287,9 @@ export async function commitAllocationsExpectation(
   ctx: CommandContext,
   demandAllocationIds?: readonly string[]
 ): Promise<string[]> {
-  const ids = demandAllocationIds ? [...new Set(demandAllocationIds)] : await orderDemandAllocationIds(tx, order.id);
+  const ids = demandAllocationIds
+    ? [...new Set(demandAllocationIds)]
+    : await orderDemandAllocationIds(tx, order.id);
   if (ids.length === 0) return [];
   const allocations = await tx.demandAllocation.findMany({ where: { id: { in: ids } } });
   const changed: string[] = [];
@@ -276,7 +318,12 @@ export async function commitAllocationsExpectation(
         expectedAt: order.expectedAt?.toISOString() ?? null,
         previousStatus: allocation.status,
       },
-      { caseId: allocation.caseId, areaKey: PURCHASES_AREA_KEY, objectType: 'demand_allocation', objectId: allocation.id }
+      {
+        caseId: allocation.caseId,
+        areaKey: PURCHASES_AREA_KEY,
+        objectType: 'demand_allocation',
+        objectId: allocation.id,
+      }
     );
   }
   return changed;
@@ -297,13 +344,21 @@ export async function releaseAllocationsExpectation(
   for (const allocationId of new Set(demandAllocationIds)) {
     const allocation = await tx.demandAllocation.findUnique({ where: { id: allocationId } });
     if (!allocation || allocation.status !== 'in_progress') continue;
-    const others = await tx.procurementAllocation.findMany({ where: { demandAllocationId: allocation.id }, select: { orderLineId: true } });
+    const others = await tx.procurementAllocation.findMany({
+      where: { demandAllocationId: allocation.id },
+      select: { orderLineId: true },
+    });
     const otherLines = others.length
-      ? await tx.procurementOrderLine.findMany({ where: { id: { in: others.map((o) => o.orderLineId) } }, select: { orderId: true } })
+      ? await tx.procurementOrderLine.findMany({
+          where: { id: { in: others.map((o) => o.orderLineId) } },
+          select: { orderId: true },
+        })
       : [];
     const otherOrders = otherLines.length
       ? await tx.procurementOrder.findMany({
-          where: { id: { in: [...new Set(otherLines.map((l) => l.orderId))], not: excludeOrderId } },
+          where: {
+            id: { in: [...new Set(otherLines.map((l) => l.orderId))], not: excludeOrderId },
+          },
           select: { id: true, status: true },
         })
       : [];
@@ -316,8 +371,19 @@ export async function releaseAllocationsExpectation(
     released.push(allocation.id);
     ctx.emit(
       OPS_EVENTS.allocation.requested,
-      { allocationId: allocation.id, demandId: allocation.demandId, previousStatus: 'in_progress', reason, procurementOrderId: excludeOrderId },
-      { caseId: allocation.caseId, areaKey: PURCHASES_AREA_KEY, objectType: 'demand_allocation', objectId: allocation.id }
+      {
+        allocationId: allocation.id,
+        demandId: allocation.demandId,
+        previousStatus: 'in_progress',
+        reason,
+        procurementOrderId: excludeOrderId,
+      },
+      {
+        caseId: allocation.caseId,
+        areaKey: PURCHASES_AREA_KEY,
+        objectType: 'demand_allocation',
+        objectId: allocation.id,
+      }
     );
   }
   return released;
@@ -347,44 +413,79 @@ export async function applyLineAllocationsInTx(
     throw new OperationsError('invalid_state', 'La orden está cerrada o cancelada');
   }
   if (num(line.qtyAccepted) > QTY_EPS || num(line.qtyReceived) > QTY_EPS) {
-    throw new OperationsError('invalid_state', 'La partida ya tiene material recibido: su reparto no se cambia');
+    throw new OperationsError(
+      'invalid_state',
+      'La partida ya tiene material recibido: su reparto no se cambia'
+    );
   }
   const byDemand = new Map<string, DesiredAllocation>();
   for (const entry of desired) {
     const current = byDemand.get(entry.demandId);
-    byDemand.set(entry.demandId, current ? { ...current, qty: current.qty + entry.qty } : { ...entry });
+    byDemand.set(
+      entry.demandId,
+      current ? { ...current, qty: current.qty + entry.qty } : { ...entry }
+    );
   }
   const total = [...byDemand.values()].reduce((sum, entry) => sum + entry.qty, 0);
   if (total > num(line.qty) + QTY_EPS) {
-    throw new OperationsError('invalid_quantity', `El reparto (${total}) supera la cantidad de la partida (${num(line.qty)})`);
+    throw new OperationsError(
+      'invalid_quantity',
+      `El reparto (${total}) supera la cantidad de la partida (${num(line.qty)})`
+    );
   }
   const demandIds = [...byDemand.keys()];
-  const demands = demandIds.length ? await tx.caseDemand.findMany({ where: { id: { in: demandIds } } }) : [];
+  const demands = demandIds.length
+    ? await tx.caseDemand.findMany({ where: { id: { in: demandIds } } })
+    : [];
   const direct = order.deliveryMode === 'direct_to_customer';
-  const resolved: Array<DesiredAllocation & { demandAllocationId: string | null; caseId: string }> = [];
+  const resolved: Array<DesiredAllocation & { demandAllocationId: string | null; caseId: string }> =
+    [];
   for (const entry of byDemand.values()) {
     const demand = demands.find((d) => d.id === entry.demandId);
-    if (!demand) throw new OperationsError('not_found', 'Alguna partida de venta del reparto no existe');
+    if (!demand)
+      throw new OperationsError('not_found', 'Alguna partida de venta del reparto no existe');
     if (demand.status === 'fulfilled' || demand.status === 'cancelled') {
-      throw new OperationsError('invalid_state', `La partida "${truncate(demand.name, 60)}" ya está surtida o cancelada`);
+      throw new OperationsError(
+        'invalid_state',
+        `La partida "${truncate(demand.name, 60)}" ya está surtida o cancelada`
+      );
     }
     if (direct && demand.caseId !== order.directDeliveryCaseId) {
-      throw new OperationsError('invalid_payload', 'Una entrega directa sólo surte partidas de su expediente');
+      throw new OperationsError(
+        'invalid_payload',
+        'Una entrega directa sólo surte partidas de su expediente'
+      );
     }
     if (line.zohoItemId && demand.zohoItemId && line.zohoItemId !== demand.zohoItemId) {
-      throw new OperationsError('invalid_payload', `La partida "${truncate(demand.name, 60)}" es de otro artículo`);
+      throw new OperationsError(
+        'invalid_payload',
+        `La partida "${truncate(demand.name, 60)}" es de otro artículo`
+      );
     }
     let demandAllocationId: string | null = null;
     const sources = direct ? ['direct_supplier'] : ['purchase'];
     if (entry.allocationId) {
-      const allocation = await tx.demandAllocation.findUnique({ where: { id: entry.allocationId } });
-      if (!allocation || allocation.demandId !== demand.id || !sources.includes(allocation.source)) {
-        throw new OperationsError('invalid_payload', 'La asignación no corresponde a la partida o a este tipo de compra');
+      const allocation = await tx.demandAllocation.findUnique({
+        where: { id: entry.allocationId },
+      });
+      if (
+        !allocation ||
+        allocation.demandId !== demand.id ||
+        !sources.includes(allocation.source)
+      ) {
+        throw new OperationsError(
+          'invalid_payload',
+          'La asignación no corresponde a la partida o a este tipo de compra'
+        );
       }
       demandAllocationId = allocation.id;
     } else {
       const allocation = await tx.demandAllocation.findFirst({
-        where: { demandId: demand.id, source: { in: sources }, status: { in: ['planned', 'requested', 'in_progress'] } },
+        where: {
+          demandId: demand.id,
+          source: { in: sources },
+          status: { in: ['planned', 'requested', 'in_progress'] },
+        },
         orderBy: { createdAt: 'asc' },
       });
       demandAllocationId = allocation?.id ?? null;
@@ -401,7 +502,10 @@ export async function applyLineAllocationsInTx(
         `La partida "${truncate(line.description, 60)}" no tiene artículo del catálogo y las ventas que surte no comparten uno: indica el artículo de la partida`
       );
     }
-    await tx.procurementOrderLine.update({ where: { id: line.id }, data: { zohoItemId: items[0] } });
+    await tx.procurementOrderLine.update({
+      where: { id: line.id },
+      data: { zohoItemId: items[0] },
+    });
   }
   const existing = await tx.procurementAllocation.findMany({ where: { orderLineId: line.id } });
   const removed = existing.filter((row) => !byDemand.has(row.demandId));
@@ -416,9 +520,15 @@ export async function applyLineAllocationsInTx(
     };
     const row = current
       ? await tx.procurementAllocation.update({ where: { id: current.id }, data })
-      : await tx.procurementAllocation.create({ data: { orderLineId: line.id, demandId: entry.demandId, ...data } });
+      : await tx.procurementAllocation.create({
+          data: { orderLineId: line.id, demandId: entry.demandId, ...data },
+        });
     allocationIds.push(row.id);
-    await ctx.relate({ type: 'operational_case', id: entry.caseId }, { type: OBJ.order, id: order.id }, 'supplied_by');
+    await ctx.relate(
+      { type: 'operational_case', id: entry.caseId },
+      { type: OBJ.order, id: order.id },
+      'supplied_by'
+    );
   }
 
   let released: string[] = [];
@@ -427,7 +537,9 @@ export async function applyLineAllocationsInTx(
     const keep = new Set(resolved.map((r) => r.demandAllocationId).filter(Boolean));
     released = await releaseAllocationsExpectation(
       tx,
-      removed.map((r) => r.demandAllocationId).filter((id): id is string => Boolean(id) && !keep.has(id)),
+      removed
+        .map((r) => r.demandAllocationId)
+        .filter((id): id is string => Boolean(id) && !keep.has(id)),
       ctx,
       `Se quitó del reparto de ${order.number}`,
       order.id
@@ -446,7 +558,11 @@ export async function applyLineAllocationsInTx(
       {
         orderId: order.id,
         orderLineId: line.id,
-        allocations: resolved.map((r) => ({ demandId: r.demandId, qty: r.qty, demandAllocationId: r.demandAllocationId })),
+        allocations: resolved.map((r) => ({
+          demandId: r.demandId,
+          qty: r.qty,
+          demandAllocationId: r.demandAllocationId,
+        })),
         removed: removed.map((r) => r.demandId),
       },
       { caseId: resolved[0]?.caseId ?? null, objectType: OBJ.order, objectId: order.id }
@@ -470,24 +586,40 @@ interface PreparedLine {
 }
 
 async function assertRequestOpen(tx: Db, requestId: string): Promise<void> {
-  const request = await tx.purchaseRequest.findUnique({ where: { id: requestId }, select: { status: true, number: true } });
+  const request = await tx.purchaseRequest.findUnique({
+    where: { id: requestId },
+    select: { status: true, number: true },
+  });
   if (!request || ['draft', 'cancelled', 'closed'].includes(request.status)) {
-    throw new OperationsError('invalid_state', `La solicitud ${request?.number ?? ''} no está abierta`.trim());
+    throw new OperationsError(
+      'invalid_state',
+      `La solicitud ${request?.number ?? ''} no está abierta`.trim()
+    );
   }
 }
 
-async function prepareLines(tx: Db, supplier: Supplier, inputs: readonly OrderLineInput[]): Promise<PreparedLine[]> {
+async function prepareLines(
+  tx: Db,
+  supplier: Supplier,
+  inputs: readonly OrderLineInput[]
+): Promise<PreparedLine[]> {
   const prepared: PreparedLine[] = [];
   for (const input of inputs) {
     if (input.requestLineId && input.sources && input.sources.length > 0) {
-      throw new OperationsError('invalid_payload', 'Una partida viene de una solicitud o de varias consolidadas, no de ambas');
+      throw new OperationsError(
+        'invalid_payload',
+        'Una partida viene de una solicitud o de varias consolidadas, no de ambas'
+      );
     }
     const requestLine = input.requestLineId
       ? await tx.purchaseRequestLine.findUnique({ where: { id: input.requestLineId } })
       : null;
     if (input.requestLineId) {
       if (!requestLine || requestLine.status === 'cancelled') {
-        throw new OperationsError('not_found', 'La partida de la solicitud de compra no existe o fue cancelada');
+        throw new OperationsError(
+          'not_found',
+          'La partida de la solicitud de compra no existe o fue cancelada'
+        );
       }
       await assertRequestOpen(tx, requestLine.requestId);
     }
@@ -495,10 +627,16 @@ async function prepareLines(tx: Db, supplier: Supplier, inputs: readonly OrderLi
     for (const source of input.sources ?? []) {
       const line = await tx.purchaseRequestLine.findUnique({ where: { id: source.requestLineId } });
       if (!line || line.status === 'cancelled') {
-        throw new OperationsError('not_found', 'Alguna partida consolidada no existe o fue cancelada');
+        throw new OperationsError(
+          'not_found',
+          'Alguna partida consolidada no existe o fue cancelada'
+        );
       }
       if (!line.demandId) {
-        throw new OperationsError('invalid_payload', 'Sólo se consolidan en una partida las solicitudes ligadas a una venta');
+        throw new OperationsError(
+          'invalid_payload',
+          'Sólo se consolidan en una partida las solicitudes ligadas a una venta'
+        );
       }
       await assertRequestOpen(tx, line.requestId);
       sourceLines.push({ line, qty: source.qty });
@@ -510,11 +648,25 @@ async function prepareLines(tx: Db, supplier: Supplier, inputs: readonly OrderLi
       throw new OperationsError('invalid_payload', 'El producto no es de este proveedor');
     }
     const firstSource = sourceLines[0]?.line ?? null;
-    const zohoItemId = input.zohoItemId ?? requestLine?.zohoItemId ?? firstSource?.zohoItemId ?? (product?.zohoItemId || null);
-    const description = input.description ?? requestLine?.description ?? firstSource?.description ?? product?.description ?? null;
+    const zohoItemId =
+      input.zohoItemId ??
+      requestLine?.zohoItemId ??
+      firstSource?.zohoItemId ??
+      (product?.zohoItemId || null);
+    const description =
+      input.description ??
+      requestLine?.description ??
+      firstSource?.description ??
+      product?.description ??
+      null;
     const unit = input.unit ?? requestLine?.unit ?? firstSource?.unit ?? product?.unit ?? null;
-    if (!description) throw new OperationsError('invalid_payload', 'Describe cada partida de la orden');
-    if (!unit) throw new OperationsError('invalid_payload', `Indica la unidad de "${truncate(description, 60)}"`);
+    if (!description)
+      throw new OperationsError('invalid_payload', 'Describe cada partida de la orden');
+    if (!unit)
+      throw new OperationsError(
+        'invalid_payload',
+        `Indica la unidad de "${truncate(description, 60)}"`
+      );
     let allocations: DesiredAllocation[] = (input.allocations ?? []).map((a) => ({
       demandId: a.demandId,
       qty: a.qty,
@@ -522,14 +674,28 @@ async function prepareLines(tx: Db, supplier: Supplier, inputs: readonly OrderLi
       requestLineId: requestLine?.id ?? null,
     }));
     if (!input.allocations && requestLine?.demandId) {
-      const remaining = remainingToOrder({ qty: num(requestLine.qty), qtyOrdered: num(requestLine.qtyOrdered), status: requestLine.status });
+      const remaining = remainingToOrder({
+        qty: num(requestLine.qty),
+        qtyOrdered: num(requestLine.qtyOrdered),
+        status: requestLine.status,
+      });
       const qty = Math.min(input.qty, remaining > QTY_EPS ? remaining : input.qty);
-      allocations = [{ demandId: requestLine.demandId, qty, allocationId: requestLine.allocationId, requestLineId: requestLine.id }];
+      allocations = [
+        {
+          demandId: requestLine.demandId,
+          qty,
+          allocationId: requestLine.allocationId,
+          requestLineId: requestLine.id,
+        },
+      ];
     }
     if (!input.allocations && sourceLines.length > 0) {
       const total = sourceLines.reduce((sum, source) => sum + source.qty, 0);
       if (total > input.qty + QTY_EPS) {
-        throw new OperationsError('invalid_quantity', `Las solicitudes consolidadas (${round4(total)}) superan la cantidad de la partida (${input.qty})`);
+        throw new OperationsError(
+          'invalid_quantity',
+          `Las solicitudes consolidadas (${round4(total)}) superan la cantidad de la partida (${input.qty})`
+        );
       }
       allocations = sourceLines.map(({ line, qty }) => ({
         demandId: line.demandId!,
@@ -581,12 +747,18 @@ async function insertLines(
       },
     });
     lines.push(line);
-    const takes = entry.requestLineId ? [{ requestLineId: entry.requestLineId, qty: entry.qty }] : entry.sources;
+    const takes = entry.requestLineId
+      ? [{ requestLineId: entry.requestLineId, qty: entry.qty }]
+      : entry.sources;
     for (const take of takes) {
       const updated = await adjustRequestLineOrdered(tx, take.requestLineId, take.qty);
       if (updated) {
         requestIds.add(updated.requestId);
-        await ctx.relate({ type: OBJ.request, id: updated.requestId }, { type: OBJ.order, id: order.id }, 'ordered_in');
+        await ctx.relate(
+          { type: OBJ.request, id: updated.requestId },
+          { type: OBJ.order, id: order.id },
+          'ordered_in'
+        );
       }
     }
     if (entry.allocations.length > 0) {
@@ -598,19 +770,28 @@ async function insertLines(
 }
 
 /** Request lines an order line took quantity from (its own or the consolidated ones through the allocations). */
-async function requestLineShares(tx: Db, line: ProcurementOrderLine): Promise<Array<{ requestLineId: string; qty: number }>> {
+async function requestLineShares(
+  tx: Db,
+  line: ProcurementOrderLine
+): Promise<Array<{ requestLineId: string; qty: number }>> {
   if (line.requestLineId) return [{ requestLineId: line.requestLineId, qty: num(line.qty) }];
   const rows = await tx.procurementAllocation.findMany({
     where: { orderLineId: line.id, requestLineId: { not: null } },
     select: { requestLineId: true, qty: true },
   });
   const byLine = new Map<string, number>();
-  for (const row of rows) byLine.set(row.requestLineId!, round4((byLine.get(row.requestLineId!) ?? 0) + num(row.qty)));
+  for (const row of rows)
+    byLine.set(row.requestLineId!, round4((byLine.get(row.requestLineId!) ?? 0) + num(row.qty)));
   return [...byLine].map(([requestLineId, qty]) => ({ requestLineId, qty }));
 }
 
 /** Gives `qty` of an order line back to its request lines, proportionally to what each one gave. */
-async function giveBackToRequests(tx: Db, line: ProcurementOrderLine, qty: number, requestIds: Set<string>): Promise<void> {
+async function giveBackToRequests(
+  tx: Db,
+  line: ProcurementOrderLine,
+  qty: number,
+  requestIds: Set<string>
+): Promise<void> {
   const shares = await requestLineShares(tx, line);
   const total = shares.reduce((sum, share) => sum + share.qty, 0);
   if (!(total > 0) || !(qty > 0)) return;
@@ -623,7 +804,11 @@ async function giveBackToRequests(tx: Db, line: ProcurementOrderLine, qty: numbe
 }
 
 /** Gives back what the lines took from the requests and removes them (draft edition). */
-async function detachDraftLines(tx: Db, order: ProcurementOrder, ctx: CommandContext): Promise<void> {
+async function detachDraftLines(
+  tx: Db,
+  order: ProcurementOrder,
+  ctx: CommandContext
+): Promise<void> {
   const lines = await loadOrderLines(tx, order.id);
   const requestIds = new Set<string>();
   for (const line of lines) {
@@ -646,23 +831,40 @@ async function detachDraftLines(tx: Db, order: ProcurementOrder, ctx: CommandCon
 async function inferDestination(
   tx: Db,
   lines: readonly OrderLineInput[]
-): Promise<{ deliveryMode: 'warehouse' | 'direct_to_customer'; directDeliveryCaseId: string | null }> {
+): Promise<{
+  deliveryMode: 'warehouse' | 'direct_to_customer';
+  directDeliveryCaseId: string | null;
+}> {
   const requestLineIds = [
-    ...new Set(lines.flatMap((line) => [line.requestLineId, ...(line.sources ?? []).map((s) => s.requestLineId)]).filter((id): id is string => Boolean(id))),
+    ...new Set(
+      lines
+        .flatMap((line) => [
+          line.requestLineId,
+          ...(line.sources ?? []).map((s) => s.requestLineId),
+        ])
+        .filter((id): id is string => Boolean(id))
+    ),
   ];
   const requestLines = requestLineIds.length
-    ? await tx.purchaseRequestLine.findMany({ where: { id: { in: requestLineIds } }, select: { allocationId: true } })
+    ? await tx.purchaseRequestLine.findMany({
+        where: { id: { in: requestLineIds } },
+        select: { allocationId: true },
+      })
     : [];
   const allocationIds = [
     ...new Set(
-      [...lines.flatMap((line) => (line.allocations ?? []).map((a) => a.allocationId)), ...requestLines.map((r) => r.allocationId)].filter(
-        (id): id is string => Boolean(id)
-      )
+      [
+        ...lines.flatMap((line) => (line.allocations ?? []).map((a) => a.allocationId)),
+        ...requestLines.map((r) => r.allocationId),
+      ].filter((id): id is string => Boolean(id))
     ),
   ];
   const warehouse = { deliveryMode: 'warehouse' as const, directDeliveryCaseId: null };
   if (allocationIds.length === 0) return warehouse;
-  const allocations = await tx.demandAllocation.findMany({ where: { id: { in: allocationIds } }, select: { source: true, caseId: true } });
+  const allocations = await tx.demandAllocation.findMany({
+    where: { id: { in: allocationIds } },
+    select: { source: true, caseId: true },
+  });
   const direct = allocations.filter((a) => a.source === 'direct_supplier');
   if (direct.length === 0) return warehouse;
   if (direct.length !== allocations.length || new Set(direct.map((a) => a.caseId)).size !== 1) {
@@ -680,27 +882,47 @@ async function resolveDestination(
 ): Promise<{ warehouseId: string | null; directDeliveryCaseId: string | null }> {
   if (input.deliveryMode === 'direct_to_customer') {
     if (!input.directDeliveryCaseId) {
-      throw new OperationsError('invalid_payload', 'Indica el expediente del cliente que recibe la entrega directa');
+      throw new OperationsError(
+        'invalid_payload',
+        'Indica el expediente del cliente que recibe la entrega directa'
+      );
     }
     const opCase = assertFoundRow(
-      await tx.operationalCase.findUnique({ where: { id: input.directDeliveryCaseId }, select: { id: true, status: true, caseNumber: true } }),
+      await tx.operationalCase.findUnique({
+        where: { id: input.directDeliveryCaseId },
+        select: { id: true, status: true, caseNumber: true },
+      }),
       'No se encontró el expediente'
     );
     if (opCase.status === 'closed' || opCase.status === 'cancelled') {
-      throw new OperationsError('invalid_state', `El expediente ${opCase.caseNumber} ya está cerrado o cancelado`);
+      throw new OperationsError(
+        'invalid_state',
+        `El expediente ${opCase.caseNumber} ya está cerrado o cancelado`
+      );
     }
     return { warehouseId: null, directDeliveryCaseId: opCase.id };
   }
   if (input.directDeliveryCaseId) {
-    throw new OperationsError('invalid_payload', 'Una compra a bodega no lleva expediente de entrega directa');
+    throw new OperationsError(
+      'invalid_payload',
+      'Una compra a bodega no lleva expediente de entrega directa'
+    );
   }
   if (input.warehouseId) {
-    const warehouse = await tx.warehouse.findUnique({ where: { id: input.warehouseId }, select: { id: true, active: true, name: true } });
+    const warehouse = await tx.warehouse.findUnique({
+      where: { id: input.warehouseId },
+      select: { id: true, active: true, name: true },
+    });
     if (!warehouse) throw new OperationsError('not_found', 'No se encontró la bodega');
-    if (!warehouse.active) throw new OperationsError('invalid_state', `La bodega ${warehouse.name} está desactivada`);
+    if (!warehouse.active)
+      throw new OperationsError('invalid_state', `La bodega ${warehouse.name} está desactivada`);
     return { warehouseId: warehouse.id, directDeliveryCaseId: null };
   }
-  const first = await tx.warehouse.findFirst({ where: { active: true }, orderBy: { createdAt: 'asc' }, select: { id: true } });
+  const first = await tx.warehouse.findFirst({
+    where: { active: true },
+    orderBy: { createdAt: 'asc' },
+    select: { id: true },
+  });
   return { warehouseId: first?.id ?? null, directDeliveryCaseId: null };
 }
 
@@ -711,7 +933,10 @@ export async function createOrderInTx(
 ): Promise<{ order: ProcurementOrder; lines: ProcurementOrderLine[] }> {
   const supplier = await loadSupplier(tx, input.supplierId);
   if (supplier.status !== 'active') {
-    throw new OperationsError('invalid_state', `El proveedor ${supplier.name} está bloqueado o archivado`);
+    throw new OperationsError(
+      'invalid_state',
+      `El proveedor ${supplier.name} está bloqueado o archivado`
+    );
   }
   const inferred = input.deliveryMode ? null : await inferDestination(tx, input.lines);
   const deliveryMode = input.deliveryMode ?? inferred!.deliveryMode;
@@ -748,7 +973,11 @@ export async function createOrderInTx(
     },
   });
   const lines = await insertLines(tx, order, prepared, totals.lineTotals, ctx);
-  await ctx.relate({ type: OBJ.order, id: order.id }, { type: OBJ.supplier, id: supplier.id }, 'ordered_from');
+  await ctx.relate(
+    { type: OBJ.order, id: order.id },
+    { type: OBJ.supplier, id: supplier.id },
+    'ordered_from'
+  );
   const caseIds = await orderCaseIds(tx, order);
   emitPurchases(
     ctx,
@@ -808,7 +1037,12 @@ export async function updateOrderDraftInTx(
     const totals = computeOrderTotals(prepared, freight);
     updated = await tx.procurementOrder.update({
       where: { id: order.id },
-      data: { subtotal: totals.subtotal, taxTotal: totals.taxTotal, freight: totals.freight, total: totals.total },
+      data: {
+        subtotal: totals.subtotal,
+        taxTotal: totals.taxTotal,
+        freight: totals.freight,
+        total: totals.total,
+      },
     });
     lines = await insertLines(tx, updated, prepared, totals.lineTotals, ctx);
   } else {
@@ -819,13 +1053,23 @@ export async function updateOrderDraftInTx(
     );
     updated = await tx.procurementOrder.update({
       where: { id: order.id },
-      data: { subtotal: totals.subtotal, taxTotal: totals.taxTotal, freight: totals.freight, total: totals.total },
+      data: {
+        subtotal: totals.subtotal,
+        taxTotal: totals.taxTotal,
+        freight: totals.freight,
+        total: totals.total,
+      },
     });
   }
   emitPurchases(
     ctx,
     EV.updated,
-    { orderId: order.id, number: order.number, total: updated.total.toString(), linesReplaced: Boolean(input.lines) },
+    {
+      orderId: order.id,
+      number: order.number,
+      total: updated.total.toString(),
+      linesReplaced: Boolean(input.lines),
+    },
     { objectType: OBJ.order, objectId: order.id }
   );
   publishBoard(ctx, { orderId: order.id });
@@ -844,6 +1088,8 @@ export interface SubmitOrderData {
   requiredApprovals: number;
   autoApproved: boolean;
   approverCount: number;
+  /** Persona cuya decisión sobre la propuesta de IA quedó como primera firma (plan 5.4). */
+  firstSignatureByUserId: string | null;
 }
 
 export async function submitOrderInTx(
@@ -854,28 +1100,48 @@ export async function submitOrderInTx(
   const order = await loadOrder(tx, input.orderId);
   const lines = await loadOrderLines(tx, order.id);
   throwCheck(
-    checkSubmitOrder({ status: order.status, lineCount: lines.filter((l) => l.status !== 'cancelled').length, total: order.total })
+    checkSubmitOrder({
+      status: order.status,
+      lineCount: lines.filter((l) => l.status !== 'cancelled').length,
+      total: order.total,
+    })
   );
   const supplier = await loadSupplier(tx, order.supplierId);
   if (supplier.status !== 'active') {
-    throw new OperationsError('invalid_state', `El proveedor ${supplier.name} está bloqueado o archivado`);
+    throw new OperationsError(
+      'invalid_state',
+      `El proveedor ${supplier.name} está bloqueado o archivado`
+    );
   }
-  await tx.procurementOrder.update({ where: { id: order.id }, data: { status: 'pending_approval' } });
+  await tx.procurementOrder.update({
+    where: { id: order.id },
+    data: { status: 'pending_approval' },
+  });
   const caseIds = await orderCaseIds(tx, order);
   // A person is the requester. An AI identity keeps two distinct signatures and, when a human caused
   // the turn, that human is the requester so they cannot be one of the signatures.
   let causer: string | null = null;
   if (ctx.actor.type === 'ai' && input.causedByUserId) {
-    const user = await tx.user.findUnique({ where: { id: input.causedByUserId }, select: { isActive: true, isBot: true } });
+    const user = await tx.user.findUnique({
+      where: { id: input.causedByUserId },
+      select: { isActive: true, isBot: true },
+    });
     if (user?.isActive && !user.isBot) {
       causer = input.causedByUserId;
-      await ctx.relate({ type: OBJ.order, id: order.id }, { type: 'user', id: causer }, 'caused_by');
+      await ctx.relate(
+        { type: OBJ.order, id: order.id },
+        { type: 'user', id: causer },
+        'caused_by'
+      );
     }
   }
   const requester =
     ctx.actor.type === 'user'
       ? { requestedByUserId: ctx.actor.id }
-      : { requestedByUserId: causer ?? `${ctx.actor.type}:${ctx.actor.id}`.slice(0, 120), minApprovals: 2 };
+      : {
+          requestedByUserId: causer ?? `${ctx.actor.type}:${ctx.actor.id}`.slice(0, 120),
+          minApprovals: 2,
+        };
   const outcome = await requestApproval(tx, {
     scope: 'procurement',
     targetType: OBJ.order,
@@ -923,6 +1189,7 @@ export async function submitOrderInTx(
     requiredApprovals: outcome.approvalRequest.requiredApprovals,
     autoApproved: outcome.autoApproved,
     approverCount: outcome.approverUserIds.length,
+    firstSignatureByUserId: outcome.firstSignatureByUserId,
   };
 }
 
@@ -936,9 +1203,14 @@ function lastDecisionNote(decisions: Prisma.JsonValue): string | null {
 }
 
 /** Reaction registered with `onApprovalDecided('procurement_order')`; runs in the deciding transaction. */
-export async function applyOrderApprovalDecision(tx: Db, event: ApprovalDecidedEvent): Promise<void> {
+export async function applyOrderApprovalDecision(
+  tx: Db,
+  event: ApprovalDecidedEvent
+): Promise<void> {
   const { ctx } = event;
-  const order = await tx.procurementOrder.findUnique({ where: { id: event.approvalRequest.targetId } });
+  const order = await tx.procurementOrder.findUnique({
+    where: { id: event.approvalRequest.targetId },
+  });
   if (!order) return;
   if (order.approvalRequestId && order.approvalRequestId !== event.approvalRequest.id) return;
   const next = statusAfterApprovalDecision(order.status, event.status);
@@ -986,7 +1258,13 @@ export async function applyOrderApprovalDecision(tx: Db, event: ApprovalDecidedE
     emitPurchases(
       ctx,
       EV.approved,
-      { orderId: order.id, number: order.number, approvalRequestId: event.approvalRequest.id, auto: event.auto, decidedByUserId: event.decidedByUserId },
+      {
+        orderId: order.id,
+        number: order.number,
+        approvalRequestId: event.approvalRequest.id,
+        auto: event.auto,
+        decidedByUserId: event.decidedByUserId,
+      },
       { caseId: caseIds[0] ?? null, objectType: OBJ.order, objectId: order.id }
     );
     if (creator && creator !== event.decidedByUserId) {
@@ -996,7 +1274,7 @@ export async function applyOrderApprovalDecision(tx: Db, event: ApprovalDecidedE
         type: 'purchase_order_approved',
         title: `Aprobada: orden ${order.number}`,
         body: 'Envíala al proveedor; el pago se solicita en automático cuando aplica',
-        url: `/app/purchases/orders/${order.id}`,
+        url: procurementOrderLink(order.id),
         entityType: OBJ.order,
         entityId: order.id,
       });
@@ -1004,13 +1282,22 @@ export async function applyOrderApprovalDecision(tx: Db, event: ApprovalDecidedE
   } else {
     await tx.procurementOrder.update({
       where: { id: order.id },
-      data: { status: 'draft', approvalRequestId: null, ...(bump ? { version: { increment: 1 } } : {}) },
+      data: {
+        status: 'draft',
+        approvalRequestId: null,
+        ...(bump ? { version: { increment: 1 } } : {}),
+      },
     });
     const note = lastDecisionNote(event.approvalRequest.decisions);
     emitPurchases(
       ctx,
       EV.rejected,
-      { orderId: order.id, number: order.number, approvalRequestId: event.approvalRequest.id, note },
+      {
+        orderId: order.id,
+        number: order.number,
+        approvalRequestId: event.approvalRequest.id,
+        note,
+      },
       { caseId: caseIds[0] ?? null, objectType: OBJ.order, objectId: order.id }
     );
     if (creator && creator !== event.decidedByUserId) {
@@ -1020,7 +1307,7 @@ export async function applyOrderApprovalDecision(tx: Db, event: ApprovalDecidedE
         type: 'purchase_order_rejected',
         title: `Rechazada: orden ${order.number}`,
         body: note ?? 'Revisa la orden y vuelve a enviarla a aprobación',
-        url: `/app/purchases/orders/${order.id}`,
+        url: procurementOrderLink(order.id),
         entityType: OBJ.order,
         entityId: order.id,
       });
@@ -1030,19 +1317,29 @@ export async function applyOrderApprovalDecision(tx: Db, event: ApprovalDecidedE
 }
 
 /** `payment_authorization` requests of an order: about its payable (current) or about the order itself. */
-async function paymentAuthorizationRequestsOf(tx: Db, order: Pick<ProcurementOrder, 'id' | 'obligationId'>) {
+async function paymentAuthorizationRequestsOf(
+  tx: Db,
+  order: Pick<ProcurementOrder, 'id' | 'obligationId'>
+) {
   return tx.areaRequest.findMany({
     where: {
       kind: 'payment_authorization',
       OR: [
-        ...(order.obligationId ? [{ objectType: OBLIGATION_OBJECT_TYPE, objectId: order.obligationId }] : []),
+        ...(order.obligationId
+          ? [{ objectType: OBLIGATION_OBJECT_TYPE, objectId: order.obligationId }]
+          : []),
         { objectType: OBJ.order, objectId: order.id },
       ],
     },
   });
 }
 
-async function cancelPendingApproval(tx: Db, approvalRequestId: string, reason: string, ctx: CommandContext): Promise<void> {
+async function cancelPendingApproval(
+  tx: Db,
+  approvalRequestId: string,
+  reason: string,
+  ctx: CommandContext
+): Promise<void> {
   const approval = await tx.approvalRequest.findUnique({ where: { id: approvalRequestId } });
   if (!approval || approval.status !== 'pending') return;
   await tx.approvalRequest.update({
@@ -1050,7 +1347,11 @@ async function cancelPendingApproval(tx: Db, approvalRequestId: string, reason: 
     data: { status: 'cancelled', decidedAt: ctx.now, version: { increment: 1 } },
   });
   const items = await tx.workItem.findMany({
-    where: { objectType: 'approval_request', objectId: approval.id, status: { in: [...WORK_ITEM_OPEN_STATUSES] } },
+    where: {
+      objectType: 'approval_request',
+      objectId: approval.id,
+      status: { in: [...WORK_ITEM_OPEN_STATUSES] },
+    },
   });
   for (const item of items) await cancelWorkItemInTx(tx, item, { reason });
   ctx.emit(
@@ -1062,7 +1363,12 @@ async function cancelPendingApproval(tx: Db, approvalRequestId: string, reason: 
       targetId: approval.targetId,
       reason,
     },
-    { caseId: approval.caseId, areaKey: approval.areaKey, objectType: 'approval_request', objectId: approval.id }
+    {
+      caseId: approval.caseId,
+      areaKey: approval.areaKey,
+      objectType: 'approval_request',
+      objectId: approval.id,
+    }
   );
 }
 
@@ -1089,7 +1395,13 @@ export async function requestPaymentInTx(
   ctx: CommandContext
 ): Promise<RequestPaymentData> {
   const order = await loadOrder(tx, input.orderId);
-  throwCheck(checkRequestPayment({ status: order.status, paymentStatus: order.paymentStatus, obligationId: order.obligationId }));
+  throwCheck(
+    checkRequestPayment({
+      status: order.status,
+      paymentStatus: order.paymentStatus,
+      obligationId: order.obligationId,
+    })
+  );
   const supplier = await loadSupplier(tx, order.supplierId);
   const caseIds = await orderCaseIds(tx, order);
   const caseId = caseIds[0] ?? null;
@@ -1117,12 +1429,22 @@ export async function requestPaymentInTx(
     ctx
   );
   const status = statusAfterPaymentRequest(order.status as OrderStatus, order.paymentMode);
-  await tx.procurementOrder.update({ where: { id: order.id }, data: { obligationId: obligation.id, status } });
-  await ctx.relate({ type: OBJ.order, id: order.id }, { type: OBLIGATION_OBJECT_TYPE, id: obligation.id }, 'payable');
+  await tx.procurementOrder.update({
+    where: { id: order.id },
+    data: { obligationId: obligation.id, status },
+  });
+  await ctx.relate(
+    { type: OBJ.order, id: order.id },
+    { type: OBLIGATION_OBJECT_TYPE, id: obligation.id },
+    'payable'
+  );
 
   let areaRequestId: string | null = null;
   let workItemId: string | null = null;
-  const paymentReason = truncate(`Orden de compra ${order.number} (${labelOf(PAYMENT_MODE_LABELS, order.paymentMode)})`, 500);
+  const paymentReason = truncate(
+    `Orden de compra ${order.number} (${labelOf(PAYMENT_MODE_LABELS, order.paymentMode)})`,
+    500
+  );
   // With a case, a prepaid / cash-on-delivery payment is a request between areas that blocks the case.
   // It points at the payable (objectType `obligation`), which is what Contabilidad authorizes and pays.
   if (order.paymentMode !== 'credit' && caseId) {
@@ -1146,17 +1468,31 @@ export async function requestPaymentInTx(
     });
     areaRequestId = request.id;
     workItemId = workItem.id;
-    await ctx.relate({ type: 'area_request', id: request.id }, { type: OBJ.order, id: order.id }, 'payment_for_order');
+    await ctx.relate(
+      { type: 'area_request', id: request.id },
+      { type: OBJ.order, id: order.id },
+      'payment_for_order'
+    );
   }
   // Every payable of a purchase needs its `payment` approval before finance settles it, in every
   // payment mode (a credit order asks for it now, so it is signed long before the due date).
-  const humanRequester = ctx.actor.type === 'user' ? null : order.createdByUserId.includes(':') ? null : order.createdByUserId;
+  const humanRequester =
+    ctx.actor.type === 'user'
+      ? null
+      : order.createdByUserId.includes(':')
+        ? null
+        : order.createdByUserId;
   let approvalRequestId: string | null = null;
   let authorizationStatus = 'pending';
   try {
     const authorization = await requestProcurementPaymentAuthorization(
       tx,
-      { obligationId: obligation.id, areaRequestId, requestedByUserId: humanRequester, note: paymentReason },
+      {
+        obligationId: obligation.id,
+        areaRequestId,
+        requestedByUserId: humanRequester,
+        note: paymentReason,
+      },
       ctx
     );
     approvalRequestId = authorization.approvalRequestId;
@@ -1215,14 +1551,21 @@ export async function requestPaymentInTx(
  * payable of the order received money. Paid when the obligation is settled,
  * partial otherwise. A prepaid order waiting for the payment moves on.
  */
-export async function markOrderPaid(tx: Db, orderId: string, ctx: CommandContext): Promise<ProcurementOrder | null> {
+export async function markOrderPaid(
+  tx: Db,
+  orderId: string,
+  ctx: CommandContext
+): Promise<ProcurementOrder | null> {
   const order = await tx.procurementOrder.findUnique({ where: { id: orderId } });
   if (!order) return null;
   let paymentStatus: 'unpaid' | 'partial' | 'paid' = 'paid';
   if (order.obligationId) {
     const obligation = await tx.obligation.findUnique({ where: { id: order.obligationId } });
     if (obligation) {
-      paymentStatus = obligation.status === 'settled' ? 'paid' : paymentStatusFor(obligation.expectedAmount, obligation.settledAmount);
+      paymentStatus =
+        obligation.status === 'settled'
+          ? 'paid'
+          : paymentStatusFor(obligation.expectedAmount, obligation.settledAmount);
     }
   }
   if (paymentStatus === order.paymentStatus) return order;
@@ -1242,7 +1585,9 @@ export async function markOrderPaid(tx: Db, orderId: string, ctx: CommandContext
     const requests = await paymentAuthorizationRequestsOf(tx, order);
     for (const request of requests) {
       if (isAreaRequestOpenStatus(request.status)) {
-        await transitionAreaRequestInTx(tx, request, 'resolve', { answer: `Pago aplicado a la orden ${order.number}` });
+        await transitionAreaRequestInTx(tx, request, 'resolve', {
+          answer: `Pago aplicado a la orden ${order.number}`,
+        });
       }
     }
     if (order.obligationId) {
@@ -1255,7 +1600,10 @@ export async function markOrderPaid(tx: Db, orderId: string, ctx: CommandContext
         },
       });
       for (const item of items) {
-        await completeWorkItemInTx(tx, item, { result: { paid: true, orderId: order.id }, skipEvidenceCheck: true });
+        await completeWorkItemInTx(tx, item, {
+          result: { paid: true, orderId: order.id },
+          skipEvidenceCheck: true,
+        });
       }
     }
   } else if (wasPaid && order.obligationId) {
@@ -1270,11 +1618,17 @@ export async function markOrderPaid(tx: Db, orderId: string, ctx: CommandContext
       select: { id: true },
     });
     if (!open) {
-      const supplier = await tx.supplier.findUnique({ where: { id: order.supplierId }, select: { name: true } });
+      const supplier = await tx.supplier.findUnique({
+        where: { id: order.supplierId },
+        select: { name: true },
+      });
       await ctx.createWorkItem({
         areaKey: 'contabilidad',
         kind: 'action',
-        title: truncate(`Volver a pagar ${order.number}${supplier ? ` a ${supplier.name}` : ''}`, 200),
+        title: truncate(
+          `Volver a pagar ${order.number}${supplier ? ` a ${supplier.name}` : ''}`,
+          200
+        ),
         description: `Se revirtió el pago de la orden: vuelve a registrarlo (${paymentStatus === 'partial' ? 'queda un saldo parcial' : 'sin pagos aplicados'}).`,
         objectType: OBLIGATION_OBJECT_TYPE,
         objectId: order.obligationId,
@@ -1285,7 +1639,13 @@ export async function markOrderPaid(tx: Db, orderId: string, ctx: CommandContext
   emitPurchases(
     ctx,
     EV.paid,
-    { orderId: order.id, number: order.number, paymentStatus, previousPaymentStatus: order.paymentStatus, status },
+    {
+      orderId: order.id,
+      number: order.number,
+      paymentStatus,
+      previousPaymentStatus: order.paymentStatus,
+      status,
+    },
     { caseId: caseIds[0] ?? null, objectType: OBJ.order, objectId: order.id }
   );
   const creator = order.createdByUserId.includes(':') ? null : order.createdByUserId;
@@ -1295,8 +1655,10 @@ export async function markOrderPaid(tx: Db, orderId: string, ctx: CommandContext
       category: purchaseNotificationCategory(),
       type: 'purchase_order_paid',
       title: `Pagada: orden ${order.number}`,
-      body: order.sentToSupplierAt ? 'El proveedor ya tiene la orden; espera el material' : 'Ya puedes enviarla al proveedor',
-      url: `/app/purchases/orders/${order.id}`,
+      body: order.sentToSupplierAt
+        ? 'El proveedor ya tiene la orden; espera el material'
+        : 'Ya puedes enviarla al proveedor',
+      url: procurementOrderLink(order.id),
       entityType: OBJ.order,
       entityId: order.id,
     });
@@ -1313,7 +1675,13 @@ export async function recordFollowupFailureInTx(
   const order = await loadOrder(tx, input.orderId);
   if (order.obligationId || order.status === 'cancelled') return { workItemId: null };
   const existing = await tx.workItem.findFirst({
-    where: { objectType: OBJ.order, objectId: order.id, areaKey: PURCHASES_AREA_KEY, status: { in: [...WORK_ITEM_OPEN_STATUSES] }, title: { startsWith: 'Solicitar el pago' } },
+    where: {
+      objectType: OBJ.order,
+      objectId: order.id,
+      areaKey: PURCHASES_AREA_KEY,
+      status: { in: [...WORK_ITEM_OPEN_STATUSES] },
+      title: { startsWith: 'Solicitar el pago' },
+    },
     select: { id: true },
   });
   if (existing) return { workItemId: existing.id };
@@ -1326,7 +1694,12 @@ export async function recordFollowupFailureInTx(
     objectId: order.id,
     ownerUserId: order.createdByUserId.includes(':') ? undefined : order.createdByUserId,
   });
-  emitPurchases(ctx, EV.followupFailed, { orderId: order.id, step: input.step, message: input.message, workItemId: item.id }, { objectType: OBJ.order, objectId: order.id });
+  emitPurchases(
+    ctx,
+    EV.followupFailed,
+    { orderId: order.id, step: input.step, message: input.message, workItemId: item.id },
+    { objectType: OBJ.order, objectId: order.id }
+  );
   return { workItemId: item.id };
 }
 
@@ -1341,7 +1714,11 @@ export async function markOrderSentInTx(
 ): Promise<ProcurementOrder> {
   const order = await loadOrder(tx, input.orderId);
   throwCheck(checkSendOrder(order.status));
-  const status = statusAfterSend(order.status as OrderStatus, order.paymentMode, order.paymentStatus);
+  const status = statusAfterSend(
+    order.status as OrderStatus,
+    order.paymentMode,
+    order.paymentStatus
+  );
   const evidenceObjectIds = input.pdfObjectId
     ? [...new Set([...order.evidenceObjectIds, input.pdfObjectId])]
     : order.evidenceObjectIds;
@@ -1380,13 +1757,21 @@ export async function allocateLineInTx(
   input: z.output<typeof allocateLineSchema>,
   ctx: CommandContext
 ): Promise<{ orderId: string; allocationIds: string[] }> {
-  const line = assertFoundRow(await tx.procurementOrderLine.findUnique({ where: { id: input.orderLineId } }), 'No se encontró la partida de la orden');
+  const line = assertFoundRow(
+    await tx.procurementOrderLine.findUnique({ where: { id: input.orderLineId } }),
+    'No se encontró la partida de la orden'
+  );
   const order = await loadOrder(tx, line.orderId);
   const result = await applyLineAllocationsInTx(
     tx,
     order,
     line,
-    input.allocations.map((a) => ({ demandId: a.demandId, qty: a.qty, allocationId: a.allocationId ?? null, requestLineId: line.requestLineId })),
+    input.allocations.map((a) => ({
+      demandId: a.demandId,
+      qty: a.qty,
+      allocationId: a.allocationId ?? null,
+      requestLineId: line.requestLineId,
+    })),
     ctx
   );
   return { orderId: order.id, allocationIds: result.allocationIds };
@@ -1398,14 +1783,21 @@ export async function cancelOrderInTx(
   ctx: CommandContext
 ): Promise<{ order: ProcurementOrder; compensations: string[] }> {
   const order = await loadOrder(tx, input.orderId);
-  const postedReceipts = await tx.goodsReceipt.count({ where: { orderId: order.id, status: { in: ['posted', 'disputed'] } } });
+  const postedReceipts = await tx.goodsReceipt.count({
+    where: { orderId: order.id, status: { in: ['posted', 'disputed'] } },
+  });
   throwCheck(checkCancelOrder({ status: order.status, postedReceipts }));
   const compensations: string[] = [];
   const reason = input.reason;
   const caseIds = await orderCaseIds(tx, order);
 
   if (order.approvalRequestId && order.status === 'pending_approval') {
-    await cancelPendingApproval(tx, order.approvalRequestId, `Orden ${order.number} cancelada: ${reason}`, ctx);
+    await cancelPendingApproval(
+      tx,
+      order.approvalRequestId,
+      `Orden ${order.number} cancelada: ${reason}`,
+      ctx
+    );
     compensations.push('approval_cancelled');
   }
   if (order.obligationId) {
@@ -1418,53 +1810,88 @@ export async function cancelOrderInTx(
         title: truncate(`Recuperar el pago de la orden cancelada ${order.number}`, 200),
         dedupeKey: `purchases.order_refund:${order.id}`,
         caseId: caseIds[0] ?? null,
-        detail: { orderId: order.id, obligationId: obligation.id, settledAmount: obligation.settledAmount.toString(), reason },
+        detail: {
+          orderId: order.id,
+          obligationId: obligation.id,
+          settledAmount: obligation.settledAmount.toString(),
+          reason,
+        },
       });
       await ctx.createWorkItem({
         areaKey: 'contabilidad',
         kind: 'action',
         title: truncate(`Gestionar reembolso o nota de crédito de ${order.number}`, 200),
-        description: `Se pagaron ${obligation.settledAmount.toString()} ${obligation.currency} y la orden se canceló: ${reason}`.slice(0, 1000),
+        description:
+          `Se pagaron ${obligation.settledAmount.toString()} ${obligation.currency} y la orden se canceló: ${reason}`.slice(
+            0,
+            1000
+          ),
         objectType: OBLIGATION_OBJECT_TYPE,
         objectId: obligation.id,
         caseId: caseIds[0] ?? null,
       });
       compensations.push('refund_requested');
     } else if (obligation && obligation.status !== 'cancelled') {
-      await cancelProcurementPayable(tx, obligation.id, `Orden ${order.number} cancelada: ${reason}`, ctx);
+      await cancelProcurementPayable(
+        tx,
+        obligation.id,
+        `Orden ${order.number} cancelada: ${reason}`,
+        ctx
+      );
       compensations.push('payable_cancelled');
     }
   }
   if (order.obligationId) {
     const pendingPaymentApprovals = await tx.approvalRequest.findMany({
-      where: { scope: 'payment', targetType: OBLIGATION_OBJECT_TYPE, targetId: order.obligationId, status: 'pending' },
+      where: {
+        scope: 'payment',
+        targetType: OBLIGATION_OBJECT_TYPE,
+        targetId: order.obligationId,
+        status: 'pending',
+      },
       select: { id: true },
     });
     for (const approval of pendingPaymentApprovals) {
-      await cancelPendingApproval(tx, approval.id, `Orden ${order.number} cancelada: ${reason}`, ctx);
+      await cancelPendingApproval(
+        tx,
+        approval.id,
+        `Orden ${order.number} cancelada: ${reason}`,
+        ctx
+      );
       compensations.push('payment_approval_cancelled');
     }
   }
   const paymentRequests = await paymentAuthorizationRequestsOf(tx, order);
   for (const request of paymentRequests) {
     if (isAreaRequestOpenStatus(request.status)) {
-      await transitionAreaRequestInTx(tx, request, 'cancel', { reason: `Orden ${order.number} cancelada: ${reason}` });
+      await transitionAreaRequestInTx(tx, request, 'cancel', {
+        reason: `Orden ${order.number} cancelada: ${reason}`,
+      });
       compensations.push('payment_request_cancelled');
     }
   }
   const openPaymentItems = order.obligationId
     ? await tx.workItem.findMany({
-        where: { objectType: OBLIGATION_OBJECT_TYPE, objectId: order.obligationId, status: { in: [...WORK_ITEM_OPEN_STATUSES] }, title: { startsWith: 'Autorizar y pagar' } },
+        where: {
+          objectType: OBLIGATION_OBJECT_TYPE,
+          objectId: order.obligationId,
+          status: { in: [...WORK_ITEM_OPEN_STATUSES] },
+          title: { startsWith: 'Autorizar y pagar' },
+        },
       })
     : [];
-  for (const item of openPaymentItems) await cancelWorkItemInTx(tx, item, { reason: `Orden ${order.number} cancelada` });
+  for (const item of openPaymentItems)
+    await cancelWorkItemInTx(tx, item, { reason: `Orden ${order.number} cancelada` });
 
   const lines = await loadOrderLines(tx, order.id);
   const requestIds = new Set<string>();
   for (const line of lines) {
     if (line.status !== 'cancelled') await giveBackToRequests(tx, line, num(line.qty), requestIds);
     if (line.status !== 'cancelled') {
-      await tx.procurementOrderLine.update({ where: { id: line.id }, data: { status: 'cancelled' } });
+      await tx.procurementOrderLine.update({
+        where: { id: line.id },
+        data: { status: 'cancelled' },
+      });
     }
   }
   await recomputeRequestStatuses(tx, requestIds, ctx);
@@ -1481,7 +1908,11 @@ export async function cancelOrderInTx(
       areaKey: PURCHASES_AREA_KEY,
       kind: 'action',
       title: truncate(`Avisar al proveedor la cancelación de ${order.number}`, 200),
-      description: `La orden ya se había enviado (${order.sentVia ?? 'sin canal'}). Motivo: ${reason}`.slice(0, 1000),
+      description:
+        `La orden ya se había enviado (${order.sentVia ?? 'sin canal'}). Motivo: ${reason}`.slice(
+          0,
+          1000
+        ),
       objectType: OBJ.order,
       objectId: order.id,
       caseId: caseIds[0] ?? null,
@@ -1489,11 +1920,21 @@ export async function cancelOrderInTx(
     });
     compensations.push('supplier_notice');
   }
-  const updated = await tx.procurementOrder.update({ where: { id: order.id }, data: { status: 'cancelled' } });
+  const updated = await tx.procurementOrder.update({
+    where: { id: order.id },
+    data: { status: 'cancelled' },
+  });
   emitPurchases(
     ctx,
     EV.cancelled,
-    { orderId: order.id, number: order.number, reason, previousStatus: order.status, compensations, releasedAllocationIds: released },
+    {
+      orderId: order.id,
+      number: order.number,
+      reason,
+      previousStatus: order.status,
+      compensations,
+      releasedAllocationIds: released,
+    },
     { caseId: caseIds[0] ?? null, objectType: OBJ.order, objectId: order.id }
   );
   publishBoard(ctx, { orderId: order.id });
@@ -1529,7 +1970,11 @@ export async function closeOrderInTx(
         },
       })
     : 0;
-  const quantities = lines.map((l) => ({ qty: num(l.qty), qtyReceived: num(l.qtyAccepted), status: l.status }));
+  const quantities = lines.map((l) => ({
+    qty: num(l.qty),
+    qtyReceived: num(l.qtyAccepted),
+    status: l.status,
+  }));
   throwCheck(
     checkCloseOrder({
       status: order.status,
@@ -1563,7 +2008,10 @@ export async function closeOrderInTx(
     `Orden ${order.number} cerrada con faltante`,
     order.id
   );
-  const updated = await tx.procurementOrder.update({ where: { id: order.id }, data: { status: 'closed' } });
+  const updated = await tx.procurementOrder.update({
+    where: { id: order.id },
+    data: { status: 'closed' },
+  });
   const caseIds = await orderCaseIds(tx, order);
   emitPurchases(
     ctx,
