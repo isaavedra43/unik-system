@@ -157,8 +157,18 @@ export function AreaWorkspace(props: AreaWorkspaceProps) {
   const [tableVersion, setTableVersion] = useState(0);
   const [pendingAction, setPendingAction] = useState<PendingRowAction | null>(null);
   const [copilotOpen, setCopilotOpen] = useState(false);
+  const [copilotVisible, setCopilotVisible] = useState(true);
   const [clientReady, setClientReady] = useState(0);
   const now = useMemo(() => new Date(nowIso), [nowIso]);
+
+  useEffect(() => {
+    if (wide !== true || !copilotVisible) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !event.defaultPrevented) setCopilotVisible(false);
+    };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [wide, copilotVisible]);
 
   // The area may register its own cells; until then the shared renderer answers.
   useEffect(() => {
@@ -358,6 +368,7 @@ export function AreaWorkspace(props: AreaWorkspaceProps) {
       starters={area.copilotStarters}
       onAfterTurn={refresh}
       {...(wide === false ? { onBack: () => setCopilotOpen(false) } : {})}
+      {...(wide === true ? { onClose: () => setCopilotVisible(false) } : {})}
     />
   ) : null;
 
@@ -377,7 +388,7 @@ export function AreaWorkspace(props: AreaWorkspaceProps) {
   const toolbarExtra = (
     <>
       {chips}
-      {pendingEvents > 0 || (canUseAssistant && wide === false) ? (
+      {pendingEvents > 0 || (canUseAssistant && (wide === false || !copilotVisible)) ? (
         <div className="area-chips" role="group" aria-label="Novedades del área">
           {pendingEvents > 0 ? (
             <Button variant="secondary" size="sm" onClick={refresh}>
@@ -387,8 +398,15 @@ export function AreaWorkspace(props: AreaWorkspaceProps) {
                 : `Hay ${pendingEvents} movimientos nuevos · Actualizar`}
             </Button>
           ) : null}
-          {canUseAssistant && wide === false ? (
-            <Button variant="secondary" size="sm" onClick={() => setCopilotOpen(true)}>
+          {canUseAssistant && (wide === false || !copilotVisible) ? (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => {
+                if (wide === false) setCopilotOpen(true);
+                else setCopilotVisible(true);
+              }}
+            >
               <Sparkles size={14} aria-hidden="true" />
               IA del área
             </Button>
@@ -500,7 +518,9 @@ export function AreaWorkspace(props: AreaWorkspaceProps) {
         )}
       </div>
 
-      {!isMobile && copilot ? <aside className="area-workspace-aside">{copilot}</aside> : null}
+      {!isMobile && wide === true && copilotVisible && copilot ? (
+        <aside className="area-workspace-aside">{copilot}</aside>
+      ) : null}
 
       {!isMobile && copilot && wide === false ? (
         <Sheet open={copilotOpen} onOpenChange={setCopilotOpen}>

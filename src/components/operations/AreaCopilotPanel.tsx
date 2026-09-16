@@ -22,10 +22,21 @@ interface Props {
   onInsertDraft?: (text: string) => void;
   onAfterTurn?: () => void;
   onBack?: () => void;
+  onClose?: () => void;
 }
 
 /** Area work-center surface of the shared copilot ("IA supervisando la tabla"). */
-export function AreaCopilotPanel({ areaKey, user, activityAt, context, starters, onInsertDraft, onAfterTurn, onBack }: Props) {
+export function AreaCopilotPanel({
+  areaKey,
+  user,
+  activityAt,
+  context,
+  starters,
+  onInsertDraft,
+  onAfterTurn,
+  onBack,
+  onClose,
+}: Props) {
   const label = AREA_LABELS[areaKey];
   const surface = useMemo<CopilotSurfaceConfig>(
     () => ({
@@ -58,6 +69,7 @@ export function AreaCopilotPanel({ areaKey, user, activityAt, context, starters,
       onInsertDraft={onInsertDraft}
       onAfterTurn={onAfterTurn}
       onBack={onBack}
+      onClose={onClose}
     />
   );
 }

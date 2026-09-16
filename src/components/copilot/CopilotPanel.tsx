@@ -117,6 +117,8 @@ export interface CopilotPanelProps {
   onSendDraft?: (text: string) => Promise<void>;
   onAfterTurn?: () => void;
   onBack?: () => void;
+  /** Hides the host panel while preserving the current conversation. */
+  onClose?: () => void;
   /** Same as `surface.context` (this prop wins when both are given). */
   context?: () => Record<string, unknown>;
   /** Same as `surface.minAutoIntervalMs` (this prop wins when both are given). */
@@ -493,6 +495,7 @@ export function CopilotPanel({
   onSendDraft,
   onAfterTurn,
   onBack,
+  onClose,
   context,
   minAutoIntervalMs,
 }: CopilotPanelProps) {
@@ -1200,6 +1203,17 @@ export function CopilotPanel({
             </div>
           )}
         </div>
+        {onClose ? (
+          <button
+            type="button"
+            className="copilot-iconbtn"
+            onClick={onClose}
+            aria-label="Cerrar copiloto"
+            title="Cerrar copiloto"
+          >
+            <X size={16} />
+          </button>
+        ) : null}
         <ModeBadge mode={mode} onChange={(m) => void changeMode(m)} busy={modeBusy} />
       </header>
 
