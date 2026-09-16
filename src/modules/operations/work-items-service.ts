@@ -29,6 +29,7 @@ import {
   type EvidenceDTO,
 } from './evidence-service';
 import { getOperationsConfig, type OperationsSettings } from './operations-config';
+import { areaViewPermissions, getArea, holdsAny } from '@/modules/areas/area-registry';
 import {
   AREA_KEYS,
   AREA_LABELS,
@@ -415,11 +416,16 @@ export function assertCanActOnWorkItem(
 }
 
 /**
- * Who may see the work of an area: `operations.view`, members of the area
- * channel, the area lead and the area responsible or backup.
+ * Who may see the work of an area: any permission that opens its workspace,
+ * `operations.view`, members of the area channel, the area lead and the area
+ * responsible or backup. The first rule intentionally mirrors the navigation
+ * and route guard: giving somebody `purchases.view`, `inventory.view`, etc.
+ * must never render an area link that the server then rejects.
  */
 export async function canViewArea(actor: CurrentUser, areaKey: string): Promise<boolean> {
   if (!isAreaKey(areaKey)) return false;
+  const meta = getArea(areaKey);
+  if (meta && holdsAny(actor, areaViewPermissions(meta))) return true;
   if (await authorizeOperationsChannel(actor, 'area', areaKey)) return true;
   const area = await prisma.area.findUnique({
     where: { key: areaKey },

@@ -658,6 +658,14 @@ describe('work item reads', () => {
     await expect(listAreaWorkItems(users.lead, 'logistica')).resolves.toMatchObject({
       nextCursor: null,
     });
+    // The sidebar and the area route are opened by the module's own view key.
+    // The work centre must recognize exactly the same access, even when this
+    // person is neither a chat member nor the configured responsible yet.
+    users.stranger.permissionKeys = ['logistics.view'];
+    await expect(listAreaWorkItems(users.stranger, 'logistica')).resolves.toMatchObject({
+      nextCursor: null,
+    });
+    users.stranger.permissionKeys = [];
     await expect(listAreaWorkItems(users.stranger, 'logistica')).rejects.toMatchObject({
       code: 'forbidden',
     });
