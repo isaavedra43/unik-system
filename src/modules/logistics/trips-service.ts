@@ -799,6 +799,21 @@ export async function failStop(
     title: `Avisar al cliente: entrega fallida (${ref})`,
     payload: { caseId: order.caseId, reason: input.reason },
   });
+  // A failed stop is also a package update when the delivery is tied to Zoho.
+  // The customer notice tells Ventas what to say; this request updates the
+  // operational contract so the package cannot look silently in transit.
+  if (order.packageId) {
+    await ctx.createAreaRequest({
+      caseId: order.caseId,
+      fromAreaKey: 'logistica',
+      toAreaKey: 'ventas',
+      kind: 'delivery_update',
+      objectType: ORDER,
+      objectId: order.id,
+      title: `Entrega fallida (${ref})`,
+      payload: { packageId: order.packageId, status: 'failed' },
+    });
+  }
   const eventOptions = { caseId: order.caseId, areaKey: 'logistica' };
   ctx.emit(
     LOGISTICS_EVENTS.trip.stopFailed,

@@ -129,6 +129,9 @@ function workItemActions(row: AreaWorkRow): AreaRowAction[] {
   const out: AreaRowAction[] = [];
   const isPreparation =
     row.areaKey === 'inventario' && extraString(row.extra, 'stepKey') === 'preparar_pedido';
+  const isAvailabilityVerification =
+    row.areaKey === 'inventario' &&
+    extraString(row.extra, 'stepKey') === 'verificar_disponibilidad';
   if (WORK_ITEM_FROM.start.includes(row.status) && row.status !== 'in_progress') {
     out.push(
       action({
@@ -141,7 +144,21 @@ function workItemActions(row: AreaWorkRow): AreaRowAction[] {
       })
     );
   }
-  if (isPreparation && WORK_ITEM_FROM.complete.includes(row.status)) {
+  if (isAvailabilityVerification && WORK_ITEM_FROM.complete.includes(row.status)) {
+    out.push(
+      action({
+        id: 'workitem.verify_case_availability',
+        label: 'Verificar disponibilidad',
+        commandType: 'stock.verify_case_availability',
+        aggregateType: WORK_ITEM_AGGREGATE,
+        payload: { workItemId: row.sourceId },
+        tone: 'primary',
+        successMessage: 'Verificación iniciada',
+        hint: 'Si la existencia no está controlada, abre un conteo spot del artículo, variante y bodega de esta necesidad. El resultado se cierra solo al resolver el conteo.',
+        participantOnly: true,
+      })
+    );
+  } else if (isPreparation && WORK_ITEM_FROM.complete.includes(row.status)) {
     out.push(
       action({
         id: 'workitem.issue_case_material',

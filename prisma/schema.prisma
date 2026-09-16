@@ -3370,6 +3370,25 @@ model DeliveryEvidence {
   @@index([commandId])
 }
 
+/// Lectura física de un contenedor al cargar o despachar una entrega. Es apéndice:
+/// repetir el mismo escaneo es idempotente y nunca reemplaza la evidencia de entrega.
+model DeliveryContainerScan {
+  id              String   @id @default(cuid())
+  deliveryOrderId String
+  stockItemId     String
+  containerKey    String
+  /// loading | dispatch
+  phase           String
+  scannedBy       String
+  scannedAt       DateTime @default(now())
+  commandId       String?
+
+  @@unique([deliveryOrderId, stockItemId, phase])
+  @@index([deliveryOrderId, phase, scannedAt])
+  @@index([stockItemId, scannedAt])
+  @@index([commandId])
+}
+
 // ===== Compras y Sourcing (plan UNIK Neural Operations) =====
 
 /// Proveedor nativo de UNIK (PRV-), opcionalmente ligado a un contacto de Zoho.

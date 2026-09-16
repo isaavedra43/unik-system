@@ -23,6 +23,113 @@ export interface RequestQuoteValues {
   dueDays: number;
 }
 
+export interface NewSupplierValues {
+  name: string;
+  primaryEmail?: string;
+  primaryPhone?: string;
+  paymentMode: 'prepaid' | 'credit' | 'cod';
+}
+
+export function NewSupplierDialog({
+  busy,
+  error,
+  onClose,
+  onSubmit,
+}: {
+  busy: boolean;
+  error: string | null;
+  onClose: () => void;
+  onSubmit: (values: NewSupplierValues) => void;
+}) {
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [phone, setPhone] = useState('');
+  const [paymentMode, setPaymentMode] = useState<NewSupplierValues['paymentMode']>('prepaid');
+  const [localError, setLocalError] = useState<string | null>(null);
+  function submit() {
+    if (name.trim().length < 2) {
+      setLocalError('Indica el nombre del proveedor');
+      return;
+    }
+    if (email.trim() && !/^\S+@\S+\.\S+$/.test(email.trim())) {
+      setLocalError('El correo no es válido');
+      return;
+    }
+    setLocalError(null);
+    onSubmit({
+      name: name.trim(),
+      ...(email.trim() ? { primaryEmail: email.trim() } : {}),
+      ...(phone.trim() ? { primaryPhone: phone.trim() } : {}),
+      paymentMode,
+    });
+  }
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title="Dar de alta proveedor"
+      footer={
+        <>
+          <Button variant="secondary" size="sm" disabled={busy} onClick={onClose}>
+            Cancelar
+          </Button>
+          <Button size="sm" isLoading={busy} onClick={submit}>
+            Crear proveedor
+          </Button>
+        </>
+      }
+    >
+      <p className="compras-lab-hint">
+        Se aplican las validaciones de duplicados antes de guardar.
+      </p>
+      {error ? <Alert variant="error">{error}</Alert> : null}
+      {localError ? <Alert variant="warning">{localError}</Alert> : null}
+      <FormField label="Nombre" htmlFor="new-supplier-name">
+        <Input
+          id="new-supplier-name"
+          value={name}
+          maxLength={200}
+          disabled={busy}
+          onChange={(event) => setName(event.target.value)}
+        />
+      </FormField>
+      <FormField label="Correo (opcional)" htmlFor="new-supplier-email">
+        <Input
+          id="new-supplier-email"
+          type="email"
+          value={email}
+          maxLength={200}
+          disabled={busy}
+          onChange={(event) => setEmail(event.target.value)}
+        />
+      </FormField>
+      <FormField label="Teléfono (opcional)" htmlFor="new-supplier-phone">
+        <Input
+          id="new-supplier-phone"
+          value={phone}
+          maxLength={40}
+          disabled={busy}
+          onChange={(event) => setPhone(event.target.value)}
+        />
+      </FormField>
+      <FormField label="Pago" htmlFor="new-supplier-payment">
+        <Select
+          id="new-supplier-payment"
+          value={paymentMode}
+          disabled={busy}
+          onChange={(event) =>
+            setPaymentMode(event.target.value as NewSupplierValues['paymentMode'])
+          }
+        >
+          <option value="prepaid">Anticipado</option>
+          <option value="credit">Crédito</option>
+          <option value="cod">Contra entrega</option>
+        </Select>
+      </FormField>
+    </Modal>
+  );
+}
+
 export interface RequestQuoteDialogProps {
   candidates: SourcingCandidateView[];
   defaultDueDays: number;

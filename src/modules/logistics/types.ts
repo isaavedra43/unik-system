@@ -173,6 +173,7 @@ export const LOGISTICS_COMMANDS = {
   deliveryAssignTransport: 'delivery.assign_transport',
   deliveryRecord: 'delivery.record',
   deliveryCancel: 'delivery.cancel',
+  deliveryScanContainer: 'delivery.scan_container',
   deliveryReconcileShipment: 'delivery.reconcile_shipment',
   deliveryZohoWriteFailed: 'delivery.zoho_write_failed',
   deliveryZohoDelivered: 'delivery.zoho_delivered',
@@ -236,6 +237,7 @@ export const LOGISTICS_EVENTS = {
     releasedFromTrip: 'delivery.released_from_trip',
     cancelled: 'delivery.cancelled',
     evidenceAdded: 'delivery.evidence_added',
+    containerScanned: 'delivery.container_scanned',
   },
   trip: {
     built: 'trip.built',

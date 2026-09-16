@@ -73,6 +73,37 @@ function requireId(value: string | null | undefined, field: string): string {
   return text;
 }
 
+/** A demand-triggered spot count is intentionally narrow: it must not become
+ * an opportunity to alter another SKU while the warehouse is confirming a sale. */
+function linkedSpotTarget(value: unknown): { zohoItemId: string; variantKey: string } | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const root = value as Record<string, unknown>;
+  const link = root.availabilitySpotCount;
+  if (!link || typeof link !== 'object' || Array.isArray(link)) return null;
+  const source = link as Record<string, unknown>;
+  const zohoItemId = typeof source.zohoItemId === 'string' ? source.zohoItemId.trim() : '';
+  const variantKey = typeof source.variantKey === 'string' ? source.variantKey : '';
+  return zohoItemId ? { zohoItemId, variantKey } : null;
+}
+
+async function assertLinkedSpotTarget(tx: Db, countId: string, row: StockItem): Promise<void> {
+  const links = await tx.workItem.findMany({
+    where: { objectType: 'stock_count', objectId: countId, areaKey: INVENTORY_AREA_KEY },
+    select: { result: true },
+    take: 5,
+  });
+  for (const link of links) {
+    const target = linkedSpotTarget(link.result);
+    if (!target) continue;
+    if (row.zohoItemId !== target.zohoItemId || row.variantKey !== target.variantKey) {
+      throw new OperationsError(
+        'invalid_payload',
+        'Este conteo spot sólo admite el artículo y la variante solicitados por la venta'
+      );
+    }
+  }
+}
+
 function toBaseOrThrow(
   quantity: DecimalLike,
   unit: string | null | undefined,
@@ -250,6 +281,8 @@ export async function recordCountLine(
       { variantJson: variant.variantJson }
     );
   }
+
+  await assertLinkedSpotTarget(tx, countId, row);
 
   await lockStockItem(tx, row.id);
   const fresh = (await tx.stockItem.findUnique({ where: { id: row.id } })) ?? row;

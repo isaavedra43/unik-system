@@ -1032,6 +1032,20 @@ export function recordDeliveryInput(
   };
 }
 
+/** Immutable physical read of a container during loading or dispatch. */
+export function scanDeliveryContainerInput(
+  order: Pick<DispatchDelivery, 'id' | 'version'>,
+  code: string,
+  phase: 'loading' | 'dispatch'
+): CommandInput {
+  return {
+    type: LOGISTICS_COMMANDS.deliveryScanContainer,
+    aggregate: { type: ORDER_AGGREGATE, id: order.id },
+    expectedVersion: order.version,
+    payload: { deliveryOrderId: order.id, code: code.trim(), phase },
+  };
+}
+
 export interface VehicleFormValues {
   code: string;
   plate: string;

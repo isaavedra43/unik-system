@@ -17,6 +17,7 @@ import {
 import {
   ChevronLeft,
   ChevronRight,
+  Barcode,
   GripVertical,
   Plus,
   RefreshCw,
@@ -55,6 +56,7 @@ import {
 } from '@/modules/areas/logistica/logistics-view-model';
 import { AssignTransportDialog } from './AssignTransportDialog';
 import { BuildTripDialog } from './BuildTripDialog';
+import { ContainerScanDialog } from './ContainerScanDialog';
 import { DeliveryCard } from './DeliveryCard';
 import { VehicleTimeline } from './VehicleTimeline';
 import '@/styles/operations/logistica.css';
@@ -93,6 +95,7 @@ export function DispatchBoard({ user, params }: AreaSpecialViewProps) {
   );
   const [activeDeliveryId, setActiveDeliveryId] = useState<string | null>(null);
   const [assignTarget, setAssignTarget] = useState<DispatchDelivery | null>(null);
+  const [scanTarget, setScanTarget] = useState<DispatchDelivery | null>(null);
   const [tripDialog, setTripDialog] = useState<{
     vehicleId: string | null;
     deliveryIds: string[];
@@ -389,6 +392,7 @@ export function DispatchBoard({ user, params }: AreaSpecialViewProps) {
                       selected={selectedId === delivery.id}
                       onSelect={() => setSelectedId(delivery.id)}
                       onAssign={() => setAssignTarget(delivery)}
+                      onScan={() => setScanTarget(delivery)}
                       onCancel={() => void cancelDelivery(delivery)}
                       trips={openTrips.map((trip) => ({ id: trip.id, number: trip.number }))}
                       onAddToTrip={(tripId) => void addToTrip(delivery, tripId)}
@@ -466,6 +470,15 @@ export function DispatchBoard({ user, params }: AreaSpecialViewProps) {
         />
       ) : null}
 
+      {scanTarget ? (
+        <ContainerScanDialog
+          delivery={scanTarget}
+          online={online}
+          onClose={() => setScanTarget(null)}
+          onSubmit={runCommand}
+        />
+      ) : null}
+
       {tripDialog && board ? (
         <BuildTripDialog
           date={date}
@@ -511,6 +524,7 @@ interface DraggableDeliveryProps {
   selected: boolean;
   onSelect: () => void;
   onAssign: () => void;
+  onScan: () => void;
   onCancel: () => void;
   trips: Array<{ id: string; number: string }>;
   onAddToTrip: (tripId: string) => void;
@@ -522,6 +536,7 @@ function DraggableDelivery({
   selected,
   onSelect,
   onAssign,
+  onScan,
   onCancel,
   trips,
   onAddToTrip,
@@ -559,6 +574,12 @@ function DraggableDelivery({
               <Button variant="secondary" size="sm" onClick={onAssign}>
                 Asignar transporte
               </Button>
+              {ownFleet ? (
+                <Button variant="secondary" size="sm" onClick={onScan}>
+                  <Barcode size={14} aria-hidden="true" />
+                  Escanear contenedor
+                </Button>
+              ) : null}
               {ownFleet && trips.length > 0 ? (
                 <label className="sr-only" htmlFor={`add-trip-${delivery.id}`}>
                   Cargar en un viaje

@@ -369,6 +369,7 @@ export const PURCHASES_COMMANDS = {
   orderSubmit: 'purchases.order.submit',
   orderRequestPayment: 'purchases.order.request_payment',
   orderMarkSent: 'purchases.order.mark_sent',
+  orderRequestVendorPickup: 'purchases.order.request_vendor_pickup',
   orderAllocateLine: 'purchases.order.allocate_line',
   orderCancel: 'purchases.order.cancel',
   orderClose: 'purchases.order.close',

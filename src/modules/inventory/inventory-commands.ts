@@ -14,7 +14,11 @@ import {
   type CommandResult,
 } from '@/modules/operations/commands';
 import { OperationsError } from '@/modules/operations/errors';
-import { completeWorkItemInTx } from '@/modules/operations/work-items-service';
+import {
+  assertCanActOnWorkItem,
+  completeWorkItemInTx,
+  waitWorkItemInTx,
+} from '@/modules/operations/work-items-service';
 import { isOpsFlagEnabled } from '@/modules/operations/operations-config';
 import {
   qty,
@@ -44,6 +48,7 @@ import {
   reserveStock,
   transferStock,
   unblockStock,
+  verifyAvailability,
 } from './inventory-service';
 import { COUNT_SCOPES, LEGACY_CLAIM_SOURCES, type ConfidenceLevel } from './inventory-types';
 import { buildStockLabel, type LabelDTO } from './labels-service';
@@ -71,6 +76,7 @@ import {
   createWarehouse,
   createWarehouseInputSchema,
   ensureDefaultWarehouse,
+  resolveWarehouseForZohoLocation,
   updateLocation,
   updateLocationInputSchema,
   updateWarehouse,
@@ -110,6 +116,7 @@ const log = (event: string, extra: Record<string, unknown> = {}) =>
 
 export const INVENTORY_COMMANDS = {
   countStart: 'stock.count.start',
+  verifyCaseAvailability: 'stock.verify_case_availability',
   countLine: 'stock.count.line',
   countClose: 'stock.count.close',
   countCancel: 'stock.count.cancel',
@@ -156,6 +163,59 @@ function assertAggregate(aggregateId: string, expected: string, label: string): 
   }
 }
 
+/** Metadata kept on the count work item. It makes a demand count auditable
+ * without turning a conversation or a client-side URL into the source of truth. */
+interface AvailabilitySpotCountLink {
+  availabilityWorkItemId: string;
+  caseId: string;
+  demandId: string;
+  zohoItemId: string;
+  variantKey: string;
+}
+
+function record(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function availabilitySpotCountLink(value: unknown): AvailabilitySpotCountLink | null {
+  const source = record(value);
+  const link = record(source.availabilitySpotCount);
+  const fields = [
+    'availabilityWorkItemId',
+    'caseId',
+    'demandId',
+    'zohoItemId',
+    'variantKey',
+  ] as const;
+  if (!fields.every((field) => typeof link[field] === 'string' && link[field].trim())) return null;
+  return {
+    availabilityWorkItemId: link.availabilityWorkItemId as string,
+    caseId: link.caseId as string,
+    demandId: link.demandId as string,
+    zohoItemId: link.zohoItemId as string,
+    variantKey: link.variantKey as string,
+  };
+}
+
+async function openAvailabilitySpotCount(tx: Parameters<typeof startCount>[0], countId: string) {
+  const links = await tx.workItem.findMany({
+    where: {
+      objectType: 'stock_count',
+      objectId: countId,
+      areaKey: 'inventario',
+      status: { in: ['open', 'in_progress', 'waiting', 'escalated'] },
+    },
+    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+  });
+  for (const link of links) {
+    const parsed = availabilitySpotCountLink(link.result);
+    if (parsed) return { tracking: link, link: parsed };
+  }
+  return null;
+}
+
 // ---------------------------------------------------------------------------
 // Shared schemas
 // ---------------------------------------------------------------------------
@@ -191,6 +251,162 @@ const referenceIdSchema = z.string().trim().min(1).max(120).nullish();
 const startCountSchema = z
   .object({ warehouseId: idSchema, scope: z.enum(COUNT_SCOPES).default('spot') })
   .strict();
+
+/**
+ * Starts the only valid human path for a non-controlled demand: a spot count
+ * tied to the verification work item. The count itself, its captured line and
+ * the final `availability_result` remain separate auditable records.
+ */
+const verifyCaseAvailabilitySchema = z.object({ workItemId: idSchema }).strict();
+
+export interface VerifyCaseAvailabilityData {
+  workItemId: string;
+  countId: string | null;
+  state: 'count_opened' | 'already_counting' | 'verified';
+  confidence: ConfidenceLevel;
+  available: string;
+  quantity: string;
+  unit: string;
+}
+
+registerCommand<z.output<typeof verifyCaseAvailabilitySchema>, VerifyCaseAvailabilityData>(
+  INVENTORY_COMMANDS.verifyCaseAvailability,
+  {
+    schema: verifyCaseAvailabilitySchema,
+    permission: 'inventory.count',
+    aggregate: 'none',
+    async handler(tx, cmd, ctx) {
+      await assertInventoryEnabled();
+      const item = await tx.workItem.findUnique({ where: { id: cmd.payload.workItemId } });
+      if (!item || item.areaKey !== 'inventario' || !item.stepId || !item.caseId) {
+        throw new OperationsError('not_found', 'No se encontró la verificación de Inventario');
+      }
+      assertCanActOnWorkItem(ctx, item);
+      const step = await tx.caseStep.findUnique({ where: { id: item.stepId } });
+      if (
+        !step ||
+        step.caseId !== item.caseId ||
+        step.stepKey !== 'verificar_disponibilidad' ||
+        !step.demandId
+      ) {
+        throw new OperationsError(
+          'invalid_state',
+          'Este trabajo no corresponde a verificar disponibilidad'
+        );
+      }
+      const demand = await tx.caseDemand.findUnique({ where: { id: step.demandId } });
+      if (!demand?.zohoItemId) {
+        throw new OperationsError('invalid_state', 'La necesidad no tiene un artículo que contar');
+      }
+      const warehouse = await resolveWarehouseForZohoLocation(tx, demand.locationId ?? null);
+      const availability = await verifyAvailability(tx, {
+        zohoItemId: demand.zohoItemId,
+        warehouseId: warehouse.id,
+        variantKey: demand.variantKey,
+        quantityBase: demand.baseQuantity,
+      });
+
+      // Controlled inventory has a fresh, deterministic answer; no physical
+      // count is opened and the work item closes with the checked values.
+      if (!availability.requiresCount) {
+        await completeWorkItemInTx(tx, item, {
+          result: {
+            availability_result: {
+              source: 'controlled_stock',
+              confidence: availability.confidence,
+              available: qty(availability.available),
+              quantity: qty(demand.baseQuantity),
+              unit: demand.baseUnit,
+              verifiedAt: ctx.now.toISOString(),
+            },
+          },
+        });
+        return {
+          data: {
+            workItemId: item.id,
+            countId: null,
+            state: 'verified',
+            confidence: availability.confidence,
+            available: qty(availability.available),
+            quantity: qty(demand.baseQuantity),
+            unit: demand.baseUnit,
+          },
+        };
+      }
+
+      const existing = await tx.workItem.findMany({
+        where: {
+          caseId: item.caseId,
+          objectType: 'stock_count',
+          areaKey: 'inventario',
+          status: { in: ['open', 'in_progress', 'waiting', 'escalated'] },
+        },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      });
+      for (const candidate of existing) {
+        const link = availabilitySpotCountLink(candidate.result);
+        if (link?.availabilityWorkItemId !== item.id) continue;
+        const count = await tx.stockCount.findUnique({ where: { id: candidate.objectId ?? '' } });
+        if (count && (count.status === 'draft' || count.status === 'in_progress')) {
+          return {
+            data: {
+              workItemId: item.id,
+              countId: count.id,
+              state: 'already_counting',
+              confidence: availability.confidence,
+              available: qty(availability.available),
+              quantity: qty(demand.baseQuantity),
+              unit: demand.baseUnit,
+            },
+          };
+        }
+      }
+
+      const count = await startCount(tx, { warehouseId: warehouse.id, scope: 'spot' }, ctx);
+      const tracking = await ctx.createWorkItem({
+        areaKey: 'inventario',
+        kind: 'action',
+        title: `Conteo spot: ${demand.sku || demand.name}`,
+        description: `Cuenta únicamente ${demand.sku || demand.name} para confirmar ${qty(demand.baseQuantity)} ${demand.baseUnit} del expediente. Al cerrar un conteo sin diferencias pendientes, la disponibilidad se registrará sola.`,
+        caseId: item.caseId,
+        objectType: 'stock_count',
+        objectId: count.id,
+        ownerUserId: item.ownerUserId,
+        backupUserId: item.backupUserId,
+      });
+      await tx.workItem.update({
+        where: { id: tracking.id },
+        data: {
+          result: {
+            availabilitySpotCount: {
+              availabilityWorkItemId: item.id,
+              caseId: item.caseId,
+              demandId: demand.id,
+              zohoItemId: demand.zohoItemId,
+              variantKey: demand.variantKey,
+            },
+          },
+        },
+      });
+      if (item.status !== 'waiting') {
+        await waitWorkItemInTx(tx, item, {
+          reason: `Esperando conteo spot ${count.id} para confirmar disponibilidad`,
+        });
+      }
+      return {
+        data: {
+          workItemId: item.id,
+          countId: count.id,
+          state: 'count_opened',
+          confidence: availability.confidence,
+          available: qty(availability.available),
+          quantity: qty(demand.baseQuantity),
+          unit: demand.baseUnit,
+        },
+      };
+    },
+  }
+);
 
 registerCommand<z.output<typeof startCountSchema>, { count: CountDTO }>(
   INVENTORY_COMMANDS.countStart,
@@ -263,14 +479,142 @@ registerCommand<z.output<typeof countLineSchema>, CountLineData>(INVENTORY_COMMA
 
 const countIdSchema = z.object({ countId: idSchema }).strict();
 
-registerCommand<z.output<typeof countIdSchema>, CloseCountResult>(INVENTORY_COMMANDS.countClose, {
+/**
+ * A linked spot count may close the original case step only after the physical
+ * line was accepted/adjusted. Pending approvals and disputed quantities stay
+ * visibly open; a user can never replace that decision with a free-text note.
+ */
+async function resolveAvailabilityAfterSpotCount(
+  tx: Parameters<typeof startCount>[0],
+  countId: string,
+  summary?: Pick<CloseCountResult, 'pending' | 'disputed'>
+): Promise<{ availabilityWorkItemId: string | null; autoClosed: boolean }> {
+  const linked = await openAvailabilitySpotCount(tx, countId);
+  if (!linked) return { availabilityWorkItemId: null, autoClosed: false };
+
+  const { tracking, link } = linked;
+  // `closeCount` gives us its authoritative summary. Subsequent adjustment
+  // approvals and dispute decisions reach this function later, so re-read the
+  // unresolved lines instead of relying on the summary from the original close.
+  const unresolved =
+    summary ??
+    (
+      await tx.stockCountLine.groupBy({
+        by: ['resolution'],
+        where: { countId, resolution: { in: ['pending', 'disputed'] } },
+        _count: { _all: true },
+      })
+    ).reduce(
+      (result, row) => ({
+        pending: result.pending + (row.resolution === 'pending' ? row._count._all : 0),
+        disputed: result.disputed + (row.resolution === 'disputed' ? row._count._all : 0),
+      }),
+      { pending: 0, disputed: 0 }
+    );
+  if (unresolved.pending > 0 || unresolved.disputed > 0) {
+    if (tracking.status !== 'waiting') {
+      await waitWorkItemInTx(tx, tracking, {
+        reason:
+          unresolved.disputed > 0
+            ? 'El conteo tiene una diferencia en disputa; resuélvela antes de confirmar disponibilidad'
+            : 'El conteo espera autorización de ajuste antes de confirmar disponibilidad',
+      });
+    }
+    return { availabilityWorkItemId: link.availabilityWorkItemId, autoClosed: false };
+  }
+
+  const [caseItem, demand, countLines] = await Promise.all([
+    tx.workItem.findUnique({ where: { id: link.availabilityWorkItemId } }),
+    tx.caseDemand.findUnique({ where: { id: link.demandId } }),
+    tx.stockCountLine.findMany({
+      where: { countId },
+      select: { stockItemId: true },
+    }),
+  ]);
+  if (
+    !caseItem ||
+    !demand ||
+    demand.caseId !== link.caseId ||
+    demand.zohoItemId !== link.zohoItemId
+  ) {
+    throw new OperationsError(
+      'invalid_state',
+      'El conteo ya no corresponde a una necesidad activa'
+    );
+  }
+  const stockItems = countLines.length
+    ? await tx.stockItem.findMany({
+        where: { id: { in: countLines.map((line) => line.stockItemId) } },
+        select: { zohoItemId: true, variantKey: true },
+      })
+    : [];
+  const targetCaptured = stockItems.some(
+    (item) => item.zohoItemId === link.zohoItemId && item.variantKey === link.variantKey
+  );
+  if (!targetCaptured) {
+    throw new OperationsError(
+      'invalid_state',
+      'El conteo debe incluir el artículo y la variante solicitados antes de cerrarse'
+    );
+  }
+
+  const count = await tx.stockCount.findUnique({ where: { id: countId } });
+  if (!count) throw new OperationsError('not_found', 'No se encontró el conteo');
+  const availability = await verifyAvailability(tx, {
+    zohoItemId: link.zohoItemId,
+    warehouseId: count.warehouseId,
+    variantKey: link.variantKey,
+    quantityBase: demand.baseQuantity,
+  });
+  if (caseItem.status !== 'done' && caseItem.status !== 'cancelled') {
+    await completeWorkItemInTx(tx, caseItem, {
+      result: {
+        availability_result: {
+          source: 'spot_count',
+          countId,
+          confidence: availability.confidence,
+          available: qty(availability.available),
+          quantity: qty(demand.baseQuantity),
+          unit: demand.baseUnit,
+          countedAt: count.closedAt?.toISOString() ?? null,
+        },
+      },
+    });
+  }
+  if (tracking.status !== 'done' && tracking.status !== 'cancelled') {
+    await completeWorkItemInTx(tx, tracking, {
+      result: {
+        availability_spot_count: {
+          countId,
+          availabilityWorkItemId: caseItem.id,
+          confidence: availability.confidence,
+        },
+      },
+      skipEvidenceCheck: true,
+    });
+  }
+  return { availabilityWorkItemId: caseItem.id, autoClosed: true };
+}
+
+registerCommand<
+  z.output<typeof countIdSchema>,
+  CloseCountResult & { availabilityWorkItemId: string | null; availabilityAutoClosed: boolean }
+>(INVENTORY_COMMANDS.countClose, {
   schema: countIdSchema,
   permission: 'inventory.count',
   aggregate: versionedAggregate('stock_count', 'stockCount'),
   async handler(tx, cmd, ctx) {
     await assertInventoryEnabled();
     assertAggregate(cmd.aggregate.id, cmd.payload.countId, 'conteo');
-    return { data: await closeCount(tx, cmd.payload, ctx) };
+    const summary = await closeCount(tx, cmd.payload, ctx);
+    const completion = await resolveAvailabilityAfterSpotCount(tx, cmd.payload.countId, summary);
+    return {
+      data: {
+        ...summary,
+        availabilityWorkItemId: completion.availabilityWorkItemId,
+        availabilityAutoClosed: completion.autoClosed,
+      },
+    };
   },
 });
 
@@ -318,6 +662,9 @@ registerCommand<z.output<typeof decideAdjustmentSchema>, DecideAdjustmentData>(
     async handler(tx, cmd, ctx) {
       await assertInventoryEnabled();
       const result = await decideCountAdjustment(tx, cmd.payload, ctx);
+      if (!result.awaitingApproval) {
+        await resolveAvailabilityAfterSpotCount(tx, result.line.countId);
+      }
       return {
         data: {
           line: toCountLineDTO(result.line),
@@ -359,6 +706,7 @@ registerCommand<
   async handler(tx, cmd, ctx) {
     await assertInventoryEnabled();
     const result = await resolveCountDispute(tx, cmd.payload, ctx);
+    await resolveAvailabilityAfterSpotCount(tx, result.line.countId);
     return { data: { ...result, line: toCountLineDTO(result.line) } };
   },
 });
@@ -1024,7 +1372,14 @@ function registerInventoryApprovalReactions(): void {
   const scope = globalThis as GlobalWithInventoryApprovals;
   for (const unsubscribe of scope.__unikInventoryApprovalReactions ?? []) unsubscribe();
   scope.__unikInventoryApprovalReactions = [
-    onApprovalDecided('stock_count_line', handleAdjustmentApprovalDecision),
+    onApprovalDecided('stock_count_line', async (tx, event) => {
+      const line = await tx.stockCountLine.findUnique({
+        where: { id: event.approvalRequest.targetId },
+        select: { countId: true },
+      });
+      await handleAdjustmentApprovalDecision(tx, event);
+      if (line) await resolveAvailabilityAfterSpotCount(tx, line.countId);
+    }),
   ];
   if (isKnownPermission(ADJUST_PERMISSION)) {
     registerApprovalScopePermission('inventory_adjustment', ADJUST_PERMISSION);

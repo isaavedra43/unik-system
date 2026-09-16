@@ -6,14 +6,20 @@ import { areaDetailHref, areaHref } from '@/modules/areas/area-registry';
 import { AuthorizationError, getCurrentSession } from '@/modules/auth/authorization';
 import type { CommandResult } from '@/modules/operations/commands';
 import {
+  consolidateRequests,
+  createSupplier,
   confirmRfqResponse,
+  confirmDirectDelivery,
   createRfq,
   inviteSuppliers,
   promoteCandidateToSupplier,
   recordGoodsReceipt,
+  recordSupplierEvaluation,
   rejectRfqResponse,
+  requestVendorPickup,
   resolveReceiptDifference,
   runSourcingSearch,
+  sendOrderToSupplier,
   selectRfqResponse,
   setCandidateStatus,
 } from '@/modules/purchases/purchases-commands';
@@ -289,6 +295,17 @@ function revalidateRfq(rfqId: string): void {
   revalidatePath(areaHref('compras', 'trabajo'));
 }
 
+function revalidateSupplier(supplierId: string): void {
+  revalidatePath(areaDetailHref('compras', 'proveedores', supplierId));
+  revalidatePath(areaHref('compras', 'trabajo'));
+  revalidateLab();
+}
+
+function revalidateRequest(requestId: string): void {
+  revalidatePath(areaDetailHref('compras', 'solicitudes', requestId));
+  revalidatePath(areaHref('compras', 'trabajo'));
+}
+
 const receiptLineSchema = z.object({
   orderLineId: z.string().trim().min(1).max(120),
   qtyReceived: z.number().nonnegative(),
@@ -459,5 +476,176 @@ export async function selectRfqResponseAction(
     };
   } catch (error) {
     return failure(errorMessage(error, 'No se pudo elegir la respuesta'));
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Órdenes, proveedores y consolidación
+// ---------------------------------------------------------------------------
+
+const sendOrderActionSchema = z.object({
+  orderId: z.string().trim().min(1).max(120),
+  via: z.enum(['whatsapp', 'sms', 'telegram', 'pdf']).default('pdf'),
+});
+
+/** Generates the authorized order document and, only when selected, sends it through its configured supplier channel. */
+export async function sendOrderToSupplierAction(
+  input: z.input<typeof sendOrderActionSchema>
+): Promise<
+  ComprasActionResult<{
+    orderId: string;
+    status: string;
+    sentVia: string | null;
+    pdfObjectId: string | null;
+  }>
+> {
+  const parsed = sendOrderActionSchema.safeParse(input);
+  if (!parsed.success) return failure(parsed.error.issues[0]?.message ?? 'Datos inválidos');
+  try {
+    const result = await sendOrderToSupplier(await actor(), parsed.data);
+    const outcome = fromCommand(result.command, 'No se pudo enviar la orden al proveedor');
+    if (!outcome.ok) return outcome;
+    revalidateOrder(parsed.data.orderId);
+    return { ok: true, data: { ...outcome.data, pdfObjectId: result.pdfObjectId } };
+  } catch (error) {
+    return failure(errorMessage(error, 'No se pudo enviar la orden al proveedor'));
+  }
+}
+
+const vendorPickupActionSchema = z.object({
+  orderId: z.string().trim().min(1).max(120),
+  pickupAddress: z.string().trim().min(8, 'Indica la dirección de recolección').max(500),
+  readyAt: z.string().datetime('Indica una fecha y hora válida'),
+  weightKg: z.number().finite().positive().max(100_000).optional(),
+});
+
+/** Opens the formal Compras → Logística request. It never creates a pickup from a chat message. */
+export async function requestVendorPickupAction(
+  input: z.input<typeof vendorPickupActionSchema>
+): Promise<ComprasActionResult<{ areaRequestId: string; workItemId: string; caseId: string }>> {
+  const parsed = vendorPickupActionSchema.safeParse(input);
+  if (!parsed.success) return failure(parsed.error.issues[0]?.message ?? 'Datos inválidos');
+  try {
+    const result = await requestVendorPickup(await actor(), parsed.data);
+    const outcome = fromCommand(result, 'No se pudo solicitar la recolección');
+    if (outcome.ok) revalidateOrder(parsed.data.orderId);
+    return outcome;
+  } catch (error) {
+    return failure(errorMessage(error, 'No se pudo solicitar la recolección'));
+  }
+}
+
+const createSupplierActionSchema = z.object({
+  name: z.string().trim().min(2, 'Indica el nombre del proveedor').max(200),
+  primaryEmail: z.string().trim().email('Correo inválido').max(200).optional(),
+  primaryPhone: z.string().trim().min(3).max(40).optional(),
+  paymentMode: z.enum(['prepaid', 'credit', 'cod']).default('prepaid'),
+  paymentTermsDays: z.number().int().min(0).max(365).optional(),
+  leadTimeDaysDefault: z.number().int().min(0).max(365).optional(),
+  currency: z.string().trim().length(3).default('MXN'),
+  notes: z.string().trim().max(2000).optional(),
+});
+
+/** Creates a real supplier record. Duplicate checks stay in the purchases command. */
+export async function createSupplierAction(
+  input: z.input<typeof createSupplierActionSchema>
+): Promise<ComprasActionResult<{ supplierId: string; number: string; name: string }>> {
+  const parsed = createSupplierActionSchema.safeParse(input);
+  if (!parsed.success) return failure(parsed.error.issues[0]?.message ?? 'Datos inválidos');
+  try {
+    const value = parsed.data;
+    const result = await createSupplier(await actor(), {
+      name: value.name,
+      primaryEmail: value.primaryEmail ?? null,
+      primaryPhone: value.primaryPhone ?? null,
+      paymentMode: value.paymentMode,
+      paymentTermsDays: value.paymentTermsDays ?? null,
+      leadTimeDaysDefault: value.leadTimeDaysDefault ?? null,
+      currency: value.currency.toUpperCase(),
+      notes: value.notes ?? null,
+      channels: [
+        ...(value.primaryEmail ? [{ type: 'email' as const, value: value.primaryEmail }] : []),
+        ...(value.primaryPhone ? [{ type: 'phone' as const, value: value.primaryPhone }] : []),
+      ],
+      tags: [],
+    });
+    const outcome = fromCommand(result, 'No se pudo crear el proveedor');
+    if (!outcome.ok) return outcome;
+    revalidateSupplier(outcome.data.supplier.id);
+    return {
+      ok: true,
+      data: {
+        supplierId: outcome.data.supplier.id,
+        number: outcome.data.supplier.number,
+        name: outcome.data.supplier.name,
+      },
+    };
+  } catch (error) {
+    return failure(errorMessage(error, 'No se pudo crear el proveedor'));
+  }
+}
+
+const supplierEvaluationActionSchema = z.object({
+  supplierId: z.string().trim().min(1).max(120),
+  orderId: z.string().trim().min(1).max(120).optional(),
+  receiptId: z.string().trim().min(1).max(120).optional(),
+  onTime: z.number().int().min(1).max(5),
+  quality: z.number().int().min(1).max(5),
+  price: z.number().int().min(1).max(5),
+  communication: z.number().int().min(1).max(5),
+  comment: z.string().trim().max(1000).optional(),
+});
+
+export async function recordSupplierEvaluationAction(
+  input: z.input<typeof supplierEvaluationActionSchema>
+): Promise<ComprasActionResult<{ evaluationId: string }>> {
+  const parsed = supplierEvaluationActionSchema.safeParse(input);
+  if (!parsed.success) return failure(parsed.error.issues[0]?.message ?? 'Datos inválidos');
+  try {
+    const result = await recordSupplierEvaluation(await actor(), parsed.data);
+    const outcome = fromCommand(result, 'No se pudo guardar la evaluación');
+    if (!outcome.ok) return outcome;
+    revalidateSupplier(parsed.data.supplierId);
+    return { ok: true, data: { evaluationId: outcome.data.evaluationId } };
+  } catch (error) {
+    return failure(errorMessage(error, 'No se pudo guardar la evaluación'));
+  }
+}
+
+const consolidateActionSchema = z.object({
+  requestId: z.string().trim().min(1).max(120),
+  lineIds: z
+    .array(z.string().trim().min(1).max(120))
+    .min(2, 'Elige al menos dos partidas')
+    .max(200),
+  into: z.enum(['rfq', 'order']),
+  supplierId: z.string().trim().min(1).max(120).optional(),
+  title: z.string().trim().max(200).optional(),
+  dueAt: z.string().datetime().optional(),
+  expectedAt: z.string().datetime().optional(),
+});
+
+/** Consolidates selected request lines into an RFQ or an order through the canonical command. */
+export async function consolidatePurchaseRequestAction(
+  input: z.input<typeof consolidateActionSchema>
+): Promise<
+  ComprasActionResult<{
+    into: 'rfq' | 'order';
+    rfqId: string | null;
+    orderId: string | null;
+    number: string;
+    lines: number;
+  }>
+> {
+  const parsed = consolidateActionSchema.safeParse(input);
+  if (!parsed.success) return failure(parsed.error.issues[0]?.message ?? 'Datos inválidos');
+  try {
+    const { requestId, ...payload } = parsed.data;
+    const result = await consolidateRequests(await actor(), payload);
+    const outcome = fromCommand(result, 'No se pudieron consolidar las partidas');
+    if (outcome.ok) revalidateRequest(requestId);
+    return outcome;
+  } catch (error) {
+    return failure(errorMessage(error, 'No se pudieron consolidar las partidas'));
   }
 }

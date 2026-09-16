@@ -914,13 +914,22 @@ export async function getStockSnapshotForActor(
   return getStockSnapshot(filter, prisma);
 }
 
-/** Scan resolution for the counting/dispatch PWA (view, count or manage permission). */
+/**
+ * Scan resolution for inventory and the loading dock. A dispatcher may read a
+ * label only to validate it against a delivery; the delivery command still
+ * performs the case/allocation authorization server-side.
+ */
 export async function scanStockCode(
   actor: CurrentUser,
   text: string,
   options: { warehouseId?: string | null } = {}
 ): Promise<ScanResolution> {
-  assertAnyPermission(actor, ['inventory.view', 'inventory.count', 'inventory.manage']);
+  assertAnyPermission(actor, [
+    'inventory.view',
+    'inventory.count',
+    'inventory.manage',
+    'logistics.dispatch',
+  ]);
   return resolveScan(text, { warehouseId: options.warehouseId });
 }
 

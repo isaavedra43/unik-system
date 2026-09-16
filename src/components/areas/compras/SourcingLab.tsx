@@ -21,6 +21,7 @@ import {
   PURCHASES_REALTIME_TYPE,
 } from '@/modules/purchases/purchases-types';
 import {
+  createSupplierAction,
   promoteCandidateAction,
   requestQuoteFromCandidatesAction,
   runSourcingSearchAction,
@@ -30,7 +31,9 @@ import { SourcingCandidateCard } from './SourcingCandidateCard';
 import { SourcingCompare } from './SourcingCompare';
 import {
   PromoteSupplierDialog,
+  NewSupplierDialog,
   RequestQuoteDialog,
+  type NewSupplierValues,
   type PromoteSupplierValues,
   type RequestQuoteValues,
 } from './SourcingDialogs';
@@ -86,6 +89,7 @@ export function SourcingLab({ areaKey, user, canAct, params }: AreaSpecialViewPr
   const [dialogError, setDialogError] = useState<string | null>(null);
   const [quoteFor, setQuoteFor] = useState<SourcingCandidateView[] | null>(null);
   const [promoteFor, setPromoteFor] = useState<SourcingCandidateView | null>(null);
+  const [newSupplierOpen, setNewSupplierOpen] = useState(false);
   const [aiFor, setAiFor] = useState<SourcingCandidateView | null>(null);
 
   const pollsRef = useRef(0);
@@ -248,6 +252,23 @@ export function SourcingLab({ areaKey, user, canAct, params }: AreaSpecialViewPr
           ? `${result.data.name} es ahora el proveedor ${result.data.number}.`
           : `Lo vinculamos con el proveedor ${result.data.number} que ya existía.`
       );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function submitNewSupplier(values: NewSupplierValues) {
+    setBusy(true);
+    setDialogError(null);
+    try {
+      const result = await createSupplierAction(values);
+      if (!result.ok) {
+        setDialogError(result.error);
+        return;
+      }
+      setNewSupplierOpen(false);
+      setReloadToken((value) => value + 1);
+      toast.success(`${result.data.name} se creó como proveedor ${result.data.number}.`);
     } finally {
       setBusy(false);
     }
@@ -420,6 +441,18 @@ export function SourcingLab({ areaKey, user, canAct, params }: AreaSpecialViewPr
         <span className="compras-lab-count">
           {data ? `${data.pagination.total} candidatos` : ''}
         </span>
+        {canAct ? (
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() => {
+              setDialogError(null);
+              setNewSupplierOpen(true);
+            }}
+          >
+            Dar de alta proveedor
+          </Button>
+        ) : null}
       </div>
 
       <SourcingCompare
@@ -499,6 +532,15 @@ export function SourcingLab({ areaKey, user, canAct, params }: AreaSpecialViewPr
           error={dialogError}
           onClose={() => setPromoteFor(null)}
           onSubmit={(values) => void submitPromotion(values)}
+        />
+      ) : null}
+
+      {newSupplierOpen ? (
+        <NewSupplierDialog
+          busy={busy}
+          error={dialogError}
+          onClose={() => setNewSupplierOpen(false)}
+          onSubmit={(values) => void submitNewSupplier(values)}
         />
       ) : null}
 

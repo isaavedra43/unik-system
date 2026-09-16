@@ -15,7 +15,10 @@ import { extraNumber, extraString, type AreaWorkRow } from '@/modules/areas/area
 import type { EntityColumnDefinition } from '@/modules/shared/entity-workspace-types';
 import { ReceiptCapturePanel } from './ReceiptCapturePanel';
 import { RfqReviewPanel } from './RfqReviewPanel';
+import { OrderOperationsPanel } from './OrderOperationsPanel';
+import { PurchaseRequestConsolidationPanel } from './PurchaseRequestConsolidationPanel';
 import { SourcingLab } from './SourcingLab';
+import { SupplierEvaluationPanel } from './SupplierEvaluationPanel';
 
 /**
  * Client side of the Compras area (plan 7.2): the labels of its row kinds, the
@@ -105,10 +108,23 @@ function renderCell(row: AreaWorkRow, column: EntityColumnDefinition): React.Rea
  */
 function DetailExtras({ rowKind, entityId, areaKey, canAct }: AreaDetailExtrasProps) {
   if (rowKind === 'procurement_order') {
-    return <ReceiptCapturePanel areaKey={areaKey} orderId={entityId} canAct={canAct} />;
+    return (
+      <>
+        <OrderOperationsPanel areaKey={areaKey} orderId={entityId} canAct={canAct} />
+        <ReceiptCapturePanel areaKey={areaKey} orderId={entityId} canAct={canAct} />
+      </>
+    );
   }
   if (rowKind === 'rfq') {
     return <RfqReviewPanel areaKey={areaKey} rfqId={entityId} canAct={canAct} />;
+  }
+  if (rowKind === 'purchase_request') {
+    return (
+      <PurchaseRequestConsolidationPanel areaKey={areaKey} requestId={entityId} canAct={canAct} />
+    );
+  }
+  if (rowKind === 'supplier') {
+    return <SupplierEvaluationPanel areaKey={areaKey} supplierId={entityId} canAct={canAct} />;
   }
   return null;
 }

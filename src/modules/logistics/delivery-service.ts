@@ -780,7 +780,7 @@ export async function recordDelivery(
       createdBy: ctx.actor.id,
     },
   });
-  await tx.evidenceLink.create({
+  const quantityEvidence = await tx.evidenceLink.create({
     data: {
       caseId: order.caseId,
       objectType: ORDER,
@@ -952,6 +952,30 @@ export async function recordDelivery(
       objectId: child.id,
     });
     publishDeliveryChange(ctx, child);
+  }
+
+  // The notification is useful, but the inter-area contract is the request:
+  // Ventas gets a structured package status, evidence link and partial-delivery
+  // incident in its table and chat context. Direct supplier deliveries have no
+  // Zoho package, so their dedicated receipt/direct-delivery flow remains the
+  // source of truth instead of inventing a package id.
+  if (order.packageId) {
+    await ctx.createAreaRequest({
+      caseId: order.caseId,
+      fromAreaKey: 'logistica',
+      toAreaKey: 'ventas',
+      kind: 'delivery_update',
+      objectType: ORDER,
+      objectId: order.id,
+      title: summary.complete ? 'Entrega confirmada' : 'Entrega parcial confirmada',
+      payload: {
+        packageId: order.packageId,
+        status: summary.complete ? 'delivered' : 'partial',
+        deliveredAt: ctx.now.toISOString(),
+        evidenceLinkId: quantityEvidence.id,
+        ...(incidentId ? { incidentId } : {}),
+      },
+    });
   }
 
   // Plan 6.6: el dueño del expediente se entera de la parada entregada, completa o no.

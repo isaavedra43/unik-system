@@ -7,9 +7,16 @@ import { z, type ZodTypeAny } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { hasPermission, type CurrentUser } from '@/modules/auth/authorization';
 import { isKnownPermission } from '@/modules/auth/permissions';
-import { sendOutboundMessage, startConversation, updateConversation } from '@/modules/comms/comms-service';
+import {
+  sendOutboundMessage,
+  startConversation,
+  updateConversation,
+} from '@/modules/comms/comms-service';
 import { JOB_PRIORITY } from '@/modules/jobs/job-queue';
-import { onApprovalDecided, registerApprovalScopePermission } from '@/modules/operations/approvals-service';
+import {
+  onApprovalDecided,
+  registerApprovalScopePermission,
+} from '@/modules/operations/approvals-service';
 import {
   executeCommand,
   registerCommand,
@@ -29,7 +36,10 @@ import {
 import { isOpsFlagEnabled } from '@/modules/operations/operations-config';
 import { OPS_EVENTS, type ActorType } from '@/modules/operations/types';
 import { saveGeneratedFile } from '@/modules/storage/storage-service';
-import { registerProcurementSettlementHandler, registerProcurementSettlementReversedHandler } from './finance-bridge';
+import {
+  registerProcurementSettlementHandler,
+  registerProcurementSettlementReversedHandler,
+} from './finance-bridge';
 import { checkSendOrder, orderStatusLabel } from './orders-state';
 import {
   allocateLineInTx,
@@ -55,7 +65,13 @@ import {
   type RequestPaymentData,
   type SubmitOrderData,
 } from './orders-service';
-import { toOrderDTO, toPurchaseRequestDTO, toRfqResponseDTO, toSupplierDTO, type ProcurementOrderDTO } from './purchases-dto';
+import {
+  toOrderDTO,
+  toPurchaseRequestDTO,
+  toRfqResponseDTO,
+  toSupplierDTO,
+  type ProcurementOrderDTO,
+} from './purchases-dto';
 import {
   MODULE_DISABLED_MESSAGE,
   assertActorHasAny,
@@ -240,7 +256,9 @@ function parseOrThrow<S extends ZodTypeAny>(schema: S, value: unknown): z.output
     invalid(
       `Datos inválidos: ${parsed.error.issues
         .slice(0, 3)
-        .map((issue) => (issue.path.length ? `${issue.path.join('.')}: ${issue.message}` : issue.message))
+        .map((issue) =>
+          issue.path.length ? `${issue.path.join('.')}: ${issue.message}` : issue.message
+        )
         .join('; ')}`
     );
   }
@@ -255,10 +273,18 @@ interface PurchasesCommandDefinition<S extends ZodTypeAny, D> {
   audit?: CommandAuditMode;
   /** Id the aggregate must have for this payload (never bump another record's version). */
   aggregateIdOf?: (payload: z.output<S>, tx: Db) => string | Promise<string | null> | null;
-  handler(tx: Db, payload: z.output<S>, ctx: CommandContext, cmd: DomainCommand<z.output<S>>): Promise<{ data: D; aggregateVersion?: number }>;
+  handler(
+    tx: Db,
+    payload: z.output<S>,
+    ctx: CommandContext,
+    cmd: DomainCommand<z.output<S>>
+  ): Promise<{ data: D; aggregateVersion?: number }>;
 }
 
-function define<S extends ZodTypeAny, D>(type: PurchasesCommandType, def: PurchasesCommandDefinition<S, D>): void {
+function define<S extends ZodTypeAny, D>(
+  type: PurchasesCommandType,
+  def: PurchasesCommandDefinition<S, D>
+): void {
   registerCommand<z.output<S>, D>(type, {
     schema: def.schema,
     aggregate: def.aggregate,
@@ -269,8 +295,13 @@ function define<S extends ZodTypeAny, D>(type: PurchasesCommandType, def: Purcha
       if (def.permissions) assertActorHasAny(ctx, def.permissions);
       if (def.aggregateIdOf) {
         const expected = await def.aggregateIdOf(cmd.payload, tx);
-        if (!expected) throw new OperationsError('not_found', 'No se encontró el registro sobre el que se quiere actuar');
-        if (expected !== cmd.aggregate.id) invalid('El registro del comando no corresponde a los datos');
+        if (!expected)
+          throw new OperationsError(
+            'not_found',
+            'No se encontró el registro sobre el que se quiere actuar'
+          );
+        if (expected !== cmd.aggregate.id)
+          invalid('El registro del comando no corresponde a los datos');
       }
       return def.handler(tx, cmd.payload, ctx, cmd);
     },
@@ -310,7 +341,9 @@ define(PC.supplierLinkZoho, {
   actorTypes: HUMAN_ONLY,
   aggregateIdOf: (payload) => payload.supplierId,
   async handler(tx, payload, ctx) {
-    return { data: { supplier: toSupplierDTO(await linkSupplierToZohoContactInTx(tx, payload, ctx)) } };
+    return {
+      data: { supplier: toSupplierDTO(await linkSupplierToZohoContactInTx(tx, payload, ctx)) },
+    };
   },
 });
 
@@ -372,7 +405,10 @@ define(PC.requestCreate, {
   async handler(tx, payload, ctx) {
     const created = await createPurchaseRequestInTx(tx, payload, ctx);
     return {
-      data: { request: toPurchaseRequestDTO(created.request, created.lines), areaRequestIds: created.areaRequestIds },
+      data: {
+        request: toPurchaseRequestDTO(created.request, created.lines),
+        areaRequestIds: created.areaRequestIds,
+      },
       aggregateVersion: created.request.version,
     };
   },
@@ -415,7 +451,11 @@ define(PC.requestConsolidate, {
   async handler(tx, payload, ctx): Promise<{ data: ConsolidateRequestsData }> {
     const lines = await loadOrderableRequestLines(tx, payload.lineIds);
     const quantities = (line: (typeof lines)[number]) =>
-      remainingToOrder({ qty: num(line.qty), qtyOrdered: num(line.qtyOrdered), status: line.status });
+      remainingToOrder({
+        qty: num(line.qty),
+        qtyOrdered: num(line.qtyOrdered),
+        status: line.status,
+      });
     const groups = groupRequestLines(
       lines
         .filter((line) => line.demandId)
@@ -440,7 +480,10 @@ define(PC.requestConsolidate, {
             group.sources.length === 1
               ? { requestLineId: group.sources[0].requestLineId, qty: group.qty }
               : {
-                  sources: group.sources.map((source) => ({ requestLineId: source.requestLineId, qty: source.qty })),
+                  sources: group.sources.map((source) => ({
+                    requestLineId: source.requestLineId,
+                    qty: source.qty,
+                  })),
                   zohoItemId: group.zohoItemId,
                   description: group.description,
                   qty: group.qty,
@@ -455,14 +498,31 @@ define(PC.requestConsolidate, {
       emitPurchases(
         ctx,
         PURCHASES_EVENTS.request.consolidated,
-        { lineIds: payload.lineIds, into: 'rfq', rfqId: rfq.id, number: rfq.number, requestIds: [...requestIds] },
+        {
+          lineIds: payload.lineIds,
+          into: 'rfq',
+          rfqId: rfq.id,
+          number: rfq.number,
+          requestIds: [...requestIds],
+        },
         { objectType: OBJ.rfq, objectId: rfq.id }
       );
-      return { data: { into: 'rfq', rfqId: rfq.id, orderId: null, number: rfq.number, lines: rfqLines.length } };
+      return {
+        data: {
+          into: 'rfq',
+          rfqId: rfq.id,
+          orderId: null,
+          number: rfq.number,
+          lines: rfqLines.length,
+        },
+      };
     }
     if (!payload.supplierId) invalid('Indica el proveedor de la orden consolidada');
     const products = await tx.supplierProduct.findMany({
-      where: { supplierId: payload.supplierId, zohoItemId: { in: lines.map((l) => l.zohoItemId ?? '').filter(Boolean) } },
+      where: {
+        supplierId: payload.supplierId,
+        zohoItemId: { in: lines.map((l) => l.zohoItemId ?? '').filter(Boolean) },
+      },
       select: { zohoItemId: true, lastPrice: true },
     });
     const priceOf = (zohoItemId: string | null) => {
@@ -478,7 +538,12 @@ define(PC.requestConsolidate, {
         ...groups.map((group) => ({
           ...(group.sources.length === 1
             ? { requestLineId: group.sources[0].requestLineId }
-            : { sources: group.sources.map((source) => ({ requestLineId: source.requestLineId, qty: source.qty })) }),
+            : {
+                sources: group.sources.map((source) => ({
+                  requestLineId: source.requestLineId,
+                  qty: source.qty,
+                })),
+              }),
           zohoItemId: group.zohoItemId,
           description: group.description,
           qty: group.qty,
@@ -486,17 +551,36 @@ define(PC.requestConsolidate, {
           unitPrice: priceOf(group.zohoItemId),
           taxRate: 0.16,
         })),
-        ...loose.map((line) => ({ requestLineId: line.id, qty: quantities(line), unitPrice: priceOf(line.zohoItemId), taxRate: 0.16 })),
+        ...loose.map((line) => ({
+          requestLineId: line.id,
+          qty: quantities(line),
+          unitPrice: priceOf(line.zohoItemId),
+          taxRate: 0.16,
+        })),
       ],
     });
     const { order, lines: orderLines } = await createOrderInTx(tx, input, ctx);
     emitPurchases(
       ctx,
       PURCHASES_EVENTS.request.consolidated,
-      { lineIds: payload.lineIds, into: 'order', orderId: order.id, number: order.number, requestIds: [...requestIds] },
+      {
+        lineIds: payload.lineIds,
+        into: 'order',
+        orderId: order.id,
+        number: order.number,
+        requestIds: [...requestIds],
+      },
       { objectType: OBJ.order, objectId: order.id }
     );
-    return { data: { into: 'order', rfqId: null, orderId: order.id, number: order.number, lines: orderLines.length } };
+    return {
+      data: {
+        into: 'order',
+        rfqId: null,
+        orderId: order.id,
+        number: order.number,
+        lines: orderLines.length,
+      },
+    };
   },
 });
 
@@ -522,6 +606,134 @@ define(PC.requestSuggestConsolidation, {
 });
 
 // ---------------------------------------------------------------------------
+// Vendor pickup → Logística
+// ---------------------------------------------------------------------------
+
+const requestVendorPickupSchema = z
+  .object({
+    orderId: idText,
+    pickupAddress: z.string().trim().min(8, 'Indica la dirección de recolección').max(500),
+    readyAt: isoDateText,
+    weightKg: z.number().finite().positive().max(100_000).optional(),
+  })
+  .strict();
+
+interface VendorPickupData {
+  areaRequestId: string;
+  workItemId: string;
+  caseId: string;
+}
+
+/** Creates the authoritative Compras → Logística pickup request for an order. */
+define(PC.orderRequestVendorPickup, {
+  schema: requestVendorPickupSchema,
+  permissions: [P.manageOrders],
+  aggregate: orderAggregate,
+  actorTypes: HUMAN_OR_AI,
+  aggregateIdOf: (payload) => payload.orderId,
+  async handler(tx, payload, ctx): Promise<{ data: VendorPickupData }> {
+    const order = await tx.procurementOrder.findUnique({ where: { id: payload.orderId } });
+    if (!order) throw new OperationsError('not_found', 'No se encontró la orden de compra');
+    if (
+      !['approved', 'pending_payment', 'awaiting_receipt', 'partially_received'].includes(
+        order.status
+      )
+    ) {
+      throw new OperationsError(
+        'invalid_state',
+        'La orden debe estar aprobada o esperando recepción para pedir su recolección'
+      );
+    }
+    if (order.deliveryMode !== 'warehouse') {
+      throw new OperationsError(
+        'invalid_state',
+        'Sólo una compra que llega al almacén puede requerir recolección del proveedor'
+      );
+    }
+    const [supplier, lines] = await Promise.all([
+      tx.supplier.findUnique({ where: { id: order.supplierId }, select: { id: true, name: true } }),
+      tx.procurementOrderLine.findMany({
+        where: { orderId: order.id, status: { notIn: ['cancelled', 'closed'] } },
+        select: {
+          id: true,
+          zohoItemId: true,
+          description: true,
+          qty: true,
+          qtyAccepted: true,
+          unit: true,
+        },
+        orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }],
+      }),
+    ]);
+    if (!supplier) throw new OperationsError('not_found', 'No se encontró el proveedor');
+    const allocations = lines.length
+      ? await tx.procurementAllocation.findMany({
+          where: { orderLineId: { in: lines.map((line) => line.id) } },
+          select: { demandId: true },
+        })
+      : [];
+    const demandIds = [...new Set(allocations.map((allocation) => allocation.demandId))];
+    const demands = demandIds.length
+      ? await tx.caseDemand.findMany({ where: { id: { in: demandIds } }, select: { caseId: true } })
+      : [];
+    const caseId = order.directDeliveryCaseId ?? demands[0]?.caseId ?? null;
+    if (!caseId) {
+      throw new OperationsError(
+        'invalid_state',
+        'La orden no está ligada a un expediente; así no se puede coordinar una recolección entre áreas'
+      );
+    }
+    const items = lines
+      .map((line) => ({
+        sku: (line.zohoItemId ?? line.description).slice(0, 120),
+        qty: Math.max(0, num(line.qty) - num(line.qtyAccepted)),
+        unit: line.unit,
+      }))
+      .filter((line) => line.qty > 0);
+    if (items.length === 0) {
+      throw new OperationsError(
+        'invalid_state',
+        'La orden ya no tiene material pendiente de recolectar'
+      );
+    }
+    const { request, workItem } = await ctx.createAreaRequest({
+      caseId,
+      fromAreaKey: 'compras',
+      toAreaKey: 'logistica',
+      kind: 'vendor_pickup',
+      objectType: OBJ.order,
+      objectId: order.id,
+      title: `Recolectar ${order.number} en ${supplier.name}`,
+      payload: {
+        procurementOrderId: order.id,
+        vendorId: supplier.id,
+        pickupAddress: payload.pickupAddress,
+        readyAt: payload.readyAt,
+        items,
+        ...(payload.weightKg ? { weightKg: payload.weightKg } : {}),
+      },
+    });
+    await ctx.relate(
+      { type: 'area_request', id: request.id },
+      { type: OBJ.order, id: order.id },
+      'vendor_pickup_for'
+    );
+    emitPurchases(
+      ctx,
+      PURCHASES_EVENTS.order.updated,
+      {
+        orderId: order.id,
+        number: order.number,
+        action: 'vendor_pickup_requested',
+        areaRequestId: request.id,
+      },
+      { caseId, objectType: OBJ.order, objectId: order.id }
+    );
+    return { data: { areaRequestId: request.id, workItemId: workItem.id, caseId } };
+  },
+});
+
+// ---------------------------------------------------------------------------
 // RFQ
 // ---------------------------------------------------------------------------
 
@@ -532,7 +744,10 @@ define(PC.rfqCreate, {
   actorTypes: HUMAN_OR_AI,
   async handler(tx, payload, ctx) {
     const { rfq, lines } = await createRfqInTx(tx, payload, ctx);
-    return { data: { rfqId: rfq.id, number: rfq.number, status: rfq.status, lines: lines.length }, aggregateVersion: rfq.version };
+    return {
+      data: { rfqId: rfq.id, number: rfq.number, status: rfq.status, lines: lines.length },
+      aggregateVersion: rfq.version,
+    };
   },
 });
 
@@ -587,7 +802,10 @@ define(PC.rfqManualResponse, {
   async handler(tx, payload, ctx) {
     const response = await recordManualResponseInTx(tx, payload, ctx);
     const lines = await tx.rfqResponseLine.findMany({ where: { responseId: response.id } });
-    return { data: { response: toRfqResponseDTO(response, lines) }, aggregateVersion: response.version };
+    return {
+      data: { response: toRfqResponseDTO(response, lines) },
+      aggregateVersion: response.version,
+    };
   },
 });
 
@@ -622,7 +840,11 @@ define(PC.rfqCompare, {
   aggregate: rfqAggregate,
   actorTypes: HUMAN_OR_AI,
   aggregateIdOf: (payload) => payload.rfqId,
-  async handler(tx, payload, ctx): Promise<{ data: { rfqId: string; ranking: RfqRankingEntry[] } }> {
+  async handler(
+    tx,
+    payload,
+    ctx
+  ): Promise<{ data: { rfqId: string; ranking: RfqRankingEntry[] } }> {
     return { data: await compareRfqInTx(tx, payload, ctx) };
   },
 });
@@ -667,7 +889,10 @@ define(PC.rfqExpire, {
 
 async function orderDto(tx: Db, orderId: string): Promise<ProcurementOrderDTO> {
   const order = await tx.procurementOrder.findUniqueOrThrow({ where: { id: orderId } });
-  const supplier = await tx.supplier.findUnique({ where: { id: order.supplierId }, select: { name: true } });
+  const supplier = await tx.supplier.findUnique({
+    where: { id: order.supplierId },
+    select: { name: true },
+  });
   return toOrderDTO(order, [], { supplierName: supplier?.name ?? null });
 }
 
@@ -678,7 +903,10 @@ define(PC.orderCreate, {
   actorTypes: HUMAN_OR_AI,
   async handler(tx, payload, ctx) {
     const { order, lines } = await createOrderInTx(tx, payload, ctx);
-    return { data: { order: await orderDto(tx, order.id), lineIds: lines.map((l) => l.id) }, aggregateVersion: order.version };
+    return {
+      data: { order: await orderDto(tx, order.id), lineIds: lines.map((l) => l.id) },
+      aggregateVersion: order.version,
+    };
   },
 });
 
@@ -702,7 +930,10 @@ define(PC.orderSubmit, {
   aggregateIdOf: (payload) => payload.orderId,
   async handler(tx, payload, ctx): Promise<{ data: SubmitOrderData }> {
     const data = await submitOrderInTx(tx, payload, ctx);
-    const order = await tx.procurementOrder.findUniqueOrThrow({ where: { id: payload.orderId }, select: { status: true } });
+    const order = await tx.procurementOrder.findUniqueOrThrow({
+      where: { id: payload.orderId },
+      select: { status: true },
+    });
     return { data: { ...data, status: order.status } };
   },
 });
@@ -736,7 +967,12 @@ define(PC.orderAllocateLine, {
   aggregate: orderAggregate,
   actorTypes: HUMAN_OR_AI,
   aggregateIdOf: async (payload, tx) =>
-    (await tx.procurementOrderLine.findUnique({ where: { id: payload.orderLineId }, select: { orderId: true } }))?.orderId ?? null,
+    (
+      await tx.procurementOrderLine.findUnique({
+        where: { id: payload.orderLineId },
+        select: { orderId: true },
+      })
+    )?.orderId ?? null,
   async handler(tx, payload, ctx) {
     return { data: await allocateLineInTx(tx, payload, ctx) };
   },
@@ -788,7 +1024,15 @@ define(PC.receiptRecord, {
   aggregateIdOf: (payload) => payload.orderId,
   async handler(tx, payload, ctx) {
     const { receipt, lines, posted } = await recordReceiptInTx(tx, payload, ctx);
-    return { data: { receiptId: receipt.id, number: receipt.number, status: receipt.status, lineIds: lines.map((l) => l.id), posted } };
+    return {
+      data: {
+        receiptId: receipt.id,
+        number: receipt.number,
+        status: receipt.status,
+        lineIds: lines.map((l) => l.id),
+        posted,
+      },
+    };
   },
 });
 
@@ -798,7 +1042,12 @@ define(PC.receiptPost, {
   aggregate: orderAggregate,
   actorTypes: HUMAN_OR_AI,
   aggregateIdOf: async (payload, tx) =>
-    (await tx.goodsReceipt.findUnique({ where: { id: payload.receiptId }, select: { orderId: true } }))?.orderId ?? null,
+    (
+      await tx.goodsReceipt.findUnique({
+        where: { id: payload.receiptId },
+        select: { orderId: true },
+      })
+    )?.orderId ?? null,
   async handler(tx, payload, ctx): Promise<{ data: PostReceiptResult }> {
     return { data: await postReceiptInTx(tx, payload.receiptId, ctx) };
   },
@@ -810,9 +1059,19 @@ define(PC.receiptResolveDifference, {
   aggregate: orderAggregate,
   actorTypes: HUMAN_ONLY,
   aggregateIdOf: async (payload, tx) => {
-    const line = await tx.goodsReceiptLine.findUnique({ where: { id: payload.receiptLineId }, select: { receiptId: true } });
+    const line = await tx.goodsReceiptLine.findUnique({
+      where: { id: payload.receiptLineId },
+      select: { receiptId: true },
+    });
     if (!line) return null;
-    return (await tx.goodsReceipt.findUnique({ where: { id: line.receiptId }, select: { orderId: true } }))?.orderId ?? null;
+    return (
+      (
+        await tx.goodsReceipt.findUnique({
+          where: { id: line.receiptId },
+          select: { orderId: true },
+        })
+      )?.orderId ?? null
+    );
   },
   async handler(tx, payload, ctx) {
     return { data: await resolveReceiptDifferenceInTx(tx, payload, ctx) };
@@ -885,7 +1144,11 @@ const SHORTFALL_EVENT_TYPES = new Set<string>([
   OPS_EVENTS.request.expired,
 ]);
 
-function shortfallJob(areaRequestId: string, reason: string, caseId: string | null): OperationalOutboxJob {
+function shortfallJob(
+  areaRequestId: string,
+  reason: string,
+  caseId: string | null
+): OperationalOutboxJob {
   return {
     type: PURCHASES_JOB_TYPES.shortfallSync,
     payload: { areaRequestId },
@@ -898,11 +1161,17 @@ function shortfallJob(areaRequestId: string, reason: string, caseId: string | nu
 }
 
 /** Pure part of the in-transaction reaction: shortfall requests to Compras created or closed. */
-export function planShortfallJobs(events: readonly OperationalEventRecord[]): OperationalOutboxJob[] {
+export function planShortfallJobs(
+  events: readonly OperationalEventRecord[]
+): OperationalOutboxJob[] {
   const jobs: OperationalOutboxJob[] = [];
   for (const event of events) {
     if (!SHORTFALL_EVENT_TYPES.has(event.type)) continue;
-    const { requestId, kind, toAreaKey } = event.payload as { requestId?: unknown; kind?: unknown; toAreaKey?: unknown };
+    const { requestId, kind, toAreaKey } = event.payload as {
+      requestId?: unknown;
+      kind?: unknown;
+      toAreaKey?: unknown;
+    };
     if (typeof requestId !== 'string' || toAreaKey !== 'compras') continue;
     if (!(SHORTFALL_REQUEST_KINDS as readonly string[]).includes(String(kind))) continue;
     jobs.push(shortfallJob(requestId, event.type, event.caseId));
@@ -917,15 +1186,30 @@ export async function planPurchasesJobsInTransaction(
 ): Promise<OperationalOutboxJob[]> {
   const jobs = planShortfallJobs(events);
   const cancelledAllocationIds = events
-    .filter((event) => event.type === OPS_EVENTS.allocation.cancelled && typeof event.payload.allocationId === 'string')
+    .filter(
+      (event) =>
+        event.type === OPS_EVENTS.allocation.cancelled &&
+        typeof event.payload.allocationId === 'string'
+    )
     .map((event) => event.payload.allocationId as string);
   if (cancelledAllocationIds.length > 0) {
     const allocations = await tx.demandAllocation.findMany({
-      where: { id: { in: cancelledAllocationIds }, linkedType: 'area_request', linkedId: { not: null }, source: { in: ['purchase', 'direct_supplier'] } },
+      where: {
+        id: { in: cancelledAllocationIds },
+        linkedType: 'area_request',
+        linkedId: { not: null },
+        source: { in: ['purchase', 'direct_supplier'] },
+      },
       select: { id: true, linkedId: true, caseId: true },
     });
     for (const allocation of allocations) {
-      jobs.push(shortfallJob(allocation.linkedId!, `allocation_cancelled:${allocation.id}`, allocation.caseId));
+      jobs.push(
+        shortfallJob(
+          allocation.linkedId!,
+          `allocation_cancelled:${allocation.id}`,
+          allocation.caseId
+        )
+      );
     }
   }
   return jobs;
@@ -941,20 +1225,31 @@ type GlobalWithPurchasesReactions = typeof globalThis & {
 function registerPurchasesReactions(): void {
   const scope = globalThis as GlobalWithPurchasesReactions;
   scope.__unikPurchasesTxUnsubscribe?.();
-  scope.__unikPurchasesTxUnsubscribe = onOperationalEventsInTransaction(async (tx, events, sink) => {
-    if (!(await isOpsFlagEnabled('purchases'))) return;
-    for (const job of await planPurchasesJobsInTransaction(tx, events)) sink.outbox(job);
-  });
+  scope.__unikPurchasesTxUnsubscribe = onOperationalEventsInTransaction(
+    async (tx, events, sink) => {
+      if (!(await isOpsFlagEnabled('purchases'))) return;
+      for (const job of await planPurchasesJobsInTransaction(tx, events)) sink.outbox(job);
+    }
+  );
   scope.__unikPurchasesApprovalUnsubscribe?.();
-  scope.__unikPurchasesApprovalUnsubscribe = onApprovalDecided(OBJ.order, applyOrderApprovalDecision);
+  scope.__unikPurchasesApprovalUnsubscribe = onApprovalDecided(
+    OBJ.order,
+    applyOrderApprovalDecision
+  );
   scope.__unikPurchasesSettlementUnsubscribe?.();
-  scope.__unikPurchasesSettlementUnsubscribe = registerProcurementSettlementHandler(async (tx, obligation, _settlement, ctx) => {
-    if (obligation.procurementOrderId) await markOrderPaid(tx, obligation.procurementOrderId, ctx);
-  });
+  scope.__unikPurchasesSettlementUnsubscribe = registerProcurementSettlementHandler(
+    async (tx, obligation, _settlement, ctx) => {
+      if (obligation.procurementOrderId)
+        await markOrderPaid(tx, obligation.procurementOrderId, ctx);
+    }
+  );
   scope.__unikPurchasesSettlementReversedUnsubscribe?.();
-  scope.__unikPurchasesSettlementReversedUnsubscribe = registerProcurementSettlementReversedHandler(async (tx, obligation, _settlement, ctx) => {
-    if (obligation.procurementOrderId) await markOrderPaid(tx, obligation.procurementOrderId, ctx);
-  });
+  scope.__unikPurchasesSettlementReversedUnsubscribe = registerProcurementSettlementReversedHandler(
+    async (tx, obligation, _settlement, ctx) => {
+      if (obligation.procurementOrderId)
+        await markOrderPaid(tx, obligation.procurementOrderId, ctx);
+    }
+  );
   if (isKnownPermission('purchases.approve')) {
     registerApprovalScopePermission('procurement', 'purchases.approve');
   } else {
@@ -1014,7 +1309,13 @@ function runSystem<D>(
   now?: Date
 ): Promise<CommandResult<D>> {
   return executeCommand<D>(
-    { commandId: commandId.slice(0, 160), type, actor: { type: 'system', id: actorId }, aggregate, payload },
+    {
+      commandId: commandId.slice(0, 160),
+      type,
+      actor: { type: 'system', id: actorId },
+      aggregate,
+      payload,
+    },
     null,
     { now }
   );
@@ -1033,28 +1334,102 @@ function rejected<D>(type: string, code: string, message: string): CommandResult
   };
 }
 
-export const createSupplier = (actor: CurrentUser, input: Input<typeof createSupplierSchema>, options?: PurchasesCommandOptions) =>
-  runAs<{ supplier: ReturnType<typeof toSupplierDTO> }>(actor, PC.supplierCreate, { type: OBJ.supplier, id: 'new' }, input, options);
+export const createSupplier = (
+  actor: CurrentUser,
+  input: Input<typeof createSupplierSchema>,
+  options?: PurchasesCommandOptions
+) =>
+  runAs<{ supplier: ReturnType<typeof toSupplierDTO> }>(
+    actor,
+    PC.supplierCreate,
+    { type: OBJ.supplier, id: 'new' },
+    input,
+    options
+  );
 
-export const updateSupplier = (actor: CurrentUser, input: Input<typeof updateSupplierSchema>, options?: PurchasesCommandOptions) =>
-  runAs<{ supplier: ReturnType<typeof toSupplierDTO> }>(actor, PC.supplierUpdate, { type: OBJ.supplier, id: input.supplierId }, input, options);
+export const updateSupplier = (
+  actor: CurrentUser,
+  input: Input<typeof updateSupplierSchema>,
+  options?: PurchasesCommandOptions
+) =>
+  runAs<{ supplier: ReturnType<typeof toSupplierDTO> }>(
+    actor,
+    PC.supplierUpdate,
+    { type: OBJ.supplier, id: input.supplierId },
+    input,
+    options
+  );
 
-export const linkSupplierToZohoContact = (actor: CurrentUser, input: Input<typeof linkZohoContactSchema>, options?: PurchasesCommandOptions) =>
-  runAs<{ supplier: ReturnType<typeof toSupplierDTO> }>(actor, PC.supplierLinkZoho, { type: OBJ.supplier, id: input.supplierId }, input, options);
+export const linkSupplierToZohoContact = (
+  actor: CurrentUser,
+  input: Input<typeof linkZohoContactSchema>,
+  options?: PurchasesCommandOptions
+) =>
+  runAs<{ supplier: ReturnType<typeof toSupplierDTO> }>(
+    actor,
+    PC.supplierLinkZoho,
+    { type: OBJ.supplier, id: input.supplierId },
+    input,
+    options
+  );
 
-export const upsertSupplierProduct = (actor: CurrentUser, input: Input<typeof upsertSupplierProductSchema>, options?: PurchasesCommandOptions) =>
-  runAs<{ supplierProductId: string; supplierId: string }>(actor, PC.supplierProductUpsert, { type: OBJ.supplierProduct, id: input.supplierId }, input, options);
+export const upsertSupplierProduct = (
+  actor: CurrentUser,
+  input: Input<typeof upsertSupplierProductSchema>,
+  options?: PurchasesCommandOptions
+) =>
+  runAs<{ supplierProductId: string; supplierId: string }>(
+    actor,
+    PC.supplierProductUpsert,
+    { type: OBJ.supplierProduct, id: input.supplierId },
+    input,
+    options
+  );
 
-export const recordSupplierEvaluation = (actor: CurrentUser, input: Input<typeof evaluateSupplierSchema>, options?: PurchasesCommandOptions) =>
-  runAs<{ evaluationId: string; supplier: ReturnType<typeof toSupplierDTO> }>(actor, PC.supplierEvaluate, { type: OBJ.supplier, id: input.supplierId }, input, options);
+export const recordSupplierEvaluation = (
+  actor: CurrentUser,
+  input: Input<typeof evaluateSupplierSchema>,
+  options?: PurchasesCommandOptions
+) =>
+  runAs<{ evaluationId: string; supplier: ReturnType<typeof toSupplierDTO> }>(
+    actor,
+    PC.supplierEvaluate,
+    { type: OBJ.supplier, id: input.supplierId },
+    input,
+    options
+  );
 
-export const promoteCandidateToSupplier = (actor: CurrentUser, input: Input<typeof promoteCandidateSchema>, options?: PurchasesCommandOptions) =>
-  runAs<{ supplier: ReturnType<typeof toSupplierDTO>; created: boolean }>(actor, PC.candidatePromote, { type: OBJ.candidate, id: input.candidateId }, input, options);
+export const promoteCandidateToSupplier = (
+  actor: CurrentUser,
+  input: Input<typeof promoteCandidateSchema>,
+  options?: PurchasesCommandOptions
+) =>
+  runAs<{ supplier: ReturnType<typeof toSupplierDTO>; created: boolean }>(
+    actor,
+    PC.candidatePromote,
+    { type: OBJ.candidate, id: input.candidateId },
+    input,
+    options
+  );
 
-export const setCandidateStatus = (actor: CurrentUser, input: Input<typeof candidateStatusSchema>, options?: PurchasesCommandOptions) =>
-  runAs<{ candidateId: string; status: string }>(actor, PC.candidateStatus, { type: OBJ.candidate, id: input.candidateId }, input, options);
+export const setCandidateStatus = (
+  actor: CurrentUser,
+  input: Input<typeof candidateStatusSchema>,
+  options?: PurchasesCommandOptions
+) =>
+  runAs<{ candidateId: string; status: string }>(
+    actor,
+    PC.candidateStatus,
+    { type: OBJ.candidate, id: input.candidateId },
+    input,
+    options
+  );
 
-export const createPurchaseRequest = (actor: CurrentUser, input: Input<typeof createPurchaseRequestSchema>, options?: PurchasesCommandOptions) =>
+export const createPurchaseRequest = (
+  actor: CurrentUser,
+  input: Input<typeof createPurchaseRequestSchema>,
+  options?: PurchasesCommandOptions
+) =>
   runAs<{ request: ReturnType<typeof toPurchaseRequestDTO>; areaRequestIds: string[] }>(
     actor,
     PC.requestCreate,
@@ -1063,14 +1438,57 @@ export const createPurchaseRequest = (actor: CurrentUser, input: Input<typeof cr
     options
   );
 
-export const cancelPurchaseRequest = (actor: CurrentUser, input: Input<typeof cancelPurchaseRequestSchema>, options?: PurchasesCommandOptions) =>
-  runAs<{ requestId: string; status: string }>(actor, PC.requestCancel, { type: OBJ.request, id: input.requestId }, input, options);
+export const cancelPurchaseRequest = (
+  actor: CurrentUser,
+  input: Input<typeof cancelPurchaseRequestSchema>,
+  options?: PurchasesCommandOptions
+) =>
+  runAs<{ requestId: string; status: string }>(
+    actor,
+    PC.requestCancel,
+    { type: OBJ.request, id: input.requestId },
+    input,
+    options
+  );
 
-export const consolidateRequests = (actor: CurrentUser, input: Input<typeof consolidateRequestsSchema>, options?: PurchasesCommandOptions) =>
-  runAs<ConsolidateRequestsData>(actor, PC.requestConsolidate, { type: OBJ.request, id: 'consolidation' }, input, options);
+export const consolidateRequests = (
+  actor: CurrentUser,
+  input: Input<typeof consolidateRequestsSchema>,
+  options?: PurchasesCommandOptions
+) =>
+  runAs<ConsolidateRequestsData>(
+    actor,
+    PC.requestConsolidate,
+    { type: OBJ.request, id: 'consolidation' },
+    input,
+    options
+  );
 
-export const createRfq = (actor: CurrentUser, input: Input<typeof createRfqSchema>, options?: PurchasesCommandOptions) =>
-  runAs<{ rfqId: string; number: string; status: string; lines: number }>(actor, PC.rfqCreate, { type: OBJ.rfq, id: 'new' }, input, options);
+export const requestVendorPickup = (
+  actor: CurrentUser,
+  input: Input<typeof requestVendorPickupSchema>,
+  options?: PurchasesCommandOptions
+) =>
+  runAs<VendorPickupData>(
+    actor,
+    PC.orderRequestVendorPickup,
+    { type: OBJ.order, id: input.orderId },
+    input,
+    options
+  );
+
+export const createRfq = (
+  actor: CurrentUser,
+  input: Input<typeof createRfqSchema>,
+  options?: PurchasesCommandOptions
+) =>
+  runAs<{ rfqId: string; number: string; status: string; lines: number }>(
+    actor,
+    PC.rfqCreate,
+    { type: OBJ.rfq, id: 'new' },
+    input,
+    options
+  );
 
 /** Creates the invitations (command) and sends them through the inbox; repeating the command id never sends twice. */
 export async function inviteSuppliers(
@@ -1078,7 +1496,13 @@ export async function inviteSuppliers(
   input: Input<typeof inviteSuppliersSchema>,
   options: PurchasesCommandOptions = {}
 ): Promise<{ command: CommandResult<InviteSuppliersData>; sent: number; failed: number }> {
-  const command = await runAs<InviteSuppliersData>(actor, PC.rfqInvite, { type: OBJ.rfq, id: input.rfqId }, input, options);
+  const command = await runAs<InviteSuppliersData>(
+    actor,
+    PC.rfqInvite,
+    { type: OBJ.rfq, id: input.rfqId },
+    input,
+    options
+  );
   if (command.status !== 'completed' || !command.data) return { command, sent: 0, failed: 0 };
   const sends = await sendRfqInvitations(actor, command.data.rfqId, command.data.toSend, {
     actorType: options.actorType ?? (actor.isBot ? 'ai' : 'user'),
@@ -1088,78 +1512,260 @@ export async function inviteSuppliers(
   return { command, sent: sends.sent, failed: sends.failed + command.data.failed.length };
 }
 
-export const recordManualRfqResponse = (actor: CurrentUser, input: Input<typeof manualResponseSchema>, options?: PurchasesCommandOptions) =>
-  runAs<{ response: ReturnType<typeof toRfqResponseDTO> }>(actor, PC.rfqManualResponse, { type: OBJ.rfqResponse, id: input.rfqId }, input, options);
-
-export const confirmRfqResponse = (actor: CurrentUser, input: Input<typeof confirmResponseSchema>, options?: PurchasesCommandOptions) =>
-  runAs<{ response: ReturnType<typeof toRfqResponseDTO> }>(actor, PC.rfqConfirmResponse, { type: OBJ.rfqResponse, id: input.responseId }, input, options);
-
-export const rejectRfqResponse = (actor: CurrentUser, input: Input<typeof rejectResponseSchema>, options?: PurchasesCommandOptions) =>
-  runAs<{ responseId: string; status: string }>(actor, PC.rfqRejectResponse, { type: OBJ.rfqResponse, id: input.responseId }, input, options);
-
-export const compareRfq = (actor: CurrentUser, input: Input<typeof rfqIdSchema>, options?: PurchasesCommandOptions) =>
-  runAs<{ rfqId: string; ranking: RfqRankingEntry[] }>(actor, PC.rfqCompare, { type: OBJ.rfq, id: input.rfqId }, input, options);
-
-export const selectRfqResponse = (actor: CurrentUser, input: Input<typeof selectResponseSchema>, options?: PurchasesCommandOptions) =>
-  runAs<{ responseId: string; rfqId: string; orderId: string; orderNumber: string; supplierId: string }>(
+export const recordManualRfqResponse = (
+  actor: CurrentUser,
+  input: Input<typeof manualResponseSchema>,
+  options?: PurchasesCommandOptions
+) =>
+  runAs<{ response: ReturnType<typeof toRfqResponseDTO> }>(
     actor,
-    PC.rfqSelectResponse,
+    PC.rfqManualResponse,
+    { type: OBJ.rfqResponse, id: input.rfqId },
+    input,
+    options
+  );
+
+export const confirmRfqResponse = (
+  actor: CurrentUser,
+  input: Input<typeof confirmResponseSchema>,
+  options?: PurchasesCommandOptions
+) =>
+  runAs<{ response: ReturnType<typeof toRfqResponseDTO> }>(
+    actor,
+    PC.rfqConfirmResponse,
     { type: OBJ.rfqResponse, id: input.responseId },
     input,
     options
   );
 
-export const cancelRfq = (actor: CurrentUser, input: Input<typeof cancelRfqSchema>, options?: PurchasesCommandOptions) =>
-  runAs<{ rfqId: string; status: string }>(actor, PC.rfqCancel, { type: OBJ.rfq, id: input.rfqId }, input, options);
-
-export const createProcurementOrder = (actor: CurrentUser, input: Input<typeof createOrderSchema>, options?: PurchasesCommandOptions) =>
-  runAs<{ order: ProcurementOrderDTO; lineIds: string[] }>(actor, PC.orderCreate, { type: OBJ.order, id: `supplier:${input.supplierId}` }, input, options);
-
-export const updateProcurementOrderDraft = (actor: CurrentUser, input: Input<typeof updateOrderSchema>, options?: PurchasesCommandOptions) =>
-  runAs<{ order: ProcurementOrderDTO; lineIds: string[] }>(actor, PC.orderUpdate, { type: OBJ.order, id: input.orderId }, input, options);
-
-export const submitProcurementOrder = (actor: CurrentUser, input: Input<typeof submitOrderSchema>, options?: PurchasesCommandOptions) =>
-  runAs<SubmitOrderData>(actor, PC.orderSubmit, { type: OBJ.order, id: input.orderId }, input, options);
-
-export const requestProcurementPayment = (actor: CurrentUser, input: Input<typeof requestPaymentSchema>, options?: PurchasesCommandOptions) =>
-  runAs<RequestPaymentData>(actor, PC.orderRequestPayment, { type: OBJ.order, id: input.orderId }, input, options);
-
-export async function allocateProcurementLine(actor: CurrentUser, input: Input<typeof allocateLineSchema>, options?: PurchasesCommandOptions) {
-  const line = await prisma.procurementOrderLine.findUnique({ where: { id: String(input.orderLineId ?? '') }, select: { orderId: true } });
-  return runAs<{ orderId: string; allocationIds: string[] }>(actor, PC.orderAllocateLine, { type: OBJ.order, id: line?.orderId }, input, options);
-}
-
-export const cancelProcurementOrder = (actor: CurrentUser, input: Input<typeof cancelOrderSchema>, options?: PurchasesCommandOptions) =>
-  runAs<{ orderId: string; status: string; compensations: string[] }>(actor, PC.orderCancel, { type: OBJ.order, id: input.orderId }, input, options);
-
-export const closeProcurementOrder = (actor: CurrentUser, input: Input<typeof closeOrderSchema>, options?: PurchasesCommandOptions) =>
-  runAs<{ orderId: string; status: string }>(actor, PC.orderClose, { type: OBJ.order, id: input.orderId }, input, options);
-
-export const recordGoodsReceipt = (actor: CurrentUser, input: Input<typeof recordReceiptSchema>, options?: PurchasesCommandOptions) =>
-  runAs<{ receiptId: string; number: string; status: string; lineIds: string[]; posted: PostReceiptResult | null }>(
+export const rejectRfqResponse = (
+  actor: CurrentUser,
+  input: Input<typeof rejectResponseSchema>,
+  options?: PurchasesCommandOptions
+) =>
+  runAs<{ responseId: string; status: string }>(
     actor,
-    PC.receiptRecord,
+    PC.rfqRejectResponse,
+    { type: OBJ.rfqResponse, id: input.responseId },
+    input,
+    options
+  );
+
+export const compareRfq = (
+  actor: CurrentUser,
+  input: Input<typeof rfqIdSchema>,
+  options?: PurchasesCommandOptions
+) =>
+  runAs<{ rfqId: string; ranking: RfqRankingEntry[] }>(
+    actor,
+    PC.rfqCompare,
+    { type: OBJ.rfq, id: input.rfqId },
+    input,
+    options
+  );
+
+export const selectRfqResponse = (
+  actor: CurrentUser,
+  input: Input<typeof selectResponseSchema>,
+  options?: PurchasesCommandOptions
+) =>
+  runAs<{
+    responseId: string;
+    rfqId: string;
+    orderId: string;
+    orderNumber: string;
+    supplierId: string;
+  }>(actor, PC.rfqSelectResponse, { type: OBJ.rfqResponse, id: input.responseId }, input, options);
+
+export const cancelRfq = (
+  actor: CurrentUser,
+  input: Input<typeof cancelRfqSchema>,
+  options?: PurchasesCommandOptions
+) =>
+  runAs<{ rfqId: string; status: string }>(
+    actor,
+    PC.rfqCancel,
+    { type: OBJ.rfq, id: input.rfqId },
+    input,
+    options
+  );
+
+export const createProcurementOrder = (
+  actor: CurrentUser,
+  input: Input<typeof createOrderSchema>,
+  options?: PurchasesCommandOptions
+) =>
+  runAs<{ order: ProcurementOrderDTO; lineIds: string[] }>(
+    actor,
+    PC.orderCreate,
+    { type: OBJ.order, id: `supplier:${input.supplierId}` },
+    input,
+    options
+  );
+
+export const updateProcurementOrderDraft = (
+  actor: CurrentUser,
+  input: Input<typeof updateOrderSchema>,
+  options?: PurchasesCommandOptions
+) =>
+  runAs<{ order: ProcurementOrderDTO; lineIds: string[] }>(
+    actor,
+    PC.orderUpdate,
     { type: OBJ.order, id: input.orderId },
     input,
     options
   );
 
-export async function postGoodsReceipt(actor: CurrentUser, input: Input<typeof postReceiptSchema>, options?: PurchasesCommandOptions) {
-  const receipt = await prisma.goodsReceipt.findUnique({ where: { id: String(input.receiptId ?? '') }, select: { orderId: true } });
-  return runAs<PostReceiptResult>(actor, PC.receiptPost, { type: OBJ.order, id: receipt?.orderId }, input, options);
+export const submitProcurementOrder = (
+  actor: CurrentUser,
+  input: Input<typeof submitOrderSchema>,
+  options?: PurchasesCommandOptions
+) =>
+  runAs<SubmitOrderData>(
+    actor,
+    PC.orderSubmit,
+    { type: OBJ.order, id: input.orderId },
+    input,
+    options
+  );
+
+export const requestProcurementPayment = (
+  actor: CurrentUser,
+  input: Input<typeof requestPaymentSchema>,
+  options?: PurchasesCommandOptions
+) =>
+  runAs<RequestPaymentData>(
+    actor,
+    PC.orderRequestPayment,
+    { type: OBJ.order, id: input.orderId },
+    input,
+    options
+  );
+
+export async function allocateProcurementLine(
+  actor: CurrentUser,
+  input: Input<typeof allocateLineSchema>,
+  options?: PurchasesCommandOptions
+) {
+  const line = await prisma.procurementOrderLine.findUnique({
+    where: { id: String(input.orderLineId ?? '') },
+    select: { orderId: true },
+  });
+  return runAs<{ orderId: string; allocationIds: string[] }>(
+    actor,
+    PC.orderAllocateLine,
+    { type: OBJ.order, id: line?.orderId },
+    input,
+    options
+  );
 }
 
-export async function resolveReceiptDifference(actor: CurrentUser, input: Input<typeof resolveDifferenceSchema>, options?: PurchasesCommandOptions) {
-  const line = await prisma.goodsReceiptLine.findUnique({ where: { id: String(input.receiptLineId ?? '') }, select: { receiptId: true } });
-  const receipt = line ? await prisma.goodsReceipt.findUnique({ where: { id: line.receiptId }, select: { orderId: true } }) : null;
-  return runAs<{ orderId: string; orderStatus: string; creditedQty: number }>(actor, PC.receiptResolveDifference, { type: OBJ.order, id: receipt?.orderId }, input, options);
+export const cancelProcurementOrder = (
+  actor: CurrentUser,
+  input: Input<typeof cancelOrderSchema>,
+  options?: PurchasesCommandOptions
+) =>
+  runAs<{ orderId: string; status: string; compensations: string[] }>(
+    actor,
+    PC.orderCancel,
+    { type: OBJ.order, id: input.orderId },
+    input,
+    options
+  );
+
+export const closeProcurementOrder = (
+  actor: CurrentUser,
+  input: Input<typeof closeOrderSchema>,
+  options?: PurchasesCommandOptions
+) =>
+  runAs<{ orderId: string; status: string }>(
+    actor,
+    PC.orderClose,
+    { type: OBJ.order, id: input.orderId },
+    input,
+    options
+  );
+
+export const recordGoodsReceipt = (
+  actor: CurrentUser,
+  input: Input<typeof recordReceiptSchema>,
+  options?: PurchasesCommandOptions
+) =>
+  runAs<{
+    receiptId: string;
+    number: string;
+    status: string;
+    lineIds: string[];
+    posted: PostReceiptResult | null;
+  }>(actor, PC.receiptRecord, { type: OBJ.order, id: input.orderId }, input, options);
+
+export async function postGoodsReceipt(
+  actor: CurrentUser,
+  input: Input<typeof postReceiptSchema>,
+  options?: PurchasesCommandOptions
+) {
+  const receipt = await prisma.goodsReceipt.findUnique({
+    where: { id: String(input.receiptId ?? '') },
+    select: { orderId: true },
+  });
+  return runAs<PostReceiptResult>(
+    actor,
+    PC.receiptPost,
+    { type: OBJ.order, id: receipt?.orderId },
+    input,
+    options
+  );
 }
 
-export const confirmDirectDelivery = (actor: CurrentUser, input: Input<typeof confirmDirectDeliverySchema>, options?: PurchasesCommandOptions) =>
-  runAs<ConfirmDirectDeliveryData>(actor, PC.receiptConfirmDirect, { type: OBJ.order, id: input.orderId }, input, options);
+export async function resolveReceiptDifference(
+  actor: CurrentUser,
+  input: Input<typeof resolveDifferenceSchema>,
+  options?: PurchasesCommandOptions
+) {
+  const line = await prisma.goodsReceiptLine.findUnique({
+    where: { id: String(input.receiptLineId ?? '') },
+    select: { receiptId: true },
+  });
+  const receipt = line
+    ? await prisma.goodsReceipt.findUnique({
+        where: { id: line.receiptId },
+        select: { orderId: true },
+      })
+    : null;
+  return runAs<{ orderId: string; orderStatus: string; creditedQty: number }>(
+    actor,
+    PC.receiptResolveDifference,
+    { type: OBJ.order, id: receipt?.orderId },
+    input,
+    options
+  );
+}
 
-export const runSourcingSearch = (actor: CurrentUser, input: Input<typeof sourcingSearchSchema>, options?: PurchasesCommandOptions) =>
-  runAs<SourcingSearchData>(actor, PC.sourcingSearch, { type: OBJ.search, id: 'new' }, input, options);
+export const confirmDirectDelivery = (
+  actor: CurrentUser,
+  input: Input<typeof confirmDirectDeliverySchema>,
+  options?: PurchasesCommandOptions
+) =>
+  runAs<ConfirmDirectDeliveryData>(
+    actor,
+    PC.receiptConfirmDirect,
+    { type: OBJ.order, id: input.orderId },
+    input,
+    options
+  );
+
+export const runSourcingSearch = (
+  actor: CurrentUser,
+  input: Input<typeof sourcingSearchSchema>,
+  options?: PurchasesCommandOptions
+) =>
+  runAs<SourcingSearchData>(
+    actor,
+    PC.sourcingSearch,
+    { type: OBJ.search, id: 'new' },
+    input,
+    options
+  );
 
 // ---------------------------------------------------------------------------
 // Send an order to the supplier (PDF and/or message)
@@ -1172,7 +1778,9 @@ export const sendOrderSchema = z.object({
 
 function moneyText(value: Prisma.Decimal | number, currency: string): string {
   try {
-    return new Intl.NumberFormat('es-MX', { style: 'currency', currency }).format(Number(value.toString()));
+    return new Intl.NumberFormat('es-MX', { style: 'currency', currency }).format(
+      Number(value.toString())
+    );
   } catch {
     return `${Number(value.toString()).toFixed(2)} ${currency}`;
   }
@@ -1180,7 +1788,10 @@ function moneyText(value: Prisma.Decimal | number, currency: string): string {
 
 async function buildOrderPdf(actor: CurrentUser, orderId: string): Promise<{ objectId: string }> {
   const order = await prisma.procurementOrder.findUniqueOrThrow({ where: { id: orderId } });
-  const lines = await prisma.procurementOrderLine.findMany({ where: { orderId, status: { not: 'cancelled' } }, orderBy: { sortOrder: 'asc' } });
+  const lines = await prisma.procurementOrderLine.findMany({
+    where: { orderId, status: { not: 'cancelled' } },
+    orderBy: { sortOrder: 'asc' },
+  });
   const supplier = await prisma.supplier.findUniqueOrThrow({ where: { id: order.supplierId } });
   const config = await getSourcingConfig();
   const { generatePdfReport } = await import('@/modules/ai/generators/pdf-generator');
@@ -1247,20 +1858,55 @@ export async function sendOrderToSupplier(
   actor: CurrentUser,
   input: Input<typeof sendOrderSchema>,
   options: PurchasesCommandOptions = {}
-): Promise<{ command: CommandResult<{ orderId: string; status: string; sentVia: string | null }>; pdfObjectId: string | null; conversationId: string | null }> {
+): Promise<{
+  command: CommandResult<{ orderId: string; status: string; sentVia: string | null }>;
+  pdfObjectId: string | null;
+  conversationId: string | null;
+}> {
   const parsed = sendOrderSchema.safeParse(input);
-  if (!parsed.success) return { command: rejected(PC.orderMarkSent, 'invalid_payload', 'Datos inválidos para enviar la orden'), pdfObjectId: null, conversationId: null };
+  if (!parsed.success)
+    return {
+      command: rejected(
+        PC.orderMarkSent,
+        'invalid_payload',
+        'Datos inválidos para enviar la orden'
+      ),
+      pdfObjectId: null,
+      conversationId: null,
+    };
   const { orderId, via } = parsed.data;
   if (!(await isOpsFlagEnabled('purchases'))) {
-    return { command: rejected(PC.orderMarkSent, 'module_disabled', MODULE_DISABLED_MESSAGE), pdfObjectId: null, conversationId: null };
+    return {
+      command: rejected(PC.orderMarkSent, 'module_disabled', MODULE_DISABLED_MESSAGE),
+      pdfObjectId: null,
+      conversationId: null,
+    };
   }
   if (!hasPermission(actor, P.manageOrders)) {
-    return { command: rejected(PC.orderMarkSent, 'forbidden', 'No tienes permisos para enviar órdenes de compra'), pdfObjectId: null, conversationId: null };
+    return {
+      command: rejected(
+        PC.orderMarkSent,
+        'forbidden',
+        'No tienes permisos para enviar órdenes de compra'
+      ),
+      pdfObjectId: null,
+      conversationId: null,
+    };
   }
   const order = await prisma.procurementOrder.findUnique({ where: { id: orderId } });
-  if (!order) return { command: rejected(PC.orderMarkSent, 'not_found', 'No se encontró la orden de compra'), pdfObjectId: null, conversationId: null };
+  if (!order)
+    return {
+      command: rejected(PC.orderMarkSent, 'not_found', 'No se encontró la orden de compra'),
+      pdfObjectId: null,
+      conversationId: null,
+    };
   const check = checkSendOrder(order.status);
-  if (!check.ok) return { command: rejected(PC.orderMarkSent, check.code, check.message), pdfObjectId: null, conversationId: null };
+  if (!check.ok)
+    return {
+      command: rejected(PC.orderMarkSent, check.code, check.message),
+      pdfObjectId: null,
+      conversationId: null,
+    };
 
   const { objectId: pdfObjectId } = await buildOrderPdf(actor, order.id);
   let conversationId: string | null = null;
@@ -1270,25 +1916,47 @@ export async function sendOrderToSupplier(
     const channels = parseChannels(supplier.channels);
     const to =
       channels.find((c) => c.type === via)?.value ??
-      (via !== 'telegram' ? (channels.find((c) => c.type === 'phone')?.value ?? supplier.primaryPhone) : null);
+      (via !== 'telegram'
+        ? (channels.find((c) => c.type === 'phone')?.value ?? supplier.primaryPhone)
+        : null);
     if (!to) {
       return {
-        command: rejected(PC.orderMarkSent, 'invalid_payload', `${supplier.name} no tiene ${via === 'telegram' ? 'Telegram' : 'teléfono'} registrado`),
+        command: rejected(
+          PC.orderMarkSent,
+          'invalid_payload',
+          `${supplier.name} no tiene ${via === 'telegram' ? 'Telegram' : 'teléfono'} registrado`
+        ),
         pdfObjectId,
         conversationId: null,
       };
     }
     const config = await getSourcingConfig();
     const provider = CHANNEL_PROVIDER[via as MessagingChannelType];
-    const configured = config.rfqAccountId ? await prisma.commAccount.findUnique({ where: { id: config.rfqAccountId } }) : null;
+    const configured = config.rfqAccountId
+      ? await prisma.commAccount.findUnique({ where: { id: config.rfqAccountId } })
+      : null;
     const account =
       configured && configured.provider === provider && configured.status === 'active'
         ? configured
-        : await prisma.commAccount.findFirst({ where: { provider, status: 'active' }, orderBy: { createdAt: 'asc' } });
+        : await prisma.commAccount.findFirst({
+            where: { provider, status: 'active' },
+            orderBy: { createdAt: 'asc' },
+          });
     if (!account) {
-      return { command: rejected(PC.orderMarkSent, 'invalid_state', 'No hay una cuenta activa de ese canal en la bandeja'), pdfObjectId, conversationId: null };
+      return {
+        command: rejected(
+          PC.orderMarkSent,
+          'invalid_state',
+          'No hay una cuenta activa de ese canal en la bandeja'
+        ),
+        pdfObjectId,
+        conversationId: null,
+      };
     }
-    const lines = await prisma.procurementOrderLine.findMany({ where: { orderId: order.id, status: { not: 'cancelled' } }, orderBy: { sortOrder: 'asc' } });
+    const lines = await prisma.procurementOrderLine.findMany({
+      where: { orderId: order.id, status: { not: 'cancelled' } },
+      orderBy: { sortOrder: 'asc' },
+    });
     const orderMessage = {
       template: config.orderMessageTemplate,
       supplierName: supplier.name,
@@ -1306,7 +1974,15 @@ export async function sendOrderToSupplier(
       deliveryLabel: labelOf(ORDER_DELIVERY_MODE_LABELS, order.deliveryMode),
       expectedAt: order.expectedAt,
     };
-    if (via === 'whatsapp' && !config.orderTemplateKey && !(await whatsappWindowOpen(prisma, { accountId: account.id, to, now: options.now ?? new Date() }))) {
+    if (
+      via === 'whatsapp' &&
+      !config.orderTemplateKey &&
+      !(await whatsappWindowOpen(prisma, {
+        accountId: account.id,
+        to,
+        now: options.now ?? new Date(),
+      }))
+    ) {
       return {
         command: rejected(
           PC.orderMarkSent,
@@ -1324,14 +2000,21 @@ export async function sendOrderToSupplier(
         contactName: supplier.name.slice(0, 120),
         body: renderOrderMessage(orderMessage),
         ...(via === 'whatsapp' && config.orderTemplateKey
-          ? { templateKey: config.orderTemplateKey, templateVariables: orderTemplateVariables(orderMessage) }
+          ? {
+              templateKey: config.orderTemplateKey,
+              templateVariables: orderTemplateVariables(orderMessage),
+            }
           : {}),
       });
       conversationId = started.conversation.id;
       messageId = started.message?.id ?? null;
       if (started.message?.status === 'failed') {
         return {
-          command: rejected(PC.orderMarkSent, 'invalid_state', started.message.error ?? 'El canal rechazó el mensaje'),
+          command: rejected(
+            PC.orderMarkSent,
+            'invalid_state',
+            started.message.error ?? 'El canal rechazó el mensaje'
+          ),
           pdfObjectId,
           conversationId,
         };
@@ -1346,17 +2029,29 @@ export async function sendOrderToSupplier(
           actor,
         });
       } catch (err) {
-        log('order_pdf_message_failed', { orderId: order.id, message: err instanceof Error ? err.message : String(err) });
+        log('order_pdf_message_failed', {
+          orderId: order.id,
+          message: err instanceof Error ? err.message : String(err),
+        });
       }
       const tag = `${ORDER_CONVERSATION_TAG_PREFIX}${order.id}`;
       if (!started.conversation.tags.includes(tag)) {
-        await updateConversation(actor, conversationId, { tags: [...started.conversation.tags, tag].slice(-30) }).catch((err) =>
-          log('order_tag_failed', { orderId: order.id, message: err instanceof Error ? err.message : String(err) })
+        await updateConversation(actor, conversationId, {
+          tags: [...started.conversation.tags, tag].slice(-30),
+        }).catch((err) =>
+          log('order_tag_failed', {
+            orderId: order.id,
+            message: err instanceof Error ? err.message : String(err),
+          })
         );
       }
     } catch (err) {
       return {
-        command: rejected(PC.orderMarkSent, 'invalid_state', truncate(err instanceof Error ? err.message : 'No se pudo enviar al proveedor', 300)),
+        command: rejected(
+          PC.orderMarkSent,
+          'invalid_state',
+          truncate(err instanceof Error ? err.message : 'No se pudo enviar al proveedor', 300)
+        ),
         pdfObjectId,
         conversationId,
       };
@@ -1369,7 +2064,12 @@ export async function sendOrderToSupplier(
     { orderId: order.id, via, conversationId, messageId, pdfObjectId },
     options
   );
-  if (command.status === 'completed') log('order_sent', { orderId: order.id, via, status: orderStatusLabel(command.data?.status ?? '') });
+  if (command.status === 'completed')
+    log('order_sent', {
+      orderId: order.id,
+      via,
+      status: orderStatusLabel(command.data?.status ?? ''),
+    });
   return { command, pdfObjectId, conversationId };
 }
 
@@ -1377,7 +2077,12 @@ export async function sendOrderToSupplier(
 // System runners (jobs)
 // ---------------------------------------------------------------------------
 
-export function runShortfallSync(areaRequestId: string, jobId: string, attempt: number, now?: Date) {
+export function runShortfallSync(
+  areaRequestId: string,
+  jobId: string,
+  attempt: number,
+  now?: Date
+) {
   return runSystem<ShortfallSyncResult>(
     PC.requestSyncShortfall,
     { type: 'area_request', id: areaRequestId },
@@ -1400,7 +2105,12 @@ export function runConsolidationSuggestion(now: Date = new Date()) {
 }
 
 /** System sweep (hourly job) of the invitations of an RFQ claimed for sending whose result was never recorded. */
-export function runRfqSendReconciliation(rfqId: string, staleBefore: Date, bucket: string, now?: Date) {
+export function runRfqSendReconciliation(
+  rfqId: string,
+  staleBefore: Date,
+  bucket: string,
+  now?: Date
+) {
   return runSystem<{ sent: number; failed: number }>(
     PC.rfqReconcileSends,
     { type: OBJ.rfq, id: rfqId },
@@ -1423,7 +2133,12 @@ export function runRfqExpiration(rfqId: string, bucket: string, now?: Date) {
 }
 
 /** Follow-up of an approved order: registers the payable (and the payment request for prepaid/cod). */
-export async function runOrderPaymentFollowup(orderId: string, jobId: string, attempt: number, now?: Date) {
+export async function runOrderPaymentFollowup(
+  orderId: string,
+  jobId: string,
+  attempt: number,
+  now?: Date
+) {
   const result = await runSystem<RequestPaymentData>(
     PC.orderRequestPayment,
     { type: OBJ.order, id: orderId },
@@ -1432,14 +2147,21 @@ export async function runOrderPaymentFollowup(orderId: string, jobId: string, at
     'purchases.order_followup',
     now
   );
-  if (result.status !== 'rejected' || ['duplicate', 'invalid_state', 'not_found', 'module_disabled'].includes(result.errorCode ?? '')) {
+  if (
+    result.status !== 'rejected' ||
+    ['duplicate', 'invalid_state', 'not_found', 'module_disabled'].includes(result.errorCode ?? '')
+  ) {
     return { result, failure: null };
   }
   if (result.errorCode === 'concurrency_conflict') return { result, failure: null };
   const failure = await runSystem<{ workItemId: string | null }>(
     PC.orderFollowupFailed,
     { type: OBJ.order, id: orderId },
-    { orderId, step: 'payment', message: result.message ?? result.errorCode ?? 'Error desconocido' },
+    {
+      orderId,
+      step: 'payment',
+      message: result.message ?? result.errorCode ?? 'Error desconocido',
+    },
     `purchases:order_followup_failed:${orderId}:${jobId}`,
     'purchases.order_followup',
     now
@@ -1447,7 +2169,12 @@ export async function runOrderPaymentFollowup(orderId: string, jobId: string, at
   return { result, failure };
 }
 
-export async function runDirectDeliverySync(plan: DirectDeliveryPlan, jobId: string, attempt: number, now?: Date) {
+export async function runDirectDeliverySync(
+  plan: DirectDeliveryPlan,
+  jobId: string,
+  attempt: number,
+  now?: Date
+) {
   const result = await runSystem<{ deliveryOrderIds: string[]; resolvedRequestIds: string[] }>(
     PC.receiptSyncDirect,
     { type: OBJ.receipt, id: plan.receiptId },
@@ -1456,11 +2183,15 @@ export async function runDirectDeliverySync(plan: DirectDeliveryPlan, jobId: str
     'purchases.direct_delivery_sync',
     now
   );
-  if (result.status !== 'rejected' || result.errorCode === 'concurrency_conflict') return { result, failure: null };
+  if (result.status !== 'rejected' || result.errorCode === 'concurrency_conflict')
+    return { result, failure: null };
   const failure = await runSystem<{ incidentId: string; workItemId: string | null }>(
     PC.receiptDirectSyncFailed,
     { type: OBJ.receipt, id: plan.receiptId },
-    { receiptId: plan.receiptId, message: result.message ?? result.errorCode ?? 'Error desconocido' },
+    {
+      receiptId: plan.receiptId,
+      message: result.message ?? result.errorCode ?? 'Error desconocido',
+    },
     `purchases:direct_sync_failed:${plan.receiptId}`,
     'purchases.direct_delivery_sync',
     now

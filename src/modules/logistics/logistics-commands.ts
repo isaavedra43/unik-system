@@ -36,6 +36,7 @@ import {
   type VehicleDTO,
 } from './fleet-service';
 import { normalizeVehicleCode } from './fleet-rules';
+import { scanDeliveryContainer, scanDeliveryContainerSchema } from './container-scan-service';
 import { assertLogisticsEnabled } from './logistics-helpers';
 import {
   assignTransport,
@@ -174,6 +175,17 @@ registerCommand(LOGISTICS_COMMANDS.deliveryRecord, {
       externalSyncStatus: result.zohoWriteQueued ? 'queued' : 'none',
       data: result,
     };
+  },
+});
+
+registerCommand(LOGISTICS_COMMANDS.deliveryScanContainer, {
+  schema: scanDeliveryContainerSchema,
+  permission: 'logistics.dispatch',
+  aggregate: deliveryAggregate,
+  async handler(tx, cmd) {
+    await assertLogisticsEnabled();
+    assertTarget(cmd, cmd.payload.deliveryOrderId);
+    return { data: await scanDeliveryContainer(tx, cmd.payload) };
   },
 });
 
