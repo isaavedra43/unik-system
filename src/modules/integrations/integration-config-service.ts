@@ -132,10 +132,7 @@ interface CachedConfig {
 const cache = new Map<IntegrationSourceKey, CachedConfig>();
 const CACHE_TTL_MS = 10_000;
 
-function mergeWithDefaults(
-  source: IntegrationSourceKey,
-  stored: unknown
-): IntegrationSettings {
+function mergeWithDefaults(source: IntegrationSourceKey, stored: unknown): IntegrationSettings {
   const defaults = DEFAULT_SETTINGS[source];
   if (!stored || typeof stored !== 'object') return { ...defaults };
   const s = stored as Record<string, unknown>;
@@ -147,6 +144,37 @@ function mergeWithDefaults(
     }
   }
   return merged as unknown as IntegrationSettings;
+}
+
+/**
+ * Loads a source configuration and creates its default row when absent.
+ *
+ * Several schedulers can start against an empty database at the same time.
+ * `source` is unique, so an insert loser must read the row written by the
+ * winner instead of letting a harmless bootstrap race fail the scheduler.
+ */
+async function ensureIntegrationConfigRow(source: IntegrationSourceKey) {
+  const existing = await prisma.integrationConfig.findUnique({ where: { source } });
+  if (existing) return existing;
+
+  try {
+    return await prisma.integrationConfig.create({
+      data: {
+        source,
+        displayName: INTEGRATION_DISPLAY_NAMES[source],
+        isEnabled: DEFAULT_SETTINGS[source].schedulerEnabled,
+        settings: DEFAULT_SETTINGS[source] as unknown as Prisma.InputJsonValue,
+      },
+    });
+  } catch (error) {
+    if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== 'P2002') {
+      throw error;
+    }
+
+    const winner = await prisma.integrationConfig.findUnique({ where: { source } });
+    if (!winner) throw error;
+    return winner;
+  }
 }
 
 /**
@@ -162,19 +190,7 @@ export async function getIntegrationSettings(
     return cached.settings;
   }
 
-  let row = await prisma.integrationConfig.findUnique({ where: { source } });
-
-  if (!row) {
-    // Seed the row with defaults so the admin UI can edit it.
-    row = await prisma.integrationConfig.create({
-      data: {
-        source,
-        displayName: INTEGRATION_DISPLAY_NAMES[source],
-        isEnabled: DEFAULT_SETTINGS[source].schedulerEnabled,
-        settings: DEFAULT_SETTINGS[source] as unknown as Prisma.InputJsonValue,
-      },
-    });
-  }
+  const row = await ensureIntegrationConfigRow(source);
 
   const settings = mergeWithDefaults(source, row.settings);
   cache.set(source, { settings, isEnabled: row.isEnabled, fetchedAt: Date.now() });
@@ -182,9 +198,7 @@ export async function getIntegrationSettings(
 }
 
 /** Returns whether the scheduler loop should run for this source. */
-export async function isIntegrationEnabled(
-  source: IntegrationSourceKey
-): Promise<boolean> {
+export async function isIntegrationEnabled(source: IntegrationSourceKey): Promise<boolean> {
   const cached = cache.get(source);
   if (cached && Date.now() - cached.fetchedAt < CACHE_TTL_MS) {
     return cached.isEnabled;
@@ -207,17 +221,7 @@ function invalidateIntegrationConfigCache(source?: IntegrationSourceKey): void {
 export async function listIntegrationConfigs() {
   // Ensure all known sources have a row.
   for (const source of Object.keys(DEFAULT_SETTINGS) as IntegrationSourceKey[]) {
-    const existing = await prisma.integrationConfig.findUnique({ where: { source } });
-    if (!existing) {
-      await prisma.integrationConfig.create({
-        data: {
-          source,
-          displayName: INTEGRATION_DISPLAY_NAMES[source],
-          isEnabled: DEFAULT_SETTINGS[source].schedulerEnabled,
-          settings: DEFAULT_SETTINGS[source] as unknown as Prisma.InputJsonValue,
-        },
-      });
-    }
+    await ensureIntegrationConfigRow(source);
   }
   return prisma.integrationConfig.findMany({ orderBy: { source: 'asc' } });
 }

@@ -74,18 +74,19 @@ prueba falla: ambas reservas pasan). `CONTROLLED` nunca queda negativo.
 
 ## Comandos (`inventory-commands.ts`)
 
-| Tipo                                                                                                          | Permiso              |
-| ------------------------------------------------------------------------------------------------------------- | -------------------- |
-| `stock.count.start`, `stock.count.line`                                                                       | `inventory.count`    |
-| `stock.count.close`, `stock.count.cancel` (versionados)                                                       | `inventory.count`    |
-| `stock.count.decide_adjustment`, `stock.count.resolve_dispute`                                                | `inventory.adjust`   |
-| `stock.reserve`, `stock.release`                                                                              | `inventory.reserve`  |
-| `stock.consume`, `stock.move` (receipt, return, produce, issue, consume, transfer), `stock.container.create`  | `inventory.manage`   |
-| `stock.adjust`, `stock.block`, `stock.unblock`                                                                | `inventory.adjust`   |
-| `stock.claim_legacy`, `stock.confirm_legacy`, `stock.release_legacy`                                          | `inventory.reserve`  |
-| `stock.expire_legacy`                                                                                         | sistema (supervisor) |
-| `profile.ensure`, `profile.update` (versionado)                                                               | `inventory.manage`   |
-| `location.create`, `location.update`, `warehouse.create`, `warehouse.update`, `warehouse.sync_zoho_locations` | `inventory.manage`   |
+| Tipo                                                                                                            | Permiso              |
+| --------------------------------------------------------------------------------------------------------------- | -------------------- |
+| `stock.count.start`, `stock.count.line`                                                                         | `inventory.count`    |
+| `stock.count.close`, `stock.count.cancel` (versionados)                                                         | `inventory.count`    |
+| `stock.count.decide_adjustment`, `stock.count.resolve_dispute`                                                  | `inventory.adjust`   |
+| `stock.reserve`, `stock.release`                                                                                | `inventory.reserve`  |
+| `stock.consume`, `stock.move` (receipt, return, produce, issue, consume, transfer), `stock.container.create`    | `inventory.manage`   |
+| `stock.issue_case_material` (surte todas las reservas activas del expediente y deja cada salida como evidencia) | `inventory.manage`   |
+| `stock.adjust`, `stock.block`, `stock.unblock`                                                                  | `inventory.adjust`   |
+| `stock.claim_legacy`, `stock.confirm_legacy`, `stock.release_legacy`                                            | `inventory.reserve`  |
+| `stock.expire_legacy`                                                                                           | sistema (supervisor) |
+| `profile.ensure`, `profile.update` (versionado)                                                                 | `inventory.manage`   |
+| `location.create`, `location.update`, `warehouse.create`, `warehouse.update`, `warehouse.sync_zoho_locations`   | `inventory.manage`   |
 
 Todos exigen el flag `inventory` (`module_disabled` si está apagado). Envoltorios `fn(actor, input, {commandId,
 expectedVersion, deviceId, occurredAt})`; `expireDueLegacyClaims({now})` para el supervisor. El consumo de reservas

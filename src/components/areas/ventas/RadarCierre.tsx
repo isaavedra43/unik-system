@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Inbox, RefreshCw, Sparkles } from 'lucide-react';
@@ -23,6 +23,7 @@ import {
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@/components/shadcn/sheet';
 import { Alert, Button, Select } from '@/components/ui/primitives';
 import { useOfflineCommandQueue } from '@/lib/hooks/use-offline-command-queue';
+import { useWideScreen } from '@/hooks/use-wide-screen';
 import type { OfflineCommandInput } from '@/lib/offline-commands';
 import { stashCommsDraft } from '@/modules/areas/comms-draft';
 import type { RadarBoardPayload } from '@/modules/areas/ventas/ventas-queries';
@@ -65,21 +66,7 @@ import {
  *   y versión.
  */
 
-const WIDE_QUERY = '(min-width: 1280px)';
 const REALTIME_TYPES = ['radar_refreshed', 'signal_changed'] as const;
-
-function useWideScreen(): boolean | null {
-  const subscribe = useCallback((onChange: () => void) => {
-    const media = window.matchMedia(WIDE_QUERY);
-    media.addEventListener('change', onChange);
-    return () => media.removeEventListener('change', onChange);
-  }, []);
-  return useSyncExternalStore<boolean | null>(
-    subscribe,
-    () => window.matchMedia(WIDE_QUERY).matches,
-    () => null
-  );
-}
 
 type PendingDialog =
   { kind: 'dismiss'; signal: RadarSignalDTO } | { kind: 'convert'; signal: RadarSignalDTO };

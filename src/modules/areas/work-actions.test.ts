@@ -109,6 +109,21 @@ describe('getRowActions · work items', () => {
     expect(complete?.hint).toContain('respuesta');
   });
 
+  it('replaces free-text completion with the guided issue command for preparation', () => {
+    const preparation = row({
+      areaKey: 'inventario',
+      extra: { stepKey: 'preparar_pedido' },
+    });
+    const actions = getRowActions(preparation, owner);
+    expect(ids(actions)).toContain('workitem.issue_case_material');
+    expect(ids(actions)).not.toContain('workitem.complete');
+    expect(actions.find((action) => action.id === 'workitem.issue_case_material')).toMatchObject({
+      commandType: 'stock.issue_case_material',
+      aggregateType: 'work_item',
+      payload: { workItemId: 'wi-1' },
+    });
+  });
+
   it('cada acción apunta al agregado y al comando del núcleo', () => {
     for (const action of getRowActions(row(), owner)) {
       expect(action.aggregateType).toBe('work_item');

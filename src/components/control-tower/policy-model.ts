@@ -43,6 +43,8 @@ export interface ApprovalPolicyRow {
   maxAmount: string | null;
   currency: string;
   requiredApprovals: number;
+  /** null = use the general deadline configured in Operations. */
+  expiresAfterMinutes: number | null;
   approverRoleKeys: string[];
   active: boolean;
   createdAt: string;
@@ -70,6 +72,13 @@ export const approvalPolicyFormSchema = z
     maxAmount: amountField.default(''),
     currency: z.enum(POLICY_CURRENCIES).default('MXN'),
     requiredApprovals: z.coerce.number().int().min(0).max(5),
+    expiresAfterMinutes: z.coerce
+      .number()
+      .int()
+      .refine((value) => [0, 30, 60, 120, 360, 720, 1440, 2880, 4320, 10080].includes(value), {
+        message: 'Elige un plazo permitido',
+      })
+      .default(0),
     approverRoleKeys: z.array(z.string().trim().min(1).max(80)).max(20).default([]),
     active: z.boolean().default(true),
   })
@@ -97,6 +106,7 @@ export const EMPTY_POLICY_FORM: ApprovalPolicyFormInput = {
   maxAmount: '',
   currency: 'MXN',
   requiredApprovals: 1,
+  expiresAfterMinutes: 0,
   approverRoleKeys: [],
   active: true,
 };
@@ -111,6 +121,7 @@ export function policyToForm(row: ApprovalPolicyRow): ApprovalPolicyFormInput {
       ? (row.currency as PolicyCurrency)
       : 'MXN',
     requiredApprovals: row.requiredApprovals,
+    expiresAfterMinutes: row.expiresAfterMinutes ?? 0,
     approverRoleKeys: [...row.approverRoleKeys],
     active: row.active,
   };

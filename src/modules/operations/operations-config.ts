@@ -59,7 +59,8 @@ export const OPS_FLAG_LABELS: Record<OpsFlag, string> = {
   crm: 'CRM y radar de cierre',
   agents: 'IA coordinadora por área',
   supervisor: 'Supervisor automático',
-  crmSalesOrderWrite: 'Crear órdenes de venta en Zoho desde el CRM (validar primero con la organización real)',
+  crmSalesOrderWrite:
+    'Crear órdenes de venta en Zoho desde el CRM (validar primero con la organización real)',
 };
 
 export interface OperationsSettings {
@@ -76,6 +77,8 @@ export interface OperationsSettings {
   reservationAlertDays: number;
   provisionalVerificationMaxHours: number;
   approvalThresholds: { procurementDoubleApprovalMxn: number; expenseAutoApproveMxn: number };
+  /** Default deadline for a business approval; policies may override it. */
+  approvalExpiryMinutes: number;
 }
 
 export interface OperationsConfig extends OperationsSettings {
@@ -115,6 +118,7 @@ export function defaultOperationsSettings(now: Date = new Date()): OperationsSet
     reservationAlertDays: 7,
     provisionalVerificationMaxHours: 72,
     approvalThresholds: { procurementDoubleApprovalMxn: 50_000, expenseAutoApproveMxn: 2_000 },
+    approvalExpiryMinutes: 1440,
   };
 }
 
@@ -148,6 +152,14 @@ const afterMinutesSchema = z
   });
 const ladderSchema = z.array(z.enum(ESCALATION_RUNGS)).min(1).max(10);
 const moneySchema = z.number().finite().min(0).max(1e12);
+/** Product-approved approval deadlines: 30 min through seven days. */
+export const APPROVAL_EXPIRY_MINUTES = [30, 60, 120, 360, 720, 1440, 2880, 4320, 10080] as const;
+const approvalExpiryMinutesSchema = z
+  .number()
+  .int()
+  .refine((value) => (APPROVAL_EXPIRY_MINUTES as readonly number[]).includes(value), {
+    message: 'El plazo de aprobación no está permitido',
+  });
 
 const SCALAR_FIELDS = {
   externalSyncStaleMinutes: intIn(1, 1440),
@@ -236,6 +248,11 @@ export function normalizeOperationsSettings(
         defaults.approvalThresholds.expenseAutoApproveMxn
       ),
     },
+    approvalExpiryMinutes: pick(
+      approvalExpiryMinutesSchema,
+      s.approvalExpiryMinutes,
+      defaults.approvalExpiryMinutes
+    ),
   };
   return { settings, cutoverRepaired: !cutover.success };
 }
@@ -269,6 +286,7 @@ export const operationsConfigPatchSchema = z
       })
       .strict()
       .optional(),
+    approvalExpiryMinutes: approvalExpiryMinutesSchema.optional(),
   })
   .strict();
 
@@ -294,6 +312,7 @@ export function applyOperationsPatch(
     provisionalVerificationMaxHours:
       patch.provisionalVerificationMaxHours ?? current.provisionalVerificationMaxHours,
     approvalThresholds: { ...current.approvalThresholds, ...defined(patch.approvalThresholds) },
+    approvalExpiryMinutes: patch.approvalExpiryMinutes ?? current.approvalExpiryMinutes,
   };
 }
 

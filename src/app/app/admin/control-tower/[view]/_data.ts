@@ -577,6 +577,7 @@ export function toPolicyRow(row: {
   maxAmount: { toString(): string } | null;
   currency: string;
   requiredApprovals: number;
+  expiresAfterMinutes: number | null;
   approverRoleKeys: string[];
   active: boolean;
   createdAt: Date;
@@ -591,6 +592,7 @@ export function toPolicyRow(row: {
     maxAmount: row.maxAmount === null ? null : row.maxAmount.toString(),
     currency: row.currency,
     requiredApprovals: row.requiredApprovals,
+    expiresAfterMinutes: row.expiresAfterMinutes,
     approverRoleKeys: row.approverRoleKeys,
     active: row.active,
     createdAt: row.createdAt.toISOString(),
@@ -627,6 +629,8 @@ export interface SettingsView {
   policies: ApprovalPolicyRow[];
   roles: Array<{ key: string; name: string }>;
   categories: Array<{ id: string; name: string }>;
+  areas: Array<{ key: string; label: string; leadUserId: string | null }>;
+  activeUsers: Array<{ id: string; name: string }>;
   /** Fuentes de las que se puede reconstruir la proyección del grafo (plan 2.1). */
   relationSources: Array<{ key: string; label: string }>;
   /** Última reconstrucción encolada, para no pedir otra a ciegas. */
@@ -663,47 +667,64 @@ async function loadLastRelationsRebuild(): Promise<RelationsRebuildStatus | null
 export async function loadSettingsView(): Promise<SettingsView> {
   // Se lanza antes del Promise.all para que viaje en paralelo sin re-indentarlo.
   const rebuildPromise = settle(loadLastRelationsRebuild(), 'la última reconstrucción del grafo');
-  const [config, sourcing, accounts, connections, policies, roles, categories] = await Promise.all([
-    getOperationsConfig(),
-    getSourcingConfig(),
-    settle(
-      prisma.commAccount.findMany({
-        where: { status: 'active' },
-        select: { id: true, label: true, provider: true, identifier: true },
-        orderBy: { label: 'asc' },
-        take: 100,
-      }),
-      'las cuentas de la bandeja'
-    ),
-    settle(
-      prisma.extensionConnection.findMany({
-        where: { status: 'active' },
-        select: { id: true, name: true, extensionId: true },
-        orderBy: { name: 'asc' },
-        take: 100,
-      }),
-      'las conexiones de extensiones'
-    ),
-    settle(listApprovalPolicies(), 'las políticas de aprobación'),
-    settle(
-      prisma.role.findMany({
-        where: { isActive: true },
-        select: { key: true, name: true },
-        orderBy: { name: 'asc' },
-        take: 100,
-      }),
-      'los roles'
-    ),
-    settle(
-      prisma.financeCategory.findMany({
-        where: { status: 'active' },
-        select: { id: true, name: true },
-        orderBy: { name: 'asc' },
-        take: 300,
-      }),
-      'las categorías de gasto'
-    ),
-  ]);
+  const [config, sourcing, accounts, connections, policies, roles, categories, areas, activeUsers] =
+    await Promise.all([
+      getOperationsConfig(),
+      getSourcingConfig(),
+      settle(
+        prisma.commAccount.findMany({
+          where: { status: 'active' },
+          select: { id: true, label: true, provider: true, identifier: true },
+          orderBy: { label: 'asc' },
+          take: 100,
+        }),
+        'las cuentas de la bandeja'
+      ),
+      settle(
+        prisma.extensionConnection.findMany({
+          where: { status: 'active' },
+          select: { id: true, name: true, extensionId: true },
+          orderBy: { name: 'asc' },
+          take: 100,
+        }),
+        'las conexiones de extensiones'
+      ),
+      settle(listApprovalPolicies(), 'las políticas de aprobación'),
+      settle(
+        prisma.role.findMany({
+          where: { isActive: true },
+          select: { key: true, name: true },
+          orderBy: { name: 'asc' },
+          take: 100,
+        }),
+        'los roles'
+      ),
+      settle(
+        prisma.financeCategory.findMany({
+          where: { status: 'active' },
+          select: { id: true, name: true },
+          orderBy: { name: 'asc' },
+          take: 300,
+        }),
+        'las categorías de gasto'
+      ),
+      settle(
+        prisma.area.findMany({
+          select: { key: true, label: true, leadUserId: true },
+          orderBy: { sortOrder: 'asc' },
+        }),
+        'las áreas operativas'
+      ),
+      settle(
+        prisma.user.findMany({
+          where: { isActive: true, isBot: false },
+          select: { id: true, name: true },
+          orderBy: { name: 'asc' },
+          take: 500,
+        }),
+        'los usuarios activos'
+      ),
+    ]);
   const lastRebuild = await rebuildPromise;
   return {
     config,
@@ -719,6 +740,8 @@ export async function loadSettingsView(): Promise<SettingsView> {
     policies: policies.value ?? [],
     roles: roles.value ?? [],
     categories: categories.value ?? [],
+    areas: areas.value ?? [],
+    activeUsers: activeUsers.value ?? [],
     relationSources: listRelationSources(),
     lastRelationsRebuild: lastRebuild.value ?? null,
     warnings: [
@@ -727,6 +750,8 @@ export async function loadSettingsView(): Promise<SettingsView> {
       policies.warning,
       roles.warning,
       categories.warning,
+      areas.warning,
+      activeUsers.warning,
       lastRebuild.warning,
     ].filter((warning): warning is string => Boolean(warning)),
   };

@@ -357,6 +357,30 @@ export function SettingsPanel({ config, saveAction, nowIso }: SettingsPanelProps
             />
           </FormField>
           <FormField
+            label="Plazo general de aprobación"
+            htmlFor="ct-approval-expiry"
+            help="Una política puede usar una excepción; si no, la aprobación vence con este plazo."
+          >
+            <select
+              id="ct-approval-expiry"
+              className="input"
+              value={form.approvalExpiryMinutes}
+              onChange={(event) =>
+                setForm((state) => ({ ...state, approvalExpiryMinutes: event.target.value }))
+              }
+            >
+              <option value="30">30 min</option>
+              <option value="60">1 h</option>
+              <option value="120">2 h</option>
+              <option value="360">6 h</option>
+              <option value="720">12 h</option>
+              <option value="1440">24 h</option>
+              <option value="2880">48 h</option>
+              <option value="4320">72 h</option>
+              <option value="10080">7 días</option>
+            </select>
+          </FormField>
+          <FormField
             label="Escritura externa atorada (min)"
             htmlFor="ct-external"
             help="Minutos esperando a Zoho antes de tratarlo como excepción."

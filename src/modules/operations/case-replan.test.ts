@@ -114,7 +114,7 @@ async function prepareOrder() {
   const result = await completeWorkItem(
     team.byArea.inventario,
     itemOf(stepOf('preparar_pedido'))!.id,
-    { result: { issue_movements: 'Surtido' } },
+    { result: { issue_movements: { movementIds: ['movement_test'] } } },
     { now: NOW }
   );
   expect(result.status).toBe('completed');
@@ -237,7 +237,7 @@ describe('case.replan', () => {
     const late = await completeWorkItem(
       team.byArea.inventario,
       prepareItem.id,
-      { result: { issue_movements: 'Surtido' } },
+      { result: { issue_movements: { movementIds: ['movement_test'] } } },
       { now: NOW }
     );
     expect(late.status).toBe('rejected');

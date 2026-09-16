@@ -390,6 +390,22 @@ describe('case.start', () => {
 });
 
 describe('advanceCase tras completar pasos', () => {
+  it('does not let a preparation work item close with a free-text note', async () => {
+    seedItemStock(fake, { zohoItemId: 'item-1', quantity: 25 });
+    seedSalesOrder(fake, { lines: [{ quantity: 10 }] });
+    await systemStart();
+
+    const result = await completeWorkItem(
+      team.byArea.inventario,
+      itemOf(stepOf('preparar_pedido'))!.id,
+      { result: { issue_movements: 'Surtido completo' } },
+      { now: NOW }
+    );
+
+    expect(result).toMatchObject({ status: 'rejected', errorCode: 'invalid_payload' });
+    expect(stepOf('preparar_pedido')!.status).toBe('ready');
+  });
+
   it('avanza de la preparación al cierre financiero con hechos de logística y Zoho', async () => {
     seedItemStock(fake, { zohoItemId: 'item-1', quantity: 25 });
     seedSalesOrder(fake, { lines: [{ quantity: 10 }] });
@@ -400,7 +416,7 @@ describe('advanceCase tras completar pasos', () => {
     const prepared = await completeWorkItem(
       team.byArea.inventario,
       itemOf(stepOf('preparar_pedido'))!.id,
-      { result: { issue_movements: 'Surtido completo' } },
+      { result: { issue_movements: { movementIds: ['movement_test'] } } },
       { now: NOW }
     );
     expect(prepared.status).toBe('completed');
@@ -489,7 +505,7 @@ describe('advanceCase tras completar pasos', () => {
     await completeWorkItem(
       team.byArea.inventario,
       itemOf(stepOf('preparar_pedido'))!.id,
-      { result: { issue_movements: 'listo' } },
+      { result: { issue_movements: { movementIds: ['movement_test'] } } },
       { now: NOW }
     );
     expect(fake.rows('deliveryOrder')[0]).toMatchObject({
@@ -513,7 +529,7 @@ describe('advanceCase tras completar pasos', () => {
     await completeWorkItem(
       team.byArea.inventario,
       itemOf(stepOf('preparar_pedido'))!.id,
-      { result: { issue_movements: 'listo' } },
+      { result: { issue_movements: { movementIds: ['movement_test'] } } },
       { now: NOW }
     );
     const delivery = fake.rows('deliveryOrder')[0];
@@ -840,7 +856,7 @@ describe('reglas del motor que evitan atascos y material fantasma', () => {
     const prepared = await completeWorkItem(
       team.byArea.inventario,
       itemOf(stepOf('preparar_pedido'))!.id,
-      { result: { issue_movements: 'Surtido' } },
+      { result: { issue_movements: { movementIds: ['movement_test'] } } },
       { now: NOW }
     );
 
@@ -920,7 +936,7 @@ describe('reglas del motor que evitan atascos y material fantasma', () => {
     await completeWorkItem(
       team.byArea.inventario,
       itemOf(stepOf('preparar_pedido'))!.id,
-      { result: { issue_movements: 'Surtido' } },
+      { result: { issue_movements: { movementIds: ['movement_test'] } } },
       { now: NOW }
     );
     const order = fake.rows('deliveryOrder')[0];

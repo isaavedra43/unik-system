@@ -130,6 +130,7 @@ export interface OperationsSettingsForm {
   provisionalVerificationMaxHours: string;
   procurementDoubleApprovalMxn: string;
   expenseAutoApproveMxn: string;
+  approvalExpiryMinutes: string;
 }
 
 function isoToDateInput(iso: string): string {
@@ -157,6 +158,7 @@ export function toSettingsForm(config: OperationsConfig): OperationsSettingsForm
     provisionalVerificationMaxHours: String(config.provisionalVerificationMaxHours),
     procurementDoubleApprovalMxn: String(config.approvalThresholds.procurementDoubleApprovalMxn),
     expenseAutoApproveMxn: String(config.approvalThresholds.expenseAutoApproveMxn),
+    approvalExpiryMinutes: String(config.approvalExpiryMinutes),
   };
 }
 
@@ -307,6 +309,20 @@ export function settingsFormToPatch(form: OperationsSettingsForm): SettingsPatch
   const expenseAuto = parseMoneyField(form.expenseAutoApproveMxn, 'Umbral de gasto sin firma');
   if (!expenseAuto.ok) errors.push(expenseAuto.error);
 
+  const approvalExpiry = parseIntField(form.approvalExpiryMinutes, 'Plazo general de aprobación', {
+    min: 30,
+    max: 10080,
+  });
+  const approvalExpiryOptions = [30, 60, 120, 360, 720, 1440, 2880, 4320, 10080];
+  if (
+    !approvalExpiry.ok ||
+    !approvalExpiryOptions.includes((approvalExpiry as { value?: number }).value ?? -1)
+  ) {
+    errors.push(
+      'Plazo general de aprobación: elige 30 min, 1 h, 2 h, 6 h, 12 h, 24 h, 48 h, 72 h o 7 días'
+    );
+  }
+
   if (errors.length > 0) return { ok: false, errors };
 
   return {
@@ -327,6 +343,7 @@ export function settingsFormToPatch(form: OperationsSettingsForm): SettingsPatch
         procurementDoubleApprovalMxn: (doubleApproval as { value: number }).value,
         expenseAutoApproveMxn: (expenseAuto as { value: number }).value,
       },
+      approvalExpiryMinutes: (approvalExpiry as { value: number }).value,
     },
   };
 }

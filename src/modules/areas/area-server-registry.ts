@@ -1,3 +1,5 @@
+import 'server-only';
+
 import type { CurrentUser } from '@/modules/auth/authorization';
 import type {
   AlertSeverity,

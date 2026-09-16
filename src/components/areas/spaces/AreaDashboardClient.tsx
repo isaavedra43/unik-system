@@ -173,22 +173,15 @@ export function AreaDashboardClient({
         method: 'POST',
       });
       const data = (await response.json().catch(() => ({}))) as {
-        dashboard?: AreaDashboardPayload | null;
-        note?: string | null;
-        liveAt?: string | null;
+        accepted?: boolean;
         error?: string;
       };
       if (!response.ok) {
         toast.error(data.error ?? 'No pudimos actualizar los indicadores');
         return;
       }
-      setState({
-        payload: data.dashboard ?? null,
-        note: data.note ?? null,
-        liveAt: data.liveAt ?? null,
-      });
       setNow(Date.now());
-      toast.success('Indicadores actualizados');
+      toast.success('Actualización solicitada');
     } catch {
       toast.error('No pudimos actualizar los indicadores; revisa tu conexión');
     } finally {

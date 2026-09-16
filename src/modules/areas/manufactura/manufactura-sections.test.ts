@@ -128,9 +128,9 @@ describe('las listas de materiales son alcanzables desde la interfaz', () => {
 
   it('las tres páginas de gestión pintan la tira de secciones', () => {
     for (const page of [
-      'src/app/app/manufacturing/bom/page.tsx',
-      'src/app/app/manufacturing/centros/page.tsx',
-      'src/app/app/manufacturing/orders/nueva/page.tsx',
+      'src/app/app/areas/manufactura/bom/page.tsx',
+      'src/app/app/areas/manufactura/centros/page.tsx',
+      'src/app/app/areas/manufactura/ordenes/nueva/page.tsx',
     ]) {
       const source = read(page);
       expect({ page, usesTabs: source.includes('manufacturaSectionTabs') }).toEqual({

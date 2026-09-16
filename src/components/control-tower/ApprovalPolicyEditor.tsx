@@ -81,6 +81,21 @@ interface EditorState {
   form: ApprovalPolicyFormInput;
 }
 
+function approvalExpiryLabel(minutes: number): string {
+  const labels: Record<number, string> = {
+    30: '30 min',
+    60: '1 h',
+    120: '2 h',
+    360: '6 h',
+    720: '12 h',
+    1440: '24 h',
+    2880: '48 h',
+    4320: '72 h',
+    10080: '7 días',
+  };
+  return labels[minutes] ?? `${minutes} min`;
+}
+
 export function ApprovalPolicyEditor({
   policies,
   roles,
@@ -206,6 +221,7 @@ export function ApprovalPolicyEditor({
                   <th scope="col">Rango</th>
                   <th scope="col">Categoría</th>
                   <th scope="col">Firmas</th>
+                  <th scope="col">Vence</th>
                   <th scope="col">Roles aprobadores</th>
                   <th scope="col">Estado</th>
                   <th scope="col">Acciones</th>
@@ -228,6 +244,11 @@ export function ApprovalPolicyEditor({
                     </td>
                     <td className="ct-numeric">
                       {describeRequiredSignatures(row.requiredApprovals)}
+                    </td>
+                    <td>
+                      {row.expiresAfterMinutes
+                        ? approvalExpiryLabel(row.expiresAfterMinutes)
+                        : 'Plazo general'}
                     </td>
                     <td>
                       {row.approverRoleKeys.length === 0 ? (
@@ -497,6 +518,40 @@ export function ApprovalPolicyEditor({
                       )
                     }
                   />
+                </FormField>
+                <FormField
+                  label="Plazo de esta política"
+                  htmlFor="ct-policy-expiry"
+                  help="General usa el plazo configurado para toda la operación."
+                >
+                  <Select
+                    id="ct-policy-expiry"
+                    value={String(editor.form.expiresAfterMinutes ?? 0)}
+                    onChange={(event) =>
+                      setEditor((state) =>
+                        state
+                          ? {
+                              ...state,
+                              form: {
+                                ...state.form,
+                                expiresAfterMinutes: Number(event.target.value),
+                              },
+                            }
+                          : state
+                      )
+                    }
+                  >
+                    <option value="0">Usar plazo general</option>
+                    <option value="30">30 min</option>
+                    <option value="60">1 h</option>
+                    <option value="120">2 h</option>
+                    <option value="360">6 h</option>
+                    <option value="720">12 h</option>
+                    <option value="1440">24 h</option>
+                    <option value="2880">48 h</option>
+                    <option value="4320">72 h</option>
+                    <option value="10080">7 días</option>
+                  </Select>
                 </FormField>
               </div>
 

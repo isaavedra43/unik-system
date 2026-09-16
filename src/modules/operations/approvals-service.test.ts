@@ -203,6 +203,7 @@ describe('requestApproval', () => {
       areaKey: 'compras',
       policyId: null,
     });
+    expect(request.expiresAt).toEqual(new Date(NOW.getTime() + 24 * 60 * 60_000));
     const items = fake.rows('workItem');
     expect(items.map((i) => i.ownerUserId).sort()).toEqual(['a1', 'a2']);
     expect(
@@ -272,6 +273,23 @@ describe('requestApproval', () => {
       policyId: 'pol1',
       requiredApprovals: 1,
     });
+  });
+
+  it('uses a policy-specific expiry over the global approval deadline', async () => {
+    fake.seed('approvalPolicy', {
+      id: 'pol-expiry',
+      scope: 'procurement',
+      minAmount: new Prisma.Decimal(0),
+      requiredApprovals: 1,
+      approverRoleKeys: [],
+      expiresAfterMinutes: 30,
+    });
+
+    await ask({ amount: '1000' });
+
+    expect(fake.rows('approvalRequest')[0].expiresAt).toEqual(
+      new Date(NOW.getTime() + 30 * 60_000)
+    );
   });
 
   it('only runs inside a command', async () => {

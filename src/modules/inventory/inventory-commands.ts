@@ -14,6 +14,7 @@ import {
   type CommandResult,
 } from '@/modules/operations/commands';
 import { OperationsError } from '@/modules/operations/errors';
+import { completeWorkItemInTx } from '@/modules/operations/work-items-service';
 import { isOpsFlagEnabled } from '@/modules/operations/operations-config';
 import {
   qty,
@@ -133,6 +134,7 @@ export const INVENTORY_COMMANDS = {
   warehouseCreate: 'warehouse.create',
   warehouseUpdate: 'warehouse.update',
   warehouseSyncZoho: 'warehouse.sync_zoho_locations',
+  issueCaseMaterial: 'stock.issue_case_material',
 } as const;
 
 export type InventoryCommandType = (typeof INVENTORY_COMMANDS)[keyof typeof INVENTORY_COMMANDS];
@@ -535,6 +537,70 @@ export interface MoveData {
   /** Container created by an inbound movement. */
   containerKey: string | null;
 }
+
+/**
+ * Surtido guiado de un expediente. Consume las reservas que ya unen la
+ * existencia con sus asignaciones y guarda los movimientos como evidencia.
+ */
+const issueCaseMaterialSchema = z.object({ workItemId: idSchema }).strict();
+
+registerCommand<
+  z.output<typeof issueCaseMaterialSchema>,
+  { workItemId: string; caseId: string; movementIds: string[] }
+>(INVENTORY_COMMANDS.issueCaseMaterial, {
+  schema: issueCaseMaterialSchema,
+  permission: 'inventory.manage',
+  aggregate: 'none',
+  async handler(tx, cmd, ctx) {
+    await assertInventoryEnabled();
+    const item = await tx.workItem.findUnique({ where: { id: cmd.payload.workItemId } });
+    if (!item || item.areaKey !== 'inventario' || !item.stepId) {
+      throw new OperationsError('not_found', 'No se encontró el surtido de Inventario');
+    }
+    const step = await tx.caseStep.findUnique({ where: { id: item.stepId } });
+    if (!step || step.caseId !== item.caseId || step.stepKey !== 'preparar_pedido') {
+      throw new OperationsError(
+        'invalid_state',
+        'Este trabajo no corresponde a preparar un pedido'
+      );
+    }
+    const reservations = await tx.stockReservation.findMany({
+      where: { caseId: step.caseId, status: 'active', allocationId: { not: null } },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+    });
+    if (reservations.length === 0) {
+      throw new OperationsError(
+        'invalid_state',
+        'No hay reservas activas que surtir; verifica las asignaciones del expediente'
+      );
+    }
+    const movementIds: string[] = [];
+    for (const reservation of reservations) {
+      const result = await recordInventoryMovement(
+        tx,
+        {
+          kind: 'issue',
+          zohoItemId: reservation.zohoItemId,
+          warehouseId: reservation.warehouseId,
+          stockItemId: reservation.stockItemId,
+          reservationId: reservation.id,
+          quantity: reservation.quantity,
+          referenceType: 'stock_reservation',
+          referenceId: reservation.id,
+          note: `Surtido del expediente ${step.caseId}`,
+          caseId: step.caseId,
+        },
+        ctx
+      );
+      movementIds.push(result.movement.id);
+    }
+    await completeWorkItemInTx(tx, item, {
+      result: { issue_movements: { movementIds } },
+      skipEvidenceCheck: true,
+    });
+    return { data: { workItemId: item.id, caseId: step.caseId, movementIds } };
+  },
+});
 
 registerCommand<z.output<typeof moveSchema>, MoveData>(INVENTORY_COMMANDS.move, {
   schema: moveSchema,
@@ -1134,6 +1200,20 @@ export function consumeStockReservation(
     actor,
     INVENTORY_COMMANDS.consume,
     { type: 'stock_reservation', id: input.reservationId },
+    input,
+    options
+  );
+}
+
+export function issueCaseMaterial(
+  actor: CurrentUser,
+  input: Input<typeof issueCaseMaterialSchema>,
+  options?: InventoryCommandOptions
+) {
+  return runAsUser<{ workItemId: string; caseId: string; movementIds: string[] }>(
+    actor,
+    INVENTORY_COMMANDS.issueCaseMaterial,
+    { type: 'work_item', id: input.workItemId },
     input,
     options
   );

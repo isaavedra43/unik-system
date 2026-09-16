@@ -3038,6 +3038,14 @@ async function assertStepCompletable(
     }
   }
   if (def.key === SALES_STEP.prepare) {
+    const issueEvidence = asRecord(result.issue_movements);
+    const movementIds = evidenceMovementIds(issueEvidence.movementIds);
+    if (movementIds.length === 0) {
+      throw new OperationsError(
+        'invalid_payload',
+        'El pedido sólo se prepara al surtirlo: usa «Surtir y preparar» para registrar las salidas de material'
+      );
+    }
     const blockers = preparationBlockers(state.allocations, state.activeReservationAllocationIds);
     if (blockers.length > 0) throw preparationPendingError(state, blockers);
   }

@@ -328,7 +328,7 @@ export function manufacturingHttpStatus(code: string | undefined): number | null
   return (MANUFACTURING_ERROR_HTTP_STATUS as Record<string, number>)[code] ?? null;
 }
 
-export const productionOrderUrl = (orderId: string) => `/app/manufacturing/orders/${orderId}`;
+export const productionOrderUrl = (orderId: string) => `/app/areas/manufactura/ordenes/${orderId}`;
 
 /**
  * Páginas de gestión de Manufactura que viven FUERA de `/app/areas` (plan 6.2).
@@ -336,6 +336,6 @@ export const productionOrderUrl = (orderId: string) => `/app/manufacturing/order
  * tablero y las propias páginas); aquí son una sola constante para que un
  * cambio de ruta no deje un enlace muerto.
  */
-export const MANUFACTURING_BOM_PATH = '/app/manufacturing/bom';
-export const MANUFACTURING_WORK_CENTERS_PATH = '/app/manufacturing/centros';
-export const MANUFACTURING_NEW_ORDER_PATH = '/app/manufacturing/orders/nueva';
+export const MANUFACTURING_BOM_PATH = '/app/areas/manufactura/bom';
+export const MANUFACTURING_WORK_CENTERS_PATH = '/app/areas/manufactura/centros';
+export const MANUFACTURING_NEW_ORDER_PATH = '/app/areas/manufactura/ordenes/nueva';

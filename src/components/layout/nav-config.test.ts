@@ -306,6 +306,33 @@ function legacyBuildBreadcrumbs(pathname: string): { label: string; href?: strin
       { label: 'Detalle' },
     ];
   }
+  // Canonical Manufactura URLs are real area pages. Keep this historical
+  // implementation aligned with the registry rules before the generic area
+  // extras see `ordenes` as an arbitrary detail page.
+  {
+    const canonicalPath = pathname;
+    const manufactura = { label: 'Manufactura', href: '/app/areas/manufactura/dashboard' };
+    const orders = { label: 'Órdenes de producción', href: '/app/areas/manufactura/ordenes' };
+    if (canonicalPath === '/app/areas/manufactura/ordenes/nueva') {
+      return [{ label: 'Operaciones' }, manufactura, orders, { label: 'Nueva' }];
+    }
+    if (
+      canonicalPath !== '/app/areas/manufactura/ordenes' &&
+      canonicalPath.startsWith('/app/areas/manufactura/ordenes') &&
+      !canonicalPath.startsWith('/app/areas/manufactura/ordenes/')
+    ) {
+      return [{ label: 'Operaciones' }, manufactura, orders, { label: 'Orden' }];
+    }
+    if (canonicalPath.startsWith('/app/areas/manufactura/bom')) {
+      return [{ label: 'Operaciones' }, manufactura, { label: 'Listas de materiales' }];
+    }
+    if (canonicalPath.startsWith('/app/areas/manufactura/centros')) {
+      return [{ label: 'Operaciones' }, manufactura, { label: 'Centros de trabajo' }];
+    }
+    if (canonicalPath.startsWith('/app/areas/manufactura/trazabilidad')) {
+      return [{ label: 'Operaciones' }, manufactura, { label: 'Trazabilidad' }];
+    }
+  }
   // Added after verification: management pages that hang from an area but are not
   // spaces of the registry, plus Expedientes and the Manufactura pages.
   for (const [areaKey, areaLabel, slug, label, parentSlug, parentLabel] of LEGACY_AREA_EXTRAS) {

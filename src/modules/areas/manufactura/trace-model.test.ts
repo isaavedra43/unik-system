@@ -164,7 +164,7 @@ describe('trazabilidad de una existencia', () => {
     expect(view.external).toBe(false);
     expect(view.headline).toContain('Producida en OP-000001');
     expect(view.headline).toContain('EXP-0007');
-    expect(view.productions[0]?.href).toBe('/app/manufacturing/orders/op_1');
+    expect(view.productions[0]?.href).toBe('/app/areas/manufactura/ordenes/op_1');
     expect(view.productions[0]?.text).toContain('10');
     expect(view.production?.materials).toHaveLength(2);
   });
@@ -181,7 +181,7 @@ describe('trazabilidad de una existencia', () => {
   });
 
   it('el enlace de una existencia escapa el identificador', () => {
-    expect(stockTraceUrl('stk 1/2')).toBe('/app/manufacturing/trazabilidad/stk%201%2F2');
+    expect(stockTraceUrl('stk 1/2')).toBe('/app/areas/manufactura/trazabilidad/stk%201%2F2');
   });
 });
 
@@ -193,13 +193,13 @@ describe('la trazabilidad es alcanzable desde la aplicación', () => {
   const read = (path: string) => readFileSync(resolve(here, path), 'utf8');
 
   it('la ficha de la orden pinta su cadena con getProductionTrace', () => {
-    const page = read('../../../app/app/manufacturing/orders/[id]/page.tsx');
+    const page = read('../../../app/app/areas/manufactura/ordenes/[id]/page.tsx');
     expect(page).toContain('getProductionTrace');
     expect(page).toContain('<TracePanel');
   });
 
   it('una existencia tiene su página y usa traceStockItem', () => {
-    const page = read('../../../app/app/manufacturing/trazabilidad/[stockItemId]/page.tsx');
+    const page = read('../../../app/app/areas/manufactura/trazabilidad/[stockItemId]/page.tsx');
     expect(page).toContain('traceStockItem');
     expect(page).toContain('stockTraceView');
   });

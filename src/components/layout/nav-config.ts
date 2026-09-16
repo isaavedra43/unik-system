@@ -698,7 +698,7 @@ const DECLARED_BREADCRUMB_RULES: BreadcrumbRule[] = [
 
   // Manufactura: páginas de gestión fuera de `/app/areas`.
   {
-    path: '/app/manufacturing/orders/nueva',
+    path: '/app/areas/manufactura/ordenes/nueva',
     match: 'exact',
     crumbs: [
       { label: 'Operaciones' },
@@ -708,7 +708,7 @@ const DECLARED_BREADCRUMB_RULES: BreadcrumbRule[] = [
     ],
   },
   {
-    path: '/app/manufacturing/orders',
+    path: '/app/areas/manufactura/ordenes',
     match: 'prefix',
     crumbs: [
       { label: 'Operaciones' },
@@ -718,7 +718,7 @@ const DECLARED_BREADCRUMB_RULES: BreadcrumbRule[] = [
     ],
   },
   {
-    path: '/app/manufacturing/bom',
+    path: '/app/areas/manufactura/bom',
     match: 'prefix',
     crumbs: [
       { label: 'Operaciones' },
@@ -727,7 +727,7 @@ const DECLARED_BREADCRUMB_RULES: BreadcrumbRule[] = [
     ],
   },
   {
-    path: '/app/manufacturing/centros',
+    path: '/app/areas/manufactura/centros',
     match: 'prefix',
     crumbs: [
       { label: 'Operaciones' },
@@ -736,7 +736,7 @@ const DECLARED_BREADCRUMB_RULES: BreadcrumbRule[] = [
     ],
   },
   {
-    path: '/app/manufacturing/trazabilidad',
+    path: '/app/areas/manufactura/trazabilidad',
     match: 'prefix',
     crumbs: [
       { label: 'Operaciones' },

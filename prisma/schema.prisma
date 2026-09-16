@@ -2897,18 +2897,20 @@ model Sequence {
 
 /// Política de aprobación de negocio por alcance y rango de monto.
 model ApprovalPolicy {
-  id                String   @id @default(cuid())
+  id                  String   @id @default(cuid())
   /// expense | procurement | payment | payroll | production_incident | inventory_adjustment
-  scope             String
-  categoryId        String?
-  minAmount         Decimal  @default(0) @db.Decimal(18, 4)
-  maxAmount         Decimal? @db.Decimal(18, 4)
-  currency          String   @default("MXN")
-  requiredApprovals Int      @default(1)
-  approverRoleKeys  String[] @default([])
-  active            Boolean  @default(true)
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  scope               String
+  categoryId          String?
+  minAmount           Decimal  @default(0) @db.Decimal(18, 4)
+  maxAmount           Decimal? @db.Decimal(18, 4)
+  currency            String   @default("MXN")
+  requiredApprovals   Int      @default(1)
+  /// null = the global approval deadline configured in Operations.
+  expiresAfterMinutes Int?
+  approverRoleKeys    String[] @default([])
+  active              Boolean  @default(true)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
 
   @@index([scope, active, minAmount])
   @@index([categoryId])

@@ -24,6 +24,7 @@ function policy(overrides: Partial<ApprovalPolicyRow> = {}): ApprovalPolicyRow {
     maxAmount: '50000',
     currency: 'MXN',
     requiredApprovals: 1,
+    expiresAfterMinutes: null,
     approverRoleKeys: [],
     active: true,
     createdAt: '2026-09-15T12:00:00.000Z',

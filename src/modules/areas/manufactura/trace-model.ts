@@ -22,9 +22,9 @@ import type { ProductionTrace } from '@/modules/manufacturing/manufacturing-quer
  *   existencia     →  orden que la produjo  →  sus insumos
  */
 
-export const TRACE_STOCK_PATH = '/app/manufacturing/trazabilidad';
+export const TRACE_STOCK_PATH = '/app/areas/manufactura/trazabilidad';
 
-/** Page of one existence: `/app/manufacturing/trazabilidad/<stockItemId>`. */
+/** Page of one existence: `/app/areas/manufactura/trazabilidad/<stockItemId>`. */
 export function stockTraceUrl(stockItemId: string): string {
   return `${TRACE_STOCK_PATH}/${encodeURIComponent(stockItemId)}`;
 }

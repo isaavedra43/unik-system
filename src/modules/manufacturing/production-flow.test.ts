@@ -482,7 +482,7 @@ describe('transformation order', () => {
       category: 'production_update',
       actorUserId: 'u_operator',
       title: 'Merma fuera de tolerancia en OP-000001: 9.52 %',
-      url: `/app/manufacturing/orders/${orderId}`,
+      url: `/app/areas/manufactura/ordenes/${orderId}`,
       entityType: 'production_order',
       entityId: orderId,
     });

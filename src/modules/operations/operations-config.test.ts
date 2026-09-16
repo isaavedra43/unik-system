@@ -70,6 +70,7 @@ describe('normalizeOperationsSettings', () => {
       procurementDoubleApprovalMxn: 80000,
       expenseAutoApproveMxn: 2000,
     });
+    expect(settings.approvalExpiryMinutes).toBe(1440);
   });
 });
 
@@ -92,6 +93,7 @@ describe('getOperationsConfig', () => {
       procurementDoubleApprovalMxn: 50000,
       expenseAutoApproveMxn: 2000,
     });
+    expect(config.approvalExpiryMinutes).toBe(1440);
     expect(storedRow()).toMatchObject({ displayName: 'Operaciones', isEnabled: true });
     expect(storedRow()!.settings.cutoverDate).toBe(NOW.toISOString());
   });
@@ -164,6 +166,7 @@ describe('updateOperationsConfig', () => {
       {
         flags: { crm: false },
         approvalThresholds: { expenseAutoApproveMxn: 5000 },
+        approvalExpiryMinutes: 120,
         slaDefaults: { verification: 90 },
         pilotLocationIds: ['loc-norte'],
       },
@@ -176,6 +179,7 @@ describe('updateOperationsConfig', () => {
       expenseAutoApproveMxn: 5000,
     });
     expect(updated.slaDefaults.verification).toBe(90);
+    expect(updated.approvalExpiryMinutes).toBe(120);
     expect(updated.slaDefaults.action).toBe(240);
     expect(updated.pilotLocationIds).toEqual(['loc-norte']);
     expect((await getOperationsConfig()).flags.crm).toBe(false);
@@ -198,6 +202,9 @@ describe('updateOperationsConfig', () => {
     await expect(updateOperationsConfig({ reservationAlertDays: 0 })).rejects.toBeInstanceOf(
       OperationsError
     );
+    await expect(
+      updateOperationsConfig({ approvalExpiryMinutes: 31 } as never)
+    ).rejects.toBeInstanceOf(OperationsError);
     await expect(
       updateOperationsConfig({ escalation: { afterMinutes: [480, 0] } })
     ).rejects.toMatchObject({
@@ -226,7 +233,8 @@ describe('updateOperationsConfig', () => {
 
 describe('isOpsFlagEnabled', () => {
   it('is true by default for every flag except the real sales order write of CRM', async () => {
-    for (const flag of OPS_FLAGS) expect(await isOpsFlagEnabled(flag)).toBe(flag !== 'crmSalesOrderWrite');
+    for (const flag of OPS_FLAGS)
+      expect(await isOpsFlagEnabled(flag)).toBe(flag !== 'crmSalesOrderWrite');
   });
 
   it('follows each flag and the row kill switch', async () => {

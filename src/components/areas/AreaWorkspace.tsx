@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { MoreHorizontal, RefreshCw, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
@@ -17,6 +17,7 @@ import {
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@/components/shadcn/sheet';
 import { Badge, Button } from '@/components/ui/primitives';
 import { useIsMobile } from '@/hooks/use-is-mobile';
+import { useWideScreen } from '@/hooks/use-wide-screen';
 import { useOfflineCommandQueue } from '@/lib/hooks/use-offline-command-queue';
 import type { OfflineCommandInput } from '@/lib/offline-commands';
 import type { CurrentUser } from '@/modules/auth/authorization';
@@ -106,8 +107,6 @@ export interface AreaWorkspaceProps {
   nowIso: string;
 }
 
-const WIDE_QUERY = '(min-width: 1280px)';
-
 const BADGE_BY_TONE = {
   default: 'default',
   success: 'success',
@@ -116,20 +115,6 @@ const BADGE_BY_TONE = {
   info: 'info',
   weak: 'weak',
 } as const;
-
-/** `null` until the browser answers (server render and hydration), then the media query. */
-function useWideScreen(): boolean | null {
-  const subscribe = useCallback((onChange: () => void) => {
-    const media = window.matchMedia(WIDE_QUERY);
-    media.addEventListener('change', onChange);
-    return () => media.removeEventListener('change', onChange);
-  }, []);
-  return useSyncExternalStore<boolean | null>(
-    subscribe,
-    () => window.matchMedia(WIDE_QUERY).matches,
-    () => null
-  );
-}
 
 function formatAmount(value: string | null): string {
   if (value === null) return '—';

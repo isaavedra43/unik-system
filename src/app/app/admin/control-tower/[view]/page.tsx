@@ -9,6 +9,7 @@ import '@/styles/operations/control-tower.css';
  * `/app/areas/[areaKey]/[space]`.
  */
 import { ApprovalPolicyEditor } from '@/components/control-tower/ApprovalPolicyEditor';
+import { AreaLeadershipPanel } from '@/components/control-tower/AreaLeadershipPanel';
 import { ApprovalsPanel } from '@/components/control-tower/ApprovalsPanel';
 import { AuditPanel } from '@/components/control-tower/AuditPanel';
 import { ControlTowerShell } from '@/components/control-tower/ControlTowerShell';
@@ -49,6 +50,7 @@ import {
   resetExceptionsPreferenceAction,
   saveExceptionsPreferenceAction,
   saveOperationsConfigAction,
+  saveAreaLeadershipAction,
   savePolicyAction,
   saveSourcingConfigAction,
   watchExceptionAction,
@@ -189,6 +191,11 @@ async function renderView(
         config={settings.config}
         saveAction={saveOperationsConfigAction}
         nowIso={nowIso}
+      />
+      <AreaLeadershipPanel
+        areas={settings.areas}
+        users={settings.activeUsers}
+        saveAction={saveAreaLeadershipAction}
       />
       <SourcingConfigPanel
         config={settings.sourcing}

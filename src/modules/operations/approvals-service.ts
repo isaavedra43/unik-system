@@ -111,6 +111,8 @@ export interface ApprovalPolicyRule {
   maxAmount: Prisma.Decimal | null;
   currency: string;
   requiredApprovals: number;
+  /** null means use the global Operations deadline. */
+  expiresAfterMinutes: number | null;
   approverRoleKeys: string[];
 }
 
@@ -130,6 +132,7 @@ function rule(
     maxAmount: max === null ? null : D(max),
     currency: 'MXN',
     requiredApprovals,
+    expiresAfterMinutes: null,
     approverRoleKeys: [],
   };
 }
@@ -396,6 +399,7 @@ function toRule(row: {
   maxAmount: Prisma.Decimal | null;
   currency: string;
   requiredApprovals: number;
+  expiresAfterMinutes: number | null;
   approverRoleKeys: string[];
 }): ApprovalPolicyRule {
   return {
@@ -406,6 +410,7 @@ function toRule(row: {
     maxAmount: row.maxAmount === null ? null : D(row.maxAmount),
     currency: row.currency,
     requiredApprovals: Math.max(0, row.requiredApprovals),
+    expiresAfterMinutes: row.expiresAfterMinutes,
     approverRoleKeys: row.approverRoleKeys,
   };
 }
@@ -555,6 +560,12 @@ export async function requestApproval(
     },
     data.minApprovals
   );
+  const config = await getOperationsConfig();
+  const expiresAt =
+    data.expiresAt ??
+    new Date(
+      ctx.now.getTime() + (policy.expiresAfterMinutes ?? config.approvalExpiryMinutes) * 60_000
+    );
   const areaKey = (data.areaKey as AreaKey | null | undefined) ?? APPROVAL_SCOPE_AREA[data.scope];
   const title =
     data.title ??
@@ -615,7 +626,7 @@ export async function requestApproval(
         status: 'approved',
         requestedByUserId: data.requestedByUserId,
         decisions: [],
-        expiresAt: data.expiresAt ?? null,
+        expiresAt,
         decidedAt: ctx.now,
         caseId: data.caseId ?? null,
         areaKey,
@@ -664,7 +675,7 @@ export async function requestApproval(
         status: 'approved',
         requestedByUserId: data.requestedByUserId,
         decisions: toOperationalJson([firstVote]),
-        expiresAt: data.expiresAt ?? null,
+        expiresAt,
         decidedAt: ctx.now,
         caseId: data.caseId ?? null,
         areaKey,
@@ -732,7 +743,7 @@ export async function requestApproval(
       status: 'pending',
       requestedByUserId: data.requestedByUserId,
       decisions: firstVote ? toOperationalJson([firstVote]) : [],
-      expiresAt: data.expiresAt ?? null,
+      expiresAt,
       caseId: data.caseId ?? null,
       areaKey,
     },
@@ -754,7 +765,7 @@ export async function requestApproval(
       objectId: request.id,
       ownerUserId: approver.id,
       backupUserId: null,
-      dueAt: data.expiresAt ?? undefined,
+      dueAt: expiresAt,
       notification: {
         category: 'approval_requested',
         title: `Aprobación pendiente: ${title}`,

@@ -49,7 +49,7 @@ import {
   type SourcingConfig,
   type SourcingConfigPatch,
 } from '@/modules/purchases/sourcing-config';
-import { APPROVAL_SCOPES, APPROVAL_SCOPE_LABELS } from '@/modules/operations/types';
+import { APPROVAL_SCOPES, APPROVAL_SCOPE_LABELS, AREA_KEYS } from '@/modules/operations/types';
 import {
   deleteUserTablePreference,
   upsertUserTablePreference,
@@ -107,6 +107,62 @@ export async function saveOperationsConfigAction(
   }
 }
 
+const areaLeadershipSchema = z.object({
+  areaKey: z
+    .string()
+    .trim()
+    .refine((value) => (AREA_KEYS as readonly string[]).includes(value), {
+      message: 'Área inválida',
+    }),
+  leadUserId: z.string().trim().min(1).max(120).nullable(),
+});
+
+/** Writes only Area.leadUserId; the responsible and backup stay in their own admin module. */
+export async function saveAreaLeadershipAction(input: {
+  areaKey: string;
+  leadUserId: string | null;
+}): Promise<{
+  success: boolean;
+  error: string | null;
+  areas: Array<{ key: string; label: string; leadUserId: string | null }> | null;
+}> {
+  try {
+    const user = await requireControlTowerActor();
+    const parsed = areaLeadershipSchema.parse(input);
+    if (parsed.leadUserId) {
+      const candidate = await prisma.user.findUnique({
+        where: { id: parsed.leadUserId },
+        select: { isActive: true, isBot: true },
+      });
+      if (!candidate || !candidate.isActive || candidate.isBot) {
+        return { success: false, error: 'El líder debe ser una persona activa', areas: null };
+      }
+    }
+    const area = await prisma.area.findUnique({ where: { key: parsed.areaKey } });
+    if (!area)
+      return { success: false, error: 'El área todavía no está inicializada', areas: null };
+    await prisma.area.update({ where: { id: area.id }, data: { leadUserId: parsed.leadUserId } });
+    await recordAuditEvent({
+      actorUserId: user.id,
+      action: 'operations.area_lead.updated',
+      targetType: 'area',
+      targetId: area.id,
+      metadata: { areaKey: area.key, leadUserId: parsed.leadUserId },
+    });
+    revalidatePath('/app/admin/control-tower/configuracion');
+    return {
+      success: true,
+      error: null,
+      areas: await prisma.area.findMany({
+        select: { key: true, label: true, leadUserId: true },
+        orderBy: { sortOrder: 'asc' },
+      }),
+    };
+  } catch (error) {
+    return { success: false, error: errorMessage(error), areas: null };
+  }
+}
+
 /**
  * Configuración del Laboratorio de Sourcing (plan 6.1). Vive aquí porque es la
  * misma superficie y la misma puerta que la configuración de operaciones:
@@ -150,6 +206,7 @@ export async function savePolicyAction(input: {
       maxAmount: decimalOrNull(form.maxAmount),
       currency: form.currency,
       requiredApprovals: form.requiredApprovals,
+      expiresAfterMinutes: form.expiresAfterMinutes || null,
       approverRoleKeys: [...new Set(form.approverRoleKeys)],
       active: form.active,
     };

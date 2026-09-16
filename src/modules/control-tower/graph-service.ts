@@ -560,7 +560,7 @@ const NODE_LOADERS: Record<string, NodeLoader> = {
         sublabel: row.outputName ?? row.outputZohoItemId,
         status: row.status,
         areaKey: 'manufactura',
-        href: `/app/manufacturing/orders/${row.id}`,
+        href: `/app/areas/manufactura/ordenes/${row.id}`,
       })
     ),
   delivery_order: async (ids) =>

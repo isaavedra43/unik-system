@@ -36,8 +36,8 @@ export function CapacityBar({
     return (
       <p className="mfg-capacity-empty">
         Sin turnos configurados:{' '}
-        <Link href="/app/manufacturing/centros">defínelos en Centros de trabajo</Link> para ver la
-        carga y programar con capacidad real.
+        <Link href="/app/areas/manufactura/centros">defínelos en Centros de trabajo</Link> para ver
+        la carga y programar con capacidad real.
       </p>
     );
   }

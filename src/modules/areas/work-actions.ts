@@ -127,6 +127,8 @@ function workItemActions(row: AreaWorkRow): AreaRowAction[] {
   if (isApproval) return [];
   const answersRequest = row.objectType === 'area_request';
   const out: AreaRowAction[] = [];
+  const isPreparation =
+    row.areaKey === 'inventario' && extraString(row.extra, 'stepKey') === 'preparar_pedido';
   if (WORK_ITEM_FROM.start.includes(row.status) && row.status !== 'in_progress') {
     out.push(
       action({
@@ -139,7 +141,20 @@ function workItemActions(row: AreaWorkRow): AreaRowAction[] {
       })
     );
   }
-  if (WORK_ITEM_FROM.complete.includes(row.status)) {
+  if (isPreparation && WORK_ITEM_FROM.complete.includes(row.status)) {
+    out.push(
+      action({
+        id: 'workitem.issue_case_material',
+        label: 'Surtir y preparar',
+        commandType: 'stock.issue_case_material',
+        aggregateType: WORK_ITEM_AGGREGATE,
+        payload: { workItemId: row.sourceId },
+        tone: 'primary',
+        successMessage: 'Material surtido y pedido preparado',
+        hint: 'Consume las reservas activas del expediente y guarda cada salida como evidencia.',
+      })
+    );
+  } else if (WORK_ITEM_FROM.complete.includes(row.status)) {
     out.push(
       action({
         id: 'workitem.complete',

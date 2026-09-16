@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useId, useMemo, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useId, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
@@ -23,6 +23,7 @@ import { useOperationsRealtime } from '@/components/operations/use-operations-re
 import { describeSubmitOutcome } from '@/components/operations/mywork-model';
 import type { AreaSpecialViewProps } from '@/components/areas/area-client-registry';
 import { useOfflineCommandQueue } from '@/lib/hooks/use-offline-command-queue';
+import { useIsMobile } from '@/hooks/use-is-mobile';
 import {
   BOARD_LANES,
   BOARD_LANE_HINTS,
@@ -78,22 +79,7 @@ const BOARD_STARTERS = [
 ] as const;
 
 const DAY_OPTIONS = [1, 3, 7, 14];
-const MOBILE_QUERY = '(max-width: 768px)';
 const CONTEXT_CARDS = 25;
-
-/** `null` until the browser answers (server render and hydration). */
-function useIsMobile(): boolean | null {
-  const subscribe = useCallback((onChange: () => void) => {
-    const media = window.matchMedia(MOBILE_QUERY);
-    media.addEventListener('change', onChange);
-    return () => media.removeEventListener('change', onChange);
-  }, []);
-  return useSyncExternalStore<boolean | null>(
-    subscribe,
-    () => window.matchMedia(MOBILE_QUERY).matches,
-    () => null
-  );
-}
 
 function CenterColumn({
   center,
@@ -385,7 +371,7 @@ export function ProductionBoard({ areaKey, user, canAct, params }: AreaSpecialVi
 
         {/*
           Única entrada a la gestión de listas de materiales desde el área: la
-          página existía (`/app/manufacturing/bom`) y nada la enlazaba, así que
+          página existe bajo el área (`/app/areas/manufactura/bom`) y desde aquí se puede abrir, así que
           crear, versionar, activar o retirar una receta exigía teclear la URL.
           Desde ahí la tira de secciones lleva a Centros de trabajo.
         */}
