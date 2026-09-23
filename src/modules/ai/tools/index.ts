@@ -104,6 +104,7 @@ import './documents-tools';
 
 // Notifications (avisar a otros usuarios, configuración de notificaciones)
 import './notifications-tools';
+import './visual-tools';
 
 // Export the registry API for consumers
 export * from './registry';

@@ -11,3 +11,4 @@ import '@/modules/campaigns/campaigns-jobs';
 import '@/modules/comms/comms-jobs';
 import '@/modules/ai/ai-jobs';
 import '@/modules/notifications/notification-jobs';
+import '@/modules/visual-studio/visual-jobs';

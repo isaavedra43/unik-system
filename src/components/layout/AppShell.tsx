@@ -35,6 +35,7 @@ import {
   BookOpen,
   Radio,
   SlidersHorizontal,
+  Palette,
 } from 'lucide-react';
 import { AssistantWidget } from '@/components/assistant/AssistantWidget';
 import { CallDockProvider } from '@/components/calls/CallDockProvider';
@@ -632,6 +633,12 @@ export default function AppShell({ user, children }: AppShellProps) {
           label: 'Asistente IA',
           icon: <Bot size={18} />,
           visible: user.permissionKeys.includes('assistant.use') || user.isSuperAdmin,
+        },
+        {
+          href: '/app/visual-studio',
+          label: 'Visual Studio',
+          icon: <Palette size={18} />,
+          visible: user.permissionKeys.includes('visual_studio.view') || user.isSuperAdmin,
         },
       ],
     },

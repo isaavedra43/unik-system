@@ -24,7 +24,8 @@ export type StoragePurpose =
   | 'plugin'
   | 'knowledge'
   | 'comm_media'
-  | 'export';
+  | 'export'
+  | 'visual';
 
 export const STORAGE_PURPOSES: StoragePurpose[] = [
   'chat',
@@ -37,6 +38,7 @@ export const STORAGE_PURPOSES: StoragePurpose[] = [
   'knowledge',
   'comm_media',
   'export',
+  'visual',
 ];
 
 const PREFIX_BY_PURPOSE: Record<StoragePurpose, string> = {
@@ -50,6 +52,7 @@ const PREFIX_BY_PURPOSE: Record<StoragePurpose, string> = {
   knowledge: 'knowledge',
   comm_media: 'comm',
   export: 'exports',
+  visual: 'visual',
 };
 
 const SAFE_SEGMENT = /^[A-Za-z0-9_-]+$/;

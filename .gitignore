@@ -53,3 +53,12 @@ Thumbs.db
 *.tmp
 *.temp
 *.log
+
+# Local object storage (disk driver output)
+/data/
+
+# SAM2 worker artifacts
+services/sam2-worker/.venv/
+services/sam2-worker/checkpoints/
+__pycache__/
+*.pyc
