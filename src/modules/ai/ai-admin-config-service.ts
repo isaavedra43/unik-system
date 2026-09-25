@@ -367,6 +367,22 @@ export const DEFAULT_AI_SETTINGS: AiSettings = {
     'generateVideo',
     // Interfaz interactiva generada al vuelo (iframe sandboxed en el chat)
     'renderInteractiveUi',
+    // Internet — la lista habilita; el candado real es el toggle admin
+    // (webSearchEnabled/webFetchEnabled) + TAVILY_API_KEY + permiso por rol.
+    // Antes faltaban aquí y el toggle solo no alcanzaba nunca al modelo.
+    'web_search',
+    'web_research',
+    'fetch_url',
+    'web_crawl',
+    // Navegador y computadora virtual — mismos candados:
+    // browserEnabled/venueEnabled + UNIK_VENUE_ENABLED + DAYTONA_API_KEY.
+    'browser',
+    'browserProfile',
+    'venueExec',
+    'venueReadFile',
+    'venueListFiles',
+    'venueWriteFile',
+    'venueScreenshot',
   ],
   maxAttachmentSizeMb: 25,
   allowedMimeTypes: [
