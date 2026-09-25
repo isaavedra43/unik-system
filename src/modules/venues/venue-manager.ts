@@ -74,22 +74,6 @@ export async function isVenueEnabled(): Promise<boolean> {
   return (await daytonaConfig()) !== null;
 }
 
-/**
- * Browser tools ride on the venue: an explicit `browserEnabled` choice in Admin
- * wins, but installs that never touched the flag (it's absent from the stored
- * settings) get the browser whenever the venue itself is on — a venue without
- * a browser can't do "abre google".
- */
-export async function isBrowserToolEnabled(): Promise<boolean> {
-  if (!(await isVenueEnabled())) return false;
-  const row = await prisma.aiConfig
-    .findUnique({ where: { key: 'global' }, select: { settings: true } })
-    .catch(() => null);
-  const raw = row?.settings;
-  const flag = raw && typeof raw === 'object' ? (raw as Record<string, unknown>).browserEnabled : undefined;
-  return typeof flag === 'boolean' ? flag : true;
-}
-
 function minutesBetween(a: Date, b: Date): number {
   return Math.max(1, Math.ceil((b.getTime() - a.getTime()) / 60_000));
 }

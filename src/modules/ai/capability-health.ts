@@ -82,7 +82,6 @@ export async function getCapabilityHealth(): Promise<CapabilityHealth[]> {
       label: 'Navegador del agente (computadora virtual)',
       ok: false,
       checks: [
-        { label: 'Toggle "Navegador del agente" activo', ok: s.browserEnabled },
         { label: 'Toggle "Computadora virtual" activo', ok: s.venueEnabled },
         { label: 'DAYTONA_API_KEY configurada', ok: hasDaytona },
         { label: '"browser" en tools habilitados', ok: enabled.has('browser') },

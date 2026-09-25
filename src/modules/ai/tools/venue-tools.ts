@@ -3,7 +3,7 @@ import { prisma } from '@/lib/prisma';
 import { registerTool, type ToolEffect } from './registry';
 import { getAiSettings } from '../ai-admin-config-service';
 import {
-  acquireVenue, emitVenueEvent, isVenueEnabled, isBrowserToolEnabled,
+  acquireVenue, emitVenueEvent, isVenueEnabled,
   listBrowserProfiles, loadBrowserProfileState, saveBrowserProfile,
   VenueUnavailableError,
 } from '@/modules/venues/venue-manager';
@@ -75,7 +75,10 @@ registerTool({
   timeoutMs: 300_000,
   maxResultBytes: 60_000,
   contextTags: ['all'],
-  isAvailable: isBrowserToolEnabled,
+  // Browser rides on the venue like exec/files do — the old `browserEnabled`
+  // flag was a trap: a full-settings admin save persisted `false` and hid the
+  // tool forever while exec kept working. Risky actions still gate on intent.
+  isAvailable: isVenueEnabled,
   parameters: browserParams,
   resolveEffect: (_actor, args) => browserEffect(args),
   summarize: (a) => {
@@ -169,7 +172,7 @@ registerTool({
   resultTrust: 'untrusted',
   timeoutMs: 300_000,
   contextTags: ['all'],
-  isAvailable: isBrowserToolEnabled,
+  isAvailable: isVenueEnabled,
   parameters: z.object({
     action: z.enum(['list', 'save', 'use']),
     host: z.string().max(200).optional().describe('Dominio del perfil, p. ej. fleet.ejemplo.mx'),

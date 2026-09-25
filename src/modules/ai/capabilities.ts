@@ -55,7 +55,7 @@ export const CAPABILITY_DEFS: readonly CapabilityDef[] = [
     id: 'browser',
     label: 'navegador dentro de la computadora virtual (abrir páginas, clicks, formularios)',
     tools: /^(browser|browserProfile|venueScreenshot)$/,
-    enableHint: 'Admin → Asistente IA → venue + browser activos y DAYTONA_API_KEY configurada.',
+    enableHint: 'Admin → Asistente IA → "Computadora virtual" activa y DAYTONA_API_KEY configurada.',
   },
   {
     id: 'computer',
