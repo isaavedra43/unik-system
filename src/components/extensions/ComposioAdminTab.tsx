@@ -94,8 +94,9 @@ export function ComposioAdminTab({ canManage }: { canManage: boolean }) {
       setMine(map);
       setMineError(false);
       return map;
-    } catch {
+    } catch (e) {
       setMineError(true);
+      setError(e instanceof Error ? e.message : 'No se pudo consultar el estado de tus cuentas');
       return {};
     }
   }, []);
@@ -310,21 +311,21 @@ export function ComposioAdminTab({ canManage }: { canManage: boolean }) {
                                 type="button"
                                 className="gui-btn"
                                 disabled={busy === `me:${p.toolkitSlug}`}
-                                onClick={() =>
-                                  void loadMine().catch(() => undefined)
-                                }
+                                onClick={() => void connectMine(p.toolkitSlug)}
                                 title={
                                   mineError
-                                    ? 'No se pudo consultar tu estado — reintentar'
-                                    : 'Verificar estado de mi cuenta'
+                                    ? 'No se pudo consultar tu estado — reintentar conexión'
+                                    : 'Conectar mi cuenta'
                                 }
                               >
                                 {busy === `me:${p.toolkitSlug}` ? (
                                   <Loader2 size={12} className="copilot-spin" />
-                                ) : (
+                                ) : mineError ? (
                                   <RefreshCw size={12} />
+                                ) : (
+                                  <Plug size={12} />
                                 )}{' '}
-                                {mineError ? 'Reintentar' : 'Verificar'}
+                                {mineError ? 'Reintentar' : 'Conectar'}
                               </button>
                             );
                           if (m.isNoAuth)
@@ -507,7 +508,7 @@ export function ComposioAdminTab({ canManage }: { canManage: boolean }) {
                             type="button"
                             className="gui-btn gui-btn-primary"
                             disabled={!canManage || busy === c.slug}
-                            onClick={() => void save(c.slug, { enabled: false })}
+                            onClick={() => void save(c.slug, { enabled: true })}
                           >
                             <Plug size={12} /> Agregar
                           </button>
