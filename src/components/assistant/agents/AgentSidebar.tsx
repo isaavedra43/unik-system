@@ -16,6 +16,7 @@ import {
 } from '@/app/app/assistant/actions';
 import { PRINCIPAL_AGENT, relTime, type AgentInfo } from './agent-types';
 import { AgentAvatar } from './AgentAvatar';
+import { InstallAppButton } from './InstallAppButton';
 import { NewAgentSheet } from './NewAgentSheet';
 
 interface ConversationItem {
@@ -403,6 +404,7 @@ export function AgentSidebar({
           <Puzzle size={16} />
           <span>Extensiones y skills</span>
         </Link>
+        <InstallAppButton />
       </div>
       <AssistantPreferencesPanel open={prefsOpen} onClose={() => setPrefsOpen(false)} />
       <NewAgentSheet

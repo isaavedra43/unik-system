@@ -72,24 +72,39 @@ const ROWS: Row[] = [
     placeholder: 'Vacío = procesos de fondo',
   },
   {
+    key: 'computerUseModel',
+    task: 'computer',
+    label: AI_TASK_LABELS.computer.label,
+    description: AI_TASK_LABELS.computer.description,
+    placeholder: 'Vacío = Gemini 2.5 Flash (OpenRouter) o rutina',
+  },
+  {
     key: 'deployment',
     task: 'primary',
     label: 'Modelo principal',
-    description: 'Respaldo de todo lo anterior cuando una fila está vacía; también lee documentos (visión).',
+    description:
+      'Respaldo de todo lo anterior cuando una fila está vacía; también lee documentos (visión).',
     placeholder: 'gpt-4o',
   },
   {
     key: 'fallbackDeployment',
     task: 'fallback',
     label: 'Modelo de emergencia',
-    description: 'Se usa a mitad de una respuesta si el modelo elegido falla (error del proveedor).',
+    description:
+      'Se usa a mitad de una respuesta si el modelo elegido falla (error del proveedor).',
     placeholder: 'gpt-4o-mini',
   },
 ];
 
 const [KIMI, MINIMAX] = CANOPY_PLAN_MODELS;
 
-export function ModelPolicyConfig({ settings, canManage, canopyConfigured, openaiConfigured, onChange }: Props) {
+export function ModelPolicyConfig({
+  settings,
+  canManage,
+  canopyConfigured,
+  openaiConfigured,
+  onChange,
+}: Props) {
   const [options, setOptions] = useState<ModelOption[]>([]);
 
   useEffect(() => {
@@ -147,7 +162,11 @@ export function ModelPolicyConfig({ settings, canManage, canopyConfigured, opena
   // which follows the complex row); the flat-rate provider keeps the daily volume when present.
   const presetMaxQuality = () => {
     const gpt5 = options.find((m) => /^gpt-5(\.\d+)?$/.test(m.id))?.id ?? 'gpt-5';
-    const cheap = canopyConfigured ? MINIMAX.id : options.some((m) => m.id === 'gpt-5-mini') ? 'gpt-5-mini' : 'gpt-4o-mini';
+    const cheap = canopyConfigured
+      ? MINIMAX.id
+      : options.some((m) => m.id === 'gpt-5-mini')
+        ? 'gpt-5-mini'
+        : 'gpt-4o-mini';
     const routine = canopyConfigured ? KIMI.id : cheap;
     onChange({
       routingEnabled: true,
@@ -169,8 +188,16 @@ export function ModelPolicyConfig({ settings, canManage, canopyConfigured, opena
     setDetecting(true);
     setDetectNote(null);
     try {
-      const res = await fetch('/app/admin/assistant/api/providers/openai/models', { method: 'POST' });
-      const json = (await res.json()) as { ok?: boolean; error?: string; models?: string[]; hasGpt5?: boolean; recommended?: string | null };
+      const res = await fetch('/app/admin/assistant/api/providers/openai/models', {
+        method: 'POST',
+      });
+      const json = (await res.json()) as {
+        ok?: boolean;
+        error?: string;
+        models?: string[];
+        hasGpt5?: boolean;
+        recommended?: string | null;
+      };
       if (!json.ok) {
         setDetectNote(json.error ?? 'No se pudo detectar');
         return;
@@ -178,7 +205,12 @@ export function ModelPolicyConfig({ settings, canManage, canopyConfigured, opena
       const ids = json.models ?? [];
       setOptions((prev) => {
         const known = new Set(prev.map((m) => m.id));
-        return [...prev, ...ids.filter((id) => !known.has(id)).map((id) => ({ id, label: id, provider: 'openai' }))];
+        return [
+          ...prev,
+          ...ids
+            .filter((id) => !known.has(id))
+            .map((id) => ({ id, label: id, provider: 'openai' })),
+        ];
       });
       setDetectNote(
         json.hasGpt5
@@ -210,9 +242,9 @@ export function ModelPolicyConfig({ settings, canManage, canopyConfigured, opena
         <Coins size={18} /> Reparto de modelos por tipo de tarea
       </h3>
       <p className="assistant-admin-config-hint" style={{ marginBottom: 12 }}>
-        El asistente clasifica cada mensaje (simple / rutina / compleja) y los procesos de fondo piden su
-        modelo aquí. Pon el volumen diario en el proveedor de tarifa plana y deja el caro solo para lo complejo.
-        Puedes escribir cualquier id de modelo de un proveedor configurado.
+        El asistente clasifica cada mensaje (simple / rutina / compleja) y los procesos de fondo
+        piden su modelo aquí. Pon el volumen diario en el proveedor de tarifa plana y deja el caro
+        solo para lo complejo. Puedes escribir cualquier id de modelo de un proveedor configurado.
       </p>
 
       <div className="model-policy-presets">
@@ -221,14 +253,28 @@ export function ModelPolicyConfig({ settings, canManage, canopyConfigured, opena
           className="btn btn-primary btn-sm"
           onClick={presetCanopyRoutine}
           disabled={!canManage || !canopyConfigured || !openaiConfigured}
-          title={!canopyConfigured || !openaiConfigured ? 'Requiere Canopy Wave y OpenAI configurados' : undefined}
+          title={
+            !canopyConfigured || !openaiConfigured
+              ? 'Requiere Canopy Wave y OpenAI configurados'
+              : undefined
+          }
         >
           <Coins size={14} /> Canopy para rutina, OpenAI para lo complejo
         </button>
-        <button type="button" className="btn btn-secondary btn-sm" onClick={presetAllCanopy} disabled={!canManage || !canopyConfigured}>
+        <button
+          type="button"
+          className="btn btn-secondary btn-sm"
+          onClick={presetAllCanopy}
+          disabled={!canManage || !canopyConfigured}
+        >
           <Zap size={14} /> Todo en Canopy
         </button>
-        <button type="button" className="btn btn-secondary btn-sm" onClick={presetAllOpenAi} disabled={!canManage || !openaiConfigured}>
+        <button
+          type="button"
+          className="btn btn-secondary btn-sm"
+          onClick={presetAllOpenAi}
+          disabled={!canManage || !openaiConfigured}
+        >
           <Sparkles size={14} /> Todo en OpenAI
         </button>
         <button
@@ -240,8 +286,14 @@ export function ModelPolicyConfig({ settings, canManage, canopyConfigured, opena
         >
           <Trophy size={14} /> Máxima calidad (GPT-5, como ChatGPT)
         </button>
-        <button type="button" className="btn btn-secondary btn-sm" onClick={detectOpenAiModels} disabled={!canManage || !openaiConfigured || detecting}>
-          <RefreshCw size={14} className={detecting ? 'copilot-spin' : undefined} /> {detecting ? 'Detectando…' : 'Detectar modelos de OpenAI'}
+        <button
+          type="button"
+          className="btn btn-secondary btn-sm"
+          onClick={detectOpenAiModels}
+          disabled={!canManage || !openaiConfigured || detecting}
+        >
+          <RefreshCw size={14} className={detecting ? 'copilot-spin' : undefined} />{' '}
+          {detecting ? 'Detectando…' : 'Detectar modelos de OpenAI'}
         </button>
         <label className="model-policy-toggle">
           <input
@@ -250,11 +302,17 @@ export function ModelPolicyConfig({ settings, canManage, canopyConfigured, opena
             onChange={(e) => onChange({ routingEnabled: e.target.checked })}
             disabled={!canManage}
           />
-          <span>Clasificar mensajes automáticamente (si se apaga, todo usa el modelo principal)</span>
+          <span>
+            Clasificar mensajes automáticamente (si se apaga, todo usa el modelo principal)
+          </span>
         </label>
       </div>
 
-      {detectNote && <p className="assistant-admin-config-hint" style={{ marginTop: 8 }}>{detectNote}</p>}
+      {detectNote && (
+        <p className="assistant-admin-config-hint" style={{ marginTop: 8 }}>
+          {detectNote}
+        </p>
+      )}
 
       <datalist id="model-policy-options">
         {options.map((m) => (
@@ -285,7 +343,10 @@ export function ModelPolicyConfig({ settings, canManage, canopyConfigured, opena
                   aria-label={row.label}
                 />
                 <span className="assistant-admin-config-hint">
-                  {value ? (effective ?? 'Id no reconocido: se enviará tal cual al proveedor que lo declare') : row.placeholder}
+                  {value
+                    ? (effective ??
+                      'Id no reconocido: se enviará tal cual al proveedor que lo declare')
+                    : row.placeholder}
                 </span>
               </div>
             </div>

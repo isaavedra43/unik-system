@@ -13,6 +13,7 @@ import {
   Loader2,
   Monitor,
   MousePointerClick,
+  Puzzle,
   RotateCcw,
   ShieldAlert,
   Terminal,
@@ -106,6 +107,13 @@ interface UsageData {
   label?: string;
 }
 
+interface ApiApp {
+  slug: string;
+  name: string;
+  logo: string | null;
+  connected: boolean;
+}
+
 const TOOL_ICON: Record<string, React.ReactNode> = {
   web_search: <Globe size={13} />,
   fetch_url: <FileText size={13} />,
@@ -160,6 +168,8 @@ export function OpsPanel({
   const [missionsLoaded, setMissionsLoaded] = useState(false);
   const [approvals, setApprovals] = useState<PendingProposal[]>([]);
   const [usage, setUsage] = useState<UsageData | null>(null);
+  const [apiApps, setApiApps] = useState<ApiApp[] | null>(null);
+  const [apiConfigured, setApiConfigured] = useState<boolean | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const [replayKey, setReplayKey] = useState(0);
   const counterRef = useRef(0);
@@ -465,6 +475,21 @@ export function OpsPanel({
         setUsage(d);
       })
       .catch(() => undefined);
+    // Third surface: apps the agent can drive through APIs (Composio).
+    // configured:false → the card shows "sin configurar" instead of pretending.
+    fetch('/app/assistant/api/composio/toolkits')
+      .then(async (res) => {
+        if (cancelled || !res.ok) return;
+        const d = (await res.json()) as {
+          configured?: boolean;
+          toolkits?: ApiApp[];
+        };
+        setApiConfigured(d.configured === true);
+        setApiApps(d.toolkits ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setApiConfigured(false);
+      });
     return () => {
       cancelled = true;
     };
@@ -559,6 +584,62 @@ export function OpsPanel({
             </p>
           </div>
         )}
+
+        {/* Superficies — the three things the agent can drive: the virtual
+            computer, the web pages it opened, and external apps over APIs
+            (the API surface replaces local-computer control for now). */}
+        <section className="ops-section">
+          <h4 className="ops-section-title">Superficies</h4>
+          <div className="ops-surfaces">
+            <div className={cn('ops-surface', venueActive && 'is-live')}>
+              <Monitor size={14} />
+              <span className="ops-surface-name">Computadora virtual</span>
+              <span className="ops-surface-state">{venueActive ? 'En vivo' : 'Apagada'}</span>
+            </div>
+            <div className={cn('ops-surface', pages.length > 0 && 'is-live')}>
+              <Globe size={14} />
+              <span className="ops-surface-name">Páginas web</span>
+              <span className="ops-surface-state">
+                {pages.length > 0 ? `${pages.length} abiertas` : 'Sin abrir'}
+              </span>
+            </div>
+            <div
+              className={cn(
+                'ops-surface',
+                (apiApps?.filter((a) => a.connected).length ?? 0) > 0 && 'is-live'
+              )}
+            >
+              <Puzzle size={14} />
+              <span className="ops-surface-name">Apps por API</span>
+              <span className="ops-surface-state">
+                {apiConfigured === null
+                  ? '…'
+                  : apiConfigured === false
+                    ? 'Sin configurar'
+                    : `${apiApps?.filter((a) => a.connected).length ?? 0} conectadas`}
+              </span>
+            </div>
+          </div>
+          {apiConfigured === true && (apiApps?.filter((a) => a.connected).length ?? 0) > 0 && (
+            <div className="ops-apps">
+              {apiApps!
+                .filter((a) => a.connected)
+                .slice(0, 8)
+                .map((a) => (
+                  <span key={a.slug} className="ops-app" title={a.name}>
+                    {a.logo ? (
+                      // External app logo (Composio CDN) — decorative icon, 14px.
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={a.logo} alt="" width={14} height={14} />
+                    ) : (
+                      <Puzzle size={12} />
+                    )}
+                    {a.name}
+                  </span>
+                ))}
+            </div>
+          )}
+        </section>
 
         {/* Pantalla — the venue's live screenshot in a browser frame. */}
         {screen && (

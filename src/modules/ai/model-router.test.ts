@@ -8,6 +8,8 @@ const settings = {
   routingSimpleModel: 'gpt-4o-mini',
   routingStandardModel: '',
   routingComplexModel: '',
+  computerUseModel: '',
+  providerConfigs: {},
 };
 
 describe('classifyTask', () => {
@@ -17,19 +19,35 @@ describe('classifyTask', () => {
   });
 
   it('data questions are standard', () => {
-    expect(classifyTask({ message: 'dime las ventas en efectivo de la semana pasada' }).tier).toBe('standard');
-    expect(classifyTask({ message: 'mandale mensaje a papa diciendole hola' }).tier).toBe('standard');
+    expect(classifyTask({ message: 'dime las ventas en efectivo de la semana pasada' }).tier).toBe(
+      'standard'
+    );
+    expect(classifyTask({ message: 'mandale mensaje a papa diciendole hola' }).tier).toBe(
+      'standard'
+    );
   });
 
   it('analysis, multi-domain and documents are complex', () => {
-    expect(classifyTask({ message: 'analiza la tendencia de ventas del trimestre y explica por qué cayó marzo' }).tier).toBe('complex');
-    expect(classifyTask({ message: 'arma un reporte trimestral con clientes top, productos más vendidos y anomalías' }).tier).toBe('complex');
-    expect(classifyTask({ message: 'lee esta factura', attachmentKinds: ['document'] }).tier).toBe('complex');
+    expect(
+      classifyTask({
+        message: 'analiza la tendencia de ventas del trimestre y explica por qué cayó marzo',
+      }).tier
+    ).toBe('complex');
+    expect(
+      classifyTask({
+        message: 'arma un reporte trimestral con clientes top, productos más vendidos y anomalías',
+      }).tier
+    ).toBe('complex');
+    expect(classifyTask({ message: 'lee esta factura', attachmentKinds: ['document'] }).tier).toBe(
+      'complex'
+    );
     expect(classifyTask({ message: 'hola', planFirst: true }).tier).toBe('complex');
   });
 
   it('a short follow-up after tools stays standard, images need vision', () => {
-    expect(classifyTask({ message: 'ok', recentToolNames: ['querySalesOrders'] }).tier).toBe('standard');
+    expect(classifyTask({ message: 'ok', recentToolNames: ['querySalesOrders'] }).tier).toBe(
+      'standard'
+    );
     const img = classifyTask({ message: 'qué ves aquí', attachmentKinds: ['image'] });
     expect(img.needsVision).toBe(true);
   });
@@ -49,14 +67,44 @@ describe('resolveTurnModel', () => {
   });
 
   it('routes complex turns to the primary model and keeps vision-capable models for images', () => {
-    expect(resolveTurnModel(settings, undefined, classifyTask({ message: 'analiza y compara ventas vs el año pasado' })).model).toBe('gpt-4o');
+    expect(
+      resolveTurnModel(
+        settings,
+        undefined,
+        classifyTask({ message: 'analiza y compara ventas vs el año pasado' })
+      ).model
+    ).toBe('gpt-4o');
     const noVision = { ...settings, routingSimpleModel: 'o3-mini' };
-    const d = resolveTurnModel(noVision, undefined, { tier: 'simple', reason: 'x', needsVision: true });
+    const d = resolveTurnModel(noVision, undefined, {
+      tier: 'simple',
+      reason: 'x',
+      needsVision: true,
+      computer: false,
+    });
     expect(d.model).toBe('gpt-4o');
   });
 
+  it('computer-use turns go to the dedicated venue model', () => {
+    const msg = 'abre la pagina del banco en la computadora virtual y captura de pantalla';
+    const cls = classifyTask({ message: msg });
+    expect(cls.computer).toBe(true);
+    const withOr = {
+      ...settings,
+      providerConfigs: { openrouter: { apiKey: 'k', endpoint: '', enabled: true } },
+    };
+    expect(resolveTurnModel(withOr, undefined, cls).model).toBe('google/gemini-2.5-flash');
+    const explicit = { ...settings, computerUseModel: 'openai/gpt-5-mini' };
+    expect(resolveTurnModel(explicit, undefined, cls).model).toBe('openai/gpt-5-mini');
+    // Sin OpenRouter ni override → el modelo de rutina/principal.
+    expect(resolveTurnModel(settings, undefined, cls).model).toBe('gpt-4o');
+  });
+
   it('uses the primary model when routing is disabled', () => {
-    const d = resolveTurnModel({ ...settings, routingEnabled: false }, undefined, classifyTask({ message: 'hola' }));
+    const d = resolveTurnModel(
+      { ...settings, routingEnabled: false },
+      undefined,
+      classifyTask({ message: 'hola' })
+    );
     expect(d.model).toBe('gpt-4o');
     expect(d.routed).toBe(false);
   });
@@ -69,9 +117,16 @@ describe('resolveTurnModel', () => {
 
 describe('routine tier', () => {
   it('standard turns use the routine model when configured', () => {
-    const split = { ...settings, routingStandardModel: 'moonshotai/kimi-k2.6', routingComplexModel: 'gpt-4o' };
+    const split = {
+      ...settings,
+      routingStandardModel: 'moonshotai/kimi-k2.6',
+      routingComplexModel: 'gpt-4o',
+    };
     expect(pickModelForTier(split, 'standard')).toBe('moonshotai/kimi-k2.6');
     expect(pickModelForTier(split, 'complex')).toBe('gpt-4o');
-    expect(resolveTurnModel(split, AUTO_MODEL_ID, classifyTask({ message: 'dime las ventas de hoy' })).model).toBe('moonshotai/kimi-k2.6');
+    expect(
+      resolveTurnModel(split, AUTO_MODEL_ID, classifyTask({ message: 'dime las ventas de hoy' }))
+        .model
+    ).toBe('moonshotai/kimi-k2.6');
   });
 });

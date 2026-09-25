@@ -46,9 +46,36 @@ export async function getSearchProvider(): Promise<SearchProvider | null> {
   const settings = await getAiSettings();
   if (!settings.webSearchEnabled) return null;
   const id = (settings.webSearchProvider || 'tavily').trim().toLowerCase();
+
+  if (id === 'openrouter' || id === 'openrouter-sonar' || id === 'sonar') {
+    const key = await openRouterKey();
+    if (!key) return null;
+    const { createOpenRouterSearchProvider } = await import('./openrouter-search');
+    return createOpenRouterSearchProvider(key);
+  }
   if (id !== 'tavily') return null;
+
   const apiKey = settings.webSearchApiKey?.trim() || process.env.TAVILY_API_KEY?.trim();
-  if (!apiKey) return null;
-  const { createTavilyProvider } = await import('./tavily');
-  return createTavilyProvider(apiKey);
+  if (apiKey) {
+    const { createTavilyProvider } = await import('./tavily');
+    return createTavilyProvider(apiKey);
+  }
+
+  // No Tavily key — fall back to Perplexity Sonar via the OpenRouter key the
+  // install already uses for models, so "buscar en internet" works anyway.
+  const fallbackKey = await openRouterKey();
+  if (!fallbackKey) return null;
+  const { createOpenRouterSearchProvider } = await import('./openrouter-search');
+  return createOpenRouterSearchProvider(fallbackKey);
+}
+
+async function openRouterKey(): Promise<string | null> {
+  try {
+    const { getProviderConfig } = await import('@/modules/ai/ai-config');
+    const cfg = await getProviderConfig('openrouter');
+    const key = cfg.apiKey?.trim() || process.env.OPENROUTER_API_KEY?.trim();
+    return key || null;
+  } catch {
+    return process.env.OPENROUTER_API_KEY?.trim() || null;
+  }
 }

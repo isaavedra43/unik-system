@@ -9,6 +9,8 @@ const base: ModelPolicySettings = {
   routingComplexModel: '',
   utilityModel: '',
   qualityJudgeModel: '',
+  computerUseModel: '',
+  providerConfigs: {},
 };
 
 describe('modelForTask', () => {

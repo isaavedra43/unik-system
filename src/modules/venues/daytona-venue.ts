@@ -122,6 +122,20 @@ export class DaytonaVenue implements Venue {
       sandbox = await client.create(baseParams, { timeout: 180 });
     }
 
+    // `create` can return while the sandbox is still 'creating'/'starting' —
+    // fs/process calls fail until it is 'started' (attach() already waits).
+    // Without this the very first uploadFile dies with a confusing
+    // "VM can't start" error even when the Daytona API is healthy.
+    if (sandbox.state !== 'started') {
+      try {
+        await sandbox.start(60);
+      } catch (err) {
+        console.error('[venue] sandbox did not reach started state:', err);
+        await sandbox.delete(60).catch(() => undefined); // no orphan billing
+        throw err;
+      }
+    }
+
     const venue = new DaytonaVenue(sessionId, sandbox, client, controllerToken, null);
     await venue.startController();
     return venue;
@@ -165,9 +179,23 @@ export class DaytonaVenue implements Venue {
   private lastDiag = '';
 
   private async startController(): Promise<void> {
-    await this.sandbox.fs.createFolder(CONTROLLER_REMOTE_DIR, '755').catch(() => undefined);
-    await this.sandbox.fs.uploadFile(Buffer.from(provisionScript(), 'utf8'), PROVISION_REMOTE_PATH);
-    await this.sandbox.fs.uploadFile(Buffer.from(controllerScript(), 'utf8'), CONTROLLER_REMOTE_PATH);
+    try {
+      await this.sandbox.fs.createFolder(CONTROLLER_REMOTE_DIR, '755').catch(() => undefined);
+      await this.sandbox.fs.uploadFile(Buffer.from(provisionScript(), 'utf8'), PROVISION_REMOTE_PATH);
+      await this.sandbox.fs.uploadFile(Buffer.from(controllerScript(), 'utf8'), CONTROLLER_REMOTE_PATH);
+    } catch {
+      // fs goes through the toolbox proxy — it can be briefly unavailable
+      // right after 'started'. Retry once before giving up.
+      await new Promise((r) => setTimeout(r, 2_500));
+      try {
+        await this.sandbox.fs.uploadFile(Buffer.from(provisionScript(), 'utf8'), PROVISION_REMOTE_PATH);
+        await this.sandbox.fs.uploadFile(Buffer.from(controllerScript(), 'utf8'), CONTROLLER_REMOTE_PATH);
+      } catch (err2) {
+        this.lastDiag = `upload controller falló: ${err2 instanceof Error ? err2.message : err2}`;
+        console.error('[venue] controller upload failed:', err2);
+        return; // browserAct will surface lastDiag and retry lazily
+      }
+    }
 
     // Provision the browser stack (node, playwright-core + chromium). Stock
     // sandbox images may lack them; without this the controller can't even
@@ -189,12 +217,18 @@ export class DaytonaVenue implements Venue {
     this.lastDiag = provTail;
 
     // Start detached so executeCommand returns immediately.
-    await this.sandbox.process.executeCommand(
-      `cd ${CONTROLLER_REMOTE_DIR} && nohup node browser-controller.mjs > controller.log 2>&1 &`,
-      CONTROLLER_REMOTE_DIR,
-      { UNIK_BROWSER_TOKEN: this.controllerToken, UNIK_CHROME_PATH: this.chromePath },
-      10
-    );
+    try {
+      await this.sandbox.process.executeCommand(
+        `cd ${CONTROLLER_REMOTE_DIR} && nohup node browser-controller.mjs > controller.log 2>&1 &`,
+        CONTROLLER_REMOTE_DIR,
+        { UNIK_BROWSER_TOKEN: this.controllerToken, UNIK_CHROME_PATH: this.chromePath },
+        10
+      );
+    } catch (err) {
+      this.lastDiag = `spawn controller falló: ${err instanceof Error ? err.message : err} | prov: ${provTail.slice(-200)}`;
+      console.error('[venue] controller spawn failed:', err);
+      return;
+    }
     // Wait for health through the signed preview URL.
     const deadline = Date.now() + 30_000;
     while (Date.now() < deadline) {

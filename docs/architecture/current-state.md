@@ -100,9 +100,16 @@ y revisión interna. Escrituras → `AiProposal` con aprobación humana exacta.
   `trigger.tick` 60 s); ToolGateway (grants, autonomía×efecto, presupuesto);
   `MemoryRouter` por scope; `tenantId` en `CurrentUser` (fail-soft `unik`).
 - **Front agentes** (`src/components/assistant/agents/`): sidebar "Tu equipo"
-  con JEFE fijado, `OpsPanel` (pantalla venue + terminal vivo + misiones +
-  vigilancias + aprobaciones + costo vía `GET /api/usage`), tarjetas
-  Mission/Activity/AgentMessage/RoutineChip, mode pills Misión/Mensaje.
+  con JEFE fijado (+ "Descargar app" PWA), `OpsPanel` (superficies: computadora
+  virtual + páginas web + apps por API Composio; pantalla venue + terminal vivo
+  - misiones + vigilancias + aprobaciones + costo vía `GET /api/usage`),
+    tarjetas Mission/Activity/AgentMessage/RoutineChip, mode pills Misión/Mensaje.
+    `AssistantWidget` = FAB flotante con el chat del agente en el resto de la app.
+- **Computer use**: turnos `venue` usan el modelo `computer` del reparto
+  (`computerUseModel` → `UNIK_COMPUTER_MODEL` → `google/gemini-2.5-flash`
+  OpenRouter → rutina). Pantallas memory-only: `stripScreenData` las quita del
+  audit, del mensaje persistido y del contexto del modelo; `/venue/state` con
+  `no-store`.
 - **APIs**: `/agents`, `/runs/[id]`, `/tasks/[id]/cancel`, `/triggers`,
   `/workspace`, `/usage`; `POST /chat` acepta `agentId`.
 

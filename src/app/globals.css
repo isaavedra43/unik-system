@@ -27016,3 +27016,217 @@ html.dark {
   outline: 2px solid var(--unik-brand);
   outline-offset: 1px;
 }
+
+/* =====================================================
+   Widget flotante del agente (todas las páginas menos
+   /app/assistant) + superficies del OpsPanel.
+   ===================================================== */
+.agent-widget-fab {
+  position: fixed;
+  right: var(--unik-space-5);
+  bottom: var(--unik-space-5);
+  z-index: 70;
+  width: 52px;
+  height: 52px;
+  border-radius: var(--unik-radius-full);
+  border: 1px solid var(--unik-border);
+  background: var(--unik-brand);
+  color: var(--unik-text-inverse);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: var(--unik-shadow-lg, 0 8px 24px rgba(0, 0, 0, 0.18));
+  transition:
+    transform 0.16s ease,
+    box-shadow 0.16s ease;
+}
+.agent-widget-fab:hover {
+  transform: translateY(-1px);
+}
+.agent-widget-fab:active {
+  transform: translateY(0);
+}
+.agent-widget-fab:focus-visible {
+  outline: 2px solid var(--unik-brand);
+  outline-offset: 2px;
+}
+.agent-widget-drawer {
+  position: fixed;
+  right: var(--unik-space-5);
+  bottom: calc(var(--unik-space-5) + 60px);
+  z-index: 70;
+  width: min(420px, calc(100vw - var(--unik-space-6)));
+  height: min(620px, calc(100dvh - 120px));
+  display: flex;
+  flex-direction: column;
+  background: var(--unik-surface);
+  border: 1px solid var(--unik-border);
+  border-radius: var(--unik-radius-lg);
+  box-shadow: var(--unik-shadow-lg, 0 16px 48px rgba(0, 0, 0, 0.22));
+  overflow: hidden;
+  animation: agent-widget-in 0.24s cubic-bezier(0, 0, 0.2, 1);
+}
+@keyframes agent-widget-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.agent-widget-head {
+  display: flex;
+  align-items: center;
+  gap: var(--unik-space-2);
+  padding: var(--unik-space-3) var(--unik-space-3) var(--unik-space-2);
+  border-bottom: 1px solid var(--unik-border);
+  flex-shrink: 0;
+}
+.agent-widget-head-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.agent-widget-head-name {
+  font-size: var(--unik-text-sm);
+  font-weight: 600;
+  color: var(--unik-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.agent-widget-head-sub {
+  font-size: var(--unik-text-xs);
+  color: var(--unik-text-muted);
+}
+.agent-widget-icon-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: var(--unik-radius-sm);
+  background: transparent;
+  color: var(--unik-text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.agent-widget-icon-btn:hover {
+  background: var(--unik-surface-hover);
+  color: var(--unik-text);
+}
+.agent-widget-icon-btn:focus-visible {
+  outline: 2px solid var(--unik-brand);
+  outline-offset: -2px;
+}
+.agent-widget-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.agent-widget-body .assistant-chat {
+  flex: 1;
+  min-height: 0;
+}
+/* Inside the drawer the chat head's own agent row duplicates ours. */
+.agent-widget-body .assistant-chat-head {
+  display: none;
+}
+.agent-widget-body .assistant-agent-strip {
+  display: none;
+}
+
+@media (max-width: 640px) {
+  .agent-widget-drawer {
+    right: var(--unik-space-3);
+    left: var(--unik-space-3);
+    width: auto;
+    bottom: calc(var(--unik-space-3) + 60px);
+    height: min(70dvh, 620px);
+  }
+  .agent-widget-fab {
+    right: var(--unik-space-3);
+    bottom: calc(var(--unik-space-3) + env(safe-area-inset-bottom, 0px));
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .agent-widget-drawer {
+    animation: none;
+  }
+  .agent-widget-fab {
+    transition: none;
+  }
+}
+
+/* Superficies — las tres cosas que el agente controla. */
+.ops-surfaces {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ops-surface {
+  display: flex;
+  align-items: center;
+  gap: var(--unik-space-2);
+  padding: 8px 10px;
+  border: 1px solid var(--unik-border);
+  border-radius: var(--unik-radius-md);
+  background: var(--unik-surface);
+  color: var(--unik-text-secondary);
+  font-size: var(--unik-text-xs);
+}
+.ops-surface svg {
+  color: var(--unik-text-muted);
+  flex-shrink: 0;
+}
+.ops-surface.is-live {
+  border-color: color-mix(in srgb, var(--unik-success) 45%, var(--unik-border));
+}
+.ops-surface.is-live svg {
+  color: var(--unik-success);
+}
+.ops-surface-name {
+  flex: 1;
+  min-width: 0;
+  font-weight: 500;
+  color: var(--unik-text);
+}
+.ops-surface-state {
+  font-size: 10px;
+  color: var(--unik-text-muted);
+  white-space: nowrap;
+}
+.ops-surface.is-live .ops-surface-state {
+  color: var(--unik-success);
+}
+.ops-apps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.ops-app {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border: 1px solid var(--unik-border);
+  border-radius: var(--unik-radius-full);
+  background: var(--unik-surface);
+  font-size: 10px;
+  color: var(--unik-text-secondary);
+  white-space: nowrap;
+}
+.ops-app img {
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+.agent-install-done {
+  color: var(--unik-success);
+  cursor: default;
+}

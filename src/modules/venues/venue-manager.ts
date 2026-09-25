@@ -140,11 +140,13 @@ export async function acquireVenue(input: { userId: string; purpose?: string }):
     await emitVenueEvent(session.id, 'session_started', { externalId: venue.externalId, purpose: input.purpose });
     return venue;
   } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    console.error('[venue] create failed:', err);
     await prisma.venueSession.update({
       where: { id: session.id },
-      data: { status: 'error', endedAt: new Date(), metadata: { error: String(err instanceof Error ? err.message : err).slice(0, 300) } },
+      data: { status: 'error', endedAt: new Date(), metadata: { error: reason.slice(0, 300) } },
     });
-    throw new VenueUnavailableError(`No se pudo crear la computadora virtual: ${err instanceof Error ? err.message : 'error'}`);
+    throw new VenueUnavailableError(`No se pudo crear la computadora virtual: ${reason}`);
   }
 }
 

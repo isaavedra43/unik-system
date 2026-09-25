@@ -13,6 +13,16 @@ interface PendingSecureInput {
   ts: string;
 }
 
+/** Screenshots are ephemeral: the frame lives only in this response, never cached. */
+const NO_STORE = {
+  'Cache-Control': 'no-store, no-cache, must-revalidate',
+  Pragma: 'no-cache',
+} as const;
+
+function stateJson(body: unknown, status = 200) {
+  return NextResponse.json(body, { status, headers: NO_STORE });
+}
+
 /**
  * GET /app/assistant/api/venue/state
  *
@@ -34,7 +44,7 @@ export async function GET() {
     where: { userId: session.user.id, status: { in: ['active', 'idle'] } },
     orderBy: { lastUsedAt: 'desc' },
   });
-  if (!vs?.externalId) return NextResponse.json({ active: false });
+  if (!vs?.externalId) return stateJson({ active: false });
 
   const meta = (vs.metadata as Record<string, unknown> | null) ?? {};
   const cutoff = Date.now() - 30 * 60_000;
@@ -55,14 +65,14 @@ export async function GET() {
     const shot = await venue.browserAct({ action: 'screenshot', timeoutMs: 15_000 });
     if (!shot.ok || !shot.screenshotBase64) {
       // Browser exists but has no page yet (or is still booting).
-      return NextResponse.json({
+      return stateJson({
         active: true,
         sessionId: vs.id,
         screen: null,
         pendingInputs,
       });
     }
-    return NextResponse.json({
+    return stateJson({
       active: true,
       sessionId: vs.id,
       screen: {
@@ -73,6 +83,6 @@ export async function GET() {
       pendingInputs,
     });
   } catch {
-    return NextResponse.json({ active: false, pendingInputs });
+    return stateJson({ active: false, pendingInputs });
   }
 }

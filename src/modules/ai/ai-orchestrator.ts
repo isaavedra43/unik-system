@@ -1,25 +1,27 @@
 import type { CurrentUser } from '@/modules/auth/authorization';
-import { chatCompletionStream, type ChatMessage, type ToolSpec, type ContentPart } from './ai-client';
+import {
+  chatCompletionStream,
+  type ChatMessage,
+  type ToolSpec,
+  type ContentPart,
+} from './ai-client';
 import { AiApiError } from './ai-client';
 import { buildSystemPrompt } from './ai-context-builder';
-import {
-  loadAvailableTools,
-  executeTool,
-  toOpenAiTools,
-} from './tools/index';
+import { loadAvailableTools, executeTool, toOpenAiTools } from './tools/index';
 import { refreshExternalTools } from '@/modules/extensions/external-tools';
 import { buildUiComponents } from './generative-ui/build-ui';
 import { getPreferences, PAUSED_MODE_HIDDEN_EFFECTS } from '@/modules/copilot/preferences-service';
 import { getAiSettings } from './ai-admin-config-service';
-import {
-  getMessages,
-  addMessage,
-  autoTitleConversation,
-} from './ai-sessions-service';
+import { getMessages, addMessage, autoTitleConversation } from './ai-sessions-service';
 import { recordAiToolCall } from './ai-audit';
 import { checkRateLimit, recordTokenUsage } from './ai-rate-limit';
 import { validateInput, validateOutput } from './ai-guardrails';
-import { listAttachments, processAttachment, resolveAttachmentsForMessage, type AttachmentResult } from './ai-attachments-service';
+import {
+  listAttachments,
+  processAttachment,
+  resolveAttachmentsForMessage,
+  type AttachmentResult,
+} from './ai-attachments-service';
 import { prisma } from '@/lib/prisma';
 import { buildReportSubtitle, buildSummaryCards } from './ai-report-helpers';
 import { resolveReportCustomization, type ReportCustomization } from './report-customization';
@@ -36,8 +38,18 @@ import { maybeSummarizeConversation } from './ai-conversation-summary';
 import { absoluteUrl } from '@/lib/app-url';
 import type { Prisma } from '@prisma/client';
 import type { ToolDefinition, ToolExecutionResult } from './tools/registry';
-import { CORE_TOOL_NAMES, PROVIDER_MAX_TOOLS, findToolsByTopic, selectToolsForTurn } from './tool-selector';
-import { classifyTask, classifyTaskWithJev, pickModelForTier, resolveTurnModel } from './model-router';
+import {
+  CORE_TOOL_NAMES,
+  PROVIDER_MAX_TOOLS,
+  findToolsByTopic,
+  selectToolsForTurn,
+} from './tool-selector';
+import {
+  classifyTask,
+  classifyTaskWithJev,
+  pickModelForTier,
+  resolveTurnModel,
+} from './model-router';
 import { decide, answerBool, answerScore } from './decisions/decision-engine';
 import { draftConfidenceDecision, reviewNeededDecision } from './decisions/decision-points';
 import { detectDomainsWithJev } from './decisions/jev-domains';
@@ -46,7 +58,12 @@ import { wrapUntrusted } from './ai-guardrails';
 import { redactDeep } from '@/modules/extensions/secrets';
 import { getModelById } from './model-catalog';
 import { isReasoningModel } from './providers/openai';
-import { buildTurnDirectives, looksUnfinished, stripMarkdownImages, wantsDocument } from './turn-directives';
+import {
+  buildTurnDirectives,
+  looksUnfinished,
+  stripMarkdownImages,
+  wantsDocument,
+} from './turn-directives';
 import { reviewComplexAnswer } from './ai-answer-review';
 import { checkAnswer, collectFolios, collectResultNumbers } from './answer-checks';
 import { emitWorkspaceEvents, workspaceEventsForTool } from './workspace-events';
@@ -60,7 +77,12 @@ import {
 } from './capabilities';
 import { parseFollowUps } from './followups';
 import { captureLearnings } from './ai-learning';
-import { buildRevisionDirective, isRevisionRequest, mergeRevisionArgs, type RevisionContext } from './revisions';
+import {
+  buildRevisionDirective,
+  isRevisionRequest,
+  mergeRevisionArgs,
+  type RevisionContext,
+} from './revisions';
 import { inferConfidence, parseConfidence } from './confidence';
 import { mergeMessageMeta } from './ai-sessions-service';
 import { attachmentKind } from './ai-attachments-service';
@@ -118,7 +140,17 @@ interface OrchestratorInput {
 }
 
 interface OrchestratorEvent {
-  type: 'token' | 'reasoning' | 'tool_call_start' | 'tool_call_end' | 'artifact' | 'proposal' | 'action' | 'ui' | 'done' | 'error';
+  type:
+    | 'token'
+    | 'reasoning'
+    | 'tool_call_start'
+    | 'tool_call_end'
+    | 'artifact'
+    | 'proposal'
+    | 'action'
+    | 'ui'
+    | 'done'
+    | 'error';
   data?: unknown;
 }
 
@@ -133,7 +165,9 @@ const EXPORT_PAGE_SIZE = 200; // querySalesOrders' Zod max
  * and strips tool_calls whose replies were cut off, so the provider always sees
  * a valid sequence. Pure; keeps everything else untouched.
  */
-export function sanitizeHistory<T extends { role: string; toolCalls: unknown; toolCallId: string | null }>(history: T[]): T[] {
+export function sanitizeHistory<
+  T extends { role: string; toolCalls: unknown; toolCallId: string | null },
+>(history: T[]): T[] {
   const out: T[] = [];
   let i = 0;
   while (i < history.length) {
@@ -142,7 +176,11 @@ export function sanitizeHistory<T extends { role: string; toolCalls: unknown; to
       i += 1; // orphan: nothing with tool_calls precedes it inside the window
       continue;
     }
-    if (m.role === 'assistant' && Array.isArray(m.toolCalls) && (m.toolCalls as unknown[]).length > 0) {
+    if (
+      m.role === 'assistant' &&
+      Array.isArray(m.toolCalls) &&
+      (m.toolCalls as unknown[]).length > 0
+    ) {
       const ids = new Set((m.toolCalls as Array<{ id: string }>).map((tc) => tc.id));
       const replies: T[] = [];
       let j = i + 1;
@@ -166,19 +204,70 @@ export function sanitizeHistory<T extends { role: string; toolCalls: unknown; to
   return out;
 }
 
-async function linkArtifactToMessage(artifactId: string, messageId: string, spec: Record<string, unknown>): Promise<void> {
+async function linkArtifactToMessage(
+  artifactId: string,
+  messageId: string,
+  spec: Record<string, unknown>
+): Promise<void> {
   try {
-    const row = await prisma.aiArtifact.findUnique({ where: { id: artifactId }, select: { meta: true } });
+    const row = await prisma.aiArtifact.findUnique({
+      where: { id: artifactId },
+      select: { meta: true },
+    });
     if (!row) return;
     const meta = { ...((row.meta as Record<string, unknown> | null) ?? {}), spec };
-    await prisma.aiArtifact.update({ where: { id: artifactId }, data: { messageId, meta: meta as Prisma.InputJsonValue } });
+    await prisma.aiArtifact.update({
+      where: { id: artifactId },
+      data: { messageId, meta: meta as Prisma.InputJsonValue },
+    });
   } catch (error) {
-    console.warn(JSON.stringify({ event: 'ai.artifact.link_failed', artifactId, message: error instanceof Error ? error.message : 'unknown' }));
+    console.warn(
+      JSON.stringify({
+        event: 'ai.artifact.link_failed',
+        artifactId,
+        message: error instanceof Error ? error.message : 'unknown',
+      })
+    );
   }
 }
 
+/**
+ * Screen captures are MEMORY-ONLY: the live frame goes to the workspace feed
+ * via SSE and dies there. Nothing downstream may hold it — not the model
+ * context (it would also blow up token cost), not AiToolCall.result, not the
+ * persisted tool message. Replaces image fields with a small marker; to "see"
+ * the screen the model uses analyzeImage (vision, bounded result).
+ */
+const SCREEN_FIELD_RE = /^(imageBase64|screenshotBase64|screenshot|image|dataUrl)$/i;
+const DATA_IMAGE_RE = /^data:(image|application\/pdf)\//i;
+
+export function stripScreenData<T>(value: T, depth = 0): T {
+  if (value == null || depth > 4) return value;
+  if (Array.isArray(value)) {
+    return value.map((v) => stripScreenData(v, depth + 1)) as unknown as T;
+  }
+  if (typeof value !== 'object') {
+    if (typeof value === 'string' && DATA_IMAGE_RE.test(value) && value.length > 512) {
+      return '[omitted:data-url]' as unknown as T;
+    }
+    return value;
+  }
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+    if (SCREEN_FIELD_RE.test(k) && typeof v === 'string' && v.length > 512) {
+      out[k] = { omitted: 'screen_capture', bytes: v.length };
+      continue;
+    }
+    out[k] = stripScreenData(v, depth + 1);
+  }
+  return out as T;
+}
+
 /** The records array of a result, read from the SAME field as the original result when known. */
-function recordRowsOf(result: Record<string, unknown> | null | undefined, rowKey: string | null): Record<string, unknown>[] | null {
+function recordRowsOf(
+  result: Record<string, unknown> | null | undefined,
+  rowKey: string | null
+): Record<string, unknown>[] | null {
   if (!result) return null;
   // A page past the end has `orders: []` — never fall back to another array (a breakdown) then.
   if (rowKey && Array.isArray(result[rowKey])) return result[rowKey] as Record<string, unknown>[];
@@ -208,9 +297,16 @@ async function fetchAllRowsForExport(
   }
 
   const all: Record<string, unknown>[] = [];
-  const pages = Math.min(Math.ceil(total / EXPORT_PAGE_SIZE), Math.ceil(EXPORT_MAX_ROWS / EXPORT_PAGE_SIZE));
+  const pages = Math.min(
+    Math.ceil(total / EXPORT_PAGE_SIZE),
+    Math.ceil(EXPORT_MAX_ROWS / EXPORT_PAGE_SIZE)
+  );
   for (let page = 1; page <= pages; page++) {
-    const res = await executeTool(toolName, actor, { ...toolArgs, page, pageSize: EXPORT_PAGE_SIZE });
+    const res = await executeTool(toolName, actor, {
+      ...toolArgs,
+      page,
+      pageSize: EXPORT_PAGE_SIZE,
+    });
     if (!res.success || !res.result || typeof res.result !== 'object') break;
     const rows = recordRowsOf(res.result as Record<string, unknown>, rowKey);
     if (!rows || rows.length === 0) break;
@@ -220,9 +316,7 @@ async function fetchAllRowsForExport(
   return all.length >= fallbackRows.length ? all : fallbackRows;
 }
 
-async function* runAssistantInner(
-  input: OrchestratorInput
-): AsyncGenerator<OrchestratorEvent> {
+async function* runAssistantInner(input: OrchestratorInput): AsyncGenerator<OrchestratorEvent> {
   // 1. Check if AI is enabled (before any work)
   const settings = await getAiSettings();
   if (!settings.isEnabled) {
@@ -303,7 +397,13 @@ async function* runAssistantInner(
   // exists in code). `isAutoTrigger` is derived early: filters depend on it.
   const isAutoTrigger = input.message.startsWith('⟦auto:');
   const actorPreferences = await getPreferences(input.actor.id).catch(() => null);
-  const lastAssistantContent = [...history].reverse().find((m) => m.role === 'assistant' && typeof m.content === 'string' && m.content.trim().length > 0)?.content ?? null;
+  const lastAssistantContent =
+    [...history]
+      .reverse()
+      .find(
+        (m) =>
+          m.role === 'assistant' && typeof m.content === 'string' && m.content.trim().length > 0
+      )?.content ?? null;
   const documentRequested = wantsDocument(input.message, lastAssistantContent);
   await refreshExternalTools();
   // UNIVERSO: el toolAllowlist del agente solo puede ACOTAR el menú del dueño —
@@ -328,22 +428,30 @@ async function* runAssistantInner(
     .filter((t) => documentRequested || isAutoTrigger || t.name !== 'composeDocument');
 
   // 6. Build system prompt (+ the live inbox context when running as copilot)
-  let systemPrompt = await buildSystemPrompt(input.actor, { ...input.context, conversationId: input.conversationId });
+  let systemPrompt = await buildSystemPrompt(input.actor, {
+    ...input.context,
+    conversationId: input.conversationId,
+  });
   // Capability contract: the prompt states what is REALLY on/off this turn so a
   // missing capability becomes an honest admission instead of an improvised lie.
   const capabilityStatus = capabilitiesFromTools(availableTools);
   systemPrompt += `\n\n${capabilityPromptBlock(capabilityStatus)}`;
   const requiredCaps = detectRequiredCapabilities(input.message);
-  const missingCaps = requiredCaps.filter((r) => !capabilityStatus.find((c) => c.id === r.cap)?.available);
-  if (missingCaps.length > 0) systemPrompt += `\n\n${missingCapabilityNote(missingCaps, capabilityStatus)}`;
+  const missingCaps = requiredCaps.filter(
+    (r) => !capabilityStatus.find((c) => c.id === r.cap)?.available
+  );
+  if (missingCaps.length > 0)
+    systemPrompt += `\n\n${missingCapabilityNote(missingCaps, capabilityStatus)}`;
   try {
     const { buildComposioPrompt } = await import('@/modules/composio/composio-prompt');
     const composioBlock = await buildComposioPrompt(input.actor);
     if (composioBlock) systemPrompt += `\n\n${composioBlock}`;
   } catch (err) {
-    console.warn('[orchestrator] composio prompt skipped:', err instanceof Error ? err.message : err);
+    console.warn(
+      '[orchestrator] composio prompt skipped:',
+      err instanceof Error ? err.message : err
+    );
   }
-
 
   // 6.5. Agent memory recall: episodes, confirmed facts and playbooks relevant to THIS
   // message. Injected before classification so it informs tool choice and routing.
@@ -414,14 +522,22 @@ async function* runAssistantInner(
     ...new Set(
       history
         .filter((m) => m.role === 'assistant' && Array.isArray(m.toolCalls))
-        .flatMap((m) => (m.toolCalls as Array<{ name?: string }>).map((tc) => tc.name).filter((n): n is string => typeof n === 'string'))
+        .flatMap((m) =>
+          (m.toolCalls as Array<{ name?: string }>)
+            .map((tc) => tc.name)
+            .filter((n): n is string => typeof n === 'string')
+        )
     ),
   ];
   let priorAttachments: AttachmentResult[] = [];
   if (!isAutoTrigger && !input.context?.voice) {
     try {
       const priorRows = await prisma.aiAttachment.findMany({
-        where: { conversationId: input.conversationId, messageId: { not: null }, NOT: { messageId: userMessage.id } },
+        where: {
+          conversationId: input.conversationId,
+          messageId: { not: null },
+          NOT: { messageId: userMessage.id },
+        },
         select: { id: true },
         orderBy: { createdAt: 'desc' },
         take: 6,
@@ -429,7 +545,9 @@ async function* runAssistantInner(
       if (priorRows.length > 0) {
         const wanted = new Set(priorRows.map((r) => r.id));
         const all = await listAttachments(input.conversationId);
-        const candidates = all.filter((a) => wanted.has(a.id) && (a.status === 'ready' || a.status === 'legacy'));
+        const candidates = all.filter(
+          (a) => wanted.has(a.id) && (a.status === 'ready' || a.status === 'legacy')
+        );
         const prelim = classifyTask({
           message: input.message,
           attachmentKinds: [...resolvedAttachments, ...candidates].map((a) => {
@@ -442,7 +560,10 @@ async function* runAssistantInner(
         if (prelim.tier !== 'simple') priorAttachments = candidates;
       }
     } catch (err) {
-      console.warn('[orchestrator] prior attachments skipped:', err instanceof Error ? err.message : err);
+      console.warn(
+        '[orchestrator] prior attachments skipped:',
+        err instanceof Error ? err.message : err
+      );
     }
   }
   const priorIds = new Set(priorAttachments.map((a) => a.id));
@@ -479,11 +600,16 @@ async function* runAssistantInner(
       for (const att of attachmentsForContext) {
         try {
           const processed = await processAttachment(att);
-          const priorTag = priorIds.has(att.id) ? ' (enviado en un mensaje anterior de esta conversación)' : '';
+          const priorTag = priorIds.has(att.id)
+            ? ' (enviado en un mensaje anterior de esta conversación)'
+            : '';
 
           if (processed.type === 'image') {
             // Add image content part for OpenAI Vision
-            contentParts.push({ type: 'text', text: `[Imagen adjunta "${att.fileName}"${priorTag}]` });
+            contentParts.push({
+              type: 'text',
+              text: `[Imagen adjunta "${att.fileName}"${priorTag}]`,
+            });
             contentParts.push({
               type: 'image_url',
               image_url: { url: processed.dataUrl },
@@ -492,13 +618,14 @@ async function* runAssistantInner(
             if (attachmentOrderNumbers.length < 5000) collectOrderNumbers(processed.content);
             // Add extracted text (PDF, Word, Excel, transcript, plain text) as a text content part
             const kind = attachmentKind(att.mimeType);
-            const label = (att.mimeType === 'application/pdf'
-              ? `[Contenido del PDF "${att.fileName}"`
-              : kind === 'audio'
-                ? `[Audio "${att.fileName}"`
-                : kind === 'document'
-                  ? `[Contenido del documento "${att.fileName}"`
-                  : `[Contenido del archivo "${att.fileName}"`) + `${priorTag}]`;
+            const label =
+              (att.mimeType === 'application/pdf'
+                ? `[Contenido del PDF "${att.fileName}"`
+                : kind === 'audio'
+                  ? `[Audio "${att.fileName}"`
+                  : kind === 'document'
+                    ? `[Contenido del documento "${att.fileName}"`
+                    : `[Contenido del archivo "${att.fileName}"`) + `${priorTag}]`;
             contentParts.push({
               type: 'text',
               text: `${label}:\n${processed.content}`,
@@ -506,7 +633,10 @@ async function* runAssistantInner(
           } else if (processed.type === 'file_part') {
             // Scanned PDF: the model reads the file itself (OCR fallback with vision)
             contentParts.push({ type: 'text', text: processed.note });
-            contentParts.push({ type: 'file', file: { filename: processed.filename, file_data: processed.dataUrl } });
+            contentParts.push({
+              type: 'file',
+              file: { filename: processed.filename, file_data: processed.dataUrl },
+            });
           } else if (processed.type === 'file') {
             contentParts.push({ type: 'text', text: processed.content });
           }
@@ -550,13 +680,15 @@ async function* runAssistantInner(
         recentToolNames,
       },
       { userId: input.actor.id, conversationId: input.conversationId }
-    ).catch(() => classifyTask({
-      message: input.message,
-      attachmentKinds: attachmentKindList,
-      planFirst: input.planFirst,
-      autoTrigger: isAutoTrigger,
-      recentToolNames,
-    })),
+    ).catch(() =>
+      classifyTask({
+        message: input.message,
+        attachmentKinds: attachmentKindList,
+        planFirst: input.planFirst,
+        autoTrigger: isAutoTrigger,
+        recentToolNames,
+      })
+    ),
   ]);
 
   // 8.5. Offer only the tools that matter this turn (OpenAI accepts ≤128; every tool costs tokens).
@@ -586,7 +718,11 @@ async function* runAssistantInner(
           recentToolNames,
           extraDomains: jevDomains,
           // Attachment turns are long already: fewer tools = smaller prompt on every pass.
-          maxTools: Math.min(Math.max(8, Number(settings.maxToolsPerTurn) || 96), PROVIDER_MAX_TOOLS, attachmentsForContext.length > 0 ? 48 : PROVIDER_MAX_TOOLS),
+          maxTools: Math.min(
+            Math.max(8, Number(settings.maxToolsPerTurn) || 96),
+            PROVIDER_MAX_TOOLS,
+            attachmentsForContext.length > 0 ? 48 : PROVIDER_MAX_TOOLS
+          ),
         });
   // Same set ⇒ same order: the serialized tools are the first part of every request and a
   // stable prefix is what lets the provider cache the prompt between passes and turns.
@@ -598,12 +734,23 @@ async function* runAssistantInner(
   let toolSpecs: ToolSpec[] = toOpenAiTools(offeredTools);
   const availableByName = new Map(availableTools.map((t) => [t.name, t] as const));
   if (selection.dropped.length > 0) {
-    console.log(JSON.stringify({ event: 'ai.tools.selected', offered: offeredTools.length, dropped: selection.dropped.length, domains: selection.domains }));
+    console.log(
+      JSON.stringify({
+        event: 'ai.tools.selected',
+        offered: offeredTools.length,
+        dropped: selection.dropped.length,
+        domains: selection.domains,
+      })
+    );
   }
 
   // 8.6. Model routing: explicit choice wins; "auto"/none → the classification above
   // (Jev when enabled, heuristics otherwise) picks the cheapest capable model.
-  const routing = resolveTurnModel(settings, input.model ?? input.agent?.modelDefault ?? undefined, classification);
+  const routing = resolveTurnModel(
+    settings,
+    input.model ?? input.agent?.modelDefault ?? undefined,
+    classification
+  );
   const effectiveModel = routing.model;
   const fallbackModel = settings.fallbackDeployment;
 
@@ -614,10 +761,17 @@ async function* runAssistantInner(
     const cap = getModelById(model)?.maxOutput;
     const heavy = classification.tier === 'complex' || attachmentsForContext.length > 0;
     // Reasoning models spend part of the budget thinking: give them room for both.
-    const wanted = heavy ? Math.max(settings.maxTokens, isReasoningModel(model) ? 32_000 : 12_000) : settings.maxTokens;
+    const wanted = heavy
+      ? Math.max(settings.maxTokens, isReasoningModel(model) ? 32_000 : 12_000)
+      : settings.maxTokens;
     return cap && cap > 0 ? Math.min(wanted, cap) : wanted;
   };
-  const turnReasoningEffort = classification.tier === 'complex' ? settings.reasoningEffort || 'high' : classification.tier === 'simple' ? 'minimal' : 'low';
+  const turnReasoningEffort =
+    classification.tier === 'complex'
+      ? settings.reasoningEffort || 'high'
+      : classification.tier === 'simple'
+        ? 'minimal'
+        : 'low';
 
   // 8.65. Working instructions for THIS turn go last in the system prompt (most recent = most
   // followed): the attachment/analysis protocol, the document protocol or the complex-task bar.
@@ -628,7 +782,9 @@ async function* runAssistantInner(
     priorAttachmentKinds: priorAttachments.map((a) => attachmentKind(a.mimeType)),
     voice: Boolean(input.context?.voice),
     autoTrigger: isAutoTrigger,
-    modelReasonsWithVision: isReasoningModel(effectiveModel) && (getModelById(effectiveModel)?.capabilities.includes('vision') ?? true),
+    modelReasonsWithVision:
+      isReasoningModel(effectiveModel) &&
+      (getModelById(effectiveModel)?.capabilities.includes('vision') ?? true),
     lastAssistantContent,
   });
   if (directives && messages[0] && typeof messages[0].content === 'string') {
@@ -652,7 +808,10 @@ async function* runAssistantInner(
 El mensaje del usuario delega trabajo que dura más que este turno${kind === 'rutina' ? ' (es recurrente)' : ''}. NO lo resuelvas improvisando en esta respuesta: llama proposeMission con el objetivo claro y los pasos concretos${kind === 'rutina' ? ' y el schedule apropiado ("daily:HH:mm" CDMX o "every:N" minutos)' : ''}. La misión corre cuando el usuario la aprueba, paso a paso, y le avisa al terminar. Si además hay algo contestable ya mismo, respóndelo breve y propón la misión para el trabajo duradero.`;
       }
     } catch (err) {
-      console.warn('[orchestrator] mission classify skipped:', err instanceof Error ? err.message : err);
+      console.warn(
+        '[orchestrator] mission classify skipped:',
+        err instanceof Error ? err.message : err
+      );
     }
   }
 
@@ -663,12 +822,16 @@ El mensaje del usuario delega trabajo que dura más que este turno${kind === 'ru
   if (!isAutoTrigger && isRevisionRequest(input.message)) {
     try {
       const last = await prisma.aiArtifact.findFirst({
-        where: { conversationId: input.conversationId, type: { in: ['pdf', 'xlsx', 'docx', 'csv', 'image'] } },
+        where: {
+          conversationId: input.conversationId,
+          type: { in: ['pdf', 'xlsx', 'docx', 'csv', 'image'] },
+        },
         orderBy: { createdAt: 'desc' },
         select: { id: true, type: true, meta: true },
       });
       const meta = (last?.meta as Record<string, unknown> | null) ?? null;
-      const spec = meta?.spec as { generatedBy?: string; generatorArgs?: Record<string, unknown> } | undefined;
+      const spec = meta?.spec as
+        { generatedBy?: string; generatorArgs?: Record<string, unknown> } | undefined;
       if (last && spec?.generatedBy && spec.generatorArgs && !meta?.supersededBy) {
         revision = {
           artifactId: last.id,
@@ -678,15 +841,22 @@ El mensaje del usuario delega trabajo que dura más que este turno${kind === 'ru
           generatedBy: spec.generatedBy,
           generatorArgs: spec.generatorArgs,
         };
-        if (messages[0] && typeof messages[0].content === 'string') messages[0].content += `\n\n${buildRevisionDirective(revision)}`;
+        if (messages[0] && typeof messages[0].content === 'string')
+          messages[0].content += `\n\n${buildRevisionDirective(revision)}`;
       }
     } catch (err) {
-      console.warn('[orchestrator] revision context skipped:', err instanceof Error ? err.message : err);
+      console.warn(
+        '[orchestrator] revision context skipped:',
+        err instanceof Error ? err.message : err
+      );
     }
   }
 
   // 8.7. Live data requested explicitly → bypass the short-TTL read cache this turn.
-  const wantsFreshData = /\b(actualiza\w*|en tiempo real|refresca\w*|sin cach[eé]|datos de ahora|ahorita mismo|al momento)\b/i.test(input.message);
+  const wantsFreshData =
+    /\b(actualiza\w*|en tiempo real|refresca\w*|sin cach[eé]|datos de ahora|ahorita mismo|al momento)\b/i.test(
+      input.message
+    );
 
   // 8.75. Prefetch: Jev predicts the one read the model will almost surely call and
   // warms the shared read cache while the first model call is still in flight. Only
@@ -699,7 +869,16 @@ El mensaje del usuario delega trabajo que dura más que este turno${kind === 'ru
       enabledToolNames: enabledForAgent,
     })
       .then((p) => {
-        if (p) console.log(JSON.stringify({ event: 'ai.tools.prefetch', conversationId: input.conversationId, tool: p.tool, warmed: p.warmed, cached: p.cached }));
+        if (p)
+          console.log(
+            JSON.stringify({
+              event: 'ai.tools.prefetch',
+              conversationId: input.conversationId,
+              tool: p.tool,
+              warmed: p.warmed,
+              cached: p.cached,
+            })
+          );
       })
       .catch(() => null);
   }
@@ -723,12 +902,19 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
     if (escalatedModel || !routing.routed) return escalatedModel;
     const heavy = pickModelForTier(settings, 'complex');
     const pick =
-      classification.needsVision && !(getModelById(heavy)?.capabilities.includes('vision'))
+      classification.needsVision && !getModelById(heavy)?.capabilities.includes('vision')
         ? settings.deployment?.trim() || 'gpt-4o'
         : heavy;
     if (pick === effectiveModel) return null;
     escalatedModel = pick;
-    console.log(JSON.stringify({ event: 'ai.model.escalated', conversationId: input.conversationId, from: effectiveModel, to: pick }));
+    console.log(
+      JSON.stringify({
+        event: 'ai.model.escalated',
+        conversationId: input.conversationId,
+        from: effectiveModel,
+        to: pick,
+      })
+    );
     return pick;
   };
   // Complex answers are reviewed before the user sees them, so their tokens are held back
@@ -747,7 +933,14 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
   const knownFolios = new Set<string>();
   // Every count/total a tool declared this turn: "9 ventas" or "$59,468" must match one.
   const knownTotals = { counts: new Set<number>(), money: new Set<number>() };
-  const turnStats = { calls: 0, cachedHits: 0, parallelBatches: 0, dataToolsSucceeded: 0, failed: 0, loadedMore: 0 };
+  const turnStats = {
+    calls: 0,
+    cachedHits: 0,
+    parallelBatches: 0,
+    dataToolsSucceeded: 0,
+    failed: 0,
+    loadedMore: 0,
+  };
   const toolsUsedThisTurn: Array<{ name: string; success: boolean; cached?: boolean }> = [];
   let routineCreatedMeta: { name: string | null; schedule: string | null } | null = null;
   // Provenance collected from real tool results — feeds the episode memory.
@@ -774,8 +967,8 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
     'generateCsvExport',
     'generateReportImage',
     'generateTable',
-  'generateWordReport',
-]);
+    'generateWordReport',
+  ]);
 
   /**
    * Builds a dynamic report title based on the tool name and its arguments.
@@ -783,17 +976,28 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
    */
   function buildDynamicTitle(toolName: string, toolArgs: Record<string, unknown> | null): string {
     const dateRange = toolArgs?.dateRange as string | undefined;
-    const dateLabel = dateRange === 'today' ? ' de Hoy'
-      : dateRange === 'yesterday' ? ' de Ayer'
-      : dateRange === 'this_week' ? ' de Esta Semana'
-      : dateRange === 'this_month' ? ' de Este Mes'
-      : dateRange === 'last_month' ? ' del Mes Pasado'
-      : dateRange === 'last_7_days' ? ' de los Últimos 7 Días'
-      : dateRange === 'last_30_days' ? ' de los Últimos 30 Días'
-      : dateRange === 'this_year' ? ' de Este Año'
-      : dateRange === 'last_year' ? ' del Año Pasado'
-      : dateRange === 'all' ? ' (Histórico)'
-      : '';
+    const dateLabel =
+      dateRange === 'today'
+        ? ' de Hoy'
+        : dateRange === 'yesterday'
+          ? ' de Ayer'
+          : dateRange === 'this_week'
+            ? ' de Esta Semana'
+            : dateRange === 'this_month'
+              ? ' de Este Mes'
+              : dateRange === 'last_month'
+                ? ' del Mes Pasado'
+                : dateRange === 'last_7_days'
+                  ? ' de los Últimos 7 Días'
+                  : dateRange === 'last_30_days'
+                    ? ' de los Últimos 30 Días'
+                    : dateRange === 'this_year'
+                      ? ' de Este Año'
+                      : dateRange === 'last_year'
+                        ? ' del Año Pasado'
+                        : dateRange === 'all'
+                          ? ' (Histórico)'
+                          : '';
 
     // For querySalesOrders, build title from filters
     if (toolName === 'querySalesOrders') {
@@ -821,7 +1025,10 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
         return v;
       };
       const ticketLabel = statusLabel(ticketStatus, [
-        [/pendiente de entrega|por entregar|sin entregar|no entregad|falta/, 'Pendientes de Entrega'],
+        [
+          /pendiente de entrega|por entregar|sin entregar|no entregad|falta/,
+          'Pendientes de Entrega',
+        ],
         [/no (se ha )?cerrad|sin cerrar|abiert/, 'Abiertas (sin cerrar)'],
         [/entregad/, 'Entregadas'],
         [/cerrad|terminad|finalizad/, 'Cerradas'],
@@ -857,28 +1064,44 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
       if (paymentMethods && paymentMethods.length > 0) {
         if (paymentMethods.length === 1) {
           const pm = paymentMethods[0];
-          parts.push(pm === 'EFECTIVO' ? 'en Efectivo'
-            : pm === 'EFECTIVO EN BODEGA' ? 'en Efectivo en Bodega'
-            : pm === 'TRANSFERENCIA' ? 'por Transferencia'
-            : pm === 'DEPOSITO' ? 'por Depósito'
-            : pm === 'TARJETA' ? 'con Tarjeta'
-            : `por ${pm}`);
+          parts.push(
+            pm === 'EFECTIVO'
+              ? 'en Efectivo'
+              : pm === 'EFECTIVO EN BODEGA'
+                ? 'en Efectivo en Bodega'
+                : pm === 'TRANSFERENCIA'
+                  ? 'por Transferencia'
+                  : pm === 'DEPOSITO'
+                    ? 'por Depósito'
+                    : pm === 'TARJETA'
+                      ? 'con Tarjeta'
+                      : `por ${pm}`
+          );
         } else {
           parts.push(`por ${paymentMethods.join(' + ')}`);
         }
       }
       if (deliveryMethod) {
-        parts.push(deliveryMethod.toLowerCase().includes('pie') ? 'a Pie de Obra'
-          : deliveryMethod.toLowerCase().includes('recoge') ? 'Recoge en Bodega'
-          : deliveryMethod.toLowerCase().includes('instal') ? 'Instalación a Domicilio'
-          : deliveryMethod);
+        parts.push(
+          deliveryMethod.toLowerCase().includes('pie')
+            ? 'a Pie de Obra'
+            : deliveryMethod.toLowerCase().includes('recoge')
+              ? 'Recoge en Bodega'
+              : deliveryMethod.toLowerCase().includes('instal')
+                ? 'Instalación a Domicilio'
+                : deliveryMethod
+        );
       } else if (deliveryType) {
         parts.push(
-          deliveryType === 'pie_de_obra' ? 'a Pie de Obra'
-            : deliveryType === 'recoge_en_bodega' ? 'Recoge en Bodega'
-            : deliveryType === 'instalacion' ? 'con Instalación'
-            : deliveryType === 'domicilio' ? 'a Domicilio'
-            : 'con Entrega a Cliente'
+          deliveryType === 'pie_de_obra'
+            ? 'a Pie de Obra'
+            : deliveryType === 'recoge_en_bodega'
+              ? 'Recoge en Bodega'
+              : deliveryType === 'instalacion'
+                ? 'con Instalación'
+                : deliveryType === 'domicilio'
+                  ? 'a Domicilio'
+                  : 'con Entrega a Cliente'
         );
       }
       if (shippingLocation) parts.push(`en ${shippingLocation}`);
@@ -983,7 +1206,11 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
   }
 
   /** Parses the model's JSON args and injects surface ids, report rows/titles and chart params. */
-  async function prepareArgs(tc: { id: string; name: string; arguments: string }): Promise<unknown> {
+  async function prepareArgs(tc: {
+    id: string;
+    name: string;
+    arguments: string;
+  }): Promise<unknown> {
     let parsedArgs: unknown;
     try {
       parsedArgs = JSON.parse(tc.arguments);
@@ -1014,9 +1241,13 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
       argsObj.customization = resolveReportCustomization(
         input.message,
         argsObj.customization as ReportCustomization | undefined,
-        isRevisionOfLast ? ((revision?.generatorArgs.customization as ReportCustomization | undefined) ?? null) : null
+        isRevisionOfLast
+          ? ((revision?.generatorArgs.customization as ReportCustomization | undefined) ?? null)
+          : null
       );
-      const modelRows = Array.isArray(argsObj.rows) ? (argsObj.rows as Record<string, unknown>[]) : null;
+      const modelRows = Array.isArray(argsObj.rows)
+        ? (argsObj.rows as Record<string, unknown>[])
+        : null;
       const subsetOnly = argsObj.subsetOnly === true;
       let decision: ReportRowsDecision | null = null;
       if (!argsObj.sections && lastToolRows && lastToolRows.length > 0) {
@@ -1029,7 +1260,14 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
         const systemRows =
           subsetOnly && modelRows && modelRows.length > 0
             ? lastToolRows
-            : await fetchAllRowsForExport(lastToolName, lastToolArgs, lastToolResult, lastToolRowKey, lastToolRows, input.actor);
+            : await fetchAllRowsForExport(
+                lastToolName,
+                lastToolArgs,
+                lastToolResult,
+                lastToolRowKey,
+                lastToolRows,
+                input.actor
+              );
         decision = resolveReportRows({
           modelRows,
           systemRows,
@@ -1039,18 +1277,20 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
         });
         argsObj.rows = decision.rows;
         reportRowChecks.set(tc.id, decision);
-        console.log(JSON.stringify({
-          event: 'ai.report.rows',
-          tool: tc.name,
-          sourceTool: lastToolName,
-          rowKey: lastToolRowKey,
-          modelRows: modelRows?.length ?? null,
-          included: decision.includedRows,
-          expected: decision.expectedRows,
-          source: decision.source,
-          complete: decision.complete,
-          blocked: Boolean(decision.blockReason),
-        }));
+        console.log(
+          JSON.stringify({
+            event: 'ai.report.rows',
+            tool: tc.name,
+            sourceTool: lastToolName,
+            rowKey: lastToolRowKey,
+            modelRows: modelRows?.length ?? null,
+            included: decision.includedRows,
+            expected: decision.expectedRows,
+            source: decision.source,
+            complete: decision.complete,
+            blocked: Boolean(decision.blockReason),
+          })
+        );
         // The cover numbers must describe the table below them: computed from the data, never typed.
         if (decision.source === 'system' && decision.complete && lastToolResult) {
           const cards = buildSummaryCards(lastToolResult);
@@ -1066,7 +1306,9 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
           decision.source === 'model'
             ? `SUBCONJUNTO: ${decision.includedRows} de ${decision.expectedRows} registros`
             : `REPORTE PARCIAL: ${decision.includedRows} de ${decision.expectedRows} registros (límite de exportación)`;
-        argsObj.subtitle = [label, typeof argsObj.subtitle === 'string' ? argsObj.subtitle : ''].filter(Boolean).join('  ·  ');
+        argsObj.subtitle = [label, typeof argsObj.subtitle === 'string' ? argsObj.subtitle : '']
+          .filter(Boolean)
+          .join('  ·  ');
       }
       // Auto-inject sections for PDF when the tool result has multiple arrays
       if (tc.name === 'generatePdfReport' && !argsObj.sections && !argsObj.rows && lastToolResult) {
@@ -1089,7 +1331,9 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
             title: sectionLabels[key] ?? key,
             rows,
           }));
-          console.log(`[ai-orchestrator] Auto-injecting ${Object.keys(allArrays).length} sections from ${lastToolName} into ${tc.name}`);
+          console.log(
+            `[ai-orchestrator] Auto-injecting ${Object.keys(allArrays).length} sections from ${lastToolName} into ${tc.name}`
+          );
         }
       }
       if (!argsObj.title && lastToolName) {
@@ -1161,9 +1405,16 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
     if (added.length > 0) {
       let next = [...offeredTools, ...added];
       if (next.length > PROVIDER_MAX_TOOLS) {
-        const keep = new Set<string>([...CORE_TOOL_NAMES, ...recentToolNames, ...toolsUsedThisTurn.map((t) => t.name), ...added.map((t) => t.name)]);
+        const keep = new Set<string>([
+          ...CORE_TOOL_NAMES,
+          ...recentToolNames,
+          ...toolsUsedThisTurn.map((t) => t.name),
+          ...added.map((t) => t.name),
+        ]);
         const removable = next.filter((t) => !keep.has(t.name)).map((t) => t.name);
-        const drop = new Set(removable.slice(Math.max(0, removable.length - (next.length - PROVIDER_MAX_TOOLS))));
+        const drop = new Set(
+          removable.slice(Math.max(0, removable.length - (next.length - PROVIDER_MAX_TOOLS)))
+        );
         next = next.filter((t) => !drop.has(t.name));
       }
       offeredTools = next;
@@ -1175,7 +1426,11 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
       durationMs: 0,
       result: {
         topic,
-        added: added.map((t) => ({ name: t.name, description: t.description.slice(0, 220), effect: t.effect ?? 'read' })),
+        added: added.map((t) => ({
+          name: t.name,
+          description: t.description.slice(0, 220),
+          effect: t.effect ?? 'read',
+        })),
         alreadyAvailable: matches.filter((t) => offeredNames.has(t.name)).map((t) => t.name),
         note:
           matches.length === 0
@@ -1188,7 +1443,8 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
   /** Read-only tools with no dependency on each other can run at the same time. */
   function isParallelizable(name: string): boolean {
     if (name === 'loadMoreTools' || name === 'proposePlan') return false;
-    if (ARTIFACT_TOOLS.has(name) || ARTIFACT_TOOL_NAMES.has(name) || name === 'generateChart') return false;
+    if (ARTIFACT_TOOLS.has(name) || ARTIFACT_TOOL_NAMES.has(name) || name === 'generateChart')
+      return false;
     const def = availableByName.get(name);
     if (!def) return false;
     return (def.effect ?? 'read') === 'read';
@@ -1205,16 +1461,30 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
     taskId: input.taskId,
   });
 
-  async function runTool(tc: { id: string; name: string; arguments: string }, parsedArgs: unknown, assistantMessageId: string): Promise<ToolExecutionResult> {
+  async function runTool(
+    tc: { id: string; name: string; arguments: string },
+    parsedArgs: unknown,
+    assistantMessageId: string
+  ): Promise<ToolExecutionResult> {
     if (tc.name === 'loadMoreTools') return loadMoreTools(parsedArgs);
     const blockReason = reportRowChecks.get(tc.id)?.blockReason;
     if (blockReason) {
-      return { success: false, error: blockReason, errorCode: 'incomplete_report_rows', durationMs: 0 };
+      return {
+        success: false,
+        error: blockReason,
+        errorCode: 'incomplete_report_rows',
+        durationMs: 0,
+      };
     }
     try {
       return await executeTool(tc.name, input.actor, parsedArgs, execCtx(assistantMessageId));
     } catch (err) {
-      return { success: false, error: err instanceof Error ? err.message : 'Error desconocido', errorCode: 'error', durationMs: 0 };
+      return {
+        success: false,
+        error: err instanceof Error ? err.message : 'Error desconocido',
+        errorCode: 'error',
+        durationMs: 0,
+      };
     }
   }
 
@@ -1316,7 +1586,8 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
         const generatorArgs = { ...((parsedArgs as Record<string, unknown>) ?? {}) };
         delete generatorArgs.rows;
         delete generatorArgs.sections;
-        if (generatorArgs.blocks && JSON.stringify(generatorArgs.blocks).length > 200_000) delete generatorArgs.blocks;
+        if (generatorArgs.blocks && JSON.stringify(generatorArgs.blocks).length > 200_000)
+          delete generatorArgs.blocks;
         const spec = {
           generatedBy: tc.name,
           generatorArgs,
@@ -1335,14 +1606,33 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
           try {
             for (const a of artifactList) {
               if (typeof a.artifactId !== 'string') continue;
-              const row = await prisma.aiArtifact.findUnique({ where: { id: a.artifactId }, select: { meta: true } });
-              const meta = { ...((row?.meta as Record<string, unknown> | null) ?? {}), version: nextVersion, revisionOf: revision.artifactId };
-              await prisma.aiArtifact.update({ where: { id: a.artifactId }, data: { meta: meta as Prisma.InputJsonValue } });
+              const row = await prisma.aiArtifact.findUnique({
+                where: { id: a.artifactId },
+                select: { meta: true },
+              });
+              const meta = {
+                ...((row?.meta as Record<string, unknown> | null) ?? {}),
+                version: nextVersion,
+                revisionOf: revision.artifactId,
+              };
+              await prisma.aiArtifact.update({
+                where: { id: a.artifactId },
+                data: { meta: meta as Prisma.InputJsonValue },
+              });
               a.version = nextVersion;
             }
-            const prev = await prisma.aiArtifact.findUnique({ where: { id: revision.artifactId }, select: { meta: true } });
-            const prevMeta = { ...((prev?.meta as Record<string, unknown> | null) ?? {}), supersededBy: String(artifactList[0].artifactId) };
-            await prisma.aiArtifact.update({ where: { id: revision.artifactId }, data: { meta: prevMeta as Prisma.InputJsonValue } });
+            const prev = await prisma.aiArtifact.findUnique({
+              where: { id: revision.artifactId },
+              select: { meta: true },
+            });
+            const prevMeta = {
+              ...((prev?.meta as Record<string, unknown> | null) ?? {}),
+              supersededBy: String(artifactList[0].artifactId),
+            };
+            await prisma.aiArtifact.update({
+              where: { id: revision.artifactId },
+              data: { meta: prevMeta as Prisma.InputJsonValue },
+            });
             // `toolResult` is the same object the tool message is built from below.
             toolResult.revision = {
               version: nextVersion,
@@ -1350,7 +1640,10 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
               note: `Es la versión ${nextVersion} de "${revision.title}" con los cambios pedidos; preséntala así (qué cambió), no como un archivo nuevo.`,
             };
           } catch (err) {
-            console.warn('[orchestrator] revision versioning failed:', err instanceof Error ? err.message : err);
+            console.warn(
+              '[orchestrator] revision versioning failed:',
+              err instanceof Error ? err.message : err
+            );
           }
         }
       }
@@ -1362,7 +1655,8 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
             type: a.type,
             title: a.title,
             filename: a.filename,
-            downloadUrl: typeof a.downloadUrl === 'string' ? absoluteUrl(a.downloadUrl) : a.downloadUrl,
+            downloadUrl:
+              typeof a.downloadUrl === 'string' ? absoluteUrl(a.downloadUrl) : a.downloadUrl,
             inlineRender: a.inlineRender,
             rowCount: a.rowCount,
             sizeBytes: a.sizeBytes,
@@ -1381,31 +1675,55 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
     // Specs are plain data built by a fixed, defensive mapper (never markup from the model or a server).
     if (result.success && result.result) {
       try {
-        const components = buildUiComponents({ toolName: tc.name, args: parsedArgs, result: result.result, success: true });
+        const components = buildUiComponents({
+          toolName: tc.name,
+          args: parsedArgs,
+          result: result.result,
+          success: true,
+        });
         if (components.length > 0) {
           yield { type: 'ui', data: { toolCallId: tc.id, toolName: tc.name, components } };
         }
       } catch (err) {
-        console.warn('[orchestrator] generative ui skipped:', err instanceof Error ? err.message : err);
+        console.warn(
+          '[orchestrator] generative ui skipped:',
+          err instanceof Error ? err.message : err
+        );
       }
     }
 
     // UI actions: a phone call joins the floating call dock; an internal call opens the chat.
-    if (result.success && UI_ACTION_TOOLS.has(tc.name) && result.result && typeof result.result === 'object') {
+    if (
+      result.success &&
+      UI_ACTION_TOOLS.has(tc.name) &&
+      result.result &&
+      typeof result.result === 'object'
+    ) {
       const r = result.result as Record<string, unknown>;
       if (typeof r.callId === 'string' && !r.error) {
-        yield { type: 'action', data: { kind: 'join_call', callId: r.callId, label: (r.to as string | undefined) ?? (r.phone as string | undefined) ?? null, aiCall: r.mode === 'ai' } };
+        yield {
+          type: 'action',
+          data: {
+            kind: 'join_call',
+            callId: r.callId,
+            label: (r.to as string | undefined) ?? (r.phone as string | undefined) ?? null,
+            aiCall: r.mode === 'ai',
+          },
+        };
       } else if (typeof r.openUrl === 'string' && !r.error) {
-        yield { type: 'action', data: { kind: 'open_url', url: r.openUrl, reason: 'internal_call' } };
+        yield {
+          type: 'action',
+          data: { kind: 'open_url', url: r.openUrl, reason: 'internal_call' },
+        };
       }
     }
 
-    // Audit tool call
+    // Audit tool call — screen captures are stripped before persisting.
     await recordAiToolCall({
       messageId: assistantMessageId,
       toolName: tc.name,
       args: parsedArgs,
-      result: result.result,
+      result: stripScreenData(result.result),
       durationMs: result.durationMs,
       success: result.success,
       errorCode: result.needsApproval ? 'needs_approval' : (result.errorCode ?? result.error),
@@ -1413,7 +1731,10 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
 
     // Add result to context
     const toolPayload = result.success
-      ? result.cached && result.result && typeof result.result === 'object' && !Array.isArray(result.result)
+      ? result.cached &&
+        result.result &&
+        typeof result.result === 'object' &&
+        !Array.isArray(result.result)
         ? { ...(result.result as Record<string, unknown>), cached: true, cachedAt: result.cachedAt }
         : result.result
       : result.needsApproval && result.proposal
@@ -1426,15 +1747,29 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
               'NO afirmes que la acción se realizó. Explica al usuario qué se hará exactamente y pídele que apruebe la propuesta en la tarjeta mostrada.',
           }
         : { error: result.error, ...(result.uncertain ? { uncertain: true } : {}) };
-    if (result.success && toolPayload && typeof toolPayload === 'object' && !Array.isArray(toolPayload) && Array.isArray((toolPayload as { uiResources?: unknown }).uiResources)) {
+    if (
+      result.success &&
+      toolPayload &&
+      typeof toolPayload === 'object' &&
+      !Array.isArray(toolPayload) &&
+      Array.isArray((toolPayload as { uiResources?: unknown }).uiResources)
+    ) {
       // The interactive component is for the user; the model only needs to know it was shown.
-      (toolPayload as Record<string, unknown>).uiResources = ((toolPayload as { uiResources: Array<{ uri?: string }> }).uiResources).map((r) => ({
+      (toolPayload as Record<string, unknown>).uiResources = (
+        toolPayload as { uiResources: Array<{ uri?: string }> }
+      ).uiResources.map((r) => ({
         uri: r?.uri,
         note: 'Mostrado al usuario como componente interactivo en el chat.',
       }));
     }
     const rowCheck = reportRowChecks.get(tc.id);
-    if (rowCheck && result.success && toolPayload && typeof toolPayload === 'object' && !Array.isArray(toolPayload)) {
+    if (
+      rowCheck &&
+      result.success &&
+      toolPayload &&
+      typeof toolPayload === 'object' &&
+      !Array.isArray(toolPayload)
+    ) {
       const { includedRows: n, expectedRows: expected } = rowCheck;
       (toolPayload as Record<string, unknown>).dataCompleteness = {
         includedRows: n,
@@ -1449,20 +1784,23 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
     }
     // Untrusted tools (web/browser/venue): secrets are scrubbed from the payload and
     // the content is wrapped so the model reads it as DATA, never as instructions.
+    // Screen captures never reach the model nor the DB — memory-only (SSE feed).
     const toolTrust = availableByName.get(tc.name)?.resultTrust ?? 'trusted';
-    const safePayload = toolTrust === 'untrusted' ? redactDeep(toolPayload) : toolPayload;
+    const cleanPayload = stripScreenData(toolPayload);
+    const safePayload = toolTrust === 'untrusted' ? redactDeep(cleanPayload) : cleanPayload;
     const serializedPayload = JSON.stringify(safePayload);
     messages.push({
       role: 'tool',
-      content: toolTrust === 'untrusted' ? wrapUntrusted(serializedPayload, tc.name) : serializedPayload,
+      content:
+        toolTrust === 'untrusted' ? wrapUntrusted(serializedPayload, tc.name) : serializedPayload,
       tool_call_id: tc.id,
     });
 
-    // Persist tool message
+    // Persist tool message (already screen-stripped).
     await addMessage(
       input.conversationId,
       'tool',
-      JSON.stringify(toolPayload),
+      JSON.stringify(cleanPayload),
       null,
       0,
       0,
@@ -1492,7 +1830,7 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
     let iterationToolCalls: Array<{ id: string; name: string; arguments: string }> | undefined;
     let finishReason: string | undefined;
 
-    const modelToUse = usingFallback ? fallbackModel : escalatedModel ?? effectiveModel;
+    const modelToUse = usingFallback ? fallbackModel : (escalatedModel ?? effectiveModel);
 
     // Buffered turns show a chip while the answer is being written instead of a blank wait.
     const draftStartedAt = Date.now();
@@ -1501,7 +1839,18 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
     const closeDraftChip = function* (): Generator<OrchestratorEvent> {
       if (!bufferAnswer || draftChipClosed) return;
       draftChipClosed = true;
-      yield { type: 'tool_call_end', data: { name: 'draftAnswer', success: true, needsApproval: false, errorCode: null, error: null, durationMs: Date.now() - draftStartedAt, cached: false } };
+      yield {
+        type: 'tool_call_end',
+        data: {
+          name: 'draftAnswer',
+          success: true,
+          needsApproval: false,
+          errorCode: null,
+          error: null,
+          durationMs: Date.now() - draftStartedAt,
+          cached: false,
+        },
+      };
     };
     try {
       for await (const chunk of chatCompletionStream({
@@ -1537,8 +1886,15 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
     } catch (err) {
       yield* closeDraftChip();
       // Handle 429 rate limit: try fallback model
-      if (err instanceof AiApiError && err.code === 'rate_limit' && !usingFallback && fallbackModel) {
-        console.warn(`[ai-orchestrator] Rate limited on ${modelToUse}, falling back to ${fallbackModel}`);
+      if (
+        err instanceof AiApiError &&
+        err.code === 'rate_limit' &&
+        !usingFallback &&
+        fallbackModel
+      ) {
+        console.warn(
+          `[ai-orchestrator] Rate limited on ${modelToUse}, falling back to ${fallbackModel}`
+        );
         usingFallback = true;
         iteration--; // Don't count this failed attempt
         continue;
@@ -1555,9 +1911,19 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
 
       // "Un momento, voy a generar…" is not an answer. Send the model back to finish the work
       // (once) instead of delivering a promise.
-      if (nudges < 1 && iteration < settings.maxToolIterations && looksUnfinished(iterationContent)) {
+      if (
+        nudges < 1 &&
+        iteration < settings.maxToolIterations &&
+        looksUnfinished(iterationContent)
+      ) {
         nudges += 1;
-        console.log(JSON.stringify({ event: 'ai.answer.unfinished', conversationId: input.conversationId, iteration }));
+        console.log(
+          JSON.stringify({
+            event: 'ai.answer.unfinished',
+            conversationId: input.conversationId,
+            iteration,
+          })
+        );
         messages.push({ role: 'assistant', content: iterationContent });
         messages.push({
           role: 'system',
@@ -1566,7 +1932,18 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
         });
         if (bufferAnswer) {
           yield { type: 'tool_call_start', data: { name: 'reviewAnswer', args: '{}' } };
-          yield { type: 'tool_call_end', data: { name: 'reviewAnswer', success: true, needsApproval: false, errorCode: null, error: null, durationMs: 0, cached: false } };
+          yield {
+            type: 'tool_call_end',
+            data: {
+              name: 'reviewAnswer',
+              success: true,
+              needsApproval: false,
+              errorCode: null,
+              error: null,
+              durationMs: 0,
+              cached: false,
+            },
+          };
         }
         continue;
       }
@@ -1580,9 +1957,26 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
         if (check.issues.length > 0) {
           nudges += 1;
           if (classification.tier === 'standard') escalateModel();
-          console.log(JSON.stringify({ event: 'ai.answer.checks', conversationId: input.conversationId, issues: check.issues }));
+          console.log(
+            JSON.stringify({
+              event: 'ai.answer.checks',
+              conversationId: input.conversationId,
+              issues: check.issues,
+            })
+          );
           yield { type: 'tool_call_start', data: { name: 'reviewAnswer', args: '{}' } };
-          yield { type: 'tool_call_end', data: { name: 'reviewAnswer', success: true, needsApproval: false, errorCode: null, error: null, durationMs: 0, cached: false } };
+          yield {
+            type: 'tool_call_end',
+            data: {
+              name: 'reviewAnswer',
+              success: true,
+              needsApproval: false,
+              errorCode: null,
+              error: null,
+              durationMs: 0,
+              cached: false,
+            },
+          };
           messages.push({ role: 'assistant', content: iterationContent });
           messages.push({
             role: 'system',
@@ -1622,7 +2016,13 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
           .catch(() => null);
         if (score !== null && score <= 0.5 && escalateModel()) {
           nudges += 1;
-          console.log(JSON.stringify({ event: 'ai.answer.low_confidence', conversationId: input.conversationId, score }));
+          console.log(
+            JSON.stringify({
+              event: 'ai.answer.low_confidence',
+              conversationId: input.conversationId,
+              score,
+            })
+          );
           messages.push({ role: 'assistant', content: iterationContent });
           messages.push({
             role: 'system',
@@ -1636,7 +2036,12 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
       // Internal review of complex answers: a second pass looks for missing parts, numbers
       // that do not add up and cut tables; the model rewrites once with the critique.
       // Jev gates the expensive pass: a confident "no" skips the LLM review entirely.
-      if (bufferAnswer && reviews < 1 && iteration < settings.maxToolIterations && iterationContent.trim().length >= 80) {
+      if (
+        bufferAnswer &&
+        reviews < 1 &&
+        iteration < settings.maxToolIterations &&
+        iterationContent.trim().length >= 80
+      ) {
         const reviewGate = reviewNeededDecision({
           userMessage: input.message,
           draft: iterationContent,
@@ -1649,43 +2054,70 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
           .then((r) => answerBool(r, 'needs_review'))
           .catch(() => null);
         if (needsReview === false) {
-          console.log(JSON.stringify({ event: 'ai.answer.review_skipped', conversationId: input.conversationId, by: 'jev' }));
+          console.log(
+            JSON.stringify({
+              event: 'ai.answer.review_skipped',
+              conversationId: input.conversationId,
+              by: 'jev',
+            })
+          );
         }
         if (needsReview !== false) {
-        reviews += 1;
-        const reviewStart = Date.now();
-        yield { type: 'tool_call_start', data: { name: 'reviewAnswer', args: '{}' } };
-        let verdict: Awaited<ReturnType<typeof reviewComplexAnswer>> = null;
-        try {
-          verdict = await reviewComplexAnswer(settings, {
-            userMessage: input.message,
-            answer: iterationContent,
-            toolsUsed: toolsUsedThisTurn,
-            hadAttachments: attachmentsForContext.length > 0,
-            documentGenerated: toolsUsedThisTurn.some((t) => t.name === 'composeDocument' && t.success),
-          });
-        } catch (err) {
-          console.warn('[ai-orchestrator] answer review failed:', err instanceof Error ? err.message : err);
-        }
-        yield {
-          type: 'tool_call_end',
-          data: { name: 'reviewAnswer', success: true, needsApproval: false, errorCode: null, error: null, durationMs: Date.now() - reviewStart, cached: false },
-        };
-        console.log(JSON.stringify({ event: 'ai.answer.review', conversationId: input.conversationId, approved: verdict?.approved ?? null, issues: verdict?.issues ?? [] }));
-        if (verdict && !verdict.approved && verdict.issues.length > 0) {
-          messages.push({ role: 'assistant', content: iterationContent });
-          messages.push({
-            role: 'system',
-            content:
-              'Revisión interna de tu borrador (el usuario NO lo vio). Corrige estos puntos y entrega la respuesta final completa — vuelve a llamar tools si hace falta para verificar:\n' +
-              verdict.issues.map((i, n) => `${n + 1}. ${i}`).join('\n'),
-          });
-          continue;
-        }
+          reviews += 1;
+          const reviewStart = Date.now();
+          yield { type: 'tool_call_start', data: { name: 'reviewAnswer', args: '{}' } };
+          let verdict: Awaited<ReturnType<typeof reviewComplexAnswer>> = null;
+          try {
+            verdict = await reviewComplexAnswer(settings, {
+              userMessage: input.message,
+              answer: iterationContent,
+              toolsUsed: toolsUsedThisTurn,
+              hadAttachments: attachmentsForContext.length > 0,
+              documentGenerated: toolsUsedThisTurn.some(
+                (t) => t.name === 'composeDocument' && t.success
+              ),
+            });
+          } catch (err) {
+            console.warn(
+              '[ai-orchestrator] answer review failed:',
+              err instanceof Error ? err.message : err
+            );
+          }
+          yield {
+            type: 'tool_call_end',
+            data: {
+              name: 'reviewAnswer',
+              success: true,
+              needsApproval: false,
+              errorCode: null,
+              error: null,
+              durationMs: Date.now() - reviewStart,
+              cached: false,
+            },
+          };
+          console.log(
+            JSON.stringify({
+              event: 'ai.answer.review',
+              conversationId: input.conversationId,
+              approved: verdict?.approved ?? null,
+              issues: verdict?.issues ?? [],
+            })
+          );
+          if (verdict && !verdict.approved && verdict.issues.length > 0) {
+            messages.push({ role: 'assistant', content: iterationContent });
+            messages.push({
+              role: 'system',
+              content:
+                'Revisión interna de tu borrador (el usuario NO lo vio). Corrige estos puntos y entrega la respuesta final completa — vuelve a llamar tools si hace falta para verificar:\n' +
+                verdict.issues.map((i, n) => `${n + 1}. ${i}`).join('\n'),
+            });
+            continue;
+          }
         }
       }
 
-      if (bufferAnswer && iterationContent) yield { type: 'token', data: { delta: iterationContent } };
+      if (bufferAnswer && iterationContent)
+        yield { type: 'token', data: { delta: iterationContent } };
 
       // Validate output for potential leaked secrets
       const outputValidation = validateOutput(iterationContent);
@@ -1724,7 +2156,11 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
         // Model's thinking (GPT-5/Kimi), kept short: enough to audit the turn later.
         reasoning: iterationReasoning.slice(0, 8000) || undefined,
         confidenceLabeled: parsedConfidence.level !== null,
-        tools: { ...turnStats, offered: offeredTools.length, used: toolsUsedThisTurn.map((t) => t.name) },
+        tools: {
+          ...turnStats,
+          offered: offeredTools.length,
+          used: toolsUsedThisTurn.map((t) => t.name),
+        },
         planFirst: Boolean(input.planFirst),
         followUps,
         // UNIVERSO: qué agente produjo el turno (avatar/etiqueta en el chat).
@@ -1749,7 +2185,12 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
           userMessage: input.message,
           lastAssistantContent,
           answer: iterationContent,
-        }).catch((err) => console.warn('[ai-orchestrator] learning capture failed:', err instanceof Error ? err.message : err));
+        }).catch((err) =>
+          console.warn(
+            '[ai-orchestrator] learning capture failed:',
+            err instanceof Error ? err.message : err
+          )
+        );
       }
 
       // Agent memory write (never blocks): Jev gates, the utility model distills the
@@ -1767,7 +2208,12 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
               artifacts: turnArtifacts.slice(0, 10),
             })
           )
-          .catch((err) => console.warn('[ai-orchestrator] memory extract failed:', err instanceof Error ? err.message : err));
+          .catch((err) =>
+            console.warn(
+              '[ai-orchestrator] memory extract failed:',
+              err instanceof Error ? err.message : err
+            )
+          );
       }
 
       // Shared context: refresh this thread's rolling summary (never blocks the answer).
@@ -1780,7 +2226,9 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
           answer: iterationContent,
           toolsUsed: toolsUsedThisTurn,
           confidence,
-        }).catch((err) => console.warn('[ai-orchestrator] judge failed:', err instanceof Error ? err.message : err));
+        }).catch((err) =>
+          console.warn('[ai-orchestrator] judge failed:', err instanceof Error ? err.message : err)
+        );
       }
       // Long turns notify their owner (phone push + bell) so they can come back to the answer.
       if (!isAutoTrigger) {
@@ -1792,7 +2240,9 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
           elapsedMs: Date.now() - runStartedAt,
           toolCalls: turnStats.calls,
           force: Boolean(input.notifyWhenDone),
-        }).catch((err) => console.warn('[ai-orchestrator] notify failed:', err instanceof Error ? err.message : err));
+        }).catch((err) =>
+          console.warn('[ai-orchestrator] notify failed:', err instanceof Error ? err.message : err)
+        );
       }
       yield {
         type: 'done',
@@ -1807,14 +2257,19 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
           confidence,
           confidenceNote: parsedConfidence.note,
           sourcesLabel: describeSourcesUsed(toolsUsedThisTurn.map((t) => t.name)),
-          tools: { calls: turnStats.calls, cachedHits: turnStats.cachedHits, parallelBatches: turnStats.parallelBatches },
+          tools: {
+            calls: turnStats.calls,
+            cachedHits: turnStats.cachedHits,
+            parallelBatches: turnStats.parallelBatches,
+          },
         },
       };
       return;
     }
 
     // Text the model wrote before calling tools is shown as it was (usually one line).
-    if (bufferAnswer && iterationContent.trim()) yield { type: 'token', data: { delta: iterationContent } };
+    if (bufferAnswer && iterationContent.trim())
+      yield { type: 'token', data: { delta: iterationContent } };
 
     // Has tool calls: persist assistant message with tool_calls
     const assistantMessage = await addMessage(
@@ -1852,7 +2307,10 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
         idx += 1;
         continue;
       }
-      const batch: Array<{ tc: { id: string; name: string; arguments: string }; parsedArgs: unknown }> = [];
+      const batch: Array<{
+        tc: { id: string; name: string; arguments: string };
+        parsedArgs: unknown;
+      }> = [];
       while (idx < iterationToolCalls.length && isParallelizable(iterationToolCalls[idx].name)) {
         const call = iterationToolCalls[idx];
         yield { type: 'tool_call_start', data: { name: call.name, args: call.arguments } };
@@ -1860,7 +2318,9 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
         idx += 1;
       }
       if (batch.length > 1) turnStats.parallelBatches += 1;
-      const results = await Promise.all(batch.map((b) => runTool(b.tc, b.parsedArgs, assistantMessage.id)));
+      const results = await Promise.all(
+        batch.map((b) => runTool(b.tc, b.parsedArgs, assistantMessage.id))
+      );
       for (let k = 0; k < batch.length; k++) {
         yield* finalizeToolCall(batch[k].tc, batch[k].parsedArgs, results[k], assistantMessage.id);
       }
@@ -1882,9 +2342,7 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
  * tablas del runtime aún no están migradas, `run` queda null y el chat se
  * comporta exactamente igual que antes.
  */
-export async function* runAssistant(
-  input: OrchestratorInput
-): AsyncGenerator<OrchestratorEvent> {
+export async function* runAssistant(input: OrchestratorInput): AsyncGenerator<OrchestratorEvent> {
   const { startRun, finishRun, emitRunEvent } = await import('@/modules/agents/run-recorder');
   const routePath = (input.route as { path?: string } | undefined)?.path ?? null;
   const run = await startRun({
@@ -1894,7 +2352,7 @@ export async function* runAssistant(
     agentId: input.agent?.id ?? null,
     ownerName: input.actor.name,
     source: input.agent?.mode === 'worker' ? 'task' : input.context?.voice ? 'voice' : 'chat',
-    parentRunId: input.agent?.mode === 'worker' ? input.parentRunId ?? null : null,
+    parentRunId: input.agent?.mode === 'worker' ? (input.parentRunId ?? null) : null,
     taskId: input.taskId ?? null,
     missionId: input.missionId ?? null,
     route: routePath,

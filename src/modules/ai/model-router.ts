@@ -18,6 +18,8 @@ export interface TaskClassification {
   tier: TaskTier;
   reason: string;
   needsVision: boolean;
+  /** The turn asks for the virtual computer (navigate/click/exec/screenshot). */
+  computer: boolean;
 }
 
 export interface RoutingDecision extends TaskClassification {
@@ -63,36 +65,73 @@ export function classifyTask(input: ClassifyInput): TaskClassification {
   const kinds = input.attachmentKinds ?? [];
   const needsVision = kinds.includes('image') || kinds.includes('document');
   const domains = detectDomains(raw);
+  const computer = domains.includes('venue');
   const words = norm ? norm.split(' ').length : 0;
 
-  if (input.planFirst) return { tier: 'complex', reason: 'plan-then-execute', needsVision };
+  if (input.planFirst)
+    return { tier: 'complex', reason: 'plan-then-execute', needsVision, computer };
   if (kinds.includes('document') || kinds.includes('audio') || kinds.includes('video')) {
-    return { tier: 'complex', reason: 'adjunto que requiere lectura/extracción', needsVision };
+    return {
+      tier: 'complex',
+      reason: 'adjunto que requiere lectura/extracción',
+      needsVision,
+      computer,
+    };
   }
   if (kinds.includes('image')) {
     // A photo with a real task (transcribe, cross-check, report, table) deserves the strongest
     // model: reading handwriting and reconciling it with system data is the hard case.
-    const substantive = words >= 8 || COMPLEX_PATTERNS.some((re) => re.test(norm)) || /report|tabla|cruz|compar|lista|transcrib|anota|nota/.test(norm);
-    return { tier: substantive ? 'complex' : 'standard', reason: substantive ? 'imagen adjunta con análisis' : 'imagen adjunta', needsVision: true };
+    const substantive =
+      words >= 8 ||
+      COMPLEX_PATTERNS.some((re) => re.test(norm)) ||
+      /report|tabla|cruz|compar|lista|transcrib|anota|nota/.test(norm);
+    return {
+      tier: substantive ? 'complex' : 'standard',
+      reason: substantive ? 'imagen adjunta con análisis' : 'imagen adjunta',
+      needsVision: true,
+      computer,
+    };
   }
 
-  if (input.autoTrigger) return { tier: 'standard', reason: 'turno automático de copiloto', needsVision };
+  if (input.autoTrigger)
+    return { tier: 'standard', reason: 'turno automático de copiloto', needsVision, computer };
 
   if (COMPLEX_PATTERNS.some((re) => re.test(norm))) {
-    return { tier: 'complex', reason: 'análisis o tarea multi-paso', needsVision };
+    return { tier: 'complex', reason: 'análisis o tarea multi-paso', needsVision, computer };
   }
   if (domains.length >= 3 || words > 70) {
-    return { tier: 'complex', reason: domains.length >= 3 ? 'varios dominios en una petición' : 'petición larga', needsVision };
+    return {
+      tier: 'complex',
+      reason: domains.length >= 3 ? 'varios dominios en una petición' : 'petición larga',
+      needsVision,
+      computer,
+    };
   }
 
   const hasRecentTools = (input.recentToolNames?.length ?? 0) > 0;
-  if (domains.length === 0 && words <= 12 && SIMPLE_PATTERNS.some((re) => re.test(norm)) && !hasRecentTools) {
-    return { tier: 'simple', reason: 'saludo / confirmación sin datos', needsVision };
+  if (
+    domains.length === 0 &&
+    words <= 12 &&
+    SIMPLE_PATTERNS.some((re) => re.test(norm)) &&
+    !hasRecentTools
+  ) {
+    return { tier: 'simple', reason: 'saludo / confirmación sin datos', needsVision, computer };
   }
   if (domains.length === 0 && words <= 6 && !/\d/.test(norm) && !hasRecentTools) {
-    return { tier: 'simple', reason: 'mensaje corto sin intención de datos', needsVision };
+    return {
+      tier: 'simple',
+      reason: 'mensaje corto sin intención de datos',
+      needsVision,
+      computer,
+    };
   }
-  return { tier: 'standard', reason: domains.length > 0 ? `consulta de ${domains.slice(0, 2).join(' y ')}` : 'petición estándar', needsVision };
+  return {
+    tier: 'standard',
+    reason:
+      domains.length > 0 ? `consulta de ${domains.slice(0, 2).join(' y ')}` : 'petición estándar',
+    needsVision,
+    computer,
+  };
 }
 
 const JEV_TIERS: readonly string[] = ['simple', 'standard', 'complex'];
@@ -110,9 +149,7 @@ export async function classifyTaskWithJev(
   const heuristic = classifyTask(input);
   // Forced tiers (plan mode, heavy attachments, copilot auto-trigger) need no decision.
   if (input.planFirst || input.autoTrigger) return heuristic;
-  if (
-    input.attachmentKinds?.some((k) => k === 'document' || k === 'audio' || k === 'video')
-  ) {
+  if (input.attachmentKinds?.some((k) => k === 'document' || k === 'audio' || k === 'video')) {
     return heuristic;
   }
 
@@ -127,6 +164,7 @@ export async function classifyTaskWithJev(
     tier,
     reason: `jev:${tier} (heurística: ${heuristic.tier})`,
     needsVision: heuristic.needsVision,
+    computer: heuristic.computer,
   };
 }
 
@@ -138,11 +176,21 @@ function modelSupportsVision(modelId: string): boolean {
 
 export type RouterSettings = Pick<
   AiSettings,
-  'deployment' | 'fallbackDeployment' | 'routingEnabled' | 'routingSimpleModel' | 'routingStandardModel' | 'routingComplexModel'
+  | 'deployment'
+  | 'fallbackDeployment'
+  | 'routingEnabled'
+  | 'routingSimpleModel'
+  | 'routingStandardModel'
+  | 'routingComplexModel'
+  | 'computerUseModel'
+  | 'providerConfigs'
 >;
 
 /** Tier → model through the shared policy (simple / rutina / compleja). */
-export function pickModelForTier(settings: Omit<RouterSettings, 'routingEnabled'>, tier: TaskTier): string {
+export function pickModelForTier(
+  settings: Omit<RouterSettings, 'routingEnabled'>,
+  tier: TaskTier
+): string {
   const policy = { ...settings, utilityModel: '', qualityJudgeModel: '' };
   if (tier === 'simple') return modelForTask(policy, 'simple');
   if (tier === 'complex') return modelForTask(policy, 'complex');
@@ -150,8 +198,9 @@ export function pickModelForTier(settings: Omit<RouterSettings, 'routingEnabled'
 }
 
 /**
- * Final model for the turn. Explicit choices win; otherwise the tier decides.
- * A routed model that cannot see images is replaced by the primary deployment.
+ * Final model for the turn. Explicit choices win; computer-use turns go to the
+ * dedicated venue model (fast+cheap, vision-capable); otherwise the tier
+ * decides. A routed model that cannot see images is replaced by the primary.
  */
 export function resolveTurnModel(
   settings: RouterSettings,
@@ -159,9 +208,27 @@ export function resolveTurnModel(
   classification: TaskClassification
 ): RoutingDecision {
   const explicit = requestedModel && requestedModel !== AUTO_MODEL_ID ? requestedModel : undefined;
-  if (explicit) return { ...classification, model: explicit, routed: false, reason: 'modelo elegido por el usuario' };
+  if (explicit)
+    return {
+      ...classification,
+      model: explicit,
+      routed: false,
+      reason: 'modelo elegido por el usuario',
+    };
   const primary = settings.deployment?.trim() || 'gpt-4o';
-  if (!settings.routingEnabled) return { ...classification, model: primary, routed: false, reason: 'routing desactivado' };
+  if (!settings.routingEnabled)
+    return { ...classification, model: primary, routed: false, reason: 'routing desactivado' };
+  const policy = { ...settings, utilityModel: '', qualityJudgeModel: '' };
+  if (classification.computer) {
+    let model = modelForTask(policy, 'computer');
+    if (classification.needsVision && !modelSupportsVision(model)) model = primary;
+    return {
+      ...classification,
+      model,
+      routed: true,
+      reason: `${classification.reason} · modelo de computadora`,
+    };
+  }
   let model = pickModelForTier(settings, classification.tier);
   if (classification.needsVision && !modelSupportsVision(model)) model = primary;
   return { ...classification, model, routed: true };

@@ -82,6 +82,8 @@ export interface AiSettings {
   routingStandardModel: string;
   /** Modelo para procesos de fondo (resúmenes, digest, borradores, re-ranking). Vacío = routingSimpleModel. */
   utilityModel: string;
+  /** Modelo para computer use (venue: navegar, ejecutar, leer pantallas — necesita tools; visión recomendada). Vacío = UNIK_COMPUTER_MODEL → Gemini 2.5 Flash vía OpenRouter si hay llave → rutina. */
+  computerUseModel: string;
   /** Máximo de tools ofrecidas al modelo por turno (OpenAI admite 128). */
   maxToolsPerTurn: number;
   toolCacheEnabled: boolean;
@@ -144,7 +146,13 @@ export interface AiSettings {
 }
 
 /** Tipos permitidos antes de la ampliación (se migran automáticamente si nunca se personalizaron). */
-const LEGACY_DEFAULT_MIME_TYPES = new Set(['image/png', 'image/jpeg', 'application/pdf', 'text/plain', 'text/csv']);
+const LEGACY_DEFAULT_MIME_TYPES = new Set([
+  'image/png',
+  'image/jpeg',
+  'application/pdf',
+  'text/plain',
+  'text/csv',
+]);
 
 export const DEFAULT_AI_SETTINGS: AiSettings = {
   isEnabled: true,
@@ -424,6 +432,7 @@ export const DEFAULT_AI_SETTINGS: AiSettings = {
   routingStandardModel: '',
   routingComplexModel: '',
   utilityModel: '',
+  computerUseModel: '',
   maxToolsPerTurn: 96,
   toolCacheEnabled: true,
   toolCacheTtlLiveSeconds: 30,
@@ -500,7 +509,10 @@ function mergeWithDefaults(stored: unknown): AiSettings {
   // Attachments: installs that never customized the MIME list get the extended defaults
   // (Word, Excel, audio, video, más imágenes); a customized list is respected as-is.
   const storedMimes = s.allowedMimeTypes;
-  if (Array.isArray(storedMimes) && storedMimes.every((t) => typeof t === 'string' && LEGACY_DEFAULT_MIME_TYPES.has(t))) {
+  if (
+    Array.isArray(storedMimes) &&
+    storedMimes.every((t) => typeof t === 'string' && LEGACY_DEFAULT_MIME_TYPES.has(t))
+  ) {
     merged.allowedMimeTypes = [...defaults.allowedMimeTypes];
   }
   return merged as unknown as AiSettings;
@@ -585,18 +597,26 @@ export async function updateAiConfig(patch: {
   // We detect this and keep the previously stored value.
   let incomingSettings = patch.settings ?? {};
   if (incomingSettings.providerConfigs && currentSettings.providerConfigs) {
-    const currentProviders = currentSettings.providerConfigs as Record<string, { apiKey?: string; endpoint?: string; enabled?: boolean }>;
-    const incomingProviders = incomingSettings.providerConfigs as Record<string, { apiKey?: string; endpoint?: string; enabled?: boolean }>;
-    const mergedProviders: Record<string, { apiKey?: string; endpoint?: string; enabled?: boolean }> = {};
+    const currentProviders = currentSettings.providerConfigs as Record<
+      string,
+      { apiKey?: string; endpoint?: string; enabled?: boolean }
+    >;
+    const incomingProviders = incomingSettings.providerConfigs as Record<
+      string,
+      { apiKey?: string; endpoint?: string; enabled?: boolean }
+    >;
+    const mergedProviders: Record<
+      string,
+      { apiKey?: string; endpoint?: string; enabled?: boolean }
+    > = {};
     for (const [providerId, incoming] of Object.entries(incomingProviders)) {
       const existing = currentProviders[providerId] ?? {};
       mergedProviders[providerId] = {
         ...existing,
         ...incoming,
         // If apiKey is empty/undefined in incoming, keep the existing one
-        apiKey: (incoming.apiKey && incoming.apiKey.length > 0)
-          ? incoming.apiKey
-          : existing.apiKey ?? '',
+        apiKey:
+          incoming.apiKey && incoming.apiKey.length > 0 ? incoming.apiKey : (existing.apiKey ?? ''),
       };
     }
     incomingSettings = { ...incomingSettings, providerConfigs: mergedProviders };
@@ -606,7 +626,11 @@ export async function updateAiConfig(patch: {
     if (secretField in incomingSettings) {
       const incoming = incomingSettings[secretField];
       const existing = currentSettings[secretField];
-      if ((!incoming || (typeof incoming === 'string' && incoming.length === 0)) && typeof existing === 'string' && existing.length > 0) {
+      if (
+        (!incoming || (typeof incoming === 'string' && incoming.length === 0)) &&
+        typeof existing === 'string' &&
+        existing.length > 0
+      ) {
         incomingSettings = { ...incomingSettings, [secretField]: existing };
       }
     }
@@ -632,13 +656,21 @@ export async function updateAiConfig(patch: {
  * Stores the model ids a provider's key reported, keeping its key, endpoint and enabled flag.
  * Written by the admin provider test so the chat selector and model→provider resolution know them.
  */
-export async function saveDiscoveredProviderModels(provider: string, models: string[]): Promise<void> {
+export async function saveDiscoveredProviderModels(
+  provider: string,
+  models: string[]
+): Promise<void> {
   const current = await listAiConfig();
   const settings =
-    current.settings && typeof current.settings === 'object' ? (current.settings as Record<string, unknown>) : {};
-  const configs = (settings.providerConfigs as Record<string, Partial<ProviderConfigEntry>> | undefined) ?? {};
+    current.settings && typeof current.settings === 'object'
+      ? (current.settings as Record<string, unknown>)
+      : {};
+  const configs =
+    (settings.providerConfigs as Record<string, Partial<ProviderConfigEntry>> | undefined) ?? {};
   const existing = configs[provider] ?? {};
-  const unique = [...new Set(models.filter((m) => typeof m === 'string' && m.length > 0 && m.length <= 160))].slice(0, 300);
+  const unique = [
+    ...new Set(models.filter((m) => typeof m === 'string' && m.length > 0 && m.length <= 160)),
+  ].slice(0, 300);
   await prisma.aiConfig.update({
     where: { key: AI_CONFIG_KEY },
     data: {
