@@ -1,7 +1,17 @@
 'use client';
 
+import Link from 'next/link';
 import React, { useCallback, useEffect, useState } from 'react';
-import { AlertCircle, ChevronDown, ChevronRight, Loader2, Plug, Search } from 'lucide-react';
+import {
+  AlertCircle,
+  CheckCircle2,
+  ChevronDown,
+  ChevronRight,
+  Loader2,
+  Plug,
+  Search,
+  Unlink,
+} from 'lucide-react';
 
 interface Policy {
   toolkitSlug: string;
@@ -21,6 +31,12 @@ interface CatalogItem {
   logo: string | null;
   categories: string[];
   noAuth: boolean;
+}
+interface MyToolkit {
+  slug: string;
+  connected: boolean;
+  isNoAuth: boolean;
+  connectedAccountId: string | null;
 }
 interface ToolRow {
   slug: string;
@@ -64,6 +80,22 @@ export function ComposioAdminTab({ canManage }: { canManage: boolean }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [open, setOpen] = useState<string | null>(null);
   const [tools, setTools] = useState<Record<string, ToolRow[] | 'loading'>>({});
+  const [mine, setMine] = useState<Record<string, MyToolkit>>({});
+
+  const loadMine = useCallback(async (): Promise<Record<string, MyToolkit>> => {
+    try {
+      const data = await api<{ toolkits?: MyToolkit[] }>(
+        '/app/assistant/api/composio/toolkits'
+      );
+      const map: Record<string, MyToolkit> = {};
+      for (const t of data.toolkits ?? []) map[t.slug] = t;
+      setMine(map);
+      return map;
+    } catch {
+      // Admin keeps working without the personal-status column.
+      return {};
+    }
+  }, []);
 
   const load = useCallback(async (q?: string) => {
     try {
@@ -73,10 +105,11 @@ export function ComposioAdminTab({ canManage }: { canManage: boolean }) {
           `/app/admin/extensions/api/composio${q ? `?search=${encodeURIComponent(q)}` : ''}`
         )
       );
+      void loadMine();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'No se pudo cargar');
     }
-  }, []);
+  }, [loadMine]);
 
   useEffect(() => {
     void load();
@@ -119,6 +152,50 @@ export function ComposioAdminTab({ canManage }: { canManage: boolean }) {
     }
   }
 
+  async function connectMine(slug: string) {
+    setBusy(`me:${slug}`);
+    setError(null);
+    try {
+      const data = await api<{ redirectUrl?: string }>('/app/assistant/api/composio/connect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ toolkit: slug }),
+      });
+      if (!data.redirectUrl) throw new Error('Composio no devolvió un enlace de autorización');
+      window.open(data.redirectUrl, '_blank', 'noopener,noreferrer');
+      // The OAuth round-trip lands on «Extensiones y skills»; poll here too so
+      // the badge updates without leaving the admin screen.
+      const started = Date.now();
+      const poll = setInterval(async () => {
+        if (Date.now() - started > 3 * 60_000) return clearInterval(poll);
+        const fresh = await loadMine();
+        if (fresh[slug]?.connected) clearInterval(poll);
+      }, 5000);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'No se pudo iniciar la conexión');
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function disconnectMine(slug: string) {
+    const t = mine[slug];
+    if (!t?.connectedAccountId) return;
+    if (!window.confirm(`¿Desconectar tu cuenta de ${slug}?`)) return;
+    setBusy(`me:${slug}`);
+    setError(null);
+    try {
+      await api(`/app/assistant/api/composio/connections/${encodeURIComponent(t.connectedAccountId)}`, {
+        method: 'DELETE',
+      });
+      await loadMine();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'No se pudo desconectar');
+    } finally {
+      setBusy(null);
+    }
+  }
+
   if (!state) return <div className="assistant-admin-loading">{error ?? 'Cargando…'}</div>;
   const policyBySlug = new Map(state.policies.map((p) => [p.toolkitSlug, p] as const));
 
@@ -132,9 +209,10 @@ export function ComposioAdminTab({ canManage }: { canManage: boolean }) {
         </div>
       ) : (
         <p className="assistant-admin-muted">
-          Cada persona conecta su propia cuenta desde el chat o desde «Extensiones y skills». Aquí
-          decides qué apps pueden usarse y por qué roles. Enviar, crear, modificar o borrar siempre
-          pide aprobación.
+          Cada persona conecta su propia cuenta desde el chat, desde «Mi cuenta» en esta tabla o
+          desde <Link href="/app/assistant/extensions">Extensiones y skills</Link>. Aquí decides qué
+          apps pueden usarse y por qué roles. Enviar, crear, modificar o borrar siempre pide
+          aprobación.
         </p>
       )}
       {error && (
@@ -156,6 +234,7 @@ export function ComposioAdminTab({ canManage }: { canManage: boolean }) {
                 <th>App</th>
                 <th>Estado</th>
                 <th>Roles autorizados</th>
+                <th>Mi cuenta</th>
                 <th>Herramientas</th>
               </tr>
             </thead>
@@ -206,6 +285,54 @@ export function ComposioAdminTab({ canManage }: { canManage: boolean }) {
                         )}
                       </td>
                       <td>
+                        {(() => {
+                          const m = mine[p.toolkitSlug];
+                          if (!m) return <span className="assistant-admin-muted">—</span>;
+                          if (m.isNoAuth)
+                            return <span className="gui-badge is-success">Sin cuenta necesaria</span>;
+                          return (
+                            <div className="gui-fields" style={{ alignItems: 'center' }}>
+                              {m.connected ? (
+                                <span className="gui-badge is-success">
+                                  <CheckCircle2 size={11} /> Conectada
+                                </span>
+                              ) : (
+                                <span className="gui-badge">Sin conectar</span>
+                              )}
+                              {m.connected && m.connectedAccountId ? (
+                                <button
+                                  type="button"
+                                  className="gui-btn"
+                                  disabled={busy === `me:${p.toolkitSlug}`}
+                                  onClick={() => void disconnectMine(p.toolkitSlug)}
+                                >
+                                  {busy === `me:${p.toolkitSlug}` ? (
+                                    <Loader2 size={12} className="copilot-spin" />
+                                  ) : (
+                                    <Unlink size={12} />
+                                  )}{' '}
+                                  Desconectar
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  className="gui-btn"
+                                  disabled={busy === `me:${p.toolkitSlug}`}
+                                  onClick={() => void connectMine(p.toolkitSlug)}
+                                >
+                                  {busy === `me:${p.toolkitSlug}` ? (
+                                    <Loader2 size={12} className="copilot-spin" />
+                                  ) : (
+                                    <Plug size={12} />
+                                  )}{' '}
+                                  Conectar
+                                </button>
+                              )}
+                            </div>
+                          );
+                        })()}
+                      </td>
+                      <td>
                         <button
                           type="button"
                           className="gui-btn"
@@ -223,7 +350,7 @@ export function ComposioAdminTab({ canManage }: { canManage: boolean }) {
                     </tr>
                     {open === p.toolkitSlug && (
                       <tr>
-                        <td colSpan={4}>
+                        <td colSpan={5}>
                           {rows === 'loading' || !rows ? (
                             <Loader2 size={14} className="copilot-spin" />
                           ) : (

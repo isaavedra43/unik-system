@@ -37,7 +37,13 @@ export interface BrowserActInput {
     | 'open' | 'back' | 'forward' | 'click' | 'type' | 'press'
     | 'scroll' | 'extract' | 'screenshot' | 'pdf' | 'tabs'
     | 'newTab' | 'closeTab' | 'waitFor' | 'submit' | 'useCredential'
-    | 'captureState' | 'applyState';
+    | 'captureState' | 'applyState'
+    /**
+     * Handled entirely by the tool layer (secure user-takeover form) — the
+     * browser tool returns before ever calling browserAct with it. Listed here
+     * so the tool's input type covers its full surface.
+     */
+    | 'secureInput';
   url?: string;
   selector?: string;
   text?: string;

@@ -6,6 +6,8 @@ import {
   ExternalLink,
   FileText,
   Globe,
+  KeyRound,
+  Loader2,
   Monitor,
   MousePointerClick,
   Terminal,
@@ -65,6 +67,19 @@ interface ScreenState {
   ts?: string;
 }
 
+interface SecureInputField {
+  selector: string;
+  label: string;
+  sensitive?: boolean;
+}
+
+interface SecureInputRequest {
+  requestId: string;
+  venueSessionId?: string;
+  message?: string | null;
+  fields: SecureInputField[];
+}
+
 const TOOL_ICON: Record<string, React.ReactNode> = {
   web_search: <Globe size={13} />,
   fetch_url: <FileText size={13} />,
@@ -100,6 +115,10 @@ export function AssistantWorkspace({
   const [browserActions, setBrowserActions] = useState<ActivityItem[]>([]);
   const [readerUrl, setReaderUrl] = useState<string | null>(null);
   const [connected, setConnected] = useState(false);
+  const [venueActive, setVenueActive] = useState(false);
+  const [secureInputs, setSecureInputs] = useState<SecureInputRequest[]>([]);
+  const [secureInputBusy, setSecureInputBusy] = useState<string | null>(null);
+  const [secureInputDone, setSecureInputDone] = useState<Set<string>>(new Set());
   const counterRef = useRef(0);
   const feedRef = useRef<HTMLDivElement>(null);
 
@@ -114,6 +133,9 @@ export function AssistantWorkspace({
     setBrowserActions([]);
     setReaderUrl(null);
     setConnected(false);
+    setVenueActive(false);
+    setSecureInputs([]);
+    setSecureInputDone(new Set());
   }, [conversationId]);
 
   useEffect(() => {
@@ -157,6 +179,7 @@ export function AssistantWorkspace({
     es.addEventListener('workspace.screen', (ev) => {
       try {
         const d = JSON.parse((ev as MessageEvent).data) as { dataUrl?: string; url?: string; ts?: string };
+        setVenueActive(true);
         if (d.dataUrl) setScreen({ dataUrl: d.dataUrl, url: d.url, ts: d.ts });
       } catch { /* ignore */ }
     });
@@ -164,9 +187,19 @@ export function AssistantWorkspace({
     es.addEventListener('workspace.browser', (ev) => {
       try {
         const d = JSON.parse((ev as MessageEvent).data) as { action?: string; url?: string; ok?: boolean; error?: string; ts?: string };
+        setVenueActive(true);
         setBrowserActions((prev) =>
           [...prev, { id: ++counterRef.current, tool: `browser.${d.action ?? 'act'}`, ok: d.ok === true, summary: d.url, error: d.error, ts: d.ts }].slice(-MAX_ITEMS)
         );
+      } catch { /* ignore */ }
+    });
+
+    es.addEventListener('workspace.secure_input', (ev) => {
+      try {
+        const d = JSON.parse((ev as MessageEvent).data) as SecureInputRequest & { requestId?: string };
+        setVenueActive(true);
+        if (!d.requestId) return;
+        setSecureInputs((prev) => (prev.some((r) => r.requestId === d.requestId) ? prev : [...prev, d]));
       } catch { /* ignore */ }
     });
 
@@ -191,6 +224,71 @@ export function AssistantWorkspace({
     es.onerror = () => setConnected(false);
     return () => es.close();
   }, [conversationId]);
+
+  // Live screen: while a venue session is active, poll the browser's live
+  // screenshot + pending secure-input requests. Only while the tab is visible
+  // — when the user stops watching, the venue's idle reaper stops the sandbox.
+  useEffect(() => {
+    if (!venueActive) return;
+    let cancelled = false;
+    const tick = async () => {
+      if (cancelled || document.visibilityState !== 'visible') return;
+      try {
+        const res = await fetch('/app/assistant/api/venue/state', { cache: 'no-store' });
+        if (!res.ok) return;
+        const d = (await res.json()) as {
+          active?: boolean;
+          screen?: { dataUrl?: string; url?: string } | null;
+          pendingInputs?: { requestId: string; message?: string | null; fields: SecureInputField[] }[];
+        };
+        if (d.active === false) {
+          setVenueActive(false);
+          return;
+        }
+        if (d.screen?.dataUrl) setScreen({ dataUrl: d.screen.dataUrl, url: d.screen.url });
+        if (d.pendingInputs) {
+          setSecureInputs((prev) => {
+            const serverIds = new Set(d.pendingInputs!.map((r) => r.requestId));
+            const kept = prev.filter((r) => serverIds.has(r.requestId));
+            const known = new Set(kept.map((r) => r.requestId));
+            return [...kept, ...d.pendingInputs!.filter((r) => !known.has(r.requestId))];
+          });
+        }
+      } catch { /* poll is best-effort */ }
+    };
+    void tick();
+    const interval = setInterval(tick, 4000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [venueActive]);
+
+  async function submitSecureInput(req: SecureInputRequest, form: HTMLFormElement) {
+    if (!req.venueSessionId) return;
+    setSecureInputBusy(req.requestId);
+    try {
+      const values: Record<string, string> = {};
+      for (const f of req.fields) {
+        const el = form.elements.namedItem(f.selector) as HTMLInputElement | null;
+        if (el?.value) values[f.selector] = el.value;
+      }
+      const res = await fetch('/app/assistant/api/venue/secure-input', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId: req.venueSessionId, requestId: req.requestId, values }),
+      });
+      if (!res.ok) throw new Error('failed');
+      // Wipe the fields immediately — values must not linger in the DOM.
+      form.reset();
+      setSecureInputs((prev) => prev.filter((r) => r.requestId !== req.requestId));
+      setSecureInputDone((prev) => new Set(prev).add(req.requestId));
+    } catch {
+      // Leave the form in place so the user can retry.
+    } finally {
+      setSecureInputBusy(null);
+    }
+  }
 
   // Keep the feed pinned to the bottom as items arrive.
   useEffect(() => {
@@ -226,7 +324,10 @@ export function AssistantWorkspace({
 
         {screen && (
           <section className="assistant-workspace-section">
-            <h4 className="assistant-workspace-section-title">Pantalla</h4>
+            <h4 className="assistant-workspace-section-title">
+              Pantalla
+              {venueActive && <span className="assistant-workspace-live-tag">en vivo</span>}
+            </h4>
             <div className="assistant-workspace-screen">
               {/* Remote-computer frame; data URL, never user HTML.
                   <img> over next/image: data URLs can't be optimized anyway. */}
@@ -235,6 +336,60 @@ export function AssistantWorkspace({
             </div>
             {screen.url && <div className="assistant-workspace-screen-url">{hostOf(screen.url)} — {screen.url}</div>}
           </section>
+        )}
+
+        {secureInputs.map((req) => (
+          <section key={req.requestId} className="assistant-workspace-section">
+            <div className="assistant-workspace-secure">
+              <div className="assistant-workspace-secure-head">
+                <KeyRound size={14} />
+                <span>El agente te necesita</span>
+              </div>
+              <p className="assistant-workspace-secure-msg">
+                {req.message ?? 'La página pide datos que solo tú debes escribir.'}
+              </p>
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  void submitSecureInput(req, e.currentTarget);
+                }}
+              >
+                {req.fields.map((f) => (
+                  <label key={f.selector} className="assistant-workspace-secure-field">
+                    <span>{f.label}</span>
+                    <input
+                      name={f.selector}
+                      type={f.sensitive ? 'password' : 'text'}
+                      autoComplete="off"
+                      required
+                      disabled={secureInputBusy === req.requestId}
+                    />
+                  </label>
+                ))}
+                <button
+                  type="submit"
+                  className="gui-btn gui-btn-primary"
+                  disabled={secureInputBusy === req.requestId}
+                >
+                  {secureInputBusy === req.requestId ? (
+                    <Loader2 size={12} className="copilot-spin" />
+                  ) : (
+                    <KeyRound size={12} />
+                  )}{' '}
+                  Escribir en la página
+                </button>
+                <p className="assistant-workspace-secure-note">
+                  Los datos van directo a la página de la computadora virtual — nunca pasan por el chat ni por la IA.
+                </p>
+              </form>
+            </div>
+          </section>
+        ))}
+
+        {secureInputDone.size > 0 && secureInputs.length === 0 && (
+          <div className="assistant-workspace-secure-done">
+            Datos escritos en la página — dile al asistente que continúe.
+          </div>
         )}
 
         {pages.length > 0 && (

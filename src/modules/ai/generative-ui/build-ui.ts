@@ -521,11 +521,25 @@ export function buildUiComponents(input: UiToolResultInput): UiComponent[] {
         items: toolkits.slice(0, MAX_UI_ITEMS).map((t) => ({
           title: String(t.name ?? t.slug ?? ''),
           subtitle: String(t.slug ?? ''),
-          badge: t.connected
-            ? { label: 'Conectada', tone: 'success' as const }
-            : { label: 'Sin conectar', tone: 'neutral' as const },
+          badge: t.isNoAuth
+            ? { label: 'Sin cuenta necesaria', tone: 'success' as const }
+            : t.connected
+              ? { label: 'Conectada', tone: 'success' as const }
+              : { label: 'Sin conectar', tone: 'neutral' as const },
         })),
       });
+      // The "Conectar" button can't depend on the model remembering to call
+      // composioConnect — every unconnected app gets a live connect card.
+      for (const t of toolkits.filter((x) => x.connected !== true).slice(0, 3)) {
+        const slug = typeof t.slug === 'string' ? t.slug : '';
+        if (!slug) continue;
+        out.push({
+          type: 'connect',
+          toolkit: slug,
+          name: typeof t.name === 'string' ? t.name : slugLabel(slug),
+          connected: false,
+        });
+      }
     }
     return out;
   }

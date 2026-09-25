@@ -452,7 +452,7 @@ export const DEFAULT_AI_SETTINGS: AiSettings = {
   webFetchMaxBytes: 2_000_000,
   venueEnabled: false,
   venueProvider: 'daytona',
-  venueImage: 'unik-browser-1',
+  venueImage: '',
   venueMaxConcurrent: 2,
   venueMaxMinutesPerDay: 60,
   venueIdleTimeoutMinutes: 15,

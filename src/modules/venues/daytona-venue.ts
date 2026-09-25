@@ -16,6 +16,7 @@ import type {
 
 const CONTROLLER_REMOTE_DIR = '/tmp/unik';
 const CONTROLLER_REMOTE_PATH = `${CONTROLLER_REMOTE_DIR}/browser-controller.mjs`;
+const PROVISION_REMOTE_PATH = `${CONTROLLER_REMOTE_DIR}/provision.sh`;
 const CONTROLLER_PORT = 3100;
 const ACT_TIMEOUT_MS = 75_000;
 
@@ -41,6 +42,16 @@ function controllerScript(): string {
     'utf8'
   );
   return controllerScriptCache;
+}
+
+let provisionScriptCache: string | null = null;
+function provisionScript(): string {
+  if (provisionScriptCache) return provisionScriptCache;
+  provisionScriptCache = readFileSync(
+    path.join(__dirname, 'assets', 'provision.sh'),
+    'utf8'
+  );
+  return provisionScriptCache;
 }
 
 export class DaytonaVenue implements Venue {
@@ -71,23 +82,33 @@ export class DaytonaVenue implements Venue {
     });
     const controllerToken = crypto.randomUUID().replaceAll('-', '') + crypto.randomUUID().replaceAll('-', '');
 
-    const sandbox = await client.create(
-      {
-        snapshot: cfg.image || undefined,
-        envVars: {
-          UNIK_BROWSER_TOKEN: controllerToken,
-          // Keep secrets OUT of env — credentials go through act payloads only.
-        },
-        labels: { 'unik-session': sessionId },
-        autoStopInterval: cfg.autoStopMinutes ?? 15,
-        autoDeleteInterval: 60 * 24, // hard ceiling: 24h
-        public: false,
-        // Network-layer egress control (unbypassable from inside): when the
-        // admin configured a web allowlist, the sandbox can only reach those.
-        ...(cfg.domainAllowList?.length ? { domainAllowList: cfg.domainAllowList.join(',') } : {}),
+    const baseParams = {
+      envVars: {
+        UNIK_BROWSER_TOKEN: controllerToken,
+        // Keep secrets OUT of env — credentials go through act payloads only.
       },
-      { timeout: 120 }
-    );
+      labels: { 'unik-session': sessionId },
+      autoStopInterval: cfg.autoStopMinutes ?? 15,
+      autoDeleteInterval: 60 * 24, // hard ceiling: 24h
+      public: false,
+      // Network-layer egress control (unbypassable from inside): when the
+      // admin configured a web allowlist, the sandbox can only reach those.
+      ...(cfg.domainAllowList?.length ? { domainAllowList: cfg.domainAllowList.join(',') } : {}),
+    };
+
+    // The configured snapshot may not exist in this Daytona account (it is a
+    // custom image). Fall back to the provider's default image — the browser
+    // stack is provisioned inside the sandbox anyway (startController).
+    let sandbox: Sandbox;
+    try {
+      sandbox = await client.create(
+        { ...baseParams, snapshot: cfg.image || undefined },
+        { timeout: 180 }
+      );
+    } catch (err) {
+      if (!cfg.image) throw err;
+      sandbox = await client.create(baseParams, { timeout: 180 });
+    }
 
     const venue = new DaytonaVenue(sessionId, sandbox, client, controllerToken, null);
     await venue.startController();
@@ -112,18 +133,38 @@ export class DaytonaVenue implements Venue {
     return venue;
   }
 
+  private chromePath = '/usr/bin/chromium';
+
   private async startController(): Promise<void> {
     await this.sandbox.fs.createFolder(CONTROLLER_REMOTE_DIR, '755').catch(() => undefined);
+    await this.sandbox.fs.uploadFile(Buffer.from(provisionScript(), 'utf8'), PROVISION_REMOTE_PATH);
     await this.sandbox.fs.uploadFile(Buffer.from(controllerScript(), 'utf8'), CONTROLLER_REMOTE_PATH);
+
+    // Provision the browser stack (playwright-core + chromium). Stock sandbox
+    // images don't ship them; without this the controller can't even import.
+    // Bounded and best-effort — non-browser tools (exec/files) don't need it.
+    try {
+      const prov = await this.sandbox.process.executeCommand(
+        `bash ${PROVISION_REMOTE_PATH}`,
+        CONTROLLER_REMOTE_DIR,
+        {},
+        280
+      );
+      const m = /UNIK_CHROME_PATH=(\S+)/.exec(prov.result ?? '');
+      if (m?.[1]) this.chromePath = m[1];
+    } catch {
+      // Provision timed out or failed — health check below reports the rest.
+    }
+
     // Start detached so executeCommand returns immediately.
     await this.sandbox.process.executeCommand(
       `cd ${CONTROLLER_REMOTE_DIR} && nohup node browser-controller.mjs > controller.log 2>&1 &`,
       CONTROLLER_REMOTE_DIR,
-      { UNIK_BROWSER_TOKEN: this.controllerToken },
+      { UNIK_BROWSER_TOKEN: this.controllerToken, UNIK_CHROME_PATH: this.chromePath },
       10
     );
     // Wait for health through the signed preview URL.
-    const deadline = Date.now() + 20_000;
+    const deadline = Date.now() + 30_000;
     while (Date.now() < deadline) {
       try {
         const base = await this.controllerUrl();
@@ -134,7 +175,15 @@ export class DaytonaVenue implements Venue {
       }
       await new Promise((r) => setTimeout(r, 700));
     }
-    // Not fatal — browser acts will retry the URL lazily.
+    // Not fatal — browser acts will retry the URL lazily. Surface why, though:
+    // the caller/user needs the real reason (missing chromium, OOM, etc).
+    try {
+      const diag = await this.exec(
+        `tail -20 ${CONTROLLER_REMOTE_DIR}/controller.log; node --version 2>&1; command -v chromium; ls ${CONTROLLER_REMOTE_DIR}/node_modules 2>/dev/null | head`,
+        { timeoutSec: 15 }
+      );
+      console.error('[venue] browser controller did not reach health:', diag.stdout.slice(0, 800));
+    } catch { /* diagnostics are best-effort */ }
   }
 
   /** Fresh signed preview URL (they expire) for the controller port. */

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { prisma } from '@/lib/prisma';
 import { registerTool, type ToolEffect } from './registry';
 import { getAiSettings } from '../ai-admin-config-service';
 import {
@@ -36,11 +37,17 @@ function browserEffect(args: unknown): ToolEffect {
   return 'read';
 }
 
+const secureFieldSchema = z.object({
+  selector: z.string().min(1).max(500).describe('Selector CSS del campo en la página'),
+  label: z.string().min(1).max(200).describe('Etiqueta que verá el usuario (p. ej. "Correo de Amazon")'),
+  sensitive: z.boolean().optional().describe('true = contraseña/tarjeta — se muestra enmascarado'),
+});
+
 const browserParams = z.object({
   action: z.enum([
     'open', 'back', 'forward', 'click', 'type', 'press', 'scroll',
     'extract', 'screenshot', 'pdf', 'tabs', 'newTab', 'closeTab',
-    'waitFor', 'submit',
+    'waitFor', 'submit', 'secureInput',
   ]),
   url: z.string().url().max(2000).optional(),
   selector: z.string().max(500).optional(),
@@ -52,24 +59,30 @@ const browserParams = z.object({
   tabId: z.string().max(20).optional(),
   timeoutMs: z.number().int().min(1000).max(60_000).optional(),
   intent: z.string().max(40).optional().describe('Qué intenta la acción (send/pay/purchase/publish/delete la marcan para aprobación)'),
+  /** secureInput: campos que el USUARIO escribe en un formulario seguro del panel. Nunca pasan por ti ni por el chat. */
+  fields: z.array(secureFieldSchema).min(1).max(8).optional(),
+  message: z.string().max(500).optional().describe('secureInput: instrucción breve para el usuario'),
 });
 
 registerTool({
   name: 'browser',
   description:
-    'Opera un navegador dentro de la computadora virtual: abrir páginas, hacer click, escribir, extraer contenido, screenshots, PDF. Las acciones que envían/publican/compran requieren aprobación del usuario.',
+    'Opera un navegador dentro de la computadora virtual: abrir páginas, hacer click, escribir, extraer contenido, screenshots, PDF. Las acciones que envían/publican/compran requieren aprobación del usuario. Cuando la página pida login, tarjeta u otro dato sensible usa action=secureInput: el usuario lo escribe en un formulario seguro de su panel y se teclea directo en la página — nunca pasa por ti ni por el chat. Tras pedirlo, dile que lo escriba en el panel "Espacio de trabajo" y que te avise; no continúes hasta que confirme.',
   category: 'venue',
   enabledByDefault: false,
   requiredPermission: 'browser.use',
   resultTrust: 'untrusted',
-  timeoutMs: 90_000,
+  timeoutMs: 300_000,
   maxResultBytes: 60_000,
   contextTags: ['all'],
   isAvailable: async () => (await getAiSettings()).browserEnabled && (await isVenueEnabled()),
   parameters: browserParams,
   resolveEffect: (_actor, args) => browserEffect(args),
   summarize: (a) => {
-    const p = a as { action: string; url?: string; selector?: string; intent?: string };
+    const p = a as { action: string; url?: string; selector?: string; intent?: string; fields?: { label: string }[] };
+    if (p.action === 'secureInput') {
+      return `Solicitud de datos seguros: ${(p.fields ?? []).map((f) => f.label).join(', ')}`;
+    }
     const target = p.url ?? p.selector ?? '';
     return `Navegador: ${p.action}${target ? ` ${target}` : ''}${p.intent ? ` (${p.intent})` : ''}`;
   },
@@ -87,9 +100,47 @@ registerTool({
     return { args };
   },
   execute: async (actor, args) => {
-    const input = args as BrowserActInput;
+    const input = args as BrowserActInput & {
+      fields?: { selector: string; label: string; sensitive?: boolean }[];
+      message?: string;
+    };
     try {
       const venue = await acquireVenue({ userId: actor.id, purpose: 'browser' });
+
+      // secureInput — user takeover: the model declares which page fields it
+      // needs; the user types the values in a masked form in their workspace
+      // panel; a dedicated route types them into the page via useCredential.
+      // Values never pass through the model, the chat log or this result.
+      if (input.action === 'secureInput') {
+        const fields = (input.fields ?? []).slice(0, 8);
+        if (fields.length === 0) return { error: 'fields requerido para secureInput' };
+        const requestId = crypto.randomUUID();
+        const session = await prisma.venueSession.findUnique({ where: { id: venue.id } });
+        const meta = (session?.metadata as Record<string, unknown> | null) ?? {};
+        const cutoff = Date.now() - 30 * 60_000;
+        const pending = [
+          ...((meta.pendingSecureInputs as { id: string; ts: string }[] | undefined) ?? [])
+            .filter((r) => new Date(r.ts).getTime() > cutoff),
+          {
+            id: requestId,
+            fields,
+            message: input.message ?? null,
+            ts: new Date().toISOString(),
+          },
+        ].slice(-5);
+        await prisma.venueSession.update({
+          where: { id: venue.id },
+          data: { metadata: { ...meta, pendingSecureInputs: pending } },
+        });
+        await emitVenueEvent(venue.id, 'secure_input_request', { requestId, fields: fields.length });
+        return {
+          awaitingUserInput: true,
+          inputRequest: { id: requestId, fields, message: input.message ?? null },
+          venueSessionId: venue.id,
+          note: 'El usuario debe escribir los datos en el formulario seguro de su panel "Espacio de trabajo". No continúes hasta que confirme.',
+        };
+      }
+
       const result = await venue.browserAct(input);
       await emitVenueEvent(venue.id, 'browser_action', {
         action: input.action,
@@ -116,7 +167,7 @@ registerTool({
   enabledByDefault: false,
   requiredPermission: 'browser.use',
   resultTrust: 'untrusted',
-  timeoutMs: 30_000,
+  timeoutMs: 300_000,
   contextTags: ['all'],
   isAvailable: async () => (await getAiSettings()).browserEnabled && (await isVenueEnabled()),
   parameters: z.object({
@@ -210,7 +261,7 @@ registerTool({
   enabledByDefault: false,
   requiredPermission: 'venue.files',
   resultTrust: 'untrusted',
-  timeoutMs: 30_000,
+  timeoutMs: 90_000,
   maxResultBytes: 200_000,
   contextTags: ['all'],
   isAvailable: isVenueEnabled,
@@ -230,7 +281,7 @@ registerTool({
   enabledByDefault: false,
   requiredPermission: 'venue.files',
   resultTrust: 'untrusted',
-  timeoutMs: 30_000,
+  timeoutMs: 90_000,
   contextTags: ['all'],
   isAvailable: isVenueEnabled,
   parameters: z.object({ path: z.string().min(1).max(1000).default('/') }),
@@ -248,7 +299,7 @@ registerTool({
   enabledByDefault: false,
   requiredPermission: 'venue.files',
   resultTrust: 'untrusted',
-  timeoutMs: 30_000,
+  timeoutMs: 90_000,
   contextTags: ['all'],
   isAvailable: isVenueEnabled,
   parameters: z.object({
@@ -272,7 +323,7 @@ registerTool({
   enabledByDefault: false,
   requiredPermission: 'browser.use',
   resultTrust: 'untrusted',
-  timeoutMs: 30_000,
+  timeoutMs: 120_000,
   maxResultBytes: 8_000_000,
   contextTags: ['all'],
   isAvailable: isVenueEnabled,

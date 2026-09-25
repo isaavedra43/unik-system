@@ -295,6 +295,9 @@ export function toolStepLabel(name: string, args: unknown, status: 'running' | '
   const base = toolLabel(name, status);
   const obj = asObject(args);
   if (!obj) return base;
+  if (obj.action === 'secureInput') {
+    return status === 'running' ? 'Pidiendo datos seguros' : 'Te pedí datos en el panel';
+  }
   const detail =
     (typeof obj.query === 'string' && obj.query.trim()) ||
     (typeof obj.url === 'string' && safeHostOrUrl(obj.url)) ||

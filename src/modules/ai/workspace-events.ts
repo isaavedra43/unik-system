@@ -17,7 +17,7 @@ import type { ToolExecutionResult } from './tools/registry';
 
 export const workspaceChannel = (conversationId: string) => `assistant:${conversationId}`;
 
-export type WorkspaceEventType = 'tool' | 'pages' | 'page_content' | 'screen' | 'browser' | 'artifact' | 'media';
+export type WorkspaceEventType = 'tool' | 'pages' | 'page_content' | 'screen' | 'browser' | 'artifact' | 'media' | 'secure_input';
 
 interface WorkspaceEvent {
   type: WorkspaceEventType;
@@ -134,6 +134,23 @@ export function workspaceEventsForTool(
       });
       const shot = dataUrl(res.screenshotBase64, res.screenshotMimeType ?? 'image/jpeg');
       if (shot) events.push({ type: 'screen', payload: { dataUrl: shot, url: str(res.url) ?? str(obj(args).url) } });
+      // secureInput — user takeover: the workspace renders the masked form.
+      const inputRequest = obj(res.inputRequest);
+      if (res.awaitingUserInput === true && str(inputRequest.id)) {
+        events.push({
+          type: 'secure_input',
+          payload: {
+            requestId: str(inputRequest.id),
+            venueSessionId: str(res.venueSessionId),
+            message: str(inputRequest.message),
+            fields: arr(inputRequest.fields).map((f) => ({
+              selector: str(f.selector),
+              label: str(f.label) ?? 'Campo',
+              sensitive: f.sensitive === true,
+            })),
+          },
+        });
+      }
       break;
     }
     case 'venueScreenshot': {

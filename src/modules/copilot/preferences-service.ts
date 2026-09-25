@@ -141,7 +141,7 @@ export function buildPreferencesPrompt(prefs: AssistantPreferences): string {
       ? '- PLANEAR SIEMPRE: antes de ejecutar cualquier tarea que use tools (salvo una consulta puntual de un solo paso), llama proposePlan y espera a que el usuario confirme con "Ejecutar plan".'
       : prefs.planMode === 'never'
         ? '- Sin planificación previa: ejecuta directo (las acciones con efectos siguen pasando por aprobación).'
-        : '- Planificación automática: en tareas complejas (3+ pasos, varias fuentes, envíos múltiples) llama proposePlan primero y espera confirmación; en consultas simples actúa directo.'
+        : '- Planificación automática: actúa directo en casi todo — proposePlan solo para trabajo de largo aliento (misiones, rutinas, tareas de 10+ pasos). Las acciones con efectos siempre pasan por aprobación al momento.'
   );
   lines.push(`- Idioma de respuesta: ${prefs.language === 'en' ? 'inglés' : 'español'}.`);
   lines.push(

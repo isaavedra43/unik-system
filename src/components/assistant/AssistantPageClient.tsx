@@ -26,6 +26,17 @@ export function AssistantPageClient({ user }: AssistantPageClientProps) {
     if (requestedId) setActiveId(requestedId);
   }, [requestedId]);
 
+  // Force-open the workspace when the agent requests a secure input or starts
+  // driving the virtual browser — the user must see the live screen / form.
+  useEffect(() => {
+    if (!activeId) return;
+    const es = new EventSource(`/app/realtime/api/stream?channels=${encodeURIComponent(`assistant:${activeId}`)}`);
+    const open = () => setWorkspaceOpen(true);
+    es.addEventListener('workspace.secure_input', open);
+    es.addEventListener('workspace.screen', open);
+    return () => es.close();
+  }, [activeId]);
+
   return (
     <div className="assistant-page-body">
       {/* Mobile sidebar toggle */}

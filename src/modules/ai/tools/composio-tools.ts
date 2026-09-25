@@ -49,7 +49,12 @@ registerTool({
       const toolkits = await listToolkits(actor, args);
       return {
         count: toolkits.length,
-        toolkits: toolkits.map((t) => ({ slug: t.slug, name: t.name, connected: t.connected })),
+        toolkits: toolkits.map((t) => ({
+          slug: t.slug,
+          name: t.name,
+          connected: t.connected,
+          isNoAuth: t.isNoAuth,
+        })),
         note:
           toolkits.length === 0
             ? 'No hay apps externas habilitadas para este usuario. Un administrador debe habilitarlas en Admin → Extensiones → Composio.'

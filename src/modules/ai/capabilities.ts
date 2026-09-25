@@ -153,7 +153,7 @@ const INTENT_RULES: readonly IntentRule[] = [
   {
     cap: 'browser',
     phrase: 'operar un navegador (abrir páginas, hacer clic, llenar formularios)',
-    re: /\b(navega(r|do)?|navegador|haz ?clic|llena (el|este|ese) formulario|inicia(r)? sesi[óo]n|entra a|edita en|reserva|reservaci[óo]n|hazme una reserva|como si fueras? usuario)\b/i,
+    re: /\b(navega(r|do)?|navegador|haz ?clic|llena (el|este|ese) formulario|inicia(r)? sesi[óo]n|entra a|edita en|reserva|reservaci[óo]n|hazme una reserva|como si fueras? usuario|carrito|agr[ée]ga\w* (al|a la) (carrito|cesta|compra)|checkout|compra(rlo|rla|rmelo|rmela|r)? en (amazon|mercado|la tienda|línea|linea))\b/i,
   },
   {
     cap: 'computer',

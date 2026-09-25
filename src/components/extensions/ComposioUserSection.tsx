@@ -113,7 +113,11 @@ export function ComposioUserSection({ canConnect }: { canConnect: boolean }) {
           <li key={t.slug} className="gui-record">
             <div className="gui-record-top">
               <span className="gui-record-title">{t.name}</span>
-              {t.connected ? (
+              {t.isNoAuth ? (
+                <span className="gui-badge is-success">
+                  <CheckCircle2 size={11} /> Sin cuenta necesaria
+                </span>
+              ) : t.connected ? (
                 <span className="gui-badge is-success">
                   <CheckCircle2 size={11} /> Conectada
                 </span>
@@ -122,7 +126,7 @@ export function ComposioUserSection({ canConnect }: { canConnect: boolean }) {
               )}
             </div>
             <div className="gui-pending-actions">
-              {!t.connected && (
+              {!t.connected && !t.isNoAuth && (
                 <button
                   type="button"
                   className="gui-btn gui-btn-primary"
