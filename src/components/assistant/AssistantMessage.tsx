@@ -4,12 +4,13 @@ import React, { useState } from 'react';
 import { Bot, Check, ChevronDown, ChevronRight, Clock, Database, FileText, Image as ImageIcon, ShieldCheck, ShieldX, Sparkles, User as UserIcon, X } from 'lucide-react';
 import { AssistantMarkdown } from './AssistantMarkdown';
 import { ArtifactRenderer, type ArtifactData } from './ArtifactRenderer';
-import { AUTO_EVENT_LABELS, autoKind, extractFailureReason, extractResultAction, parsePlan, performUiAction, toolLabel, type MessageFeedbackData, type TurnMeta } from '@/components/copilot/copilot-types';
+import { AUTO_EVENT_LABELS, autoKind, extractFailureReason, extractResultAction, parseMission, parsePlan, performUiAction, toolLabel, type MessageFeedbackData, type TurnMeta } from '@/components/copilot/copilot-types';
 import { ExternalLink, Phone } from 'lucide-react';
 import { ConfidenceBadge } from '@/components/copilot/ConfidenceBadge';
 import { parseFollowUps } from '@/modules/ai/followups';
 import { MessageFeedback } from '@/components/copilot/MessageFeedback';
 import { PlanCard } from '@/components/copilot/PlanCard';
+import { MissionCard } from '@/components/copilot/MissionCard';
 import { parseConfidence } from '@/modules/ai/confidence';
 import { buildUiComponents } from '@/modules/ai/generative-ui/build-ui';
 import { GenerativeUi } from './generative/GenerativeUi';
@@ -177,6 +178,8 @@ export function AssistantMessage({ message, onSendText, isLatest = false }: Assi
     : [];
   const planRecord = !isUser ? records.find((r) => r.toolName === 'proposePlan' && r.success) : undefined;
   const plan = planRecord ? parsePlan(planRecord.args) : null;
+  const missionRecord = !isUser ? records.find((r) => r.toolName === 'proposeMission' && r.success) : undefined;
+  const mission = missionRecord ? parseMission(missionRecord.args, missionRecord.result) : null;
   const parsed = !isUser ? parseConfidence(message.content) : null;
   const followParsed = parsed ? parseFollowUps(parsed.content) : null;
   const content = followParsed ? followParsed.content : parsed ? parsed.content : message.content;
@@ -201,7 +204,7 @@ export function AssistantMessage({ message, onSendText, isLatest = false }: Assi
             ))}
           </div>
         )}
-        {!isUser && <ToolSteps records={records.filter((r) => r.toolName !== 'proposePlan')} />}
+        {!isUser && <ToolSteps records={records.filter((r) => r.toolName !== 'proposePlan' && r.toolName !== 'proposeMission')} />}
         {uiComponents.length > 0 && <GenerativeUi components={uiComponents} onSendText={onSendText} interactive={isLatest} />}
         {content && (
           <div className="assistant-msg-content">
@@ -209,6 +212,7 @@ export function AssistantMessage({ message, onSendText, isLatest = false }: Assi
           </div>
         )}
         {plan && onSendText && <PlanCard plan={plan} active={isLatest} onRun={onSendText} />}
+        {mission && <MissionCard mission={mission} active={isLatest} />}
         {artifacts.length > 0 && (
           <div className="assistant-artifacts assistant-artifacts-inline">
             {artifacts.map((a) => (

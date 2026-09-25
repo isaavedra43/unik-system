@@ -242,6 +242,16 @@ const TOOL_LABELS: Record<string, { running: string; done: string }> = {
   composioConnect: { running: 'Preparando la conexión', done: 'Conexión preparada' },
   composioExecute: { running: 'Usando tu app externa', done: 'App externa consultada' },
   proposePlan: { running: 'Armando el plan', done: 'Plan propuesto' },
+  proposeMission: { running: 'Armando la misión', done: 'Misión propuesta' },
+  listMissions: { running: 'Revisando misiones', done: 'Misiones revisadas' },
+  missionStatus: { running: 'Consultando la misión', done: 'Misión consultada' },
+  controlMission: { running: 'Actualizando la misión', done: 'Misión actualizada' },
+  recallMemory: { running: 'Recordando', done: 'Memoria consultada' },
+  saveFact: { running: 'Guardando hecho', done: 'Hecho propuesto' },
+  renderView: { running: 'Dibujando visual', done: 'Visual listo' },
+  saveVenuePlaybook: { running: 'Guardando automatización', done: 'Automatización propuesta' },
+  listVenuePlaybooks: { running: 'Revisando automatizaciones', done: 'Automatizaciones revisadas' },
+  runVenuePlaybook: { running: 'Ejecutando automatización', done: 'Automatización ejecutada' },
   listConversationAttachments: { running: 'Revisando adjuntos', done: 'Adjuntos revisados' },
   extractDocumentData: { running: 'Leyendo el documento', done: 'Documento extraído' },
   readAttachment: { running: 'Leyendo el adjunto', done: 'Adjunto leído' },
@@ -299,6 +309,28 @@ export function parsePlan(args: unknown): PlanData | null {
     assumptions: Array.isArray(obj.assumptions) ? obj.assumptions.filter((a): a is string => typeof a === 'string') : [],
     deliverable: typeof obj.deliverable === 'string' ? obj.deliverable : null,
   };
+}
+
+export interface MissionCardData {
+  missionId: string;
+  goal: string;
+  steps: Array<{ title: string; status: string }>;
+  schedule?: string | null;
+}
+
+/** Mission proposed with `proposeMission` (missionId from the tool result, plan from args). */
+export function parseMission(args: unknown, result: unknown): MissionCardData | null {
+  const a = asObject(args);
+  const r = asObject(result);
+  if (!a || typeof a.goal !== 'string') return null;
+  const missionId = r && typeof r.missionId === 'string' ? r.missionId : null;
+  if (!missionId) return null;
+  const steps = Array.isArray(a.steps)
+    ? a.steps
+        .filter((s): s is string => typeof s === 'string')
+        .map((title) => ({ title, status: 'pending' }))
+    : [];
+  return { missionId, goal: a.goal, steps, schedule: typeof a.schedule === 'string' ? a.schedule : null };
 }
 
 /** Message the host sends when the user confirms a plan. */

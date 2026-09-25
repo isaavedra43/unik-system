@@ -54,6 +54,8 @@ export const CORE_TOOL_NAMES: readonly string[] = [
   'queryProducts',
   'searchKnowledgeLibrary',
   'rememberForUser',
+  'recallMemory',
+  'renderView',
   'generateTable',
   'generatePdfReport',
   'generateExcelReport',

@@ -1,23 +1,32 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { AnimatePresence, motion, useReducedMotion, type Variants } from 'motion/react';
 import {
+  AtSign,
   Bell,
   BellRing,
   Bot,
   Check,
   CheckCheck,
+  ChevronRight,
   Eye,
+  Inbox,
   MessageCircle,
   Phone,
+  PhoneCall,
   PhoneMissed,
   Settings,
   Smartphone,
-  Inbox,
+  type LucideIcon,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { Button } from '@/components/shadcn/button';
+import { Skeleton } from '@/components/shadcn/skeleton';
+import { cn } from '@/lib/utils';
+import { duration, ease } from '@/lib/motion/presets';
 import type { NotificationRow } from '@/modules/notifications/notification-service';
 import { NOTIFICATION_CATALOG } from '@/modules/notifications/catalog';
 import { useNotificationStream } from './useNotificationStream';
@@ -30,21 +39,40 @@ interface NotificationsPageProps {
 
 type Filter = 'all' | 'unread';
 
-const GROUP_ICONS: Record<string, React.ReactNode> = {
-  Llamadas: <Phone size={16} />,
-  Mensajes: <MessageCircle size={16} />,
-  'Asistente IA': <Bot size={16} />,
-  Seguimiento: <Eye size={16} />,
-  Sistema: <Bell size={16} />,
+const GROUP_ICONS: Record<string, LucideIcon> = {
+  Llamadas: Phone,
+  Mensajes: MessageCircle,
+  'Asistente IA': Bot,
+  Seguimiento: Eye,
+  Sistema: Bell,
 };
 
-function iconFor(category: string): React.ReactNode {
-  if (category === 'call_missed') return <PhoneMissed size={16} />;
-  if (category === 'call_incoming') return <PhoneMissed size={16} />;
-  if (category === 'inbox_message' || category === 'inbox_assigned') return <Inbox size={16} />;
-  const def = NOTIFICATION_CATALOG.find((c) => c.key === category);
-  return GROUP_ICONS[def?.group ?? 'Sistema'] ?? <Bell size={16} />;
-}
+const CATEGORY_META: Record<string, { icon: LucideIcon; tile: string }> = {
+  call_incoming: { icon: Phone, tile: 'bg-success/10 text-success' },
+  call_missed: { icon: PhoneMissed, tile: 'bg-destructive/10 text-destructive' },
+  call_summary: { icon: PhoneCall, tile: 'bg-info/10 text-info' },
+  chat_message: { icon: MessageCircle, tile: 'bg-info/10 text-info' },
+  chat_mention: { icon: AtSign, tile: 'bg-info/10 text-info' },
+  inbox_message: { icon: Inbox, tile: 'bg-info/10 text-info' },
+  inbox_assigned: { icon: Inbox, tile: 'bg-info/10 text-info' },
+  ai_task_done: { icon: Bot, tile: 'bg-primary/10 text-primary' },
+  ai_user_message: { icon: Bot, tile: 'bg-primary/10 text-primary' },
+  entity_change: { icon: Eye, tile: 'bg-warning/10 text-warning' },
+  system: { icon: Bell, tile: 'bg-muted text-muted-foreground' },
+};
+const FALLBACK_META = { icon: Bell, tile: 'bg-muted text-muted-foreground' };
+
+const GROUPS = [...new Set(NOTIFICATION_CATALOG.map((c) => c.group))];
+
+const itemVariants: Variants = {
+  initial: { opacity: 0, y: 6 },
+  animate: (index: number) => ({
+    opacity: 1,
+    y: 0,
+    transition: { duration: duration.normal, ease: ease.out, delay: Math.min(index * 0.025, 0.3) },
+  }),
+  exit: { opacity: 0, transition: { duration: duration.fast } },
+};
 
 function relativeTime(value: string): string {
   const date = new Date(value);
@@ -63,10 +91,27 @@ function relativeTime(value: string): string {
   }
 }
 
-const GROUPS = [...new Set(NOTIFICATION_CATALOG.map((c) => c.group))];
+function dayLabel(value: string): string {
+  const date = new Date(value);
+  const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const diffDays = Math.round((startOfDay(new Date()) - startOfDay(date)) / 86_400_000);
+  if (diffDays <= 0) return 'Hoy';
+  if (diffDays === 1) return 'Ayer';
+  try {
+    const label = date.toLocaleDateString('es-MX', {
+      weekday: 'long',
+      day: 'numeric',
+      month: 'long',
+    });
+    return label.charAt(0).toUpperCase() + label.slice(1);
+  } catch {
+    return 'Anteriores';
+  }
+}
 
 export function NotificationsPage({ userId, initialData }: NotificationsPageProps) {
   const router = useRouter();
+  const reduceMotion = useReducedMotion();
   const [notifications, setNotifications] = useState(initialData.data);
   const [filter, setFilter] = useState<Filter>('all');
   const [group, setGroup] = useState<string | null>(null);
@@ -111,6 +156,25 @@ export function NotificationsPage({ userId, initialData }: NotificationsPageProp
     });
   }, [notifications, filter, group]);
 
+  const groupUnread = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const n of notifications) {
+      if (n.readAt) continue;
+      const g = NOTIFICATION_CATALOG.find((c) => c.key === n.category)?.group;
+      if (g) counts.set(g, (counts.get(g) ?? 0) + 1);
+    }
+    return counts;
+  }, [notifications]);
+
+  const sections = useMemo(() => {
+    const map = new Map<string, NotificationRow[]>();
+    for (const n of visible) {
+      const key = dayLabel(n.createdAt);
+      map.set(key, [...(map.get(key) ?? []), n]);
+    }
+    return [...map.entries()];
+  }, [visible]);
+
   const markRead = useCallback(
     async (id: string) => {
       setNotifications((prev) =>
@@ -138,7 +202,9 @@ export function NotificationsPage({ userId, initialData }: NotificationsPageProp
       body: JSON.stringify({ all: true }),
     });
     if (res.ok) {
-      setNotifications((prev) => prev.map((n) => ({ ...n, readAt: n.readAt ?? new Date().toISOString() })));
+      setNotifications((prev) =>
+        prev.map((n) => ({ ...n, readAt: n.readAt ?? new Date().toISOString() }))
+      );
       setUnread(0);
       toast.success('Todas las notificaciones marcadas como leídas');
     } else {
@@ -147,156 +213,353 @@ export function NotificationsPage({ userId, initialData }: NotificationsPageProp
   };
 
   const showPushBanner = push.status === 'prompt' || push.status === 'needs_install';
+  const showSkeleton = loading && visible.length === 0;
 
   return (
-    <div>
-      <div className="page-header page-header-row">
-        <div className="page-header-info">
-          <h1 className="page-title">Notificaciones</h1>
-          <p className="page-description">{unread > 0 ? `${unread} sin leer` : 'Todo al día'}</p>
+    <div className="mx-auto w-full max-w-3xl space-y-5">
+      <header className="flex flex-wrap items-center justify-between gap-3">
+        <div className="min-w-0">
+          <h1 className="flex items-center gap-2.5 text-xl font-semibold tracking-tight sm:text-2xl">
+            Notificaciones
+            {unread > 0 ? (
+              <motion.span
+                key={unread}
+                initial={reduceMotion ? false : { scale: 0.7, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                transition={ease.spring}
+                className="rounded-full bg-primary px-2 py-0.5 text-xs font-semibold text-primary-foreground"
+              >
+                {unread > 99 ? '99+' : unread}
+              </motion.span>
+            ) : null}
+          </h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {unread > 0 ? `${unread} sin leer — toca una para abrirla` : 'Todo al día'}
+          </p>
         </div>
-        <div className="row-actions">
+        <div className="flex items-center gap-2">
           {unread > 0 ? (
-            <button className="btn btn-secondary btn-sm" onClick={markAll} type="button">
-              <CheckCheck size={14} /> Marcar todo como leído
-            </button>
+            <Button variant="outline" size="sm" onClick={markAll} type="button">
+              <CheckCheck /> Marcar todo leído
+            </Button>
           ) : null}
-          <Link href="/app/account/notifications" className="btn btn-ghost btn-sm">
-            <Settings size={14} /> Configurar
-          </Link>
-        </div>
-      </div>
-
-      {showPushBanner ? (
-        <div className="notif-banner">
-          <Smartphone size={18} />
-          <div className="notif-banner-text">
-            <strong>Recibe avisos en este dispositivo</strong>
-            <span>
-              {push.status === 'needs_install'
-                ? 'En iPhone primero agrega UNIK a la pantalla de inicio (Compartir → “Agregar a inicio”) y ábrela desde ahí.'
-                : 'Llamadas, mensajes y tareas de la IA te llegarán aunque la app esté cerrada.'}
-            </span>
-          </div>
-          {push.status === 'prompt' ? (
-            <button
-              type="button"
-              className="btn btn-primary btn-sm"
-              onClick={() => void push.subscribe().then((ok) => ok && toast.success('Notificaciones activadas'))}
-              disabled={push.busy}
-            >
-              <BellRing size={14} /> Activar
-            </button>
-          ) : (
-            <Link href="/app/account/notifications" className="btn btn-secondary btn-sm">
-              Cómo instalar
+          <Button variant="ghost" size="sm" asChild>
+            <Link href="/app/account/notifications">
+              <Settings /> Configurar
             </Link>
-          )}
+          </Button>
         </div>
-      ) : null}
+      </header>
 
-      <div className="notif-filters">
-        <div className="notif-filter-group" role="tablist" aria-label="Filtro">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={filter === 'all'}
-            className={`notif-chip ${filter === 'all' ? 'active' : ''}`}
-            onClick={() => setFilter('all')}
+      <AnimatePresence>
+        {showPushBanner ? (
+          <motion.div
+            initial={reduceMotion ? false : { opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: duration.normal, ease: ease.out }}
+            className="flex flex-col gap-3 rounded-xl border border-primary/25 bg-primary/[0.06] p-4 sm:flex-row sm:items-center"
           >
-            Todas
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={filter === 'unread'}
-            className={`notif-chip ${filter === 'unread' ? 'active' : ''}`}
-            onClick={() => setFilter('unread')}
-          >
-            No leídas {unread > 0 ? <span className="notif-chip-count">{unread}</span> : null}
-          </button>
-        </div>
-        <div className="notif-filter-group" aria-label="Tipo">
-          <button
-            type="button"
-            className={`notif-chip ${group === null ? 'active' : ''}`}
-            onClick={() => setGroup(null)}
-          >
-            Todo
-          </button>
-          {GROUPS.map((g) => (
+            <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+              <Smartphone className="size-5" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-semibold">Recibe avisos en este dispositivo</p>
+              <p className="text-sm text-muted-foreground">
+                {push.status === 'needs_install'
+                  ? 'En iPhone primero agrega UNIK a la pantalla de inicio (Compartir → “Agregar a inicio”) y ábrela desde ahí.'
+                  : 'Llamadas, mensajes y tareas de la IA te llegarán aunque la app esté cerrada.'}
+              </p>
+            </div>
+            {push.status === 'prompt' ? (
+              <Button
+                size="sm"
+                className="shrink-0"
+                onClick={() =>
+                  void push
+                    .subscribe()
+                    .then((ok) => ok && toast.success('Notificaciones activadas'))
+                }
+                disabled={push.busy}
+              >
+                <BellRing /> Activar
+              </Button>
+            ) : (
+              <Button variant="secondary" size="sm" className="shrink-0" asChild>
+                <Link href="/app/account/notifications">Cómo instalar</Link>
+              </Button>
+            )}
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
+
+      <div className="flex flex-col gap-3">
+        <div
+          className="inline-flex w-fit items-center gap-1 rounded-lg bg-muted p-1"
+          role="tablist"
+          aria-label="Filtro"
+        >
+          {(
+            [
+              { key: 'all', label: 'Todas' },
+              { key: 'unread', label: 'No leídas' },
+            ] as const
+          ).map((f) => (
             <button
-              key={g}
+              key={f.key}
               type="button"
-              className={`notif-chip ${group === g ? 'active' : ''}`}
-              onClick={() => setGroup(group === g ? null : g)}
+              role="tab"
+              aria-selected={filter === f.key}
+              onClick={() => setFilter(f.key)}
+              className={cn(
+                'inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
+                filter === f.key
+                  ? 'bg-background text-foreground shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground'
+              )}
             >
-              {GROUP_ICONS[g]} {g}
+              {f.label}
+              {f.key === 'unread' && unread > 0 ? (
+                <span
+                  className={cn(
+                    'rounded-full px-1.5 py-px text-xs font-semibold',
+                    filter === 'unread'
+                      ? 'bg-primary/10 text-primary'
+                      : 'bg-muted-foreground/15 text-muted-foreground'
+                  )}
+                >
+                  {unread}
+                </span>
+              ) : null}
             </button>
           ))}
         </div>
+
+        <div className="flex flex-wrap items-center gap-1.5" aria-label="Tipo">
+          <FilterChip active={group === null} onClick={() => setGroup(null)}>
+            Todo
+          </FilterChip>
+          {GROUPS.map((g) => {
+            const Icon = GROUP_ICONS[g] ?? Bell;
+            const count = groupUnread.get(g) ?? 0;
+            return (
+              <FilterChip
+                key={g}
+                active={group === g}
+                onClick={() => setGroup(group === g ? null : g)}
+              >
+                <Icon className="size-3.5" />
+                {g}
+                {count > 0 ? (
+                  <span
+                    className={cn(
+                      'rounded-full px-1.5 py-px text-[0.6875rem] font-semibold leading-4',
+                      group === g
+                        ? 'bg-primary/15 text-primary'
+                        : 'bg-muted-foreground/15 text-muted-foreground'
+                    )}
+                  >
+                    {count}
+                  </span>
+                ) : null}
+              </FilterChip>
+            );
+          })}
+        </div>
       </div>
 
-      <div className="card" style={{ padding: 0 }} aria-busy={loading}>
-        {visible.length === 0 ? (
-          <div className="empty-state">
-            <Bell size={48} className="empty-state-icon" />
-            <h3 className="empty-state-title">
-              {filter === 'unread' ? 'Nada pendiente' : 'Sin notificaciones'}
-            </h3>
-            <p className="text-muted">
-              Aquí verás llamadas, mensajes, avisos de la IA y cambios en lo que sigues.
-            </p>
+      <div aria-busy={loading}>
+        {showSkeleton ? (
+          <div className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-card">
+            {Array.from({ length: 5 }, (_, i) => (
+              <div key={i} className="flex items-start gap-3 px-4 py-3.5">
+                <Skeleton className="mt-0.5 size-9 rounded-lg" />
+                <div className="flex-1 space-y-2">
+                  <Skeleton className="h-3.5 w-2/5" />
+                  <Skeleton className="h-3 w-3/4" />
+                  <Skeleton className="h-2.5 w-16" />
+                </div>
+              </div>
+            ))}
           </div>
-        ) : (
-          visible.map((n) => {
-            const isUnread = n.readAt === null;
-            return (
-              <div
-                key={n.id}
-                className={`notif-item ${isUnread ? 'unread' : ''}`}
-                role={n.url ? 'link' : undefined}
-                tabIndex={0}
-                onClick={() => void open(n)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    void open(n);
-                  }
+        ) : visible.length === 0 ? (
+          <motion.div
+            initial={reduceMotion ? false : { opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: duration.normal, ease: ease.out }}
+            className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-border bg-card/50 px-6 py-14 text-center"
+          >
+            <span className="flex size-14 items-center justify-center rounded-2xl bg-muted text-muted-foreground">
+              <Bell className="size-7" />
+            </span>
+            <div>
+              <h2 className="text-sm font-semibold">
+                {filter === 'unread' ? 'Nada pendiente' : 'Sin notificaciones'}
+              </h2>
+              <p className="mt-1 max-w-sm text-sm text-muted-foreground">
+                Aquí verás llamadas, mensajes, avisos de la IA y cambios en lo que sigues.
+              </p>
+            </div>
+            {filter !== 'all' || group !== null ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setFilter('all');
+                  setGroup(null);
                 }}
               >
-                <span className={`notif-item-icon notif-cat-${n.category}`} aria-hidden="true">
-                  {iconFor(n.category)}
-                </span>
-                <div className="notif-item-body">
-                  <div className="notif-item-title">
-                    {isUnread ? <span className="so-unread-dot" /> : null}
-                    {n.title}
-                  </div>
-                  {n.body ? <div className="notif-item-text">{n.body}</div> : null}
-                  <div className="notif-item-meta">
-                    <span>{relativeTime(n.createdAt)}</span>
-                    {n.url ? <span className="notif-item-link">Abrir →</span> : null}
-                  </div>
-                </div>
-                {isUnread ? (
-                  <button
-                    className="btn btn-ghost btn-sm"
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      void markRead(n.id);
-                    }}
-                    aria-label="Marcar como leída"
-                  >
-                    <Check size={14} />
-                  </button>
-                ) : null}
+                Ver todas
+              </Button>
+            ) : null}
+          </motion.div>
+        ) : (
+          sections.map(([label, items]) => (
+            <section key={label} className="mb-5 last:mb-0">
+              <h2 className="px-1 pb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                {label}
+              </h2>
+              <div className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+                <AnimatePresence initial={false}>
+                  {items.map((n, i) => (
+                    <NotificationItem
+                      key={n.id}
+                      n={n}
+                      index={i}
+                      onOpen={open}
+                      onMarkRead={markRead}
+                    />
+                  ))}
+                </AnimatePresence>
               </div>
-            );
-          })
+            </section>
+          ))
         )}
       </div>
     </div>
+  );
+}
+
+function FilterChip({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      aria-pressed={active}
+      onClick={onClick}
+      className={cn(
+        'inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors',
+        active
+          ? 'border-primary/30 bg-primary/10 text-primary'
+          : 'border-border bg-card text-muted-foreground hover:bg-accent hover:text-foreground'
+      )}
+    >
+      {children}
+    </button>
+  );
+}
+
+function NotificationItem({
+  n,
+  index,
+  onOpen,
+  onMarkRead,
+}: {
+  n: NotificationRow;
+  index: number;
+  onOpen: (n: NotificationRow) => void;
+  onMarkRead: (id: string) => void;
+}) {
+  const meta = CATEGORY_META[n.category] ?? FALLBACK_META;
+  const Icon = meta.icon;
+  const isUnread = n.readAt === null;
+
+  return (
+    <motion.div
+      variants={itemVariants}
+      custom={index}
+      initial="initial"
+      animate="animate"
+      exit="exit"
+      layout="position"
+      role={n.url ? 'link' : undefined}
+      tabIndex={0}
+      onClick={() => void onOpen(n)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          void onOpen(n);
+        }
+      }}
+      className={cn(
+        'group relative flex items-start gap-3 px-4 py-3.5 transition-colors',
+        'hover:bg-accent/50 focus-visible:bg-accent/60 focus-visible:outline-none',
+        n.url && 'cursor-pointer',
+        isUnread && 'bg-primary/[0.04]'
+      )}
+    >
+      <span
+        className={cn(
+          'mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-lg',
+          meta.tile
+        )}
+        aria-hidden="true"
+      >
+        <Icon className="size-4" />
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          {isUnread ? (
+            <span
+              className="size-2 shrink-0 rounded-full bg-primary"
+              role="img"
+              aria-label="Sin leer"
+            />
+          ) : null}
+          <p
+            className={cn(
+              'truncate text-sm',
+              isUnread ? 'font-semibold text-foreground' : 'font-medium text-foreground/90'
+            )}
+          >
+            {n.title}
+          </p>
+        </div>
+        {n.body ? (
+          <p className="mt-0.5 line-clamp-2 text-sm text-muted-foreground">{n.body}</p>
+        ) : null}
+        <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
+          <span>{relativeTime(n.createdAt)}</span>
+          {n.url ? (
+            <span className="inline-flex items-center gap-0.5 font-medium text-primary">
+              Abrir
+              <ChevronRight className="size-3" />
+            </span>
+          ) : null}
+        </div>
+      </div>
+      {isUnread ? (
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          type="button"
+          aria-label="Marcar como leída"
+          className="shrink-0 text-muted-foreground sm:opacity-0 sm:transition-opacity sm:group-hover:opacity-100 sm:focus-visible:opacity-100"
+          onClick={(e) => {
+            e.stopPropagation();
+            void onMarkRead(n.id);
+          }}
+        >
+          <Check />
+        </Button>
+      ) : null}
+    </motion.div>
   );
 }

@@ -71,7 +71,86 @@ export interface AnswerCheckResult {
   issues: string[];
 }
 
-export function checkAnswer(answer: string, knownFolios: Set<string>): AnswerCheckResult {
+/**
+ * Totals a tool result declares. Walks the JSON and collects every number stored under a
+ * count/total-style key (`total`, `count`, `matched`, `totalOrdersInDateRange`, breakdown
+ * counts…) so a claim like "9 ventas" is verified against REAL totals — not against `showing`
+ * or page sizes, which are deliberately excluded (a page of 9 is not "9 ventas" of 24).
+ */
+const TOTAL_KEY = /(?:^|_)(total|count|orders|matched|included|excluded|inrange)(?:$|[a-z_])/i;
+const MONEY_KEY = /total|sum|revenue|balance|amount/i;
+const MAX_NUMBERS = 400;
+
+export function collectResultNumbers(result: unknown, counts: Set<number>, money: Set<number>, depth = 0): void {
+  if (result === null || result === undefined || depth > 8) return;
+  if (counts.size + money.size > MAX_NUMBERS) return;
+  if (Array.isArray(result)) {
+    for (const item of result) collectResultNumbers(item, counts, money, depth + 1);
+    return;
+  }
+  if (typeof result !== 'object') return;
+  for (const [key, value] of Object.entries(result as Record<string, unknown>)) {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      if (TOTAL_KEY.test(key) && Number.isInteger(value) && value >= 0 && value < 1_000_000) counts.add(value);
+      if (MONEY_KEY.test(key)) money.add(Math.round(value * 100) / 100);
+    } else if (typeof value === 'string' && MONEY_KEY.test(key)) {
+      const n = Number(value.replace(/[$,\s]/g, ''));
+      if (Number.isFinite(n)) money.add(n);
+    } else {
+      collectResultNumbers(value, counts, money, depth + 1);
+    }
+  }
+}
+
+const COUNT_CLAIM = /\b(\d{1,5})\s+(?:ventas|órdenes|ordenes|pedidos|registros|resultados|coincidencias|facturas|cotizaciones|compras|pagos)\b/gi;
+const MONEY_CLAIM = /(?:total(?:\s+de)?|suman|sumaron|acumul\w*|por un total de|en total)\s+(?:de\s+)?\$?\s*([\d,]+(?:\.\d{1,2})?)/gi;
+
+/**
+ * Claims like "9 ventas" or "un total de $59,468" that match NO total the tools returned.
+ * The set covers group/breakdown counts too, so legitimate sub-counts pass; a bare number
+ * that equals `showing` but not `total` is exactly what this catches.
+ */
+export function numericClaimsNotInResults(answer: string, counts: Set<number>, money: Set<number>): string[] {
+  const issues: string[] = [];
+  if (counts.size > 0) {
+    const seen = new Set<number>();
+    for (const m of answer.matchAll(COUNT_CLAIM)) {
+      const n = Number(m[1]);
+      if (!Number.isFinite(n) || n === 0 || seen.has(n)) continue;
+      seen.add(n);
+      if (!counts.has(n)) {
+        issues.push(
+          `Afirmas "${m[0].trim()}" pero ninguna tool devolvió ese total este turno. ` +
+            `Totales reales disponibles: ${[...counts].sort((a, b) => b - a).slice(0, 12).join(', ')}. ` +
+            'Corrige con el número del tool result (campo total / reconciliaciones) o vuelve a consultar.'
+        );
+      }
+    }
+  }
+  if (money.size > 0) {
+    const seen = new Set<number>();
+    for (const m of answer.matchAll(MONEY_CLAIM)) {
+      const n = Number(m[1].replace(/,/g, ''));
+      if (!Number.isFinite(n) || n === 0 || seen.has(n)) continue;
+      seen.add(n);
+      // Allow rounding to the peso and small aggregation drift.
+      const ok = [...money].some((t) => Math.abs(t - n) < 1 || (t > 0 && Math.abs(t - n) / t < 0.001));
+      if (!ok) {
+        issues.push(
+          `Afirmas "${m[0].trim()}" pero ninguna tool devolvió esa suma este turno. ` +
+            'Usa el campo total/totalSum del resultado o re-consulta antes de dar la cifra.'
+        );
+      }
+    }
+  }
+  return issues;
+}
+
+export function checkAnswer(
+  answer: string,
+  knownFolios: Set<string>,
+  knownTotals?: { counts: Set<number>; money: Set<number> }
+): AnswerCheckResult {
   const issues: string[] = [];
   const ghosts = citedFoliosNotInResults(answer, knownFolios);
   if (ghosts.length > 0) {
@@ -83,5 +162,8 @@ export function checkAnswer(answer: string, knownFolios: Set<string>): AnswerChe
     );
   }
   issues.push(...findMarkdownCountMismatches(answer).map((i) => `${i}: corrige el conteo o completa la tabla.`));
+  if (knownTotals) {
+    issues.push(...numericClaimsNotInResults(answer, knownTotals.counts, knownTotals.money));
+  }
   return { issues };
 }

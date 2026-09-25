@@ -402,6 +402,86 @@ export function extractMcpUiResources(result: unknown): UiMcpResource[] {
   return out;
 }
 
+// ── renderView: model-emitted view specs, revalidated here ─────────────────
+
+const VIEW_TONES = new Set(['neutral', 'success', 'warning', 'danger', 'info']);
+const viewTone = (v: unknown): UiTone => (VIEW_TONES.has(String(v)) ? (v as UiTone) : 'neutral');
+const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
+const str = (v: unknown, max = 80): string => cut(textOf(v) ?? '', max);
+
+/** Defensive parse of a `renderView` spec → closed-vocabulary UiComponent. */
+export function sanitizeViewSpec(view: unknown): UiComponent | null {
+  if (!isObj(view)) return null;
+  switch (view.type) {
+    case 'chart': {
+      const labels = Array.isArray(view.labels) ? view.labels.slice(0, 24).map((l) => str(l, 40)) : [];
+      const series = (Array.isArray(view.series) ? view.series : [])
+        .slice(0, 4)
+        .map((s): { name?: string; data: number[] } | null =>
+          isObj(s)
+            ? {
+                ...(s.name ? { name: str(s.name, 40) } : {}),
+                data: (Array.isArray(s.data) ? s.data : []).slice(0, 24).map(num),
+              }
+            : null
+        )
+        .filter((s): s is { name?: string; data: number[] } => s !== null && s.data.length > 0);
+      if (labels.length === 0 || series.length === 0) return null;
+      const chart = view.chart === 'line' || view.chart === 'pie' ? view.chart : 'bar';
+      return {
+        type: 'chart',
+        chart,
+        labels,
+        series,
+        ...(view.title ? { title: str(view.title, 100) } : {}),
+        ...(view.unit ? { unit: str(view.unit, 20) } : {}),
+      };
+    }
+    case 'kpi': {
+      const items = (Array.isArray(view.items) ? view.items : [])
+        .filter(isObj)
+        .slice(0, 8)
+        .map((i) => ({
+          label: str(i.label, 60),
+          value: str(i.value, 60),
+          ...(i.delta ? { delta: str(i.delta, 40) } : {}),
+          tone: viewTone(i.tone),
+        }))
+        .filter((i) => i.label && i.value);
+      return items.length ? { type: 'kpi', items, ...(view.title ? { title: str(view.title, 100) } : {}) } : null;
+    }
+    case 'progress': {
+      const steps = (Array.isArray(view.steps) ? view.steps : [])
+        .filter(isObj)
+        .slice(0, 20)
+        .map((s) => ({
+          title: str(s.title, 100),
+          status: (['pending', 'running', 'done', 'failed'] as const).includes(s.status as never)
+            ? (s.status as 'pending' | 'running' | 'done' | 'failed')
+            : 'pending',
+          ...(s.detail ? { detail: str(s.detail, 120) } : {}),
+        }))
+        .filter((s) => s.title);
+      return steps.length ? { type: 'progress', title: str(view.title, 100) || 'Progreso', steps } : null;
+    }
+    case 'timeline': {
+      const events = (Array.isArray(view.events) ? view.events : [])
+        .filter(isObj)
+        .slice(0, 20)
+        .map((e) => ({
+          label: str(e.label, 100),
+          ...(e.at ? { at: str(e.at, 40) } : {}),
+          ...(e.detail ? { detail: str(e.detail, 160) } : {}),
+          tone: viewTone(e.tone),
+        }))
+        .filter((e) => e.label);
+      return events.length ? { type: 'timeline', events, ...(view.title ? { title: str(view.title, 100) } : {}) } : null;
+    }
+    default:
+      return null;
+  }
+}
+
 // ── entry point ────────────────────────────────────────────────────────────
 
 const slugLabel = (slug: string) => humanize(slug.toLowerCase());
@@ -480,6 +560,13 @@ export function buildUiComponents(input: UiToolResultInput): UiComponent[] {
         detail: cut(tool, 120),
       },
     ];
+  }
+
+  // renderView: the model drew a chart/kpi/progress/timeline — spec revalidated.
+  if (toolName === 'renderView' && isObj(result.view)) {
+    const spec = sanitizeViewSpec(result.view);
+    if (spec) out.push(spec);
+    return out;
   }
 
   // MCP extension tools ("<namespace>__<tool>") and their UI resources.

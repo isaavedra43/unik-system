@@ -4,6 +4,7 @@ import {
   extractMcpUiResources,
   extractUiFromData,
   safeHttpUrl,
+  sanitizeViewSpec,
 } from './build-ui';
 
 describe('generative-ui builder', () => {
@@ -171,5 +172,83 @@ describe('generative-ui builder', () => {
     expect(buildUiComponents({ toolName: 'queryProducts', success: true, result: 'text' })).toEqual(
       []
     );
+  });
+
+  it('sanitizes a chart spec from renderView into a closed-vocabulary component', () => {
+    const ui = buildUiComponents({
+      toolName: 'renderView',
+      success: true,
+      result: {
+        view: {
+          type: 'chart',
+          chart: 'bar',
+          title: 'Ventas por método',
+          unit: 'MXN',
+          labels: ['Efectivo', 'Crédito', '<script>x</script>'.repeat(10)],
+          series: [
+            { name: 'Hoy', data: [10, 5, 'NaN', 2] },
+            { name: 'Ayer', data: [] },
+            'garbage',
+          ],
+        },
+      },
+    });
+    expect(ui).toHaveLength(1);
+    const chart = ui[0] as {
+      type: string;
+      chart: string;
+      labels: string[];
+      series: Array<{ name?: string; data: number[] }>;
+    };
+    expect(chart.type).toBe('chart');
+    expect(chart.chart).toBe('bar');
+    expect(chart.labels).toHaveLength(3);
+    // empty/garbage series dropped; non-finite numbers coerced to 0
+    expect(chart.series).toHaveLength(1);
+    expect(chart.series[0].data).toEqual([10, 5, 0, 2]);
+  });
+
+  it('sanitizes kpi, progress and timeline specs', () => {
+    const kpi = sanitizeViewSpec({
+      type: 'kpi',
+      title: 'Corte',
+      items: [
+        { label: 'Ventas', value: '$12,400', delta: '+8%', tone: 'success' },
+        { label: 'Sin valor', tone: 'bogus-tone' },
+      ],
+    });
+    expect(kpi).toMatchObject({ type: 'kpi' });
+    const items = (kpi as { items: Array<{ label: string; tone: string }> }).items;
+    expect(items).toHaveLength(1);
+    expect(items[0].tone).toBe('success');
+
+    const progress = sanitizeViewSpec({
+      type: 'progress',
+      steps: [
+        { title: 'Descargar reporte', status: 'done' },
+        { title: 'Conciliar', status: 'hacking' },
+        { status: 'pending' },
+      ],
+    });
+    expect(progress).toMatchObject({ type: 'progress' });
+    const steps = (progress as { steps: Array<{ title: string; status: string }> }).steps;
+    expect(steps).toHaveLength(2);
+    expect(steps[1].status).toBe('pending'); // invalid status → pending
+
+    const timeline = sanitizeViewSpec({
+      type: 'timeline',
+      events: [{ label: 'Creada', at: '09:00', tone: 'danger' }, { detail: 'sin label' }],
+    });
+    expect(timeline).toMatchObject({ type: 'timeline' });
+    expect((timeline as { events: unknown[] }).events).toHaveLength(1);
+  });
+
+  it('rejects invalid or unknown view types', () => {
+    expect(sanitizeViewSpec(null)).toBeNull();
+    expect(sanitizeViewSpec({ type: 'chart', labels: [], series: [] })).toBeNull();
+    expect(sanitizeViewSpec({ type: 'html', markup: '<b>x</b>' })).toBeNull();
+    expect(
+      buildUiComponents({ toolName: 'renderView', success: true, result: { view: 'nope' } })
+    ).toEqual([]);
   });
 });

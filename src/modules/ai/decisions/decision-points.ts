@@ -200,6 +200,155 @@ export function webRelevanceDecision(input: {
 }
 
 // ---------------------------------------------------------------------------
+// Memory: is this turn worth remembering as an episode? (agent core Fase 1)
+// ---------------------------------------------------------------------------
+
+export function memoryGateDecision(input: {
+  userMessage: string;
+  answer: string;
+  toolsUsed: string[];
+}) {
+  return {
+    state: {
+      peticion: cap(input.userMessage, 1200),
+      respuesta: cap(input.answer, 2000),
+      herramientas_usadas: input.toolsUsed.slice(0, 15),
+    },
+    questions: {
+      memorable: {
+        type: 'noul',
+        instructions: '¿Este turno vale recordarse como episodio para futuras conversaciones? Sí si hubo datos del negocio consultados, correcciones del usuario, decisiones, hallazgos o trabajo multi-paso.',
+        criteria: {
+          true: 'Consulta de datos real, corrección, decisión, reporte o hallazgo que pueda importar después.',
+          false: 'Saludo, confirmación, aclaración o intercambio trivial sin contenido durable.',
+        },
+      } satisfies JevQuestion,
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Missions: is this message a persistent objective rather than a one-shot ask?
+// (agent core Fase 2)
+// ---------------------------------------------------------------------------
+
+export function missionClassifyDecision(message: string) {
+  return {
+    state: { mensaje: cap(message, 1500) },
+    questions: {
+      kind: {
+        type: 'choice',
+        instructions: '¿Qué tipo de petición es este mensaje para un asistente de ERP?',
+        criteria: {
+          chat: 'Conversación, saludo o pregunta general sin datos ni acciones.',
+          consulta: 'Pide datos del sistema o una acción que se resuelve en este mismo turno.',
+          objetivo: 'Una meta que dura más que este turno: "investiga X y avísame", "vigila Y cada mañana", "prepárame el corte y mándalo", o trabajo de varios pasos que el usuario quiere delegado.',
+          rutina: 'Igual que objetivo pero recurrente/programado: "todos los días", "cada semana", "avísame cuando pase".',
+        },
+      } satisfies JevQuestion,
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Prefetch: which single read will the model almost surely call? (Fase 5)
+// The pick maps to a canonical tool+args in `ai/prefetch.ts`; the orchestrator
+// warms the shared read cache while the first model call is in flight.
+// ---------------------------------------------------------------------------
+
+export const PREFETCH_CHOICES = [
+  'none',
+  'sales_period',
+  'business_summary',
+  'accounts_receivable',
+  'low_stock',
+  'top_products',
+] as const;
+export type PrefetchChoice = (typeof PREFETCH_CHOICES)[number];
+
+export const PREFETCH_PERIODS = [
+  'today',
+  'yesterday',
+  'this_week',
+  'this_month',
+  'last_month',
+  'last_7_days',
+  'last_30_days',
+  'this_year',
+  'none',
+] as const;
+export type PrefetchPeriod = (typeof PREFETCH_PERIODS)[number];
+
+export function prefetchPickDecision(message: string) {
+  return {
+    state: { mensaje: cap(message, 1200) },
+    questions: {
+      read: {
+        type: 'choice',
+        instructions:
+          '¿Qué consulta de datos del ERP ejecutará casi seguro el asistente para responder este mensaje? Solo lectura. Si el mensaje no necesita datos o no hay una consulta obvia, responde none.',
+        criteria: {
+          none: 'No necesita datos del sistema, o la consulta depende de detalles que no se pueden adivinar.',
+          sales_period: 'Pregunta por ventas/órdenes de un periodo ("ventas de hoy", "cuánto vendí ayer", "órdenes de la semana").',
+          business_summary: 'Pide un panorama general del negocio: resumen, KPIs, "cómo vamos", "cómo va el día".',
+          accounts_receivable: 'Pregunta por cuentas por cobrar, saldos pendientes, quién debe.',
+          low_stock: 'Pregunta por inventario bajo, faltantes o productos sin movimiento.',
+          top_products: 'Pregunta por los productos más vendidos o el ranking de productos.',
+        },
+      } satisfies JevQuestion,
+      period: {
+        type: 'choice',
+        instructions: 'Si el mensaje menciona un periodo, ¿cuál es? Si no menciona ninguno, responde none.',
+        criteria: {
+          today: 'hoy',
+          yesterday: 'ayer',
+          this_week: 'esta semana',
+          this_month: 'este mes',
+          last_month: 'el mes pasado',
+          last_7_days: 'los últimos 7 días',
+          last_30_days: 'los últimos 30 días',
+          this_year: 'este año',
+          none: 'sin periodo explícito',
+        },
+      } satisfies JevQuestion,
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Mid-turn escalation: is this draft trustworthy enough, or should a heavier
+// model redo the final answer? (Fase 5)
+// ---------------------------------------------------------------------------
+
+export function draftConfidenceDecision(input: {
+  userMessage: string;
+  draft: string;
+  toolsUsed: string[];
+}) {
+  return {
+    state: {
+      peticion: cap(input.userMessage, 1500),
+      borrador: cap(input.draft, 3500),
+      herramientas_usadas: input.toolsUsed.slice(0, 20),
+    },
+    questions: {
+      confidence: {
+        type: 'score',
+        instructions:
+          '¿Qué tan confiable es este borrador para entregarlo al usuario? Confiable = cifras consistentes con lo que las herramientas devolvieron y respuesta completa; dudoso = cifras no trazables, respuesta a medias o afirmaciones que el mensaje no pedía.',
+        criteria: [
+          'Dudoso: cifras no respaldadas o respuesta incompleta',
+          'Riesgoso: podría tener errores que el usuario notaría',
+          'Aceptable pero con puntos débiles',
+          'Confiable: consistente con las herramientas',
+          'Muy confiable: completo y verificable',
+        ],
+      } satisfies JevQuestion,
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Venue: does this shell command risk effects outside the sandbox? (Fase 2)
 // ---------------------------------------------------------------------------
 

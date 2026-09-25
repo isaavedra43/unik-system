@@ -37,7 +37,7 @@ interface ServerInfo {
   subscriptions: PushDevice[];
 }
 
-function isIos(): boolean {
+export function isIos(): boolean {
   if (typeof navigator === 'undefined') return false;
   const ua = navigator.userAgent;
   return /iPhone|iPad|iPod/.test(ua) || (ua.includes('Macintosh') && navigator.maxTouchPoints > 1);

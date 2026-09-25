@@ -12,6 +12,7 @@ import type {
 import { AiApiError } from './types';
 import { recordAiApiCall } from '../ai-audit';
 import { getProviderConfig } from '../ai-config';
+import { getModelById } from '../model-catalog';
 
 /**
  * OpenAI direct API provider.
@@ -75,7 +76,14 @@ const OPENAI_MAX_TOOLS = 128;
  * `reasoning_effort`. Sending the GPT-4o parameters to them fails with a 400.
  */
 export function isReasoningModel(model: string): boolean {
-  return /^(o\d|gpt-5)/i.test(model.trim());
+  const id = model.trim();
+  if (/^(o\d|gpt-5)/i.test(id)) return true;
+  // Vendor-prefixed ids (openai/gpt-5.2, anthropic/claude-opus-4.5, x-ai/grok-4
+  // via OpenRouter): the catalog's `reasoning` capability is the source of truth;
+  // for unknown prefixed ids fall back to the pattern on the tail segment.
+  const entry = getModelById(id);
+  if (entry) return entry.capabilities.includes('reasoning');
+  return /\/(o\d|gpt-5|.*reasoning)/i.test(id);
 }
 
 /** Request parameters that differ between reasoning and classic models. Pure. */

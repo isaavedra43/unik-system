@@ -37,17 +37,18 @@ import { absoluteUrl } from '@/lib/app-url';
 import type { Prisma } from '@prisma/client';
 import type { ToolDefinition, ToolExecutionResult } from './tools/registry';
 import { CORE_TOOL_NAMES, PROVIDER_MAX_TOOLS, findToolsByTopic, selectToolsForTurn } from './tool-selector';
-import { classifyTask, classifyTaskWithJev, resolveTurnModel } from './model-router';
-import { decide, answerBool } from './decisions/decision-engine';
-import { reviewNeededDecision } from './decisions/decision-points';
+import { classifyTask, classifyTaskWithJev, pickModelForTier, resolveTurnModel } from './model-router';
+import { decide, answerBool, answerScore } from './decisions/decision-engine';
+import { draftConfidenceDecision, reviewNeededDecision } from './decisions/decision-points';
 import { detectDomainsWithJev } from './decisions/jev-domains';
+import { prefetchLikelyRead } from './prefetch';
 import { wrapUntrusted } from './ai-guardrails';
 import { redactDeep } from '@/modules/extensions/secrets';
 import { getModelById } from './model-catalog';
 import { isReasoningModel } from './providers/openai';
 import { buildTurnDirectives, looksUnfinished, stripMarkdownImages, wantsDocument } from './turn-directives';
 import { reviewComplexAnswer } from './ai-answer-review';
-import { checkAnswer, collectFolios } from './answer-checks';
+import { checkAnswer, collectFolios, collectResultNumbers } from './answer-checks';
 import { parseFollowUps } from './followups';
 import { captureLearnings } from './ai-learning';
 import { buildRevisionDirective, isRevisionRequest, mergeRevisionArgs, type RevisionContext } from './revisions';
@@ -313,6 +314,16 @@ export async function* runAssistant(
     systemPrompt += `\n\n${await buildChatCopilotPrompt(input.actor, chatChannelId)}`;
   }
 
+  // 6.5. Agent memory recall: episodes, confirmed facts and playbooks relevant to THIS
+  // message. Injected before classification so it informs tool choice and routing.
+  // Skipped when the user disabled memory in preferences.
+  const actorPreferences = await getPreferences(input.actor.id).catch(() => null);
+  if (actorPreferences?.memoryEnabled !== false) {
+    const { buildRecallBlock } = await import('@/modules/memory/memory-service');
+    const recallBlock = await buildRecallBlock(input.actor.id, input.message).catch(() => '');
+    if (recallBlock) systemPrompt += `\n\n${recallBlock}`;
+  }
+
   // 7. Build messages (history is sanitized so every `tool` reply follows its
   // `tool_calls` message — the context window can otherwise cut a pair in half
   // and the provider rejects the request with a 400).
@@ -474,8 +485,9 @@ export async function* runAssistant(
     page: input.context?.page,
   });
   // Paused mode: the assistant keeps answering and drafting, but tools with side
-  // effects are not even offered to the model.
-  const preferences = await getPreferences(input.actor.id).catch(() => null);
+  // effects are not even offered to the model. (Preferences already loaded above
+  // for memory recall — same read reused.)
+  const preferences = actorPreferences;
   const lastAssistantContent = [...history].reverse().find((m) => m.role === 'assistant' && typeof m.content === 'string' && m.content.trim().length > 0)?.content ?? null;
   const documentRequested = wantsDocument(input.message, lastAssistantContent);
   const availableTools = (
@@ -527,15 +539,27 @@ export async function* runAssistant(
     ...(inboxConversationId ? [...INBOX_ONLY_TOOLS, ...INBOX_CONVERSATION_ID_TOOLS, 'suggestNextActions', 'draftQuoteFromRequest', 'sendQuoteToContact'] : []),
     ...(chatChannelId ? [...CHAT_ONLY_TOOLS, ...CHAT_CHANNEL_ID_TOOLS, 'suggestNextActions', 'listChatChannels', 'startInternalCall', 'createChatEvent'] : []),
   ];
-  const selection = selectToolsForTurn({
-    tools: availableTools,
-    message: input.message,
-    recentToolNames,
-    pinned: pinnedTools,
-    extraDomains: jevDomains,
-    // Attachment turns are long already: fewer tools = smaller prompt on every pass.
-    maxTools: Math.min(Math.max(8, Number(settings.maxToolsPerTurn) || 96), PROVIDER_MAX_TOOLS, attachmentsForContext.length > 0 ? 48 : PROVIDER_MAX_TOOLS),
-  });
+  // A "simple" turn (greeting, thanks, short clarification — no data intent and no
+  // recent tool context) gets the cheap model AND a minimal prompt: three tool
+  // specs instead of ~30. `loadMoreTools` is the escape valve — if the classifier
+  // misread the intent, the model pulls real tools in one extra step.
+  const SIMPLE_TIER_TOOLS = new Set(['loadMoreTools', 'getSystemTime', 'recallMemory']);
+  const selection =
+    classification.tier === 'simple' && pinnedTools.length === 0
+      ? {
+          offered: availableTools.filter((t) => SIMPLE_TIER_TOOLS.has(t.name)),
+          dropped: [] as ToolDefinition[],
+          domains: [] as string[],
+        }
+      : selectToolsForTurn({
+          tools: availableTools,
+          message: input.message,
+          recentToolNames,
+          pinned: pinnedTools,
+          extraDomains: jevDomains,
+          // Attachment turns are long already: fewer tools = smaller prompt on every pass.
+          maxTools: Math.min(Math.max(8, Number(settings.maxToolsPerTurn) || 96), PROVIDER_MAX_TOOLS, attachmentsForContext.length > 0 ? 48 : PROVIDER_MAX_TOOLS),
+        });
   // Same set ⇒ same order: the serialized tools are the first part of every request and a
   // stable prefix is what lets the provider cache the prompt between passes and turns.
   let offeredTools: ToolDefinition[] = [...selection.offered].sort((a, b) => a.name.localeCompare(b.name));
@@ -579,6 +603,27 @@ export async function* runAssistant(
     messages[0].content += `\n\n${directives}`;
   }
 
+  // 8.67. Objective detection (Jev): a message that delegates lasting work
+  // ("investiga X y avísame", "vigila Y cada mañana") becomes a Mission proposal
+  // instead of a one-shot answer. Chat and data asks stay in this turn.
+  if (!isAutoTrigger && !input.context?.voice && classification.tier !== 'simple') {
+    try {
+      const { missionClassifyDecision } = await import('./decisions/decision-points');
+      const { decide, answerChoice } = await import('./decisions/decision-engine');
+      const mc = missionClassifyDecision(input.message);
+      const kind = await decide(mc.state, mc.questions, {
+        userId: input.actor.id,
+        conversationId: input.conversationId,
+      }).then((r) => answerChoice(r, 'kind', ['chat', 'consulta', 'objetivo', 'rutina'] as const));
+      if (kind === 'objetivo' || kind === 'rutina') {
+        messages[0].content += `\n\n## OBJETIVO DETECTADO
+El mensaje del usuario delega trabajo que dura más que este turno${kind === 'rutina' ? ' (es recurrente)' : ''}. NO lo resuelvas improvisando en esta respuesta: llama proposeMission con el objetivo claro y los pasos concretos${kind === 'rutina' ? ' y el schedule apropiado ("daily:HH:mm" CDMX o "every:N" minutos)' : ''}. La misión corre cuando el usuario la aprueba, paso a paso, y le avisa al terminar. Si además hay algo contestable ya mismo, respóndelo breve y propón la misión para el trabajo duradero.`;
+      }
+    } catch (err) {
+      console.warn('[orchestrator] mission classify skipped:', err instanceof Error ? err.message : err);
+    }
+  }
+
   // 8.66. "Quita los totales", "ponlo en vertical": changes apply to the file just delivered.
   // The model is told what it generated it with; the generator gets the previous arguments
   // under the new ones; the result becomes the next version of the same document.
@@ -611,6 +656,22 @@ export async function* runAssistant(
   // 8.7. Live data requested explicitly → bypass the short-TTL read cache this turn.
   const wantsFreshData = /\b(actualiza\w*|en tiempo real|refresca\w*|sin cach[eé]|datos de ahora|ahorita mismo|al momento)\b/i.test(input.message);
 
+  // 8.75. Prefetch: Jev predicts the one read the model will almost surely call and
+  // warms the shared read cache while the first model call is still in flight. Only
+  // cacheable reads the actor can actually run; skipped when the user asked for
+  // live data (that call bypasses the cache anyway) or the turn is trivial.
+  if (!isAutoTrigger && classification.tier !== 'simple' && !wantsFreshData) {
+    void prefetchLikelyRead(input.message, input.actor, offeredTools, {
+      userId: input.actor.id,
+      conversationId: input.conversationId,
+      enabledToolNames: settings.enabledTools,
+    })
+      .then((p) => {
+        if (p) console.log(JSON.stringify({ event: 'ai.tools.prefetch', conversationId: input.conversationId, tool: p.tool, warmed: p.warmed, cached: p.cached }));
+      })
+      .catch(() => null);
+  }
+
   // 8.8. Plan-then-execute requested from the UI for this message.
   if (input.planFirst && messages[0] && typeof messages[0].content === 'string') {
     messages[0].content += `\n\n## PLANEAR PRIMERO (activado por el usuario en este mensaje)
@@ -622,6 +683,22 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
   let totalPromptTokens = 0;
   let totalCompletionTokens = 0;
   let usingFallback = false;
+  // Mid-turn escalation: a routed standard turn whose draft fails verification (or
+  // whose confidence Jev scores low) re-runs the final answer once on the
+  // complex-tier model — escalation, not degradation. Explicit picks never escalate.
+  let escalatedModel: string | null = null;
+  const escalateModel = (): string | null => {
+    if (escalatedModel || !routing.routed) return escalatedModel;
+    const heavy = pickModelForTier(settings, 'complex');
+    const pick =
+      classification.needsVision && !(getModelById(heavy)?.capabilities.includes('vision'))
+        ? settings.deployment?.trim() || 'gpt-4o'
+        : heavy;
+    if (pick === effectiveModel) return null;
+    escalatedModel = pick;
+    console.log(JSON.stringify({ event: 'ai.model.escalated', conversationId: input.conversationId, from: effectiveModel, to: pick }));
+    return pick;
+  };
   // Complex answers are reviewed before the user sees them, so their tokens are held back
   // and released in one piece (or rewritten once). Everything else streams as usual.
   // A reasoning model already checks its own work while thinking; a second pass would add
@@ -636,6 +713,8 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
   let reviews = 0;
   // Every folio a tool returned this turn: an answer may only cite these.
   const knownFolios = new Set<string>();
+  // Every count/total a tool declared this turn: "9 ventas" or "$59,468" must match one.
+  const knownTotals = { counts: new Set<number>(), money: new Set<number>() };
   const turnStats = { calls: 0, cachedHits: 0, parallelBatches: 0, dataToolsSucceeded: 0, failed: 0, loadedMore: 0 };
   const toolsUsedThisTurn: Array<{ name: string; success: boolean; cached?: boolean }> = [];
 
@@ -1152,7 +1231,10 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
       };
     }
 
-    if (result.success && result.result) collectFolios(result.result, knownFolios);
+    if (result.success && result.result) {
+      collectFolios(result.result, knownFolios);
+      collectResultNumbers(result.result, knownTotals.counts, knownTotals.money);
+    }
 
     // Track the last DATA tool result for auto-injection into artifact tools
     if (
@@ -1369,7 +1451,7 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
     let iterationToolCalls: Array<{ id: string; name: string; arguments: string }> | undefined;
     let finishReason: string | undefined;
 
-    const modelToUse = usingFallback ? fallbackModel : effectiveModel;
+    const modelToUse = usingFallback ? fallbackModel : escalatedModel ?? effectiveModel;
     // Copilot auto-analysis (open / inbound): the first call MUST produce the clickable
     // action chips instead of prose, so the user only clicks.
     const forceActions =
@@ -1456,9 +1538,10 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
       // Deterministic verification (every model): folios that no tool returned, group
       // headings whose count does not match their table. One corrective pass, max.
       if (nudges < 2 && iteration < settings.maxToolIterations && classification.tier !== 'simple') {
-        const check = checkAnswer(iterationContent, knownFolios);
+        const check = checkAnswer(iterationContent, knownFolios, knownTotals);
         if (check.issues.length > 0) {
           nudges += 1;
+          if (classification.tier === 'standard') escalateModel();
           console.log(JSON.stringify({ event: 'ai.answer.checks', conversationId: input.conversationId, issues: check.issues }));
           yield { type: 'tool_call_start', data: { name: 'reviewAnswer', args: '{}' } };
           yield { type: 'tool_call_end', data: { name: 'reviewAnswer', success: true, needsApproval: false, errorCode: null, error: null, durationMs: 0, cached: false } };
@@ -1468,6 +1551,45 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
             content:
               'Verificación automática de tu borrador (el usuario NO lo vio). Corrige y entrega la respuesta final completa:\n' +
               check.issues.map((i, n) => `${n + 1}. ${i}`).join('\n'),
+          });
+          continue;
+        }
+      }
+
+      // Mid-turn escalation on standard turns: the deterministic checks passed, so
+      // Jev scores how trustworthy the draft is; a low score reruns the final
+      // answer once on the complex-tier model. Only drafts that can be wrong in a
+      // way the user would notice — they cite numbers — are scored.
+      if (
+        escalatedModel === null &&
+        routing.routed &&
+        classification.tier === 'standard' &&
+        !isAutoTrigger &&
+        nudges < 2 &&
+        iteration < settings.maxToolIterations &&
+        iterationContent.trim().length >= 60 &&
+        /\d/.test(iterationContent) &&
+        toolsUsedThisTurn.length > 0
+      ) {
+        const gate = draftConfidenceDecision({
+          userMessage: input.message,
+          draft: iterationContent,
+          toolsUsed: toolsUsedThisTurn.map((t) => t.name),
+        });
+        const score = await decide(gate.state, gate.questions, {
+          userId: input.actor.id,
+          conversationId: input.conversationId,
+        })
+          .then((r) => answerScore(r, 'confidence', 5))
+          .catch(() => null);
+        if (score !== null && score <= 0.5 && escalateModel()) {
+          nudges += 1;
+          console.log(JSON.stringify({ event: 'ai.answer.low_confidence', conversationId: input.conversationId, score }));
+          messages.push({ role: 'assistant', content: iterationContent });
+          messages.push({
+            role: 'system',
+            content:
+              'Tu borrador anterior no pasó la evaluación de confianza (el usuario NO lo vio). Rehaz la respuesta: verifica cada cifra contra los resultados de tus tools, no afirmes nada que no puedas respaldar, y entrega la respuesta final completa.',
           });
           continue;
         }
@@ -1574,6 +1696,22 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
           lastAssistantContent,
           answer: iterationContent,
         }).catch((err) => console.warn('[ai-orchestrator] learning capture failed:', err instanceof Error ? err.message : err));
+      }
+
+      // Agent memory write (never blocks): Jev gates, the utility model distills the
+      // episode + facts + playbook of the turn into the three-layer memory.
+      if (actorPreferences?.memoryEnabled !== false && !input.context?.voice) {
+        void import('@/modules/memory/memory-extract')
+          .then((m) =>
+            m.extractAndStoreMemory(settings, {
+              userId: input.actor.id,
+              conversationId: input.conversationId,
+              userMessage: input.message,
+              answer: iterationContent,
+              toolsUsed: toolsUsedThisTurn.map((t) => t.name),
+            })
+          )
+          .catch((err) => console.warn('[ai-orchestrator] memory extract failed:', err instanceof Error ? err.message : err));
       }
 
       // Shared context: refresh this thread's rolling summary (never blocks the answer).

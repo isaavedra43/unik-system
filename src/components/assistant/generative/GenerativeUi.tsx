@@ -19,6 +19,12 @@ const McpUiFrame = dynamic(() => import('./McpUiFrame'), {
   loading: () => <div className="gui-card gui-skeleton" aria-busy="true" />,
 });
 
+// Recharts is heavy — the chart view loads only when a renderView spec emits one.
+const ViewChart = dynamic(() => import('./ViewChart'), {
+  ssr: false,
+  loading: () => <div className="gui-card gui-skeleton" aria-busy="true" />,
+});
+
 const dateFmt = new Intl.DateTimeFormat('es-MX', { dateStyle: 'medium', timeStyle: 'short' });
 const dayFmt = new Intl.DateTimeFormat('es-MX', { dateStyle: 'medium' });
 
@@ -330,6 +336,86 @@ export function GenerativeUi({
                   {c.detail && <div className="gui-muted">{c.detail}</div>}
                 </div>
               </div>
+            );
+          case 'chart':
+            return (
+              <section key={i} className="gui-card" aria-label={c.title ?? 'Gráfica'}>
+                {c.title && (
+                  <div className="gui-head">
+                    <span className="gui-title">{c.title}</span>
+                  </div>
+                )}
+                <ViewChart chart={c.chart} labels={c.labels} series={c.series} unit={c.unit} />
+              </section>
+            );
+          case 'kpi':
+            return (
+              <section key={i} className="gui-card" aria-label={c.title ?? 'Métricas'}>
+                {c.title && (
+                  <div className="gui-head">
+                    <span className="gui-title">{c.title}</span>
+                  </div>
+                )}
+                <div className="gui-kpis">
+                  {c.items.map((item, j) => (
+                    <div key={j} className={`gui-kpi is-${item.tone ?? 'neutral'}`}>
+                      <span className="gui-kpi-value">{item.value}</span>
+                      <span className="gui-kpi-label">{item.label}</span>
+                      {item.delta && <span className="gui-kpi-delta">{item.delta}</span>}
+                    </div>
+                  ))}
+                </div>
+              </section>
+            );
+          case 'progress': {
+            const done = c.steps.filter((s) => s.status === 'done').length;
+            return (
+              <section key={i} className="gui-card" aria-label={c.title}>
+                <div className="gui-head">
+                  <span className="gui-title">{c.title}</span>
+                  <span className="gui-muted">
+                    {done}/{c.steps.length}
+                  </span>
+                </div>
+                <div className="gui-progress-bar" aria-hidden="true">
+                  <div
+                    className="gui-progress-fill"
+                    style={{ width: `${Math.round((done / Math.max(1, c.steps.length)) * 100)}%` }}
+                  />
+                </div>
+                <ul className="gui-progress-steps">
+                  {c.steps.map((s, j) => (
+                    <li key={j} className={`gui-progress-step is-${s.status}`}>
+                      <span className="gui-progress-dot" aria-hidden="true" />
+                      <span className="gui-progress-title">{s.title}</span>
+                      {s.detail && <span className="gui-muted"> {s.detail}</span>}
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            );
+          }
+          case 'timeline':
+            return (
+              <section key={i} className="gui-card" aria-label={c.title ?? 'Actividad'}>
+                {c.title && (
+                  <div className="gui-head">
+                    <span className="gui-title">{c.title}</span>
+                  </div>
+                )}
+                <ul className="gui-timeline">
+                  {c.events.map((e, j) => (
+                    <li key={j} className={`gui-timeline-event is-${e.tone ?? 'neutral'}`}>
+                      <span className="gui-timeline-dot" aria-hidden="true" />
+                      <div className="gui-timeline-body">
+                        <span className="gui-timeline-label">{e.label}</span>
+                        {e.at && <time className="gui-muted">{e.at}</time>}
+                        {e.detail && <div className="gui-muted">{e.detail}</div>}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </section>
             );
           case 'mcp_ui':
             return (

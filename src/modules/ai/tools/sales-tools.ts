@@ -279,6 +279,59 @@ registerTool({
       };
     }
 
+    // Pool shared by the reconciliations below: orders of the period WITHOUT the SQL status
+    // pre-filter. Fetched lazily — only when a reconciliation actually needs it.
+    let datePool: typeof orders | null = null;
+    const getDatePool = async () => {
+      if (datePool) return datePool;
+      datePool = Object.keys(statusWhere).length > 0 ? await fetchOrders(dateWhere) : orders;
+      return datePool;
+    };
+
+    // Payment-method reconciliation: the filter is an EXACT normalized match, so asking for
+    // ["EFECTIVO"] silently drops "EFECTIVO EN BODEGA" and "EFECTIVO Y TARJETA" orders. Surface
+    // what the filter left out so the model can say "9 en EFECTIVO + 15 más en EFECTIVO EN
+    // BODEGA" instead of answering "9 ventas" as if that were all the cash.
+    let paymentReconciliation: Record<string, unknown> | null = null;
+    if (args.paymentMethods && args.paymentMethods.length > 0) {
+      const withoutPayment = { ...args, paymentMethods: undefined };
+      const sameOtherFilters = applySalesOrderFilters(await getDatePool(), withoutPayment);
+      const matchedNumbers = new Set(filtered.map((o) => o.salesOrderNumber));
+      const excluded = sameOtherFilters.filter((o) => !matchedNumbers.has(o.salesOrderNumber));
+      if (excluded.length > 0) {
+        paymentReconciliation = {
+          totalWithoutPaymentFilter: sameOtherFilters.length,
+          matched: filtered.length,
+          excludedByPaymentFilter: excluded.length,
+          excludedBreakdownByPaymentMethod: valueDistribution(
+            excluded.map((o) => o.paymentMethod),
+            10
+          ),
+          allBreakdownByPaymentMethod: valueDistribution(
+            sameOtherFilters.map((o) => o.paymentMethod),
+            10
+          ),
+          note:
+            `Con los mismos filtros pero SIN método de pago hay ${sameOtherFilters.length} órdenes; el filtro de método dejó ${filtered.length} y excluyó ${excluded.length}. ` +
+            'Si el usuario pidió "efectivo" o un método en sentido amplio, menciona SIEMPRE los métodos excluidos con su número (ej. "9 en EFECTIVO y 15 más en EFECTIVO EN BODEGA") — no presentes el subtotal como si fuera el total.',
+        };
+      }
+    }
+
+    // Per-filter counts whenever several filters combine — even with non-empty results. Lets the
+    // model see which filter shrank the set ("24 órdenes hoy, solo 9 con EFECTIVO") without
+    // waiting for a zero-result diagnostic.
+    let filterMatchSummary: Record<string, unknown> | null = null;
+    if (filtered.length > 0 && activeFilters.length >= 2) {
+      const inRange = await getDatePool();
+      filterMatchSummary = {
+        totalOrdersInDateRange: inRange.length,
+        matchesPerFilterInDateRange: perFilterMatchCounts(inRange, args),
+        note:
+          'Cada número es cuántas órdenes del periodo cumplen ESE filtro por separado. Si el usuario pidió algo amplio y un filtro lo redujo mucho, dilo con los números.',
+      };
+    }
+
     // Reconciliation: deliveryType is a heuristic classifier (only "pickup" vs "delivered to
     // customer"), so when it's used, surface how many orders matching the OTHER filters were left
     // out because their deliveryMethod didn't classify — otherwise sub-totals silently don't add
@@ -311,8 +364,8 @@ registerTool({
     if (usedStatusFilter) {
       const withoutStatus = { ...args };
       for (const k of STATUS_KEYS) withoutStatus[k] = undefined;
-      // The SQL pre-filter already excluded other statuses, so fetch the period again without it.
-      const unfilteredPool = Object.keys(statusWhere).length > 0 ? await fetchOrders(dateWhere) : orders;
+      // The SQL pre-filter already excluded other statuses, so use the period pool without it.
+      const unfilteredPool = await getDatePool();
       const sameOtherFilters = applySalesOrderFilters(unfilteredPool, withoutStatus);
       const matchedNumbers = new Set(filtered.map((o) => o.salesOrderNumber));
       const excluded = sameOtherFilters.filter((o) => !matchedNumbers.has(o.salesOrderNumber));
@@ -334,6 +387,8 @@ registerTool({
       ...(filtered.length > 0 && activeFilters.length > 0 ? { interpretation: interpretSalesOrderMatches(filtered, args) } : {}),
       ...(statusReconciliation ? { statusReconciliation } : {}),
       ...(deliveryReconciliation ? { deliveryReconciliation } : {}),
+      ...(paymentReconciliation ? { paymentReconciliation } : {}),
+      ...(filterMatchSummary ? { filterMatchSummary } : {}),
       ...(truncated
         ? {
             truncated: true,

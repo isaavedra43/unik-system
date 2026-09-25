@@ -10,7 +10,19 @@ describe('OpenAI reasoning-model parameters', () => {
     expect(isReasoningModel('o1')).toBe(true);
     expect(isReasoningModel('gpt-4o')).toBe(false);
     expect(isReasoningModel('gpt-4.1-mini')).toBe(false);
-    expect(isReasoningModel('moonshotai/kimi-k2.6')).toBe(false);
+  });
+
+  it('recognizes vendor-prefixed reasoning ids through the catalog', () => {
+    // OpenRouter ids carry the vendor prefix; the catalog declares reasoning.
+    expect(isReasoningModel('openai/gpt-5.2')).toBe(true);
+    expect(isReasoningModel('anthropic/claude-opus-4.5')).toBe(true);
+    expect(isReasoningModel('x-ai/grok-4')).toBe(true);
+    expect(isReasoningModel('google/gemini-2.5-flash')).toBe(true);
+    // Prefixed catalog ids without the reasoning capability stay classic.
+    expect(isReasoningModel('deepseek/deepseek-chat-v3.1')).toBe(false);
+    // Unknown prefixed ids fall back to the tail pattern.
+    expect(isReasoningModel('vendor/o3-something')).toBe(true);
+    expect(isReasoningModel('vendor/llama-4')).toBe(false);
   });
 
   it('sends max_completion_tokens + reasoning_effort and never temperature to reasoning models', () => {

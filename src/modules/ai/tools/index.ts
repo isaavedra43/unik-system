@@ -114,6 +114,16 @@ import './web-tools';
 
 // Venue tools (computadora virtual Daytona: browser, exec, archivos, screenshot)
 import './venue-tools';
+import '@/modules/venues/venue-playbook-tools';
+
+// Agent memory tools (recallMemory, saveFact — memoria episódica/semántica/procedural)
+import '@/modules/memory/memory-tools';
+
+// Mission tools (proposeMission, listMissions, missionStatus, controlMission — objetivos persistentes)
+import '@/modules/missions/mission-tools';
+
+// View tools (renderView — chart/kpi/progress/timeline inline en el chat)
+import './view-tools';
 
 // Export the registry API for consumers
 export * from './registry';

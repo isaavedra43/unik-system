@@ -41,6 +41,7 @@ import { AssistantWidget } from '@/components/assistant/AssistantWidget';
 import { CallDockProvider } from '@/components/calls/CallDockProvider';
 import { ThemeToggle } from '@/components/layout/ThemeToggle';
 import { useNotificationStream } from '@/components/notifications/useNotificationStream';
+import { PushEnablePrompt } from '@/components/notifications/PushEnablePrompt';
 import { SeedDemoDataButton } from '@/components/dev/SeedDemoDataButton';
 
 interface AppShellProps {
@@ -887,6 +888,7 @@ export default function AppShell({ user, children }: AppShellProps) {
           </main>
         </div>
         {showWidget && <AssistantWidget user={user} context={{ page: pathname }} />}
+        <PushEnablePrompt />
       </div>
     </CallDockProvider>
   );

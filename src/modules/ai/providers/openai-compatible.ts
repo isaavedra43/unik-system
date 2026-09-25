@@ -14,6 +14,7 @@ import { AiApiError } from './types';
 import { recordAiApiCall } from '../ai-audit';
 import { getProviderConfig } from '../ai-config';
 import { getModelById } from '../model-catalog';
+import { buildGenerationParams } from './openai';
 import { createThinkFilter, stripThink } from './think-filter';
 
 /**
@@ -122,6 +123,17 @@ export function createOpenAiCompatibleProvider(options: OpenAiCompatibleOptions)
 
   const supportsVision = (model: string) => getModelById(model)?.capabilities.includes('vision') ?? false;
 
+  // OpenRouter normalizes reasoning params (reasoning_effort, max_completion_tokens)
+  // per vendor, so prefixed heavy ids get them there; every other compatible
+  // server keeps the classic pair unless the bare id is a known reasoning model.
+  const generationParams = (
+    model: string,
+    opts: Pick<ChatCompletionOptions, 'temperature' | 'maxTokens' | 'reasoningEffort'>
+  ): Record<string, unknown> =>
+    options.id === 'openrouter'
+      ? buildGenerationParams(model, opts)
+      : { temperature: opts.temperature ?? 0.3, max_tokens: opts.maxTokens ?? 2000 };
+
   const provider: OpenAiCompatibleProvider = {
     id: options.id,
     label: options.label,
@@ -153,8 +165,10 @@ export function createOpenAiCompatibleProvider(options: OpenAiCompatibleOptions)
           model,
           messages: adaptMessagesForModel(opts.messages, supportsVision(model)) as unknown as OpenAI.Chat.Completions.ChatCompletionMessageParam[],
           tools: toTools(opts.tools),
-          temperature: opts.temperature ?? 0.3,
-          max_tokens: opts.maxTokens ?? 2000,
+          // Reasoning params go through OpenRouter (it normalizes them per vendor)
+          // or bare reasoning ids; other compatible servers keep classic params —
+          // some reject max_completion_tokens outright.
+          ...generationParams(model, opts),
         });
         const choice = response.choices[0];
         const usage = response.usage;
@@ -216,8 +230,7 @@ export function createOpenAiCompatibleProvider(options: OpenAiCompatibleOptions)
           messages: adaptMessagesForModel(opts.messages, supportsVision(model)) as unknown as OpenAI.Chat.Completions.ChatCompletionMessageParam[],
           tools,
           ...(forced ? { tool_choice: forced } : {}),
-          temperature: opts.temperature ?? 0.3,
-          max_tokens: opts.maxTokens ?? 2000,
+          ...generationParams(model, opts),
           stream: true,
           stream_options: { include_usage: true },
         });

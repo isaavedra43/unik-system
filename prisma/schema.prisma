@@ -2698,3 +2698,140 @@ model BrowserProfile {
 
   @@unique([userId, host])
 }
+
+// =====================================================
+// AGENT CORE — memoria real, objetivos y automatizaciones
+// =====================================================
+
+/// Memoria episódica: cada turno relevante destilado a un resumen buscable.
+/// embedding Float[] + coseno en-app (mismo patrón que KnowledgeChunk).
+model AgentEpisode {
+  id             String   @id @default(cuid())
+  userId         String
+  conversationId String?
+  /// "Pidió ventas en efectivo de hoy → 9 EFECTIVO + 15 EFECTIVO EN BODEGA"
+  summary        String
+  embedding      Float[]  @default([])
+  /// entidades mencionadas: clientes, folios, productos (para recall por keyword)
+  entities       String[] @default([])
+  toolNames      String[] @default([])
+  /// 1-10: lo que vale recordar vs. ruido
+  importance     Int      @default(5)
+  createdAt      DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@index([userId, importance])
+}
+
+/// Memoria semántica: hechos del negocio/usuario. Los auto-extraídos llegan
+/// `pending` y el usuario los confirma — nada se afirma sin confirmación.
+model AgentFact {
+  id              String    @id @default(cuid())
+  userId          String
+  /// "efectivo", "Roberto", "corte de caja"
+  entity          String
+  /// "incluye", "es", "horario"
+  attribute       String
+  /// "EFECTIVO + EFECTIVO EN BODEGA", "contacto de logística", "8pm"
+  value           String
+  /// 0-1
+  confidence      Float     @default(0.7)
+  /// user | tool | observation | correction
+  source          String    @default("observation")
+  /// toolCallId / conversationId / fuente del hecho
+  sourceRef       String?
+  /// pending | active | archived
+  status          String    @default("pending")
+  lastConfirmedAt DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([userId, status, entity])
+  @@index([userId, entity, attribute])
+}
+
+/// Memoria procedural: patrones de tool-args que funcionaron para este usuario.
+/// "Para 'efectivo' este usuario espera EFECTIVO + EFECTIVO EN BODEGA".
+model AgentPlaybook {
+  id           String   @id @default(cuid())
+  userId       String
+  /// intención disparadora: "ventas en efectivo", "pendientes de entrega"
+  trigger      String
+  toolName     String
+  /// args que funcionaron (sin datos concretos: folios/fechas se omiten)
+  argsTemplate Json
+  note         String?
+  successCount Int      @default(1)
+  failCount    Int      @default(0)
+  lastUsedAt   DateTime @default(now())
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([userId, successCount])
+  @@index([userId, trigger])
+}
+
+/// Objetivo persistente: el agente lo persigue hasta completarlo, con
+/// presupuesto, journal y reanudación entre turnos/sesiones.
+model Mission {
+  id             String         @id @default(cuid())
+  userId         String
+  conversationId String?
+  goal           String
+  /// planning | awaiting_approval | active | blocked | done | failed | cancelled
+  status         String         @default("planning")
+  /// pasos: [{title, status, toolHint?, result?}]
+  plan           Json?
+  /// tope de gasto vía UsageMeter
+  budgetUsd      Decimal?       @db.Decimal(10, 2)
+  spentUsd       Decimal        @default(0) @db.Decimal(10, 4)
+  /// cron expression para rutinas (Vigía): "0 20 * * *" = corte a las 8pm
+  schedule       String?
+  /// próxima corrida programada
+  nextRunAt      DateTime?
+  venueSessionId String?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  completedAt    DateTime?
+  events         MissionEvent[]
+
+  @@index([userId, status])
+  @@index([status, nextRunAt])
+}
+
+/// Journal append-only de la misión: cada paso, tool call y hallazgo.
+/// Es también el feed de actividad que ve el usuario (SSE mission:{id}).
+model MissionEvent {
+  id        String   @id @default(cuid())
+  missionId String
+  /// step_started | step_done | tool_call | finding | approval | error | note
+  type      String
+  payload   Json?
+  createdAt DateTime @default(now())
+  mission   Mission  @relation(fields: [missionId], references: [id], onDelete: Cascade)
+
+  @@index([missionId, createdAt])
+}
+
+/// Automatización de computadora virtual: flujo grabable que una rutina
+/// ejecuta sin improvisar (login → navegar → extraer → reportar).
+model VenuePlaybook {
+  id           String    @id @default(cuid())
+  userId       String
+  /// "Revisión diaria GPS", "Descargar reporte Zoho"
+  name         String
+  /// [{action, args, expect?}] — browser.open/click/type/extract/exec…
+  steps        Json
+  /// parámetros declarados que la corrida llena (fechas, ids)
+  params       Json?
+  /// host/perfil requerido (BrowserProfile.host)
+  requiresHost String?
+  /// pending | active | archived — el usuario aprueba el playbook una vez
+  status       String    @default("pending")
+  runCount     Int       @default(0)
+  lastRunAt    DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([userId, status])
+}

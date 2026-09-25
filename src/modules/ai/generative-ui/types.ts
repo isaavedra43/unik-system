@@ -36,6 +36,31 @@ export interface UiMcpResource {
   text?: string;
 }
 
+export interface UiChartSeries {
+  name?: string;
+  data: number[];
+}
+
+export interface UiKpiItem {
+  label: string;
+  value: string;
+  delta?: string;
+  tone?: UiTone;
+}
+
+export interface UiProgressStep {
+  title: string;
+  status: 'pending' | 'running' | 'done' | 'failed';
+  detail?: string;
+}
+
+export interface UiTimelineEvent {
+  label: string;
+  at?: string;
+  detail?: string;
+  tone?: UiTone;
+}
+
 export type UiComponent =
   | { type: 'connect'; toolkit: string; name: string; connected: boolean }
   | { type: 'records'; heading?: string; source?: string; items: UiRecord[]; total: number }
@@ -49,6 +74,18 @@ export type UiComponent =
       total: number;
     }
   | { type: 'notice'; tone: UiTone; title: string; detail?: string; url?: string }
+  | {
+      /** Live chart spec emitted by the renderView tool — never raw markup. */
+      type: 'chart';
+      title?: string;
+      chart: 'bar' | 'line' | 'pie';
+      unit?: string;
+      labels: string[];
+      series: UiChartSeries[];
+    }
+  | { type: 'kpi'; title?: string; items: UiKpiItem[] }
+  | { type: 'progress'; title: string; steps: UiProgressStep[] }
+  | { type: 'timeline'; title?: string; events: UiTimelineEvent[] }
   | { type: 'mcp_ui'; resource: UiMcpResource; title?: string };
 
 export interface UiToolResultInput {
