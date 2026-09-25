@@ -278,6 +278,10 @@ const server = http.createServer(async (req, res) => {
   });
 });
 
-server.listen(PORT, '127.0.0.1', () => {
-  console.log(`unik-browser-controller listening on 127.0.0.1:${PORT}`);
+// 0.0.0.0 — Daytona's preview proxy reaches the sandbox from outside the
+// loopback interface; binding 127.0.0.1 makes every /act and /health call a
+// 502 even though the controller is alive. Auth stays the x-unik-token header
+// on every request, loopback or not.
+server.listen(PORT, '0.0.0.0', () => {
+  console.log(`unik-browser-controller listening on 0.0.0.0:${PORT}`);
 });

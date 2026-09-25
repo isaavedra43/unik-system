@@ -219,7 +219,7 @@ export class DaytonaVenue implements Venue {
     // Start detached so executeCommand returns immediately.
     try {
       await this.sandbox.process.executeCommand(
-        `cd ${CONTROLLER_REMOTE_DIR} && nohup node browser-controller.mjs > controller.log 2>&1 &`,
+        `pkill -f browser-controller.mjs 2>/dev/null; sleep 1; cd ${CONTROLLER_REMOTE_DIR} && nohup node browser-controller.mjs > controller.log 2>&1 &`,
         CONTROLLER_REMOTE_DIR,
         { UNIK_BROWSER_TOKEN: this.controllerToken, UNIK_CHROME_PATH: this.chromePath },
         10
@@ -325,25 +325,46 @@ export class DaytonaVenue implements Venue {
     return { imageBase64: b64, mimeType: 'image/jpeg' };
   }
 
+  /** One lazy heal per session: a dead/unreachable controller gets a single
+   *  re-provision+respawn inside the turn, then the act retries once. */
+  private healAttempted = false;
+
   async browserAct(input: BrowserActInput): Promise<BrowserActResult> {
-    let res: Response;
+    let res: Response | undefined;
     try {
       const base = await this.controllerUrl();
       res = await this.controllerFetch(`${base}/act`, {
         method: 'POST',
         body: JSON.stringify(input),
       });
-    } catch {
-      // Controller unreachable — still provisioning or it died. Include the
-      // last diagnostic so the model can tell the user the real cause.
-      const why = this.lastDiag ? ` Detalle: ${this.lastDiag.slice(0, 300)}` : '';
-      return {
-        ok: false,
-        error: `El navegador de la VM aún no responde (aprovisionando o el controlador falló al arrancar). Reintenta en unos segundos; si persiste, la sesión se recreará.${why}`,
-      };
+      if (res.status >= 500) throw new Error(`controller ${res.status}`);
+    } catch (err) {
+      if (!this.healAttempted) {
+        this.healAttempted = true;
+        try {
+          await this.startController();
+          const base = await this.controllerUrl();
+          res = await this.controllerFetch(`${base}/act`, {
+            method: 'POST',
+            body: JSON.stringify(input),
+          });
+        } catch {
+          /* healed attempt also failed — report below */
+        }
+      }
+      if (!res) {
+        const why = this.lastDiag ? ` Detalle: ${this.lastDiag.slice(0, 300)}` : '';
+        const cause = err instanceof Error && err.message.startsWith('controller')
+          ? `Controller respondió ${err.message.slice(11)}.`
+          : 'El navegador de la VM aún no responde (aprovisionando o el controlador falló al arrancar).';
+        return { ok: false, error: `${cause} Reintenta en unos segundos; si persiste, la sesión se recreará.${why}` };
+      }
     }
-    const data = (await res.json().catch(() => null)) as BrowserActResult | null;
-    if (!data) return { ok: false, error: `Controller respondió ${res.status}` };
+    const data = (await res!.json().catch(() => null)) as BrowserActResult | null;
+    if (!data) {
+      const why = this.lastDiag ? ` Detalle: ${this.lastDiag.slice(0, 300)}` : '';
+      return { ok: false, error: `Controller respondió ${res.status}.${why}` };
+    }
     if (data.screenshotBase64 && data.screenshotBase64.length > 8_000_000) {
       data.screenshotBase64 = undefined;
       data.error = 'screenshot demasiado grande';
