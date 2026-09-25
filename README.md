@@ -28,7 +28,7 @@ UNIK opera como capa de inteligencia y operación sobre **Zoho Inventory/Books**
 
 | Área                 | Ruta                                                        | Módulo                                                                                         |
 | -------------------- | ----------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| Asistente IA         | `/app/assistant`                                            | `src/modules/ai` (~57 tools, multi-proveedor, venue Daytona, UI generativa, memoria, misiones) |
+| Asistente IA         | `/app/assistant`                                            | `src/modules/ai` + `src/modules/agents` (220+ tools, multi-agente, routing JEV, delegación, venue Daytona, UI generativa, memoria, misiones, triggers) |
 | Órdenes de venta     | `/app/sales/orders`                                         | `src/modules/sales`                                                                            |
 | Cotizaciones         | `/app/quotes`                                               | `src/modules/quotes`                                                                           |
 | Facturas / Pagos     | `/app/invoices`, `/app/payments`                            | `src/modules/invoices`, `src/modules/payments`                                                 |
@@ -55,14 +55,18 @@ Zoho API → sync engine → IntegrationSnapshot (RAW) → normalizer → tablas
 
 El detalle está en `docs/integrations/zoho.md` y `docs/architecture/current-state.md`.
 
-## Asistente IA
+## Asistente IA — UNIVERSO
 
-Un solo agente vive en `/app/assistant` y como servidor MCP (`/api/mcp`). Comparte orquestador, tools, permisos y aprobaciones. Ver `docs/ai-unified.md`.
+El asistente vive en `/app/assistant` y como servidor MCP (`/api/mcp`). Comparte orquestador, tools, permisos y aprobaciones. Ver `docs/ai-unified.md` y `docs/agents.md`.
 
-- Más de 50 tools internas (ventas, compras, mensajería, campañas, voz, web, documentos, venue).
+- **Multi-agente** (`UNIK_AGENT_RUNTIME_V2`, apagado por default): un agente principal por usuario (badge JEFE) + especialistas creados desde "+ Nuevo agente" + subagentes delegados por tarea. Cada turno se graba como `AgentRun` con `traceId`, linaje y costos.
+- **Delegación**: `delegateTask` manda una cápsula (nunca el historial) a un worker en sesión fresca (`agent.task.run`); el reporte vuelve plegado al chat (`AgentMessage`) y al terminal vivo del panel.
+- **Routing JEV**: una llamada batch decide path, dominios, delegación, modelo y riesgo (deadline 600 ms, fallback heurístico).
+- **220+ tools internas** (ventas, compras, mensajería, campañas, voz, web, documentos, venue) con ToolGateway por agente (grants, autonomía×efecto, presupuesto).
+- **Triggers/rutinas**: `trigger.tick` cada 60 s — horarios, condiciones deterministas sin LLM, cambios de entidad, webhooks y playbooks de venue.
 - Escrituras y envíos siempre pasan por tarjeta de aprobación (`AiProposal`).
 - UI generativa (tablas, tarjetas, charts, HTML interactivo sandboxed).
-- Venue: computadora remota desechable (Daytona) con navegador Playwright.
+- Venue: computadora remota desechable (Daytona) compartida con lease por run, navegador Playwright.
 
 ## Infraestructura
 
@@ -101,6 +105,7 @@ npm run ui:check           # typecheck + lint + format + build + storybook
 | ------------------------------------ | ------------------------------------------------ |
 | `docs/architecture/current-state.md` | Estado funcional completo por fases              |
 | `docs/ai-unified.md`                 | Asistente, tools, MCP, venue, documentos         |
+| `docs/agents.md`                     | Runtime multi-agente UNIVERSO (schema, delegación, JEV, triggers, APIs) |
 | `docs/ai-model-policy.md`            | Reparto de modelos por tarea                     |
 | `docs/authentication.md`             | Sesiones, roles, permission registry             |
 | `docs/integrations/zoho.md`          | Integración Zoho Inventory/Books                 |

@@ -22,6 +22,7 @@ Personalización: tono (profesional/cercano/directo), idioma (es/en), profundida
 - Visible, editable y eliminable por su dueño (`/app/assistant/api/memory`, `[id]`, `DELETE` todo).
 - El usuario crea recuerdos activos; lo que el asistente propone (`rememberForUser`, incluidas correcciones) queda **pendiente** hasta que el usuario confirma (`[id]/confirm`). Aprendizaje controlado, nunca silencioso.
 - Se inyectan hasta 30 recuerdos activos por recencia; los pendientes solo se mencionan como "no confirmados".
+- **Scopes por agente** (`src/modules/agents/memory-router.ts`, runtime V2): los recuerdos llevan `tenantId`/`agentId`/`conversationId` y el router decide qué inyectar por alcance (tenant → user → agent → thread) y modo (`full` para el principal, `on_demand` para workers delegados, `off`).
 
 ## Biblioteca aprobada (`KnowledgeSource` → versiones → fragmentos)
 

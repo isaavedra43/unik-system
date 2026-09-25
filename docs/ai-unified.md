@@ -1,7 +1,15 @@
 # IA unificada de UNIK (asistente y MCP)
 
-Una sola IA vive en el asistente y en el servidor MCP. Comparte orquestador, tools,
+La IA vive en el asistente y en el servidor MCP. Comparte orquestador, tools,
 permisos, aprobaciones, memoria personal y contexto reciente.
+
+> **UNIVERSO (2026-10, flag `UNIK_AGENT_RUNTIME_V2`):** encima de esta misma
+> base corre el runtime multi-agente — un agente principal por usuario +
+> especialistas + subagentes delegados con identidad propia (persona, modelo,
+> toolAllowlist), `AgentRun`/`AgentEvent` por turno, routing JEV por envelope,
+> delegación con cápsulas, DAG de tasks, venue central con lease, triggers
+> always-on, ToolGateway por agente y memoria con scopes. Detalle completo en
+> `docs/agents.md`. Sin el flag, todo lo descrito aquí corre igual en modo LEGACY.
 
 | Superficie   | Dónde            | Ruta de turno                  | Hilo (`AiConversation.context.kind`) |
 | ------------ | ---------------- | ------------------------------ | ------------------------------------ |

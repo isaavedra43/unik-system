@@ -81,14 +81,30 @@ Detalle en `docs/modules/sales-orders.md` (referencia del patrón) y
 
 ## Asistente IA (`/app/assistant` + MCP server)
 
-`src/modules/ai/` + `docs/ai-unified.md`. Un solo agente: orquestador SSE con loop
-de tools, selección semántica de tools, routing de modelos por tier (OpenAI,
-Anthropic, Gemini, Ollama, CanopyWave, OpenRouter, local; GPT-5/o-series con
-reasoning effort), memoria personal (`AiMemory`), biblioteca de conocimiento
-(`KnowledgeSource` + FTS + embeddings), misiones, artefactos (PDF/Word/Excel/CSV/
-charts/tablas), UI generativa (spec JSON cerrada + iframes sandboxed
-`renderInteractiveUi`), verificación determinista de respuestas y revisión interna.
-Escrituras → `AiProposal` con aprobación humana exacta.
+`src/modules/ai/` + `src/modules/agents/` (`docs/ai-unified.md`, `docs/agents.md`).
+Base: orquestador SSE con loop de tools, selección semántica de tools, routing de
+modelos por tier (OpenAI, Anthropic, Gemini, Ollama, CanopyWave, OpenRouter,
+local; GPT-5/o-series con reasoning effort), memoria personal (`AiMemory`),
+biblioteca de conocimiento (`KnowledgeSource` + FTS + embeddings), misiones,
+artefactos (PDF/Word/Excel/CSV/charts/tablas), UI generativa (spec JSON cerrada +
+iframes sandboxed `renderInteractiveUi`), verificación determinista de respuestas
+y revisión interna. Escrituras → `AiProposal` con aprobación humana exacta.
+
+- **Runtime multi-agente UNIVERSO** (`src/modules/agents/`, flag
+  `UNIK_AGENT_RUNTIME_V2`, migración `20260925140000_universo_agent_runtime`):
+  `Agent` principal por usuario + especialistas + transitorios; `AgentRun`/
+  `AgentEvent` con `traceId` por turno; `AgentTask` DAG con `dependsOn` y
+  `delegateTask` (cápsula, worker `agent.task.run`, `AgentMessage` al padre);
+  routing envelope JEV (10 decisiones, 600 ms, fallback); `Workspace`/`Lease`
+  venue central; `Trigger` (time/condition/entity_change/webhook/playbook,
+  `trigger.tick` 60 s); ToolGateway (grants, autonomía×efecto, presupuesto);
+  `MemoryRouter` por scope; `tenantId` en `CurrentUser` (fail-soft `unik`).
+- **Front agentes** (`src/components/assistant/agents/`): sidebar "Tu equipo"
+  con JEFE fijado, `OpsPanel` (pantalla venue + terminal vivo + misiones +
+  vigilancias + aprobaciones + costo vía `GET /api/usage`), tarjetas
+  Mission/Activity/AgentMessage/RoutineChip, mode pills Misión/Mensaje.
+- **APIs**: `/agents`, `/runs/[id]`, `/tasks/[id]/cancel`, `/triggers`,
+  `/workspace`, `/usage`; `POST /chat` acepta `agentId`.
 
 - **Venue** (`src/modules/venues`): VM Daytona desechable, controller Playwright,
   screenshots post-acción, `secureInput` para credenciales sin pasar por el modelo.
@@ -110,7 +126,7 @@ Escrituras → `AiProposal` con aprobación humana exacta.
 
 ## Estado del repositorio
 
-- ~113 modelos Prisma, ~79 migraciones versionadas, 300+ rutas API, ~200 K líneas
+- ~127 modelos Prisma, ~80 migraciones versionadas, 300+ rutas API, ~200 K líneas
   `src/`, tests con Vitest (`*.test.ts` junto a módulos) + Playwright (`e2e/`) +
   Storybook.
 
