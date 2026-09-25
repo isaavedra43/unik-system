@@ -109,7 +109,8 @@ export async function listToolkits(
     const session = await sessionFor(actor, allowed);
     const res = await session.toolkits({
       toolkits: allowed,
-      limit: Math.min(Math.max(options.limit ?? 50, 1), 100),
+      // El endpoint session.toolkits() de Composio rechaza limit > 50 (HTTP_BadRequest).
+      limit: Math.min(Math.max(options.limit ?? 50, 1), 50),
       ...(options.search ? { search: options.search } : {}),
       ...(options.connectedOnly ? { isConnected: true } : {}),
     });
@@ -173,7 +174,7 @@ export async function getConnectionState(
       403
     );
   }
-  const found = (await listToolkits(actor, { limit: 100 })).find((t) => t.slug === slug);
+  const found = (await listToolkits(actor, { limit: 50 })).find((t) => t.slug === slug);
   return { toolkit: slug, name: found?.name ?? slug, connected: Boolean(found?.connected) };
 }
 
