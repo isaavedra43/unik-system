@@ -194,6 +194,29 @@ export function OpsPanel({
     startRef.current = null;
   }, [conversationId]);
 
+  // Hydrate real state on mount/conversation switch: the sandbox is per-user,
+  // not per-conversation, so a page reload or a switched conversation must not
+  // show "Apagada" while a session from earlier is still actually running.
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/app/assistant/api/venue/state', { cache: 'no-store' })
+      .then(async (res) => {
+        if (cancelled || !res.ok) return;
+        const d = (await res.json()) as {
+          active?: boolean;
+          screen?: { dataUrl?: string; url?: string } | null;
+        };
+        if (d.active === true) {
+          setVenueActive(true);
+          if (d.screen?.dataUrl) setScreen({ dataUrl: d.screen.dataUrl, url: d.screen.url });
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [conversationId]);
+
   useEffect(() => {
     if (!conversationId) return;
     const channel = `assistant:${conversationId}`;
