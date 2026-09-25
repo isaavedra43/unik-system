@@ -47,7 +47,9 @@ COPY prisma ./prisma
 COPY scripts/prisma-deploy.mjs ./scripts/prisma-deploy.mjs
 COPY --from=deps /app/node_modules/prisma ./node_modules/prisma
 COPY --from=deps /app/node_modules/@prisma ./node_modules/@prisma
-COPY --from=deps /app/node_modules/.bin/prisma ./node_modules/.bin/prisma
+# NO .bin/prisma: COPY dereferences the symlink into a regular file, so the
+# bundled CLI resolves __dirname=.bin/ and can't find its wasm next to it.
+# prisma-deploy.mjs runs node ./node_modules/prisma/build/index.js directly.
 COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 
 # Disk storage driver writes under cwd when used (storage/drivers/index.ts).

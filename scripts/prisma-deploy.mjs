@@ -75,7 +75,15 @@ async function resolveFailedMigrations() {
 
 await resolveFailedMigrations();
 
-const deploy = spawnSync('npx', ['prisma', 'migrate', 'deploy'], { stdio: 'inherit' });
+// Run the real CLI entry point — never the `.bin/prisma` shim. In the
+// standalone Docker image, COPY dereferences the symlink into a plain file at
+// .bin/, so the bundled CLI looks up prisma_schema_build_bg.wasm relative to
+// __dirname=.bin/ and dies with ENOENT. `build/index.js` keeps its own dir.
+import { existsSync } from 'node:fs';
+const cliEntry = './node_modules/prisma/build/index.js';
+const deploy = existsSync(cliEntry)
+  ? spawnSync('node', [cliEntry, 'migrate', 'deploy'], { stdio: 'inherit' })
+  : spawnSync('npx', ['prisma', 'migrate', 'deploy'], { stdio: 'inherit' });
 if (deploy.error) {
   console.error('[migrate] could not run "prisma migrate deploy":', deploy.error.message);
   process.exit(1);
