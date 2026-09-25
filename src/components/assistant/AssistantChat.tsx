@@ -16,6 +16,8 @@ import {
 import { VoiceMode } from './VoiceMode';
 import { AssistantProposalCard, type ProposalData } from './AssistantProposalCard';
 import { createConversationAction } from '@/app/app/assistant/actions';
+import { GenerativeUi } from './generative/GenerativeUi';
+import type { UiComponent } from '@/modules/ai/generative-ui/types';
 
 export interface AssistantChatProps {
   conversationId: string | null;
@@ -43,6 +45,7 @@ export function AssistantChat({
   const [activeToolCalls, setActiveToolCalls] = useState<ActiveToolCall[]>([]);
   const [artifacts, setArtifacts] = useState<ArtifactData[]>([]);
   const [proposals, setProposals] = useState<ProposalData[]>([]);
+  const [liveUi, setLiveUi] = useState<UiComponent[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loadingConv, setLoadingConv] = useState(false);
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
@@ -127,7 +130,7 @@ export function AssistantChat({
     if (!isNearBottomRef.current) return;
     // Use instant scroll during streaming to avoid janky repeated smooth animations
     container.scrollTop = container.scrollHeight;
-  }, [messages, streamingContent, activeToolCalls, artifacts]);
+  }, [messages, streamingContent, activeToolCalls, artifacts, liveUi]);
 
   async function handleSend(text: string, attachments: AttachmentDraft[] = []) {
     setError(null);
@@ -165,6 +168,7 @@ export function AssistantChat({
     setStreamingContent('');
     setActiveToolCalls([]);
     setArtifacts([]);
+    setLiveUi([]);
     setPlanFirst(false);
 
     const controller = new AbortController();
@@ -229,6 +233,8 @@ export function AssistantChat({
               }
             } else if (event.type === 'artifact') {
               setArtifacts((prev) => [...prev, event.data as ArtifactData]);
+            } else if (event.type === 'ui' && Array.isArray(event.data?.components)) {
+              setLiveUi((prev) => [...prev, ...(event.data.components as UiComponent[])].slice(-6));
             } else if (event.type === 'proposal') {
               setProposals((prev) => [...prev.filter((p) => p.id !== event.data.id), event.data as ProposalData]);
             } else if (event.type === 'action') {
@@ -236,8 +242,9 @@ export function AssistantChat({
             } else if (event.type === 'done') {
               setStreamingContent('');
               setActiveToolCalls([]);
-              // Persisted artifacts now render inside their message.
+              // Persisted artifacts and tool cards now render inside their message.
               setArtifacts([]);
+              setLiveUi([]);
               if (convId) await loadConversation(convId);
             } else if (event.type === 'error') {
               setError(event.data?.message ?? 'Error desconocido');
@@ -340,7 +347,8 @@ export function AssistantChat({
                   ))}
                 </div>
               )}
-              {streaming && !streamingContent && activeToolCalls.length === 0 && (
+              {liveUi.length > 0 && <GenerativeUi components={liveUi} onSendText={(text) => void handleSend(text)} />}
+              {streaming && !streamingContent && activeToolCalls.length === 0 && liveUi.length === 0 && (
                 <div className="assistant-typing">
                   <span className="assistant-typing-dot" />
                   <span className="assistant-typing-dot" />

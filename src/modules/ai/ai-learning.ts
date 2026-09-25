@@ -2,6 +2,8 @@ import { chatCompletion } from './ai-client';
 import { modelForTask } from './model-policy';
 import { addMemory, listMemory } from '@/modules/copilot/memory-service';
 import type { AiSettings } from './ai-admin-config-service';
+import { decide, answerBool } from './decisions/decision-engine';
+import { learningSignalDecision } from './decisions/decision-points';
 
 /**
  * Learning from corrections. When the user corrects the assistant or states a
@@ -79,6 +81,19 @@ export async function captureLearnings(
   input: { userId: string; userMessage: string; lastAssistantContent: string | null; answer: string }
 ): Promise<number> {
   if (!detectCorrection(input.userMessage, input.lastAssistantContent)) return 0;
+  // Jev gate: the regex says "looks like a correction"; Jev confirms it is a
+  // durable rule before we spend an LLM call extracting it. Unconfident → proceed
+  // as before (never lose a learning to a flaky decision call).
+  if (settings.jevEnabled) {
+    const gate = learningSignalDecision({
+      userMessage: input.userMessage,
+      lastAssistantContent: input.lastAssistantContent,
+    });
+    const hasLearning = await decide(gate.state, gate.questions, { userId: input.userId })
+      .then((r) => answerBool(r, 'has_learning'))
+      .catch(() => null);
+    if (hasLearning === false) return 0;
+  }
   const model = modelForTask(settings, 'utility');
   const res = await chatCompletion({
     model,

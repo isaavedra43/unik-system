@@ -13,7 +13,10 @@ import { markdownLinksToPlain, rewriteArtifactLinksForSharing } from '../artifac
 
 const CHAT_PERMISSION = 'chat.use';
 
-function shortChannelLabel(c: { type: string; name: string | null; members: { userId: string; name: string }[] }, actorId: string): string {
+export function shortChannelLabel(
+  c: { type: string; name: string | null; members: { userId: string; name: string }[] },
+  actorId: string
+): string {
   if (c.type === 'group') return `grupo "${c.name ?? 'sin nombre'}"`;
   const other = c.members.find((m) => m.userId !== actorId);
   return `chat con ${other?.name ?? 'usuario'}`;

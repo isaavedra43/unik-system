@@ -8,6 +8,7 @@ import {
   toOpenAiTools,
 } from './tools/index';
 import { refreshExternalTools } from '@/modules/extensions/external-tools';
+import { buildUiComponents } from './generative-ui/build-ui';
 import { getPreferences, PAUSED_MODE_HIDDEN_EFFECTS } from '@/modules/copilot/preferences-service';
 import { getAiSettings } from './ai-admin-config-service';
 import {
@@ -36,7 +37,12 @@ import { absoluteUrl } from '@/lib/app-url';
 import type { Prisma } from '@prisma/client';
 import type { ToolDefinition, ToolExecutionResult } from './tools/registry';
 import { CORE_TOOL_NAMES, PROVIDER_MAX_TOOLS, findToolsByTopic, selectToolsForTurn } from './tool-selector';
-import { classifyTask, resolveTurnModel } from './model-router';
+import { classifyTask, classifyTaskWithJev, resolveTurnModel } from './model-router';
+import { decide, answerBool } from './decisions/decision-engine';
+import { reviewNeededDecision } from './decisions/decision-points';
+import { detectDomainsWithJev } from './decisions/jev-domains';
+import { wrapUntrusted } from './ai-guardrails';
+import { redactDeep } from '@/modules/extensions/secrets';
 import { getModelById } from './model-catalog';
 import { isReasoningModel } from './providers/openai';
 import { buildTurnDirectives, looksUnfinished, stripMarkdownImages, wantsDocument } from './turn-directives';
@@ -78,7 +84,7 @@ interface OrchestratorInput {
 }
 
 interface OrchestratorEvent {
-  type: 'token' | 'tool_call_start' | 'tool_call_end' | 'artifact' | 'proposal' | 'action' | 'done' | 'error';
+  type: 'token' | 'tool_call_start' | 'tool_call_end' | 'artifact' | 'proposal' | 'action' | 'ui' | 'done' | 'error';
   data?: unknown;
 }
 
@@ -292,6 +298,13 @@ export async function* runAssistant(
   const inboxConversationId = input.context?.inboxConversationId;
   const chatChannelId = input.context?.chatChannelId;
   let systemPrompt = await buildSystemPrompt(input.actor, { ...input.context, conversationId: input.conversationId });
+  try {
+    const { buildComposioPrompt } = await import('@/modules/composio/composio-prompt');
+    const composioBlock = await buildComposioPrompt(input.actor);
+    if (composioBlock) systemPrompt += `\n\n${composioBlock}`;
+  } catch (err) {
+    console.warn('[orchestrator] composio prompt skipped:', err instanceof Error ? err.message : err);
+  }
   if (inboxConversationId) {
     const { buildInboxCopilotPrompt } = await import('@/modules/comms/inbox-copilot');
     systemPrompt += `\n\n${await buildInboxCopilotPrompt(input.actor, inboxConversationId)}`;
@@ -477,6 +490,36 @@ export async function* runAssistant(
     .filter((t) => inboxConversationId || !INBOX_ONLY_TOOLS.has(t.name))
     .filter((t) => !inboxConversationId || !INBOX_HIDDEN_TOOLS.has(t.name))
     .filter((t) => chatChannelId || !CHAT_ONLY_TOOLS.has(t.name));
+
+  // 8.4. Jev decisions (one cheap call each, run in parallel): which domains this
+  // message touches beyond the regex pass, and which model tier the turn needs.
+  const attachmentKindList = attachmentsForContext.map((a) => {
+    const k = attachmentKind(a.mimeType);
+    return k === 'text' ? 'other' : k;
+  });
+  const [jevDomains, classification] = await Promise.all([
+    detectDomainsWithJev(input.message, {
+      userId: input.actor.id,
+      conversationId: input.conversationId,
+    }).catch(() => [] as string[]),
+    classifyTaskWithJev(
+      {
+        message: input.message,
+        attachmentKinds: attachmentKindList,
+        planFirst: input.planFirst,
+        autoTrigger: isAutoTrigger,
+        recentToolNames,
+      },
+      { userId: input.actor.id, conversationId: input.conversationId }
+    ).catch(() => classifyTask({
+      message: input.message,
+      attachmentKinds: attachmentKindList,
+      planFirst: input.planFirst,
+      autoTrigger: isAutoTrigger,
+      recentToolNames,
+    })),
+  ]);
+
   // 8.5. Offer only the tools that matter this turn (OpenAI accepts ≤128; every tool costs tokens).
   // Core + surface tools are always present; the rest is chosen by relevance and recent use.
   // `loadMoreTools` lets the model pull any other tool by topic in one extra step.
@@ -489,6 +532,7 @@ export async function* runAssistant(
     message: input.message,
     recentToolNames,
     pinned: pinnedTools,
+    extraDomains: jevDomains,
     // Attachment turns are long already: fewer tools = smaller prompt on every pass.
     maxTools: Math.min(Math.max(8, Number(settings.maxToolsPerTurn) || 96), PROVIDER_MAX_TOOLS, attachmentsForContext.length > 0 ? 48 : PROVIDER_MAX_TOOLS),
   });
@@ -501,17 +545,8 @@ export async function* runAssistant(
     console.log(JSON.stringify({ event: 'ai.tools.selected', offered: offeredTools.length, dropped: selection.dropped.length, domains: selection.domains }));
   }
 
-  // 8.6. Model routing: explicit choice wins; "auto"/none → classify the task and pick the cheapest capable model.
-  const classification = classifyTask({
-    message: input.message,
-    attachmentKinds: attachmentsForContext.map((a) => {
-      const k = attachmentKind(a.mimeType);
-      return k === 'text' ? 'other' : k;
-    }),
-    planFirst: input.planFirst,
-    autoTrigger: isAutoTrigger,
-    recentToolNames,
-  });
+  // 8.6. Model routing: explicit choice wins; "auto"/none → the classification above
+  // (Jev when enabled, heuristics otherwise) picks the cheapest capable model.
   const routing = resolveTurnModel(settings, input.model, classification);
   const effectiveModel = routing.model;
   const fallbackModel = settings.fallbackDeployment;
@@ -856,7 +891,12 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
       if (CHAT_CHANNEL_ID_TOOLS.has(tc.name) && !argsObj.chatChannelId) {
         argsObj.chatChannelId = chatChannelId;
       }
-      if (tc.name === 'sendInternalChatMessage' && !argsObj.channelId) {
+      if (
+        tc.name === 'sendInternalChatMessage' &&
+        !argsObj.channelId &&
+        !argsObj.recipient &&
+        !argsObj.recipientUserId
+      ) {
         argsObj.channelId = chatChannelId;
       }
     }
@@ -1215,6 +1255,19 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
       }
     }
 
+    // Generative UI: results of external tools (Composio, MCP) become visual components in the chat.
+    // Specs are plain data built by a fixed, defensive mapper (never markup from the model or a server).
+    if (result.success && result.result) {
+      try {
+        const components = buildUiComponents({ toolName: tc.name, args: parsedArgs, result: result.result, success: true });
+        if (components.length > 0) {
+          yield { type: 'ui', data: { toolCallId: tc.id, toolName: tc.name, components } };
+        }
+      } catch (err) {
+        console.warn('[orchestrator] generative ui skipped:', err instanceof Error ? err.message : err);
+      }
+    }
+
     // UI actions: a phone call joins the floating call dock; an internal call opens the chat.
     if (result.success && UI_ACTION_TOOLS.has(tc.name) && result.result && typeof result.result === 'object') {
       const r = result.result as Record<string, unknown>;
@@ -1251,6 +1304,13 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
               'NO afirmes que la acción se realizó. Explica al usuario qué se hará exactamente y pídele que apruebe la propuesta en la tarjeta mostrada.',
           }
         : { error: result.error, ...(result.uncertain ? { uncertain: true } : {}) };
+    if (result.success && toolPayload && typeof toolPayload === 'object' && !Array.isArray(toolPayload) && Array.isArray((toolPayload as { uiResources?: unknown }).uiResources)) {
+      // The interactive component is for the user; the model only needs to know it was shown.
+      (toolPayload as Record<string, unknown>).uiResources = ((toolPayload as { uiResources: Array<{ uri?: string }> }).uiResources).map((r) => ({
+        uri: r?.uri,
+        note: 'Mostrado al usuario como componente interactivo en el chat.',
+      }));
+    }
     const rowCheck = reportRowChecks.get(tc.id);
     if (rowCheck && result.success && toolPayload && typeof toolPayload === 'object' && !Array.isArray(toolPayload)) {
       const { includedRows: n, expectedRows: expected } = rowCheck;
@@ -1265,9 +1325,14 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
             : `El archivo contiene SOLO ${n} de ${expected} filas (límite de exportación). Díselo al usuario con esos números y ofrece dividir por periodo o filtro.`,
       };
     }
+    // Untrusted tools (web/browser/venue): secrets are scrubbed from the payload and
+    // the content is wrapped so the model reads it as DATA, never as instructions.
+    const toolTrust = availableByName.get(tc.name)?.resultTrust ?? 'trusted';
+    const safePayload = toolTrust === 'untrusted' ? redactDeep(toolPayload) : toolPayload;
+    const serializedPayload = JSON.stringify(safePayload);
     messages.push({
       role: 'tool',
-      content: JSON.stringify(toolPayload),
+      content: toolTrust === 'untrusted' ? wrapUntrusted(serializedPayload, tc.name) : serializedPayload,
       tool_call_id: tc.id,
     });
 
@@ -1410,7 +1475,23 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
 
       // Internal review of complex answers: a second pass looks for missing parts, numbers
       // that do not add up and cut tables; the model rewrites once with the critique.
+      // Jev gates the expensive pass: a confident "no" skips the LLM review entirely.
       if (bufferAnswer && reviews < 1 && iteration < settings.maxToolIterations && iterationContent.trim().length >= 80) {
+        const reviewGate = reviewNeededDecision({
+          userMessage: input.message,
+          draft: iterationContent,
+          toolsUsed: toolsUsedThisTurn.map((t) => t.name),
+        });
+        const needsReview = await decide(reviewGate.state, reviewGate.questions, {
+          userId: input.actor.id,
+          conversationId: input.conversationId,
+        })
+          .then((r) => answerBool(r, 'needs_review'))
+          .catch(() => null);
+        if (needsReview === false) {
+          console.log(JSON.stringify({ event: 'ai.answer.review_skipped', conversationId: input.conversationId, by: 'jev' }));
+        }
+        if (needsReview !== false) {
         reviews += 1;
         const reviewStart = Date.now();
         yield { type: 'tool_call_start', data: { name: 'reviewAnswer', args: '{}' } };
@@ -1440,6 +1521,7 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
               verdict.issues.map((i, n) => `${n + 1}. ${i}`).join('\n'),
           });
           continue;
+        }
         }
       }
 

@@ -24,6 +24,10 @@ function sanitizeSettings(settings: Record<string, unknown>): Record<string, unk
   delete safe.apiKey;
   safe.hasApiKey = hasApiKey;
 
+  // Standalone secret fields (never sent to the client)
+  safe.hasWebSearchApiKey = Boolean(safe.webSearchApiKey);
+  delete safe.webSearchApiKey;
+
   // Per-provider API keys inside providerConfigs
   const providerConfigs = (safe.providerConfigs as Record<string, Record<string, unknown>>) ?? {};
   const safeProviderConfigs: Record<string, unknown> = {};
@@ -122,6 +126,7 @@ export async function PATCH(req: NextRequest) {
 
   // Strip read-only computed fields
   delete settings.hasApiKey;
+  delete settings.hasWebSearchApiKey;
 
   // Get current config to merge providerConfigs
   const current = await listAiConfig();

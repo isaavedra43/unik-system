@@ -36,7 +36,9 @@ export type ToolCategory =
   | 'extension'
   | 'skill'
   | 'knowledge'
-  | 'communication';
+  | 'communication'
+  | 'web'
+  | 'venue';
 
 /** Effect categories defined by UNIK after review (never by the tool itself). */
 export type ToolEffect =
@@ -63,6 +65,13 @@ export interface ToolDefinition {
   version?: string;
   /** Defaults to 'read'. */
   effect?: ToolEffect;
+  /**
+   * Dynamic classification for gateway tools whose effect depends on the arguments
+   * (e.g. `composioExecute` runs any Composio tool). Decided server-side by UNIK,
+   * never by the model. It may throw to refuse the call. When set, `effect` is only
+   * the conservative default used for listings.
+   */
+  resolveEffect?: (actor: CurrentUser, args: unknown) => Promise<ToolEffect> | ToolEffect;
   /** 'auto' skips the approval step even for side effects (admin decision). */
   approvalPolicy?: 'auto' | 'require_approval';
   /** Max wall-clock time. Default: 60s built-in, capability value for external. */
@@ -77,6 +86,12 @@ export interface ToolDefinition {
   allowedRoleKeys?: string[];
   /** Context tags for on-demand loading ("all" or page prefixes like "sales"). */
   contextTags?: string[];
+  /**
+   * 'untrusted' marks tools whose results come from the open web / external
+   * machines (fetch_url, browser, venue). The orchestrator wraps those results
+   * as untrusted data so the model never treats them as instructions.
+   */
+  resultTrust?: 'trusted' | 'untrusted';
   /** Dynamic availability (suspended extension, revoked connection...). */
   isAvailable?: () => Promise<boolean> | boolean;
   /** Human summary used in approval cards. */
@@ -249,7 +264,18 @@ export async function loadAvailableTools(
   enabledToolNames: string[],
   options: { page?: string } = {}
 ): Promise<ToolDefinition[]> {
-  const builtin = getAvailableTools(actor, enabledToolNames);
+  const builtin: ToolDefinition[] = [];
+  for (const tool of getAvailableTools(actor, enabledToolNames)) {
+    // Gateway tools (Composio) hide themselves when their backend is not configured.
+    if (tool.isAvailable) {
+      try {
+        if (!(await tool.isAvailable())) continue;
+      } catch {
+        continue;
+      }
+    }
+    builtin.push(tool);
+  }
   const external: ToolDefinition[] = [];
   for (const tool of externalRegistry.values()) {
     if (!actorHasPermission(actor, tool.requiredPermission)) continue;
@@ -327,8 +353,8 @@ function boundResult(
   };
 }
 
-function requiresApproval(tool: ToolDefinition): boolean {
-  const effect = tool.effect ?? 'read';
+function requiresApproval(tool: ToolDefinition, effectOverride?: ToolEffect): boolean {
+  const effect = effectOverride ?? tool.effect ?? 'read';
   if (!EFFECTS_REQUIRING_APPROVAL.has(effect)) return false;
   return tool.approvalPolicy !== 'auto';
 }
@@ -434,12 +460,29 @@ export async function executeTool(
     }
   }
 
+  // 4c. Effect of THIS call. Gateway tools classify per argument set; failing closed (a revoked
+  // toolkit, an unknown tool) also stops an already-approved proposal from running.
+  let effect: ToolEffect = tool.effect ?? 'read';
+  if (tool.resolveEffect) {
+    try {
+      effect = await tool.resolveEffect(actor, parsed.data);
+    } catch (e) {
+      return {
+        success: false,
+        error: e instanceof Error ? e.message : 'No se pudo clasificar la acción',
+        errorCode: 'forbidden',
+        durationMs: 0,
+      };
+    }
+  }
+
   // 5. Approval for side effects
-  if ((requiresApproval(tool) || ctx.forceApproval) && !ctx.skipApproval && !ctx.approvedProposalId) {
+  if ((requiresApproval(tool, effect) || ctx.forceApproval) && !ctx.skipApproval && !ctx.approvedProposalId) {
     const { createProposal } = await import('@/modules/extensions/proposals-service');
     const proposal = await createProposal({
       actor,
       tool,
+      effect,
       args: parsed.data,
       conversationId: ctx.conversationId,
       messageId: ctx.messageId,
@@ -498,7 +541,6 @@ export async function executeTool(
       responseBytes: bounded.bytes,
       proposalId: ctx.approvedProposalId,
     });
-    const effect = tool.effect ?? 'read';
     if (effect !== 'read') {
       // Business data changed (or may have): every cached read is now suspect.
       toolResultCache.clear();
@@ -519,7 +561,6 @@ export async function executeTool(
     const durationMs = Date.now() - start;
     const isTimeout = e instanceof ToolTimeoutError;
     const message = e instanceof Error ? e.message : 'Unknown error';
-    const effect = tool.effect ?? 'read';
     // A timeout on a side-effecting external call may have completed remotely.
     const uncertain = isTimeout && source !== 'builtin' && EFFECTS_REQUIRING_APPROVAL.has(effect);
     await recordExecution(tool, actor, ctx, {

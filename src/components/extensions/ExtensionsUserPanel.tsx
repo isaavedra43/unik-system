@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useState } from 'react';
 import { AlertCircle, CheckCircle2, Link2, Play, Plus, Trash2, Unlink } from 'lucide-react';
+import { ComposioUserSection } from './ComposioUserSection';
 
 /**
  * User-facing extensions: approved catalog, personal connections and
@@ -254,6 +255,8 @@ export function ExtensionsUserPanel({
           <CheckCircle2 size={16} /> {notice}
         </div>
       )}
+
+      <ComposioUserSection canConnect={canConnect} />
 
       <div className="assistant-admin-section">
         <h3 className="assistant-admin-section-title">Catálogo aprobado</h3>

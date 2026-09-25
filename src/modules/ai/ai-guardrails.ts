@@ -85,3 +85,27 @@ export function wrapUntrusted(text: string, source: string): string {
   const flagged = containsInjection(safe) ? ' posible_manipulacion="true"' : '';
   return `<untrusted source="${source}"${flagged}>\n${safe}\n</untrusted>`;
 }
+
+/**
+ * Second-layer injection check for untrusted external content (web pages,
+ * browser extracts, venue output): the regex pass (`containsInjection`) is
+ * instant; Jev adds a semantic pass that catches phrasing no regex was taught.
+ * Returns true when EITHER layer flags the content. Never throws — a failed
+ * decision call falls back to the regex verdict.
+ */
+export async function isInjectionAttempt(
+  text: string,
+  source: string,
+  opts: { userId?: string; conversationId?: string } = {}
+): Promise<boolean> {
+  if (containsInjection(text)) return true;
+  try {
+    const { decide, answerBool } = await import('./decisions/decision-engine');
+    const { injectionCheckDecision } = await import('./decisions/decision-points');
+    const gate = injectionCheckDecision(text, source);
+    const result = await decide(gate.state, gate.questions, opts);
+    return answerBool(result, 'injection_attempt') === true;
+  } catch {
+    return false;
+  }
+}

@@ -48,7 +48,7 @@ const notifyArgs = z.object({
 registerTool({
   name: 'notifyUser',
   description:
-    'Envía un aviso (notificación en la app + push al teléfono) a uno o varios usuarios de UNIK de parte del usuario actual. Úsalo cuando te pidan "avísale a…", "notifica a…", "dile a … que…". No sirve para clientes externos (para eso usa WhatsApp/SMS).',
+    'Envía un aviso (notificación en la app + push al teléfono) a uno o varios usuarios de UNIK de parte del usuario actual. Úsalo cuando te pidan "avísale a…", "notifica a…", "dile a … que…". No sirve para clientes externos (para eso usa WhatsApp/SMS); si piden mandarlo por el chat interno usa sendInternalChatMessage.',
   category: 'communication',
   enabledByDefault: true,
   effect: 'internal_task',

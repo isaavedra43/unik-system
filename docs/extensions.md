@@ -2,6 +2,8 @@
 
 Única fuente de verdad sobre cómo UNIK amplía las capacidades del asistente sin ejecutar código arbitrario.
 
+> Apps de terceros (Gmail, Calendar, Slack, GitHub, Notion…): ver [composio.md](composio.md). Las guías «MCP local» del catálogo antiguo están obsoletas y ocultas.
+
 ## 1. Conceptos
 
 | Elemento | Definición en UNIK                                                                                                                                                                                     |

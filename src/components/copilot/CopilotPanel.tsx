@@ -35,6 +35,9 @@ import { cn } from '@/lib/utils';
 import { AssistantMarkdown } from '@/components/assistant/AssistantMarkdown';
 import { ArtifactRenderer, toAttachable, type ArtifactData, type AttachableArtifact } from '@/components/assistant/ArtifactRenderer';
 import { ProposalCard } from './ProposalCard';
+import { GenerativeUi } from '@/components/assistant/generative/GenerativeUi';
+import { buildUiComponents } from '@/modules/ai/generative-ui/build-ui';
+import type { UiComponent } from '@/modules/ai/generative-ui/types';
 import { PlanCard } from './PlanCard';
 import { ConfidenceBadge } from './ConfidenceBadge';
 import { MessageFeedback } from './MessageFeedback';
@@ -361,6 +364,7 @@ export function CopilotPanel({ surface, user, onInsertDraft, onInsertAttachment,
   const [liveActions, setLiveActions] = useState<SuggestedActionsData | null>(null);
   const [liveDraft, setLiveDraft] = useState<DraftData | null>(null);
   const [liveArtifacts, setLiveArtifacts] = useState<ArtifactData[]>([]);
+  const [liveUi, setLiveUi] = useState<UiComponent[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [input, setInput] = useState('');
   const abortRef = useRef<AbortController | null>(null);
@@ -403,6 +407,7 @@ export function CopilotPanel({ surface, user, onInsertDraft, onInsertAttachment,
       setLiveActions(null);
       setLiveDraft(null);
       setLiveArtifacts([]);
+      setLiveUi([]);
       const controller = new AbortController();
       abortRef.current = controller;
       try {
@@ -476,6 +481,8 @@ export function CopilotPanel({ surface, user, onInsertDraft, onInsertAttachment,
                   toast.success('PDF de la cotización adjuntado al redactor');
                 }
               }
+            } else if (event.type === 'ui' && Array.isArray(d.components)) {
+              setLiveUi((prev) => [...prev, ...(d.components as UiComponent[])].slice(-6));
             } else if (event.type === 'proposal') {
               const p = d as unknown as CopilotProposal;
               setProposals((prev) => [...prev.filter((x) => x.id !== p.id), p]);
@@ -498,6 +505,7 @@ export function CopilotPanel({ surface, user, onInsertDraft, onInsertAttachment,
         setLiveActions(null);
         setLiveDraft(null);
         setLiveArtifacts([]);
+        setLiveUi([]);
         abortRef.current = null;
         const queued = pendingTrigger.current;
         pendingTrigger.current = null;
@@ -717,7 +725,8 @@ export function CopilotPanel({ surface, user, onInsertDraft, onInsertAttachment,
         const parsedText = parseConfidence(m.content);
         const text = parsedText.content.trim();
         const artifacts = m.artifacts ?? [];
-        if (!text && !actions && drafts.length === 0 && steps.length === 0 && artifacts.length === 0 && !plan) return null;
+        const ui = records.flatMap((r) => (r.success ? buildUiComponents({ toolName: r.toolName, args: r.args, result: r.result, success: true }) : []));
+        if (!text && !actions && drafts.length === 0 && steps.length === 0 && artifacts.length === 0 && ui.length === 0 && !plan) return null;
         return {
           kind: 'assistant' as const,
           id: m.id,
@@ -727,6 +736,7 @@ export function CopilotPanel({ surface, user, onInsertDraft, onInsertAttachment,
           actionsCurrent: i === lastActionsIdx,
           drafts,
           artifacts,
+          ui,
           plan,
           meta: m.meta ?? null,
           feedback: m.feedback ?? null,
@@ -868,6 +878,7 @@ export function CopilotPanel({ surface, user, onInsertDraft, onInsertAttachment,
                     }}
                   />
                 )}
+                {it.ui.length > 0 && <GenerativeUi components={it.ui} onSendText={send} />}
                 {it.artifacts.length > 0 && (
                   <div className="copilot-artifacts">
                     {it.artifacts.map((a) => (
@@ -902,6 +913,7 @@ export function CopilotPanel({ surface, user, onInsertDraft, onInsertAttachment,
                 <span />
               </div>
             ) : null}
+            {liveUi.length > 0 && <GenerativeUi components={liveUi} onSendText={send} />}
             {liveArtifacts.length > 0 && (
               <div className="copilot-artifacts">
                 {liveArtifacts.map((a) => (

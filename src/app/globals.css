@@ -20944,3 +20944,59 @@ textarea.vs-input { resize: vertical; font-family: inherit; }
 .vs-compare-after { position: absolute; inset: 0; overflow: hidden; border-right: 2px solid #fff; }
 .vs-compare-after img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: left; }
 .vs-compare-slider { position: absolute; inset: 0; width: 100%; opacity: 0; cursor: ew-resize; }
+
+/* ── Generative UI (tool results as cards in the assistant chat) ─────────── */
+.gui-stack { display: flex; flex-direction: column; gap: var(--unik-space-2, 8px); margin: 6px 0 10px; min-width: 0; max-width: 100%; }
+.gui-card { border: 1px solid var(--unik-border); background: var(--unik-surface); border-radius: var(--unik-radius-lg); padding: 10px 12px; min-width: 0; overflow: hidden; }
+.gui-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+.gui-title { font-size: var(--unik-text-sm); font-weight: 600; color: var(--unik-text); overflow-wrap: anywhere; }
+.gui-source { font-size: 11px; color: var(--unik-text-muted); background: var(--unik-surface-hover); border-radius: var(--unik-radius-full); padding: 1px 8px; white-space: nowrap; }
+.gui-muted { font-size: var(--unik-text-xs); color: var(--unik-text-secondary); overflow-wrap: anywhere; }
+.gui-foot { margin-top: 6px; font-size: 11px; color: var(--unik-text-muted); }
+.gui-records { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.gui-record { padding: 8px 0; border-top: 1px solid var(--unik-border-subtle); min-width: 0; }
+.gui-record:first-child { border-top: 0; padding-top: 2px; }
+.gui-record-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.gui-record-title { font-size: var(--unik-text-sm); font-weight: 600; color: var(--unik-text); overflow-wrap: anywhere; }
+.gui-link { display: inline-flex; align-items: center; gap: 4px; color: var(--unik-brand-text); text-decoration: none; }
+.gui-link:hover { text-decoration: underline; }
+.gui-link:focus-visible, .gui-btn:focus-visible { outline: 2px solid var(--unik-brand); outline-offset: 2px; border-radius: var(--unik-radius-sm); }
+.gui-record-meta { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 2px; font-size: var(--unik-text-xs); color: var(--unik-text-secondary); }
+.gui-record-body { margin: 4px 0 0; font-size: var(--unik-text-xs); color: var(--unik-text-secondary); overflow-wrap: anywhere; }
+.gui-fields { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 6px 0 0; }
+.gui-field { display: flex; gap: 4px; font-size: 11.5px; min-width: 0; }
+.gui-field dt { color: var(--unik-text-muted); }
+.gui-field dd { margin: 0; color: var(--unik-text); overflow-wrap: anywhere; }
+.gui-badge { flex: none; font-size: 11px; font-weight: 600; border-radius: var(--unik-radius-full); padding: 1px 8px; background: var(--unik-surface-hover); color: var(--unik-text-secondary); }
+.gui-badge.is-success { background: var(--unik-success-bg); color: var(--unik-success); }
+.gui-badge.is-danger { background: var(--unik-danger-bg); color: var(--unik-danger); }
+.gui-badge.is-warning { background: var(--unik-warning-bg); color: var(--unik-warning); }
+.gui-table-wrap { overflow-x: auto; max-width: 100%; }
+.gui-table { border-collapse: collapse; width: 100%; font-size: var(--unik-text-xs); }
+.gui-table th { text-align: left; color: var(--unik-text-muted); font-weight: 600; padding: 4px 10px 4px 0; border-bottom: 1px solid var(--unik-border); white-space: nowrap; }
+.gui-table td { padding: 5px 10px 5px 0; border-bottom: 1px solid var(--unik-border-subtle); color: var(--unik-text); vertical-align: top; }
+.gui-notice { display: flex; gap: 8px; align-items: flex-start; }
+.gui-notice-icon { flex: none; margin-top: 1px; color: var(--unik-text-secondary); }
+.gui-notice.is-success { background: var(--unik-success-bg); border-color: transparent; }
+.gui-notice.is-success .gui-notice-icon { color: var(--unik-success); }
+.gui-notice.is-danger { background: var(--unik-danger-bg); border-color: transparent; }
+.gui-notice.is-danger .gui-notice-icon { color: var(--unik-danger); }
+.gui-notice.is-warning { background: var(--unik-warning-bg); border-color: transparent; }
+.gui-notice.is-warning .gui-notice-icon { color: var(--unik-warning); }
+.gui-connect { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.gui-connect-icon { flex: none; display: grid; place-items: center; width: 34px; height: 34px; border-radius: var(--unik-radius-md); background: var(--unik-brand-subtle); color: var(--unik-brand-text); }
+.gui-connect.is-connected .gui-connect-icon { background: var(--unik-success-bg); color: var(--unik-success); }
+.gui-connect-text { flex: 1 1 200px; min-width: 0; }
+.gui-btn { display: inline-flex; align-items: center; gap: 6px; font: inherit; font-size: var(--unik-text-xs); font-weight: 600; padding: 6px 12px; border-radius: var(--unik-radius-md); border: 1px solid var(--unik-border); background: var(--unik-surface); color: var(--unik-text); cursor: pointer; }
+.gui-btn:hover:not(:disabled) { background: var(--unik-surface-hover); }
+.gui-btn:disabled { opacity: 0.6; cursor: default; }
+.gui-btn-primary { background: var(--unik-brand); border-color: var(--unik-brand); color: var(--unik-text-inverse); }
+.gui-btn-primary:hover:not(:disabled) { background: var(--unik-brand-hover); }
+.gui-mcp { padding-bottom: 8px; }
+.gui-mcp iframe { display: block; width: 100%; }
+.gui-pending { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; padding: 8px 10px; border-radius: var(--unik-radius-md); background: var(--unik-warning-bg); font-size: var(--unik-text-xs); }
+.gui-pending-text { display: inline-flex; align-items: center; gap: 6px; min-width: 0; overflow-wrap: anywhere; }
+.gui-pending-actions { display: inline-flex; gap: 6px; }
+.gui-skeleton { min-height: 96px; background: linear-gradient(90deg, var(--unik-surface-hover), var(--unik-surface), var(--unik-surface-hover)); background-size: 200% 100%; animation: gui-shimmer 1.4s linear infinite; }
+@keyframes gui-shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+@media (prefers-reduced-motion: reduce) { .gui-skeleton { animation: none; } }

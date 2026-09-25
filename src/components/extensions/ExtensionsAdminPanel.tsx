@@ -5,6 +5,7 @@ import { AlertCircle, CheckCircle2, Plug, RefreshCw, ShieldOff, Upload } from 'l
 import { AssistantAdminStatCard } from '@/components/assistant/admin/AssistantAdminStatCard';
 import { CatalogGrid } from './CatalogGrid';
 import { MonitoringTab } from './MonitoringTab';
+import { ComposioAdminTab } from './ComposioAdminTab';
 import type { CuratedEntry } from '@/modules/extensions/curated-catalog';
 
 /**
@@ -118,10 +119,11 @@ interface SkillRow {
 }
 
 type TabId =
-  | 'catalog' | 'monitoring' | 'connections' | 'mcp' | 'apis' | 'skills' | 'plugins' | 'executions' | 'usage';
+  | 'catalog' | 'composio' | 'monitoring' | 'connections' | 'mcp' | 'apis' | 'skills' | 'plugins' | 'executions' | 'usage';
 
 const TABS: Array<{ id: TabId; label: string }> = [
   { id: 'catalog', label: 'Catálogo' },
+  { id: 'composio', label: 'Composio' },
   { id: 'monitoring', label: 'Monitoreo' },
   { id: 'connections', label: 'Conexiones' },
   { id: 'mcp', label: 'MCP' },
@@ -288,6 +290,7 @@ export function ExtensionsAdminPanel({
 
   const kindFilter: Record<TabId, string | null> = {
     catalog: null,
+    composio: null,
     monitoring: null,
     connections: null,
     mcp: 'mcp',
@@ -549,6 +552,15 @@ export function ExtensionsAdminPanel({
 
       <div className="assistant-admin-tab-content">
         {tab === 'monitoring' && <MonitoringTab extensions={extensions} />}
+
+        {tab === 'composio' && <ComposioAdminTab canManage={canManage} />}
+
+        {tab === 'catalog' && (
+          <div className="assistant-admin-muted" role="note">
+            Las guías de «servidores MCP locales» quedaron obsoletas y se retiraron de este catálogo. Para apps como Gmail, Calendar, Slack, GitHub o Notion usa la pestaña{' '}
+            <button type="button" className="gui-btn" onClick={() => setTab('composio')}>Composio</button>; los MCP remotos por HTTPS siguen en la pestaña MCP.
+          </div>
+        )}
 
         {tab === 'catalog' && (
           <CatalogGrid

@@ -27,6 +27,8 @@ export interface ToolSelectionInput<T extends SelectableTool> {
   /** Always offered (surface tools, etc.). */
   pinned?: string[];
   maxTools: number;
+  /** Domains Jev detected beyond the regex pass (unioned with regex hits). */
+  extraDomains?: string[];
 }
 
 export interface ToolSelectionResult<T extends SelectableTool> {
@@ -287,7 +289,7 @@ const DOMAIN_RULES: DomainRule[] = [
   { domain: 'analytics', test: /tendenc|pronost|proyecc|compar|versus|\bvs\b|ranking|\btop\b|mejores|kpi|indicador|metric|desempe|rendimient|anomal|analiz|analisis|retenc|segment|patron|horari|ritmo|crec|cay|baj[oó]|subi/, categories: ['sales', 'finance'], tools: ['getTopProducts', 'getSalesTrend', 'getSalesRanking', 'getHourlySalesPattern', 'getWeekdaySalesPattern', 'comparePeriods', 'getSalesKPIs', 'getDashboardSummary', 'getCrossTabAnalysis', 'compareEntities', 'getTeamPerformance', 'getSalesForecast', 'getSalesAlerts', 'getSalesVelocity', 'getProductBundles', 'getRevenueAnalysis', 'getDailyRevenue', 'getSalespersonScorecard', 'getCustomerRetention'] },
   { domain: 'documents', test: /reporte|informe|\bpdf\b|excel|xlsx|word|docx|\bcsv\b|grafic|tabla|imagen|foto|export|descarg|archivo|documento/, categories: ['export'], tools: ['composeDocument', 'generatePdfReport', 'generateExcelReport', 'generateWordReport', 'generateCsvExport', 'generateChart', 'generateReportImage', 'generateTable', 'listArtifacts', 'cleanupArtifacts', 'getArtifactSpec', 'shareArtifact', 'listAttachableDocuments', 'findShareableDocument'] },
   { domain: 'messaging', test: /mensaje|whatsapp|\bsms\b|manda|envia|escribe|avisa|dile|contesta|respond|recordatorio|masivo|campa/, categories: ['communication'], tools: ['sendMessageToContact', 'sendBulkMessages', 'sendInboxMessage', 'draftReply', 'listInboxConversations', 'getConversationMessages', 'listCommitments', 'createCommitment', 'scheduleFollowUp', 'getPickupLocation', 'listAttachableDocuments', 'findShareableDocument', 'shareArtifact', 'listCampaigns', 'getCampaignStats', 'draftCampaignContent', 'createCampaignDraft', 'approveCampaign', 'draftSatisfactionSurvey', 'draftCollectionReminders', 'notifyDelayedDeliveries'] },
-  { domain: 'chat', test: /chat|canal|equipo|compa[ñn]er|interno|fija|pinea|reunion|evento|agenda|junta/, categories: [], tools: ['listChatChannels', 'getChatChannelMessages', 'searchChatMessages', 'summarizeChatChannel', 'proposeChatDraft', 'pinChatMessage', 'sendInternalChatMessage', 'createChatEvent', 'startInternalCall', 'suggestAssignee'] },
+  { domain: 'chat', test: /chat|canal|equipo|compa[ñn]er|interno|fija|pinea|reunion|evento|agenda|junta/, categories: [], tools: ['listChatChannels', 'getChatChannelMessages', 'searchChatMessages', 'summarizeChatChannel', 'proposeChatDraft', 'pinChatMessage', 'sendInternalChatMessage', 'createChatEvent', 'startInternalCall', 'suggestAssignee', 'findUsers'] },
   { domain: 'calls', test: /llam|marc[aá]|telefon|habl[ae]|\bvoz\b|grabaci|transcrip/, categories: [], tools: ['callContact', 'startInternalCall', 'startOutboundCall', 'listCalls', 'getCallTranscript', 'pauseCallAi'] },
   { domain: 'pickup', test: /recog|ubicaci|direccion|bodega|mapa|maps|donde estan|horario/, categories: [], tools: ['getPickupLocation', 'sendMessageToContact'] },
   { domain: 'knowledge', test: /manual|politic|procedim|biblioteca|conocimient|ficha|garantia|instalaci|especificaci|que dice|promoci|catalogo|folleto|lista de precio/, categories: ['knowledge'], tools: ['searchKnowledgeLibrary', 'listAttachableDocuments', 'findShareableDocument'] },
@@ -296,12 +298,48 @@ const DOMAIN_RULES: DomainRule[] = [
   { domain: 'digest', test: /como voy|mi dia|jornada|que hice|digest|ponme al dia|resumen del dia|pendientes de hoy/, categories: [], tools: ['getWorkDigest', 'getRecentActivity', 'getNotifications', 'getDealBlockers'] },
   { domain: 'attachments', test: /adjunt|subi|archivo|factura|recibo|extrae|\bocr\b|lee el|leer el|documento/, categories: [], tools: ['listConversationAttachments', 'readAttachment', 'composeDocument', 'lookupSalesOrdersByNumber', 'extractDocumentData', 'draftBillFromDocument'] },
   { domain: 'system', test: /integraci|zoho|sincroniz|notificaci|modulo|sistema|quien soy|permiso/, categories: ['system'], tools: ['getIntegrationStatus', 'getNotifications', 'getModuleList', 'getCurrentUserContext'] },
+  { domain: 'apps', test: /gmail|outlook|calendar|calendario|slack|github|gitlab|notion|sheets|hoja de calculo|google|drive|dropbox|hubspot|salesforce|stripe|jira|linear|trello|asana|discord|twitter|linkedin|zoom|\bteams\b|airtable|clickup|monday|shopify|figma|composio|app externa|apps externas|aplicacion externa|integracion externa/, categories: [], tools: ['composioListToolkits', 'composioSearchTools', 'composioConnect', 'composioExecute'] },
+  { domain: 'web', test: /internet|\bweb\b|online|en linea|googl|busca(r)? en la red|investiga en|notici|tipo de cambio|clima|\bpagina web|sitio web|https?:\/\/|www\.|\.com\b|\.mx\b|\.io\b|\.ai\b/, categories: ['web'], tools: ['web_search', 'fetch_url', 'web_crawl'] },
+  { domain: 'venue', test: /computadora virtual|maquina virtual|sandbox|navega(r)? (en|la|el)|abre la pagina|entra a|inicia sesion en|screenshot|captura de pantalla|ejecuta|corre este|terminal|comando|script/, categories: ['venue'], tools: ['browser', 'browserProfile', 'venueExec', 'venueReadFile', 'venueListFiles', 'venueWriteFile', 'venueScreenshot'] },
   { domain: 'planning', test: /\bplan\b|planea|paso a paso|primero.*luego|trimestral|anual|completo|integral/, categories: [], tools: ['proposePlan'] },
 ];
 
 export function detectDomains(message: string): string[] {
   const norm = normalizeText(message);
   return DOMAIN_RULES.filter((r) => r.test.test(norm)).map((r) => r.domain);
+}
+
+/** Human description per domain — the criteria Jev uses to detect it. */
+const DOMAIN_HINTS: Record<string, string> = {
+  quotes: 'Cotizaciones y presupuestos.',
+  sales: 'Ventas, órdenes de venta, pedidos, entregas y cortes de caja.',
+  invoices: 'Facturas emitidas, CFDI, facturación.',
+  payments: 'Pagos, cobranza, saldos y adeudos de clientes.',
+  purchases: 'Compras a proveedores, órdenes de compra, bills y gastos.',
+  inventory: 'Productos, existencias, stock y catálogo de materiales.',
+  customers: 'Clientes, contactos, expedientes y salud de cuentas.',
+  packages: 'Paqueterías, envíos, guías y rastreo.',
+  analytics: 'Tendencias, comparativas, KPIs, pronósticos y anomalías.',
+  documents: 'Generar o exportar reportes/archivos: PDF, Excel, Word, CSV, gráficas.',
+  messaging: 'Enviar mensajes a clientes, WhatsApp, campañas y recordatorios.',
+  chat: 'Chat interno, canales del equipo, reuniones.',
+  calls: 'Llamadas de voz, transcripciones, grabaciones.',
+  pickup: 'Ubicación de bodega, direcciones, horarios, mapas.',
+  knowledge: 'Biblioteca de conocimiento: manuales, políticas, fichas.',
+  memory: 'Preferencias y recuerdos del usuario.',
+  skills: 'Skills/recetas automatizadas.',
+  digest: 'Resumen del día, actividad reciente, notificaciones propias.',
+  attachments: 'Archivos adjuntos de la conversación: leer, extraer datos.',
+  system: 'Estado del sistema, integraciones (Zoho), módulos, permisos.',
+  apps: 'Apps externas conectadas: Gmail, Sheets, Slack, etc.',
+  planning: 'Planes paso a paso antes de ejecutar.',
+  web: 'Internet: buscar en la web, abrir páginas, noticias, precios externos.',
+  venue: 'Computadora virtual del agente: navegar sitios con sesión, ejecutar comandos/scripts, archivos del sandbox.',
+};
+
+/** Domain catalog for Jev-based detection (id + criteria). */
+export function domainCatalog(): Array<{ domain: string; hint: string }> {
+  return DOMAIN_RULES.map((r) => ({ domain: r.domain, hint: DOMAIN_HINTS[r.domain] ?? '' }));
 }
 
 function splitCamel(name: string): string[] {
@@ -358,7 +396,8 @@ export function scoreTool(
 export function selectToolsForTurn<T extends SelectableTool>(input: ToolSelectionInput<T>): ToolSelectionResult<T> {
   const cap = Math.max(8, Math.min(input.maxTools, PROVIDER_MAX_TOOLS));
   const norm = normalizeText(input.message);
-  const domainRules = DOMAIN_RULES.filter((r) => r.test.test(norm));
+  const extra = new Set(input.extraDomains ?? []);
+  const domainRules = DOMAIN_RULES.filter((r) => r.test.test(norm) || extra.has(r.domain));
   const messageStems = stems(input.message);
   const recent = new Set(input.recentToolNames ?? []);
   const always = new Set<string>([...CORE_TOOL_NAMES, ...(input.pinned ?? [])]);

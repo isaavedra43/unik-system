@@ -117,7 +117,19 @@ export interface CuratedEntry {
   verified: boolean;
   /** Popularity tier for sorting. */
   popularity: 'high' | 'medium' | 'low';
+  /** Obsolete entry: hidden from the catalog UI (kept only so old links/tests still resolve). */
+  deprecated?: { reason: string; replacement: string };
 }
+
+/**
+ * The old `mcp-*` entries describe installing a local MCP server and pasting its URL, which UNIK
+ * does not support (only remote Streamable HTTP servers). Composio replaces them: one integration,
+ * hundreds of apps, per-user OAuth and the same approval rules.
+ */
+const LEGACY_MCP = {
+  reason: 'Guía obsoleta: pedía instalar un servidor MCP local, algo que UNIK no soporta (solo MCP remotos por HTTPS).',
+  replacement: 'Composio (Admin → Extensiones → Composio)',
+} as const;
 
 export const CURATED_CATALOG: CuratedEntry[] = [
 {
@@ -602,6 +614,7 @@ export const CURATED_CATALOG: CuratedEntry[] = [
     name: 'PostgreSQL MCP',
     category: 'Datos',
     kind: 'mcp',
+    deprecated: LEGACY_MCP,
     description: 'Consultar PostgreSQL con SQL natural.',
     longDescription:
       'Servidor MCP que permite al asistente consultar tu base PostgreSQL con SQL, leer esquemas y analizar datos.',
@@ -633,6 +646,7 @@ export const CURATED_CATALOG: CuratedEntry[] = [
     name: 'SQLite MCP',
     category: 'Datos',
     kind: 'mcp',
+    deprecated: LEGACY_MCP,
     description: 'Consultar bases SQLite locales.',
     longDescription:
       'Servidor MCP que permite al asistente consultar bases SQLite, leer esquemas y analizar datos.',
@@ -663,6 +677,7 @@ export const CURATED_CATALOG: CuratedEntry[] = [
     name: 'Filesystem MCP',
     category: 'Datos',
     kind: 'mcp',
+    deprecated: LEGACY_MCP,
     description: 'Leer y buscar archivos del sistema.',
     longDescription:
       'Servidor MCP que permite al asistente leer, buscar y listar archivos de un directorio permitido.',
@@ -693,6 +708,7 @@ export const CURATED_CATALOG: CuratedEntry[] = [
     name: 'Brave Search MCP',
     category: 'Búsqueda',
     kind: 'mcp',
+    deprecated: LEGACY_MCP,
     description: 'Búsqueda web en tiempo real.',
     longDescription:
       'Servidor MCP que permite al asistente buscar en la web en tiempo real usando Brave Search API.',
@@ -724,6 +740,7 @@ export const CURATED_CATALOG: CuratedEntry[] = [
     name: 'Memory MCP',
     category: 'Utilidades',
     kind: 'mcp',
+    deprecated: LEGACY_MCP,
     description: 'Memoria persistente para el asistente.',
     longDescription:
       'Servidor MCP que da al asistente memoria persistente entre sesiones: guarda hechos, preferencias y contexto del usuario.',
@@ -753,6 +770,7 @@ export const CURATED_CATALOG: CuratedEntry[] = [
     name: 'Fetch MCP',
     category: 'Utilidades',
     kind: 'mcp',
+    deprecated: LEGACY_MCP,
     description: 'Descargar y leer páginas web.',
     longDescription:
       'Servidor MCP que permite al asistente descargar páginas web, leer su contenido y extraer texto.',
@@ -782,6 +800,7 @@ export const CURATED_CATALOG: CuratedEntry[] = [
     name: 'Time MCP',
     category: 'Utilidades',
     kind: 'mcp',
+    deprecated: LEGACY_MCP,
     description: 'Hora, fechas y zonas horarias.',
     longDescription:
       'Servidor MCP que permite al asistente obtener la hora actual, convertir entre zonas horarias y calcular diferencias.',
@@ -1941,6 +1960,7 @@ export const CURATED_CATALOG: CuratedEntry[] = [
     name: 'GitHub MCP',
     category: 'Desarrollo',
     kind: 'mcp',
+    deprecated: LEGACY_MCP,
     description: 'GitHub via MCP Server oficial.',
     longDescription:
       'Servidor MCP oficial de GitHub que permite al asistente gestionar repos, issues, PRs y actions.',
@@ -1973,6 +1993,7 @@ export const CURATED_CATALOG: CuratedEntry[] = [
     name: 'Slack MCP',
     category: 'Comunicaciones',
     kind: 'mcp',
+    deprecated: LEGACY_MCP,
     description: 'Slack via MCP Server oficial.',
     longDescription:
       'Servidor MCP oficial de Slack que permite al asistente enviar mensajes, buscar y leer canales.',
@@ -2004,6 +2025,7 @@ export const CURATED_CATALOG: CuratedEntry[] = [
     name: 'Google Drive MCP',
     category: 'Almacenamiento',
     kind: 'mcp',
+    deprecated: LEGACY_MCP,
     description: 'Google Drive via MCP Server oficial.',
     longDescription:
       'Servidor MCP oficial de Google Drive que permite al asistente buscar, leer y gestionar archivos.',
@@ -2035,6 +2057,7 @@ export const CURATED_CATALOG: CuratedEntry[] = [
     name: 'Puppeteer MCP',
     category: 'Utilidades',
     kind: 'mcp',
+    deprecated: LEGACY_MCP,
     description: 'Automatización de navegador headless.',
     longDescription:
       'Servidor MCP que permite al asistente navegar páginas web, tomar screenshots y extraer contenido.',
@@ -2066,6 +2089,7 @@ export const CURATED_CATALOG: CuratedEntry[] = [
     name: 'Sequential Thinking MCP',
     category: 'IA',
     kind: 'mcp',
+    deprecated: LEGACY_MCP,
     description: 'Razonamiento paso a paso para el asistente.',
     longDescription:
       'Servidor MCP que da al asistente la capacidad de razonar paso a paso, revisar y corregir su proceso.',
@@ -2096,6 +2120,7 @@ export const CURATED_CATALOG: CuratedEntry[] = [
     name: 'EverArt MCP',
     category: 'Diseño',
     kind: 'mcp',
+    deprecated: LEGACY_MCP,
     description: 'Generación de imágenes con IA.',
     longDescription:
       'Servidor MCP que permite al asistente generar imágenes con IA usando modelos de EverArt.',
@@ -2126,6 +2151,7 @@ export const CURATED_CATALOG: CuratedEntry[] = [
     name: 'GitLab MCP',
     category: 'Desarrollo',
     kind: 'mcp',
+    deprecated: LEGACY_MCP,
     description: 'GitLab via MCP Server.',
     longDescription:
       'Servidor MCP que permite al asistente gestionar repos, merge requests y pipelines de GitLab.',
@@ -5413,6 +5439,7 @@ export const CURATED_CATALOG: CuratedEntry[] = [
     name: 'AWS MCP',
     category: 'Datos',
     kind: 'mcp',
+    deprecated: LEGACY_MCP,
     description: 'Servicios de AWS via MCP.',
     longDescription:
       'Servidor MCP que permite al asistente gestionar servicios de AWS (S3, EC2, Lambda).',
@@ -5444,6 +5471,7 @@ export const CURATED_CATALOG: CuratedEntry[] = [
     name: 'Notion MCP',
     category: 'Productividad',
     kind: 'mcp',
+    deprecated: LEGACY_MCP,
     description: 'Notion via MCP Server.',
     longDescription:
       'Servidor MCP que permite al asistente gestionar páginas, databases y contenido de Notion.',
@@ -5475,6 +5503,7 @@ export const CURATED_CATALOG: CuratedEntry[] = [
     name: 'Linear MCP',
     category: 'Desarrollo',
     kind: 'mcp',
+    deprecated: LEGACY_MCP,
     description: 'Linear via MCP Server.',
     longDescription:
       'Servidor MCP que permite al asistente gestionar issues, sprints y proyectos de Linear.',
@@ -5506,6 +5535,7 @@ export const CURATED_CATALOG: CuratedEntry[] = [
     name: 'Brave Search MCP',
     category: 'Búsqueda',
     kind: 'mcp',
+    deprecated: LEGACY_MCP,
     description: 'Búsqueda web en tiempo real.',
     longDescription:
       'Servidor MCP que permite al asistente buscar en la web en tiempo real usando Brave Search.',
@@ -7815,6 +7845,7 @@ export const CURATED_CATALOG: CuratedEntry[] = [
     name: 'Tavily MCP',
     category: 'Búsqueda',
     kind: 'mcp',
+    deprecated: LEGACY_MCP,
     description: 'Búsqueda web con IA.',
     longDescription:
       'Servidor MCP que permite al asistente buscar en la web con IA usando Tavily API.',
@@ -7845,6 +7876,7 @@ export const CURATED_CATALOG: CuratedEntry[] = [
     name: 'Exa MCP',
     category: 'Búsqueda',
     kind: 'mcp',
+    deprecated: LEGACY_MCP,
     description: 'Búsqueda semántica de alta calidad.',
     longDescription:
       'Servidor MCP que permite al asistente buscar en la web con búsqueda semántica de Exa.',
@@ -7875,6 +7907,7 @@ export const CURATED_CATALOG: CuratedEntry[] = [
     name: 'Serper MCP',
     category: 'Búsqueda',
     kind: 'mcp',
+    deprecated: LEGACY_MCP,
     description: 'Búsqueda web con Google.',
     longDescription:
       'Servidor MCP que permite al asistente buscar en Google con Serper API.',
@@ -7905,6 +7938,7 @@ export const CURATED_CATALOG: CuratedEntry[] = [
     name: 'Obsidian MCP',
     category: 'Productividad',
     kind: 'mcp',
+    deprecated: LEGACY_MCP,
     description: 'Notas y vaults de Obsidian.',
     longDescription:
       'Servidor MCP que permite al asistente leer y gestionar notas de tu vault de Obsidian.',
@@ -7936,6 +7970,7 @@ export const CURATED_CATALOG: CuratedEntry[] = [
     name: 'Todoist MCP',
     category: 'Productividad',
     kind: 'mcp',
+    deprecated: LEGACY_MCP,
     description: 'Tareas y proyectos de Todoist.',
     longDescription:
       'Servidor MCP que permite al asistente gestionar tareas, proyectos y labels de Todoist.',
@@ -7967,6 +8002,7 @@ export const CURATED_CATALOG: CuratedEntry[] = [
     name: 'Google Sheets MCP',
     category: 'Datos',
     kind: 'mcp',
+    deprecated: LEGACY_MCP,
     description: 'Hojas de cálculo de Google.',
     longDescription:
       'Servidor MCP que permite al asistente leer y escribir en Google Sheets.',
@@ -7999,6 +8035,7 @@ export const CURATED_CATALOG: CuratedEntry[] = [
     name: 'Excel MCP',
     category: 'Datos',
     kind: 'mcp',
+    deprecated: LEGACY_MCP,
     description: 'Archivos Excel locales.',
     longDescription:
       'Servidor MCP que permite al asistente leer y escribir archivos Excel locales.',
@@ -8030,6 +8067,7 @@ export const CURATED_CATALOG: CuratedEntry[] = [
     name: 'Figma MCP',
     category: 'Diseño',
     kind: 'mcp',
+    deprecated: LEGACY_MCP,
     description: 'Diseños de Figma via MCP.',
     longDescription:
       'Servidor MCP que permite al asistente leer archivos de diseño de Figma.',
@@ -8061,6 +8099,7 @@ export const CURATED_CATALOG: CuratedEntry[] = [
     name: 'Shopify MCP',
     category: 'Comercio',
     kind: 'mcp',
+    deprecated: LEGACY_MCP,
     description: 'Tienda Shopify via MCP.',
     longDescription:
       'Servidor MCP que permite al asistente gestionar productos, órdenes e inventario de Shopify.',
@@ -8092,6 +8131,7 @@ export const CURATED_CATALOG: CuratedEntry[] = [
     name: 'Stripe MCP',
     category: 'Pagos',
     kind: 'mcp',
+    deprecated: LEGACY_MCP,
     description: 'Pagos y facturas via MCP.',
     longDescription:
       'Servidor MCP que permite al asistente gestionar pagos, clientes y facturas de Stripe.',
@@ -8123,6 +8163,7 @@ export const CURATED_CATALOG: CuratedEntry[] = [
     name: 'Twilio MCP',
     category: 'Comunicaciones',
     kind: 'mcp',
+    deprecated: LEGACY_MCP,
     description: 'SMS y voz via MCP.',
     longDescription:
       'Servidor MCP que permite al asistente enviar SMS, hacer llamadas y gestionar WhatsApp.',
@@ -8154,6 +8195,7 @@ export const CURATED_CATALOG: CuratedEntry[] = [
     name: 'SendGrid MCP',
     category: 'Email',
     kind: 'mcp',
+    deprecated: LEGACY_MCP,
     description: 'Envío de email via MCP.',
     longDescription:
       'Servidor MCP que permite al asistente enviar emails transaccionales y de marketing con SendGrid.',
@@ -8184,6 +8226,7 @@ export const CURATED_CATALOG: CuratedEntry[] = [
     name: 'MongoDB MCP',
     category: 'Base de datos',
     kind: 'mcp',
+    deprecated: LEGACY_MCP,
     description: 'MongoDB via MCP Server.',
     longDescription:
       'Servidor MCP que permite al asistente consultar y gestionar bases de datos MongoDB.',
@@ -8215,6 +8258,7 @@ export const CURATED_CATALOG: CuratedEntry[] = [
     name: 'Elasticsearch MCP',
     category: 'Base de datos',
     kind: 'mcp',
+    deprecated: LEGACY_MCP,
     description: 'Búsqueda y analytics via MCP.',
     longDescription:
       'Servidor MCP que permite al asistente ejecutar queries en Elasticsearch.',
@@ -8246,6 +8290,7 @@ export const CURATED_CATALOG: CuratedEntry[] = [
     name: 'Neo4j MCP',
     category: 'Base de datos',
     kind: 'mcp',
+    deprecated: LEGACY_MCP,
     description: 'Graph database via MCP.',
     longDescription:
       'Servidor MCP que permite al asistente ejecutar queries Cypher en Neo4j.',
@@ -8277,6 +8322,7 @@ export const CURATED_CATALOG: CuratedEntry[] = [
     name: 'Algolia MCP',
     category: 'Búsqueda',
     kind: 'mcp',
+    deprecated: LEGACY_MCP,
     description: 'Búsqueda instantánea via MCP.',
     longDescription:
       'Servidor MCP que permite al asistente buscar en índices de Algolia.',
@@ -8731,6 +8777,7 @@ export const CURATED_CATALOG: CuratedEntry[] = [
     name: 'GitHub Issues MCP',
     category: 'Desarrollo',
     kind: 'mcp',
+    deprecated: LEGACY_MCP,
     description: 'Gestión de issues y PRs via MCP.',
     longDescription:
       'Servidor MCP que permite al asistente gestionar issues, pull requests y comentarios de GitHub.',
@@ -8762,6 +8809,7 @@ export const CURATED_CATALOG: CuratedEntry[] = [
     name: 'Jira MCP',
     category: 'Desarrollo',
     kind: 'mcp',
+    deprecated: LEGACY_MCP,
     description: 'Jira via MCP Server.',
     longDescription:
       'Servidor MCP que permite al asistente gestionar issues, sprints y boards de Jira.',
@@ -8793,6 +8841,7 @@ export const CURATED_CATALOG: CuratedEntry[] = [
     name: 'Discord MCP',
     category: 'Comunicaciones',
     kind: 'mcp',
+    deprecated: LEGACY_MCP,
     description: 'Discord via MCP Server.',
     longDescription:
       'Servidor MCP que permite al asistente enviar mensajes, leer canales y gestionar roles de Discord.',
@@ -8824,6 +8873,7 @@ export const CURATED_CATALOG: CuratedEntry[] = [
     name: 'Notion Databases MCP',
     category: 'Datos',
     kind: 'mcp',
+    deprecated: LEGACY_MCP,
     description: 'Databases de Notion via MCP.',
     longDescription:
       'Servidor MCP que permite al asistente consultar y gestionar databases de Notion.',
@@ -8855,6 +8905,7 @@ export const CURATED_CATALOG: CuratedEntry[] = [
     name: 'Airtable MCP',
     category: 'Datos',
     kind: 'mcp',
+    deprecated: LEGACY_MCP,
     description: 'Airtable via MCP Server.',
     longDescription:
       'Servidor MCP que permite al asistente gestionar bases, records y views de Airtable.',
@@ -8886,6 +8937,7 @@ export const CURATED_CATALOG: CuratedEntry[] = [
     name: 'Supabase MCP',
     category: 'Base de datos',
     kind: 'mcp',
+    deprecated: LEGACY_MCP,
     description: 'Supabase via MCP Server.',
     longDescription:
       'Servidor MCP que permite al asistente consultar PostgreSQL, gestionar auth y storage de Supabase.',
@@ -8917,6 +8969,7 @@ export const CURATED_CATALOG: CuratedEntry[] = [
     name: 'Sentry MCP',
     category: 'Monitoreo',
     kind: 'mcp',
+    deprecated: LEGACY_MCP,
     description: 'Errores y performance via MCP.',
     longDescription:
       'Servidor MCP que permite al asistente leer errores, issues y performance de Sentry.',
@@ -8948,6 +9001,7 @@ export const CURATED_CATALOG: CuratedEntry[] = [
     name: 'Datadog MCP',
     category: 'Monitoreo',
     kind: 'mcp',
+    deprecated: LEGACY_MCP,
     description: 'Métricas y logs via MCP.',
     longDescription:
       'Servidor MCP que permite al asistente leer métricas, logs y traces de Datadog.',
@@ -8979,6 +9033,7 @@ export const CURATED_CATALOG: CuratedEntry[] = [
     name: 'Google Drive MCP',
     category: 'Almacenamiento',
     kind: 'mcp',
+    deprecated: LEGACY_MCP,
     description: 'Google Drive via MCP Server.',
     longDescription:
       'Servidor MCP que permite al asistente buscar, leer y gestionar archivos de Google Drive.',
@@ -9011,6 +9066,7 @@ export const CURATED_CATALOG: CuratedEntry[] = [
     name: 'Dropbox MCP',
     category: 'Almacenamiento',
     kind: 'mcp',
+    deprecated: LEGACY_MCP,
     description: 'Dropbox via MCP Server.',
     longDescription:
       'Servidor MCP que permite al asistente buscar, leer y gestionar archivos de Dropbox.',
@@ -9043,6 +9099,7 @@ export const CURATED_CATALOG: CuratedEntry[] = [
     name: 'AWS S3 MCP',
     category: 'Almacenamiento',
     kind: 'mcp',
+    deprecated: LEGACY_MCP,
     description: 'S3 via MCP Server.',
     longDescription:
       'Servidor MCP que permite al asistente gestionar buckets, subir y descargar objetos de S3.',
@@ -9074,6 +9131,7 @@ export const CURATED_CATALOG: CuratedEntry[] = [
     name: 'HubSpot MCP',
     category: 'CRM',
     kind: 'mcp',
+    deprecated: LEGACY_MCP,
     description: 'HubSpot via MCP Server.',
     longDescription:
       'Servidor MCP que permite al asistente gestionar contacts, deals y companies de HubSpot.',
@@ -9105,6 +9163,7 @@ export const CURATED_CATALOG: CuratedEntry[] = [
     name: 'Salesforce MCP',
     category: 'CRM',
     kind: 'mcp',
+    deprecated: LEGACY_MCP,
     description: 'Salesforce via MCP Server.',
     longDescription:
       'Servidor MCP que permite al asistente gestionar leads, accounts y opportunities de Salesforce.',
@@ -9136,6 +9195,7 @@ export const CURATED_CATALOG: CuratedEntry[] = [
     name: 'Google Maps MCP',
     category: 'Mapas',
     kind: 'mcp',
+    deprecated: LEGACY_MCP,
     description: 'Google Maps via MCP Server.',
     longDescription:
       'Servidor MCP que permite al asistente geocodificar, calcular rutas y buscar lugares.',
@@ -13955,6 +14015,7 @@ export const CURATED_CATALOG: CuratedEntry[] = [
     name: 'Office MCP',
     category: 'Productividad',
     kind: 'mcp',
+    deprecated: LEGACY_MCP,
     description: 'Crear Word, Excel y PowerPoint locales.',
     longDescription:
       'Servidor MCP que permite al asistente crear y editar documentos Word, Excel y PowerPoint de forma local sin necesidad de OAuth. Ideal para documentos que no requieren OneDrive.',
@@ -13984,8 +14045,11 @@ export const CURATED_CATALOG: CuratedEntry[] = [
   },
 ];
 
+/** Entries shown in the catalog UI (obsolete ones excluded). */
+export const ACTIVE_CATALOG: CuratedEntry[] = CURATED_CATALOG.filter((e) => !e.deprecated);
+
 /** Group entries by category for display. */
-export function groupByCategory(entries: CuratedEntry[] = CURATED_CATALOG): Record<string, CuratedEntry[]> {
+export function groupByCategory(entries: CuratedEntry[] = ACTIVE_CATALOG): Record<string, CuratedEntry[]> {
   return entries.reduce<Record<string, CuratedEntry[]>>((acc, e) => {
     (acc[e.category] ??= []).push(e);
     return acc;
@@ -13993,7 +14057,7 @@ export function groupByCategory(entries: CuratedEntry[] = CURATED_CATALOG): Reco
 }
 
 /** Filter entries by kind. */
-export function filterByKind(entries: CuratedEntry[] = CURATED_CATALOG, kind: CatalogKind): CuratedEntry[] {
+export function filterByKind(entries: CuratedEntry[] = ACTIVE_CATALOG, kind: CatalogKind): CuratedEntry[] {
   return entries.filter((e) => e.kind === kind);
 }
 

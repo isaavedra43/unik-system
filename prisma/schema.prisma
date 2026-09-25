@@ -2634,3 +2634,67 @@ model ProductMedia {
   @@index([productId])
   @@index([objectId])
 }
+
+/// Política de UNIK para un toolkit de Composio (Gmail, Slack, GitHub…): qué
+/// toolkits puede usar el asistente y qué roles los usan. Composio guarda las
+/// cuentas conectadas y sus tokens; UNIK NO los almacena. Nace deshabilitada.
+model ComposioToolkitPolicy {
+  id              String   @id @default(cuid())
+  /// Slug del toolkit en Composio, en minúsculas (p. ej. "gmail").
+  toolkitSlug     String   @unique
+  enabled         Boolean  @default(false)
+  /// Roles que pueden usarlo. Vacío = solo super_admin.
+  allowedRoleKeys String[] @default([])
+  /// Clasificación de efecto decidida por un administrador: { "GMAIL_SEND_EMAIL": "external_send" }.
+  effectOverrides Json     @default("{}")
+  /// Herramientas concretas del toolkit que el asistente nunca debe ofrecer.
+  disabledTools   String[] @default([])
+  updatedBy       String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([enabled])
+}
+
+// =====================================================
+// AGENT VENUES — computadoras virtuales desechables (Daytona)
+// =====================================================
+
+/// Sesión de computadora virtual: un sandbox Daytona por usuario/misión.
+/// El controllerToken del browser vive en metadata (interno, nunca al cliente).
+model VenueSession {
+  id            String    @id @default(cuid())
+  userId        String
+  /// daytona (más providers después)
+  kind          String    @default("daytona")
+  /// sandbox id del provider
+  externalId    String?
+  /// active | idle | stopped | error
+  status        String    @default("active")
+  purpose       String?
+  lastUsedAt    DateTime  @default(now())
+  endedAt       DateTime?
+  billedMinutes Int       @default(0)
+  metadata      Json?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([userId, status])
+  @@index([status, lastUsedAt])
+}
+
+/// Estado de sesión de browser por host (cookies/localStorage) cifrado
+/// AES-256-GCM con extensions/secrets.ts. Nunca se persiste en claro.
+model BrowserProfile {
+  id              String    @id @default(cuid())
+  userId          String
+  /// etiqueta humana: "Plataforma GPS", "WhatsApp"
+  name            String
+  /// host al que aplica el perfil
+  host            String
+  stateCiphertext String
+  createdAt       DateTime  @default(now())
+  lastUsedAt      DateTime?
+
+  @@unique([userId, host])
+}

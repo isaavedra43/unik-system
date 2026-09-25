@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useState, useCallback } from 'react';
-import { Save, AlertCircle, CheckCircle2, Key, Cloud, Cpu, Check, X } from 'lucide-react';
+import { Save, AlertCircle, CheckCircle2, Key, Cloud, Cpu, Check, Globe } from 'lucide-react';
 import { updateAiConfigAction, toggleAiEnabledAction } from '@/app/app/admin/assistant/actions';
 import { CANOPY_PLAN_MODELS, CanopyWaveSetup } from './CanopyWaveSetup';
 import { ModelPolicyConfig } from './ModelPolicyConfig';
@@ -33,6 +33,12 @@ const PROVIDER_OPTIONS = [
     hint: 'Kimi K2.6 y MiniMax M3 de tu plan Unlimited, y cualquier otro modelo de tu cuenta. API compatible con OpenAI.',
     implemented: true,
   },
+  {
+    value: 'openrouter',
+    label: 'OpenRouter',
+    hint: 'Acceso a cientos de modelos (Claude, Gemini, DeepSeek, Jev…) con una sola API key. Necesario para las decisiones Jev.',
+    implemented: true,
+  },
   { value: 'anthropic', label: 'Anthropic (Claude)', hint: 'Claude Sonnet, Haiku, Opus (futuro)', implemented: false },
   { value: 'gemini', label: 'Google (Gemini)', hint: 'Gemini 2.0 Flash, etc. (futuro)', implemented: false },
   { value: 'local', label: 'Local (Ollama / LM Studio)', hint: 'Modelos locales en tu máquina (futuro)', implemented: false },
@@ -46,7 +52,7 @@ const SETTING_FIELDS: Array<{ key: string; label: string; type: 'number' | 'stri
   { key: 'maxConversationMessages', label: 'Mensajes en contexto', type: 'number' },
   { key: 'maxToolIterations', label: 'Iteraciones de tools', type: 'number' },
   { key: 'systemPromptOverride', label: 'System prompt override', type: 'textarea', hint: 'Vacío = usar prompt default' },
-  { key: 'enabledTools', label: 'Tools habilitados (uno por línea)', type: 'list' },
+  { key: 'enabledTools', label: 'Tools habilitados (uno por línea)', type: 'list', hint: 'Para internet/venue agrega: web_search, fetch_url, web_crawl, browser, browserProfile, venueExec, venueReadFile, venueListFiles, venueWriteFile, venueScreenshot' },
   { key: 'maxAttachmentSizeMb', label: 'Tamaño máx adjunto (MB)', type: 'number' },
   { key: 'allowedMimeTypes', label: 'MIME types permitidos (uno por línea)', type: 'list' },
   { key: 'artifactTtlHours', label: 'TTL artefactos (horas)', type: 'number' },
@@ -78,6 +84,27 @@ const SETTING_FIELDS: Array<{ key: string; label: string; type: 'number' | 'stri
   { key: 'reasoningEffort', label: 'Razonamiento en tareas complejas', type: 'string', hint: 'low | medium | high — solo aplica a modelos que piensan (GPT-5, o-series)' },
   { key: 'answerReviewEnabled', label: 'Revisión interna de respuestas complejas', type: 'boolean', hint: 'Solo con modelos que no razonan (GPT-4o, Kimi): un revisor detecta faltantes o cifras que no cuadran y el modelo corrige una vez. GPT-5 ya revisa mientras piensa' },
   { key: 'learningCaptureEnabled', label: 'Aprender de correcciones', type: 'boolean', hint: 'Cuando el usuario corrige a la IA o define un término ("Recolección significa…"), se propone como recuerdo pendiente que él confirma en Preferencias y memoria' },
+];
+
+/** Sección "Internet y Agentes": Jev, web tools y computadora virtual. */
+const AGENT_SETTING_FIELDS: Array<{ key: string; label: string; type: 'number' | 'string' | 'boolean' | 'list' | 'textarea' | 'password'; hint?: string }> = [
+  { key: 'jevEnabled', label: 'Decisiones Jev (OpenRouter)', type: 'boolean', hint: 'Micro-decisiones baratas y tipadas (typesafe/jev-1.13): routing, revisión, juez, filtros de inyección. Requiere API key de OpenRouter. Si falla, el sistema usa el comportamiento actual.' },
+  { key: 'jevModel', label: 'Modelo Jev', type: 'string', hint: 'typesafe/jev-1.13' },
+  { key: 'jevMinConfidence', label: 'Confianza mínima Jev', type: 'number', hint: '0.0 - 1.0 (default 0.7). Debajo se usa el fallback normal.' },
+  { key: 'webSearchEnabled', label: 'Búsqueda web (web_search)', type: 'boolean', hint: 'Permite al asistente buscar en internet con citas. Requiere API key del proveedor.' },
+  { key: 'webSearchProvider', label: 'Proveedor de búsqueda', type: 'string', hint: 'tavily' },
+  { key: 'webSearchApiKey', label: 'API key de búsqueda', type: 'password', hint: 'Tavily (o TAVILY_API_KEY en env). Nunca sale del servidor.' },
+  { key: 'webFetchEnabled', label: 'Lectura de páginas (fetch_url / web_crawl)', type: 'boolean', hint: 'Abre URLs públicas https con protección anti-SSRF, redirects revalidados y extracción a texto legible.' },
+  { key: 'webDomainAllowlist', label: 'Allowlist de dominios (uno por línea)', type: 'list', hint: 'Vacía = toda la web pública. Con entradas, SOLO esos dominios se pueden abrir — también limita la red del sandbox.' },
+  { key: 'webDomainDenylist', label: 'Denylist de dominios (uno por línea)', type: 'list', hint: 'Siempre bloqueados, aunque la allowlist esté vacía.' },
+  { key: 'webFetchMaxBytes', label: 'Bytes máx por página', type: 'number', hint: 'Default 2,000,000' },
+  { key: 'browserEnabled', label: 'Navegador del agente', type: 'boolean', hint: 'Tool browser dentro del venue: navegar, click, escribir, extraer, screenshot. Acciones externas (enviar/comprar/publicar) siempre piden aprobación.' },
+  { key: 'venueEnabled', label: 'Computadora virtual (Daytona)', type: 'boolean', hint: 'Sandbox desechable para browser + exec. Requiere DAYTONA_API_KEY y snapshot con chromium (venueImage).' },
+  { key: 'venueProvider', label: 'Proveedor de venue', type: 'string', hint: 'daytona' },
+  { key: 'venueImage', label: 'Snapshot/imagen del venue', type: 'string', hint: 'Snapshot Daytona con node + playwright-core + chromium (p. ej. unik-browser-1)' },
+  { key: 'venueMaxConcurrent', label: 'Venues simultáneos máx', type: 'number' },
+  { key: 'venueMaxMinutesPerDay', label: 'Minutos de venue por día', type: 'number', hint: 'Presupuesto diario compartido — se agota y las tools devuelven aviso.' },
+  { key: 'venueIdleTimeoutMinutes', label: 'Auto-apagado por inactividad (min)', type: 'number', hint: 'El reaper apaga venues sin uso cada 5 min.' },
 ];
 
 export function AssistantAdminConfig({ canManage }: { canManage: boolean }) {
@@ -156,6 +183,53 @@ export function AssistantAdminConfig({ canManage }: { canManage: boolean }) {
         providerConfigs: { ...configs, canopywave: { ...entry, enabled: true } },
       };
     });
+  }
+
+  function renderSettingField(field: { key: string; label: string; type: string; hint?: string }) {
+    return (
+      <div key={field.key} className="assistant-admin-config-field">
+        <label htmlFor={`cfg-${field.key}`}>{field.label}</label>
+        {field.type === 'boolean' ? (
+          <input
+            id={`cfg-${field.key}`}
+            type="checkbox"
+            checked={Boolean(settings[field.key])}
+            onChange={(e) => updateSetting(field.key, e.target.checked)}
+            disabled={!canManage}
+          />
+        ) : field.type === 'textarea' ? (
+          <textarea
+            id={`cfg-${field.key}`}
+            value={String(settings[field.key] ?? '')}
+            onChange={(e) => updateSetting(field.key, e.target.value)}
+            disabled={!canManage}
+            rows={4}
+          />
+        ) : field.type === 'list' ? (
+          <textarea
+            id={`cfg-${field.key}`}
+            value={Array.isArray(settings[field.key]) ? (settings[field.key] as string[]).join('\n') : String(settings[field.key] ?? '')}
+            onChange={(e) => updateSetting(field.key, e.target.value.split('\n').filter(Boolean))}
+            disabled={!canManage}
+            rows={4}
+          />
+        ) : (
+          <input
+            id={`cfg-${field.key}`}
+            type={field.type === 'number' ? 'number' : field.type === 'password' ? 'password' : 'text'}
+            value={String(settings[field.key] ?? '')}
+            onChange={(e) => updateSetting(field.key, field.type === 'number' ? Number(e.target.value) : e.target.value)}
+            disabled={!canManage}
+            placeholder={
+              field.type === 'password' && (settings[field.key] || settings[`has${field.key[0].toUpperCase()}${field.key.slice(1)}`])
+                ? '•••••••••••••••• (configurada)'
+                : undefined
+            }
+          />
+        )}
+        {field.hint && <span className="assistant-admin-config-hint">{field.hint}</span>}
+      </div>
+    );
   }
 
   function updateProviderConfig(provider: string, field: keyof ProviderConfigEntry, value: unknown) {
@@ -331,45 +405,22 @@ export function AssistantAdminConfig({ canManage }: { canManage: boolean }) {
           <Cpu size={18} /> Modelo y comportamiento
         </h3>
         <div className="assistant-admin-config-grid">
-          {SETTING_FIELDS.map((field) => (
-            <div key={field.key} className="assistant-admin-config-field">
-              <label htmlFor={`cfg-${field.key}`}>{field.label}</label>
-              {field.type === 'boolean' ? (
-                <input
-                  id={`cfg-${field.key}`}
-                  type="checkbox"
-                  checked={Boolean(settings[field.key])}
-                  onChange={(e) => updateSetting(field.key, e.target.checked)}
-                  disabled={!canManage}
-                />
-              ) : field.type === 'textarea' ? (
-                <textarea
-                  id={`cfg-${field.key}`}
-                  value={String(settings[field.key] ?? '')}
-                  onChange={(e) => updateSetting(field.key, e.target.value)}
-                  disabled={!canManage}
-                  rows={4}
-                />
-              ) : field.type === 'list' ? (
-                <textarea
-                  id={`cfg-${field.key}`}
-                  value={Array.isArray(settings[field.key]) ? (settings[field.key] as string[]).join('\n') : String(settings[field.key] ?? '')}
-                  onChange={(e) => updateSetting(field.key, e.target.value.split('\n').filter(Boolean))}
-                  disabled={!canManage}
-                  rows={4}
-                />
-              ) : (
-                <input
-                  id={`cfg-${field.key}`}
-                  type={field.type === 'number' ? 'number' : 'text'}
-                  value={String(settings[field.key] ?? '')}
-                  onChange={(e) => updateSetting(field.key, field.type === 'number' ? Number(e.target.value) : e.target.value)}
-                  disabled={!canManage}
-                />
-              )}
-              {field.hint && <span className="assistant-admin-config-hint">{field.hint}</span>}
-            </div>
-          ))}
+          {SETTING_FIELDS.map(renderSettingField)}
+        </div>
+      </div>
+
+      {/* ===== Sección: Internet y Agentes ===== */}
+      <div className="assistant-admin-config-section">
+        <h3 className="assistant-admin-section-title">
+          <Globe size={18} /> Internet y Agentes
+        </h3>
+        <p className="assistant-admin-config-hint" style={{ marginBottom: 16 }}>
+          Capa de agentes: decisiones Jev (OpenRouter), acceso a internet solo-lectura y la
+          computadora virtual Daytona donde el navegador y los comandos corren aislados.
+          Todo nace desactivado; las acciones externas siempre pasan por aprobación.
+        </p>
+        <div className="assistant-admin-config-grid">
+          {AGENT_SETTING_FIELDS.map(renderSettingField)}
         </div>
       </div>
 

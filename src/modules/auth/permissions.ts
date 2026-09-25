@@ -116,6 +116,8 @@ import { PURCHASE_ORDERS_PERMISSIONS } from '@/modules/purchase-orders/permissio
 import { BILLS_PERMISSIONS } from '@/modules/bills/permissions';
 import { VENDOR_CREDITS_PERMISSIONS } from '@/modules/vendor-credits/permissions';
 import { VISUAL_STUDIO_PERMISSIONS } from '@/modules/visual-studio/permissions';
+import { WEB_PERMISSIONS } from '@/modules/web/permissions';
+import { VENUE_PERMISSIONS } from '@/modules/venues/permissions';
 
 /** Every known permission. Future modules spread their definitions here. */
 export const PERMISSION_REGISTRY: PermissionDefinition[] = [
@@ -141,6 +143,8 @@ export const PERMISSION_REGISTRY: PermissionDefinition[] = [
   ...CAMPAIGNS_PERMISSIONS,
   ...VOICE_PERMISSIONS,
   ...VISUAL_STUDIO_PERMISSIONS,
+  ...WEB_PERMISSIONS,
+  ...VENUE_PERMISSIONS,
 ];
 
 const REGISTRY_KEYS = new Set(PERMISSION_REGISTRY.map((p) => p.key));

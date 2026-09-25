@@ -2,6 +2,8 @@ import type { AiSettings } from './ai-admin-config-service';
 import { getModelById } from './model-catalog';
 import { modelForTask } from './model-policy';
 import { detectDomains, normalizeText } from './tool-selector';
+import { decide, answerChoice } from './decisions/decision-engine';
+import { turnTierDecision } from './decisions/decision-points';
 
 /**
  * Model routing by task. When the user leaves the model on "Automático" the
@@ -91,6 +93,41 @@ export function classifyTask(input: ClassifyInput): TaskClassification {
     return { tier: 'simple', reason: 'mensaje corto sin intención de datos', needsVision };
   }
   return { tier: 'standard', reason: domains.length > 0 ? `consulta de ${domains.slice(0, 2).join(' y ')}` : 'petición estándar', needsVision };
+}
+
+const JEV_TIERS: readonly string[] = ['simple', 'standard', 'complex'];
+
+/**
+ * Jev-aware classification: the decision model answers which tier the turn is
+ * in one cheap call; when Jev is disabled/unconfident the heuristic
+ * `classifyTask` decides (and vice versa — an obvious heuristic verdict on
+ * trivially simple or forced-complex turns skips the Jev call entirely).
+ */
+export async function classifyTaskWithJev(
+  input: ClassifyInput,
+  opts: { userId?: string; conversationId?: string } = {}
+): Promise<TaskClassification> {
+  const heuristic = classifyTask(input);
+  // Forced tiers (plan mode, heavy attachments, copilot auto-trigger) need no decision.
+  if (input.planFirst || input.autoTrigger) return heuristic;
+  if (
+    input.attachmentKinds?.some((k) => k === 'document' || k === 'audio' || k === 'video')
+  ) {
+    return heuristic;
+  }
+
+  const { state, questions } = turnTierDecision(input.message, {
+    hasAttachments: (input.attachmentKinds?.length ?? 0) > 0,
+    domainHints: detectDomains(input.message),
+  });
+  const result = await decide(state, questions, opts);
+  const tier = answerChoice(result, 'tier', JEV_TIERS) as TaskTier | null;
+  if (!tier) return heuristic;
+  return {
+    tier,
+    reason: `jev:${tier} (heurística: ${heuristic.tier})`,
+    needsVision: heuristic.needsVision,
+  };
 }
 
 function modelSupportsVision(modelId: string): boolean {

@@ -31,7 +31,7 @@ import {
   Zap,
 } from 'lucide-react';
 import {
-  CURATED_CATALOG,
+  ACTIVE_CATALOG,
   groupByCategory,
   type CatalogKind,
   type CuratedEntry,
@@ -376,7 +376,7 @@ interface SearchableEntry {
   haystack: string; // precomputed lowercase haystack
 }
 
-const SEARCH_INDEX: SearchableEntry[] = CURATED_CATALOG.map((entry) => ({
+const SEARCH_INDEX: SearchableEntry[] = ACTIVE_CATALOG.map((entry) => ({
   entry,
   haystack: [
     entry.name,

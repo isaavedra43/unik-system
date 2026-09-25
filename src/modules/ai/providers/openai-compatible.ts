@@ -33,6 +33,8 @@ export interface OpenAiCompatibleOptions {
   defaultEndpoint: string;
   apiKeyEnv: string;
   defaultModel: string;
+  /** Extra headers on every request (e.g. OpenRouter HTTP-Referer / X-Title). */
+  defaultHeaders?: Record<string, string>;
 }
 
 export interface OpenAiCompatibleProvider extends AiProvider {
@@ -106,7 +108,13 @@ export function createOpenAiCompatibleProvider(options: OpenAiCompatibleOptions)
       );
     }
     if (client && cachedKey === config.apiKey && cachedEndpoint === config.endpoint) return client;
-    client = new OpenAI({ apiKey: config.apiKey, baseURL: config.endpoint, timeout: 180_000, maxRetries: 2 });
+    client = new OpenAI({
+      apiKey: config.apiKey,
+      baseURL: config.endpoint,
+      timeout: 180_000,
+      maxRetries: 2,
+      ...(options.defaultHeaders ? { defaultHeaders: options.defaultHeaders } : {}),
+    });
     cachedKey = config.apiKey;
     cachedEndpoint = config.endpoint;
     return client;

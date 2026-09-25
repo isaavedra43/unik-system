@@ -5,6 +5,7 @@ import { anthropicProvider } from './anthropic';
 import { geminiProvider } from './gemini';
 import { localProvider } from './local';
 import { canopywaveProvider } from './canopywave';
+import { openrouterProvider } from './openrouter';
 import { getActiveProviderId } from '../ai-config';
 
 const REGISTRY: Record<ProviderId, AiProvider> = {
@@ -13,6 +14,7 @@ const REGISTRY: Record<ProviderId, AiProvider> = {
   anthropic: anthropicProvider,
   gemini: geminiProvider,
   local: localProvider,
+  openrouter: openrouterProvider,
 };
 
 /** Returns the provider implementation for the given id. */

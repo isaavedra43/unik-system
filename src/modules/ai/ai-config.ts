@@ -49,6 +49,12 @@ const PROVIDER_ENV_MAP: Record<
     fallbackModel: 'OLLAMA_FALLBACK_MODEL',
     endpoint: 'OLLAMA_ENDPOINT',
   },
+  openrouter: {
+    apiKey: 'OPENROUTER_API_KEY',
+    model: 'OPENROUTER_MODEL',
+    fallbackModel: 'OPENROUTER_FALLBACK_MODEL',
+    endpoint: 'OPENROUTER_ENDPOINT',
+  },
 };
 
 const DEFAULT_MODELS: Record<ProviderId, { model: string; fallbackModel: string }> = {
@@ -57,6 +63,7 @@ const DEFAULT_MODELS: Record<ProviderId, { model: string; fallbackModel: string 
   anthropic: { model: 'claude-sonnet-4-5', fallbackModel: 'claude-haiku-4-5' },
   gemini: { model: 'gemini-2.0-flash', fallbackModel: 'gemini-2.0-flash-lite' },
   local: { model: 'llama3.1', fallbackModel: 'llama3.1' },
+  openrouter: { model: 'google/gemini-2.5-flash', fallbackModel: 'openai/gpt-5-mini' },
 };
 
 export interface ProviderConfig {

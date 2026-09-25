@@ -22,6 +22,14 @@ import net from 'net';
 export interface EgressPolicy {
   /** Approved hosts (exact) or wildcard subdomains ("*.example.com"). */
   allowedHosts: string[];
+  /**
+   * Open-web mode (web fetch tools): any host may be requested — HTTPS and the
+   * public-IP DNS check still apply, and `denyHosts` is always enforced.
+   * allowedHosts is ignored when set.
+   */
+  allowAnyHost?: boolean;
+  /** Hosts never allowed (exact or "*.suffix"), checked before everything else. */
+  denyHosts?: string[];
   /** Approved ports. Default: [443]. */
   allowedPorts?: number[];
   maxResponseBytes?: number;
@@ -156,7 +164,10 @@ async function assertUrlAllowed(url: URL, policy: EgressPolicy): Promise<void> {
   if (url.protocol !== 'https:' && !insecureLocal) {
     throw new EgressError('Solo se permite HTTPS', 'scheme');
   }
-  if (!isHostAllowed(url.hostname, policy.allowedHosts)) {
+  if (policy.denyHosts && isHostAllowed(url.hostname, policy.denyHosts)) {
+    throw new EgressError(`Dominio bloqueado por el administrador: ${url.hostname}`, 'host');
+  }
+  if (!policy.allowAnyHost && !isHostAllowed(url.hostname, policy.allowedHosts)) {
     throw new EgressError(`Dominio no aprobado: ${url.hostname}`, 'host');
   }
   const port = url.port ? Number(url.port) : url.protocol === 'https:' ? 443 : 80;

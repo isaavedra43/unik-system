@@ -31,7 +31,7 @@ Personalización: tono (profesional/cercano/directo), idioma (es/en), profundida
 
 ## Propuestas de comunicación interna
 
-`sendInternalChatMessage` (efecto `external_send`): el asistente propone un mensaje al chat interno; el usuario lo aprueba en la tarjeta de propuesta. Nunca se envía solo.
+`sendInternalChatMessage` (efecto `external_send`): el asistente propone un mensaje al chat interno; el usuario lo aprueba en la tarjeta de propuesta. Nunca se envía solo. Acepta `channelId` (de `listChatChannels`), `recipient` (nombre del grupo o de la persona — resuelto en `prepareArgs` contra canales y `findUsersByQuery`; ambiguo → error con candidatos) o `recipientUserId` (de `findUsers`; el DM se crea con `createDmChannel` al ejecutar, solo si se aprobó). Opcional `priority: 'urgent'`.
 
 ## Herramientas nuevas
 

@@ -22,6 +22,7 @@ import {
   refineSurface,
   requestProposal,
 } from './visual-service';
+import zlib from 'node:zlib';
 import type { CurrentUser } from '@/modules/auth/authorization';
 import type { PermissionKey } from '@/modules/auth/permissions';
 
@@ -30,7 +31,6 @@ function syntheticKitchenPng(): Buffer {
   // PNG mínimo generado con zlib manual sería largo; usamos un canvas-like
   // bitmap → PNG vía sharp? No disponible. Generamos un PNG real con la
   // librería de compresión de node.
-  const zlib = require('node:zlib') as typeof import('node:zlib');
   const W = 640, H = 480;
   const raw = Buffer.alloc(H * (1 + W * 3));
   for (let y = 0; y < H; y++) {

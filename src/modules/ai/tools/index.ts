@@ -106,5 +106,14 @@ import './documents-tools';
 import './notifications-tools';
 import './visual-tools';
 
+// Composio gateway (apps externas: Gmail, Calendar, Slack, GitHub, Notion… con aprobación por efecto)
+import './composio-tools';
+
+// Internet tools (web_search, fetch_url, web_crawl — resultados untrusted)
+import './web-tools';
+
+// Venue tools (computadora virtual Daytona: browser, exec, archivos, screenshot)
+import './venue-tools';
+
 // Export the registry API for consumers
 export * from './registry';

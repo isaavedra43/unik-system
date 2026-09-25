@@ -2,7 +2,7 @@ import { createHash } from 'crypto';
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import type { CurrentUser } from '@/modules/auth/authorization';
-import type { ToolDefinition, ToolExecutionResult } from '@/modules/ai/tools/registry';
+import type { ToolDefinition, ToolEffect, ToolExecutionResult } from '@/modules/ai/tools/registry';
 import { canonicalJson } from './json-schema-to-zod';
 import { redactDeep } from './secrets';
 
@@ -55,6 +55,8 @@ export function computeProposalHash(input: {
 export interface CreateProposalInput {
   actor: CurrentUser;
   tool: ToolDefinition;
+  /** Effect resolved for THIS call (gateway tools); defaults to the tool's static effect. */
+  effect?: ToolEffect;
   args: unknown;
   conversationId?: string;
   messageId?: string;
@@ -91,7 +93,7 @@ export async function createProposal(input: CreateProposalInput) {
       recipient: input.recipient ?? null,
       fileIds,
       contextHash: input.contextHash ?? null,
-      effect: input.tool.effect ?? 'read',
+      effect: input.effect ?? input.tool.effect ?? 'read',
       expiresAt: new Date(Date.now() + PROPOSAL_TTL_MS),
     },
   });

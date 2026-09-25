@@ -6,7 +6,7 @@ import { prisma } from '@/lib/prisma';
  * "Consumo" tab and by capacity planning.
  */
 export type UsageDimension =
-  'extension' | 'provider' | 'user' | 'team' | 'storage' | 'job' | 'campaign' | 'calls';
+  'extension' | 'provider' | 'user' | 'team' | 'storage' | 'job' | 'campaign' | 'calls' | 'venue' | 'web';
 
 function today(): string {
   return new Date().toISOString().slice(0, 10);

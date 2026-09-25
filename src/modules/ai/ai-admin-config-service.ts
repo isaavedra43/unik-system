@@ -105,6 +105,42 @@ export interface AiSettings {
   answerReviewEnabled: boolean;
   /** Aprender de correcciones y definiciones del usuario: se proponen como recuerdos pendientes de confirmar. */
   learningCaptureEnabled: boolean;
+
+  // ---- Agentes: Jev, internet y computadora virtual ----
+  /** Jev (System One en OpenRouter): decisiones tipadas baratas para routing, revisión, juez y filtros. */
+  jevEnabled: boolean;
+  /** Modelo de decisiones (OpenRouter Decisions API). */
+  jevModel: string;
+  /** Confianza mínima (0-1) para actuar sobre una decisión Jev; debajo se usa el fallback. */
+  jevMinConfidence: number;
+  /** Búsqueda web disponible para el asistente (tool web_search). */
+  webSearchEnabled: boolean;
+  /** Proveedor de búsqueda: 'tavily' (más por venir). */
+  webSearchProvider: string;
+  /** API key del proveedor de búsqueda (nunca sale del servidor). */
+  webSearchApiKey: string;
+  /** Lectura de páginas públicas (fetch_url / web_crawl). */
+  webFetchEnabled: boolean;
+  /** fetch_url / web_crawl: dominios bloqueados siempre. */
+  webDomainDenylist: string[];
+  /** Si no está vacía, SOLO estos dominios pueden fetchearse. */
+  webDomainAllowlist: string[];
+  /** Tope de bytes por página fetheada. */
+  webFetchMaxBytes: number;
+  /** Computadora virtual (venue) para browser y exec de agentes. */
+  venueEnabled: boolean;
+  /** Proveedor de venue: 'daytona'. */
+  venueProvider: string;
+  /** Imagen/snapshot del sandbox (con chromium instalado). */
+  venueImage: string;
+  /** Sandboxes simultáneos máximos. */
+  venueMaxConcurrent: number;
+  /** Minutos de venue por día (presupuesto). */
+  venueMaxMinutesPerDay: number;
+  /** Sesión de venue sin uso se apaga tras N minutos. */
+  venueIdleTimeoutMinutes: number;
+  /** Browser agentico dentro del venue. */
+  browserEnabled: boolean;
 }
 
 /** Tipos permitidos antes de la ampliación (se migran automáticamente si nunca se personalizaron). */
@@ -308,6 +344,11 @@ export const DEFAULT_AI_SETTINGS: AiSettings = {
     'extractDocumentData',
     'draftBillFromDocument',
     'getZohoBooksStatus',
+    // Composio (apps externas)
+    'composioListToolkits',
+    'composioSearchTools',
+    'composioConnect',
+    'composioExecute',
   ],
   maxAttachmentSizeMb: 25,
   allowedMimeTypes: [
@@ -365,6 +406,23 @@ export const DEFAULT_AI_SETTINGS: AiSettings = {
   reasoningEffort: 'medium',
   answerReviewEnabled: true,
   learningCaptureEnabled: true,
+  jevEnabled: false,
+  jevModel: 'typesafe/jev-1.13',
+  jevMinConfidence: 0.7,
+  webSearchEnabled: false,
+  webSearchProvider: 'tavily',
+  webSearchApiKey: '',
+  webFetchEnabled: false,
+  webDomainDenylist: [],
+  webDomainAllowlist: [],
+  webFetchMaxBytes: 2_000_000,
+  venueEnabled: false,
+  venueProvider: 'daytona',
+  venueImage: 'unik-browser-1',
+  venueMaxConcurrent: 2,
+  venueMaxMinutesPerDay: 60,
+  venueIdleTimeoutMinutes: 15,
+  browserEnabled: false,
 };
 
 interface CachedConfig {
@@ -511,6 +569,16 @@ export async function updateAiConfig(patch: {
       };
     }
     incomingSettings = { ...incomingSettings, providerConfigs: mergedProviders };
+  }
+  // Same rule for standalone secret fields (web search key): empty input keeps the stored value.
+  for (const secretField of ['webSearchApiKey'] as const) {
+    if (secretField in incomingSettings) {
+      const incoming = incomingSettings[secretField];
+      const existing = currentSettings[secretField];
+      if ((!incoming || (typeof incoming === 'string' && incoming.length === 0)) && typeof existing === 'string' && existing.length > 0) {
+        incomingSettings = { ...incomingSettings, [secretField]: existing };
+      }
+    }
   }
 
   const mergedSettings =

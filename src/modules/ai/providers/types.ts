@@ -11,9 +11,9 @@
  * (e.g. Anthropic) are responsible for adapting in their implementation.
  */
 
-export type ProviderId = 'openai' | 'canopywave' | 'anthropic' | 'gemini' | 'local';
+export type ProviderId = 'openai' | 'canopywave' | 'anthropic' | 'gemini' | 'local' | 'openrouter';
 
-export const PROVIDER_IDS: ProviderId[] = ['openai', 'canopywave', 'anthropic', 'gemini', 'local'];
+export const PROVIDER_IDS: ProviderId[] = ['openai', 'canopywave', 'anthropic', 'gemini', 'local', 'openrouter'];
 
 export const PROVIDER_LABELS: Record<ProviderId, string> = {
   openai: 'OpenAI (ChatGPT API)',
@@ -21,6 +21,7 @@ export const PROVIDER_LABELS: Record<ProviderId, string> = {
   anthropic: 'Anthropic (Claude)',
   gemini: 'Google (Gemini)',
   local: 'Local (Ollama / LM Studio)',
+  openrouter: 'OpenRouter',
 };
 
 /** Content part for multimodal messages (OpenAI Vision format). */

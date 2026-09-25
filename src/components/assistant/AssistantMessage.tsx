@@ -11,6 +11,8 @@ import { parseFollowUps } from '@/modules/ai/followups';
 import { MessageFeedback } from '@/components/copilot/MessageFeedback';
 import { PlanCard } from '@/components/copilot/PlanCard';
 import { parseConfidence } from '@/modules/ai/confidence';
+import { buildUiComponents } from '@/modules/ai/generative-ui/build-ui';
+import { GenerativeUi } from './generative/GenerativeUi';
 
 export interface AttachmentDisplay {
   id: string;
@@ -168,6 +170,11 @@ export function AssistantMessage({ message, onSendText, isLatest = false }: Assi
   }
   const records = message.toolCallRecords ?? [];
   const artifacts = message.artifacts ?? [];
+  // Generative UI: results of external tools (Composio, MCP) drawn as cards. Rebuilt from the
+  // persisted tool records, so history looks the same as the live turn.
+  const uiComponents = !isUser
+    ? records.flatMap((r) => (r.success ? buildUiComponents({ toolName: r.toolName, args: r.args, result: r.result, success: true }) : []))
+    : [];
   const planRecord = !isUser ? records.find((r) => r.toolName === 'proposePlan' && r.success) : undefined;
   const plan = planRecord ? parsePlan(planRecord.args) : null;
   const parsed = !isUser ? parseConfidence(message.content) : null;
@@ -195,6 +202,7 @@ export function AssistantMessage({ message, onSendText, isLatest = false }: Assi
           </div>
         )}
         {!isUser && <ToolSteps records={records.filter((r) => r.toolName !== 'proposePlan')} />}
+        {uiComponents.length > 0 && <GenerativeUi components={uiComponents} onSendText={onSendText} interactive={isLatest} />}
         {content && (
           <div className="assistant-msg-content">
             <AssistantMarkdown content={content} />

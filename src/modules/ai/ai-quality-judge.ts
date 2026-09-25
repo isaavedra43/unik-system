@@ -2,6 +2,8 @@ import { chatCompletion } from './ai-client';
 import { getAiSettings } from './ai-admin-config-service';
 import { mergeMessageMeta } from './ai-sessions-service';
 import { modelForTask } from './model-policy';
+import { decide, answerScore } from './decisions/decision-engine';
+import { judgeScoreDecision } from './decisions/decision-points';
 
 /**
  * Optional automatic quality evaluation ("LLM as judge"). Runs AFTER the answer
@@ -45,8 +47,38 @@ export async function judgeTurnQuality(input: JudgeInput): Promise<JudgeVerdict 
   const settings = await getAiSettings();
   if (!settings.qualityJudgeEnabled) return null;
   if (input.answer.trim().length < 40) return null;
-  const model = modelForTask(settings, 'judge');
   const tools = input.toolsUsed.length > 0 ? input.toolsUsed.map((t) => `${t.name}${t.success ? '' : ' (falló)'}${t.cached ? ' (caché)' : ''}`).join(', ') : 'ninguna';
+
+  // Jev path: the decision model scores the turn on the same 1-5 rubric at a
+  // fraction of the cost, and a confident answer skips the LLM judge entirely.
+  if (settings.jevEnabled) {
+    const gate = judgeScoreDecision({
+      userMessage: input.userMessage,
+      answer: input.answer,
+      toolsUsed: input.toolsUsed.map((t) => t.name),
+      confidence: input.confidence,
+    });
+    const score01 = await decide(gate.state, gate.questions, {
+      userId: input.messageId,
+    })
+      .then((r) => answerScore(r, 'quality', 5))
+      .catch(() => null);
+    if (score01 !== null) {
+      const score = Math.max(1, Math.min(5, Math.round(score01 * 4 + 1)));
+      const full: JudgeVerdict = {
+        score,
+        issues: [],
+        summary: 'Jev score',
+        model: settings.jevModel || 'typesafe/jev-1.13',
+        at: new Date().toISOString(),
+      };
+      await mergeMessageMeta(input.messageId, { judge: full });
+      return full;
+    }
+    // Jev unconfident/down → fall through to the LLM judge.
+  }
+
+  const model = modelForTask(settings, 'judge');
   const res = await chatCompletion({
     model,
     temperature: 0,

@@ -244,6 +244,14 @@ export async function callMcpTool(
         return { type: 'resource', uri: (c.resource as Record<string, unknown> | undefined)?.uri };
       return { type: String(c.type) };
     });
+    // MCP-UI / MCP Apps: `ui://` resources are interactive components for the user. Kept apart from
+    // `content` (so the model never reads the HTML) and only ever drawn in a sandboxed iframe.
+    const uiResources = content.flatMap((c: Record<string, unknown>) => {
+      const r = c.type === 'resource' ? (c.resource as Record<string, unknown> | undefined) : undefined;
+      if (!r || typeof r.uri !== 'string' || !r.uri.startsWith('ui://') || typeof r.text !== 'string') return [];
+      if (r.text.length > 120_000) return [];
+      return [{ uri: r.uri, mimeType: typeof r.mimeType === 'string' ? r.mimeType : 'text/html', text: r.text }];
+    });
     const structured = (result as { structuredContent?: unknown }).structuredContent;
     if (result.isError) {
       throw new McpError(
@@ -254,7 +262,7 @@ export async function callMcpTool(
         'tool_error'
       );
     }
-    return redactDeep({ content: parts, structuredContent: structured ?? null });
+    return { ...redactDeep({ content: parts, structuredContent: structured ?? null }), ...(uiResources.length ? { uiResources } : {}) };
   } catch (err) {
     if (connectionId)
       await touchConnection(connectionId, err instanceof Error ? err.message : 'error');
