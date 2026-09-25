@@ -64,10 +64,20 @@ por datos existentes:
   data de Zoho puede tener huérfanos; validar filas viejas brickea el deploy.
   `NOT VALID` deja la restricción activa para escrituras nuevas sin validar lo viejo.
 - Renames/`ALTER` dentro de `DO $$ … IF EXISTS … $$`
-- El pre-deploy de Railway corre `bash scripts/prisma-deploy.sh` (resuelve
-  migraciones fallidas → `migrate deploy`). NUNCA volver a `npx prisma migrate deploy` directo.
+- `ADD CONSTRAINT` SIEMPRE dentro de una guarda `pg_constraint` — una FK que ya
+  existía en producción aborta la migración (error 42710) y desde ese momento
+  **todos** los deploys siguientes mueren con P3009, aunque no tengan relación.
+  Fue exactamente lo que pasó el 2026-09-25 con `20260923231444_visual_studio`.
 
-El USUARIO aplicará después: `npx prisma migrate deploy` mediante el Pre-deploy ya configurado en Railway.
+Esto se verifica solo: `src/modules/shared/prisma-migrations.test.ts` revisa cada
+`migration.sql` nueva y falla el build si algo no es re-ejecutable. No edites las
+migraciones ya aplicadas en producción (cambia su checksum): la marca está en
+`FROZEN_THROUGH` dentro de ese test.
+
+El pre-deploy de Railway corre `node scripts/prisma-deploy.mjs`, que marca como
+rolled-back cualquier migración fallida y luego aplica `migrate deploy`. NUNCA
+volver a poner `npx prisma migrate deploy` directo: sin ese paso, una migración
+mala vuelve a dejar el deploy bloqueado de forma permanente.
 
 ### Testing — Reporte final
 

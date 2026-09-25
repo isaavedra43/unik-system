@@ -1,5 +1,9 @@
+-- Composio toolkit governance. Additive + re-runnable (AGENTS.md → Migraciones):
+-- every statement no-ops when the object already exists, so a re-run after a
+-- failed deploy converges instead of aborting.
+
 -- CreateTable
-CREATE TABLE "ComposioToolkitPolicy" (
+CREATE TABLE IF NOT EXISTS "ComposioToolkitPolicy" (
     "id" TEXT NOT NULL,
     "toolkitSlug" TEXT NOT NULL,
     "enabled" BOOLEAN NOT NULL DEFAULT false,
@@ -14,8 +18,7 @@ CREATE TABLE "ComposioToolkitPolicy" (
 );
 
 -- CreateIndex
-CREATE UNIQUE INDEX "ComposioToolkitPolicy_toolkitSlug_key" ON "ComposioToolkitPolicy"("toolkitSlug");
+CREATE UNIQUE INDEX IF NOT EXISTS "ComposioToolkitPolicy_toolkitSlug_key" ON "ComposioToolkitPolicy"("toolkitSlug");
 
 -- CreateIndex
-CREATE INDEX "ComposioToolkitPolicy_enabled_idx" ON "ComposioToolkitPolicy"("enabled");
-
+CREATE INDEX IF NOT EXISTS "ComposioToolkitPolicy_enabled_idx" ON "ComposioToolkitPolicy"("enabled");
