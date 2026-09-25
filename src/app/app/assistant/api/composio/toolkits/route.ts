@@ -14,7 +14,7 @@ export async function GET(request: NextRequest) {
   if (!isComposioConfigured()) return NextResponse.json({ configured: false, toolkits: [] });
   try {
     const search = request.nextUrl.searchParams.get('search') ?? undefined;
-    const toolkits = await listToolkits(auth.user, { search, limit: 100 });
+    const toolkits = await listToolkits(auth.user, { search, limit: 50 });
     return NextResponse.json({ configured: true, toolkits });
   } catch (err) {
     return composioErrorResponse(err);
