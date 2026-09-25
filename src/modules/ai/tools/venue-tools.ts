@@ -3,7 +3,7 @@ import { prisma } from '@/lib/prisma';
 import { registerTool, type ToolEffect } from './registry';
 import { getAiSettings } from '../ai-admin-config-service';
 import {
-  acquireVenue, emitVenueEvent, isVenueEnabled,
+  acquireVenue, emitVenueEvent, isVenueEnabled, isBrowserToolEnabled,
   listBrowserProfiles, loadBrowserProfileState, saveBrowserProfile,
   VenueUnavailableError,
 } from '@/modules/venues/venue-manager';
@@ -75,7 +75,7 @@ registerTool({
   timeoutMs: 300_000,
   maxResultBytes: 60_000,
   contextTags: ['all'],
-  isAvailable: async () => (await getAiSettings()).browserEnabled && (await isVenueEnabled()),
+  isAvailable: isBrowserToolEnabled,
   parameters: browserParams,
   resolveEffect: (_actor, args) => browserEffect(args),
   summarize: (a) => {
@@ -169,7 +169,7 @@ registerTool({
   resultTrust: 'untrusted',
   timeoutMs: 300_000,
   contextTags: ['all'],
-  isAvailable: async () => (await getAiSettings()).browserEnabled && (await isVenueEnabled()),
+  isAvailable: isBrowserToolEnabled,
   parameters: z.object({
     action: z.enum(['list', 'save', 'use']),
     host: z.string().max(200).optional().describe('Dominio del perfil, p. ej. fleet.ejemplo.mx'),

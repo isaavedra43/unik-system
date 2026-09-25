@@ -40,12 +40,54 @@ async function daytonaConfig(): Promise<DaytonaVenueConfig | null> {
     image: settings.venueImage?.trim() || undefined,
     target: process.env.DAYTONA_TARGET?.trim() || undefined,
     autoStopMinutes: settings.venueIdleTimeoutMinutes || 15,
-    domainAllowList: (settings.webDomainAllowlist ?? []).map((h) => h.trim().toLowerCase()).filter(Boolean),
+    domainAllowList: mergedDomainAllowList(settings.webDomainAllowlist ?? []),
   };
+}
+
+/**
+ * The allowlist exists to constrain where the AGENT browses — not the VM's own
+ * provisioning. Without these infra hosts an admin allowlist silently kills
+ * `provision.sh` (no node/npm/chromium) and every browser action then fails
+ * with a confusing "controller down" error.
+ */
+const PROVISION_HOSTS = [
+  'nodejs.org',
+  'registry.npmjs.org',
+  'deb.debian.org',
+  'security.debian.org',
+  'ftp.debian.org',
+  'archive.ubuntu.com',
+  'security.ubuntu.com',
+  'cdn.playwright.dev',
+  'playwright.azureedge.net',
+  'playwright-akamai.azureedge.net',
+  'playwright-verizon.azureedge.net',
+];
+
+function mergedDomainAllowList(allowlist: string[]): string[] {
+  const userHosts = allowlist.map((h) => h.trim().toLowerCase()).filter(Boolean);
+  if (userHosts.length === 0) return []; // empty → param omitted → unrestricted
+  return [...new Set([...userHosts, ...PROVISION_HOSTS])];
 }
 
 export async function isVenueEnabled(): Promise<boolean> {
   return (await daytonaConfig()) !== null;
+}
+
+/**
+ * Browser tools ride on the venue: an explicit `browserEnabled` choice in Admin
+ * wins, but installs that never touched the flag (it's absent from the stored
+ * settings) get the browser whenever the venue itself is on — a venue without
+ * a browser can't do "abre google".
+ */
+export async function isBrowserToolEnabled(): Promise<boolean> {
+  if (!(await isVenueEnabled())) return false;
+  const row = await prisma.aiConfig
+    .findUnique({ where: { key: 'global' }, select: { settings: true } })
+    .catch(() => null);
+  const raw = row?.settings;
+  const flag = raw && typeof raw === 'object' ? (raw as Record<string, unknown>).browserEnabled : undefined;
+  return typeof flag === 'boolean' ? flag : true;
 }
 
 function minutesBetween(a: Date, b: Date): number {

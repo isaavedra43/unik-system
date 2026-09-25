@@ -212,6 +212,9 @@ export function OpsPanel({
         };
         if (!d.tool) return;
         if (!startRef.current) startRef.current = Date.now();
+        // Venue tools (exec/files too — not only browser) mean the sandbox is
+        // alive: wake the live-state poll so SUPERFICIES reads "En vivo".
+        if (/^(browser|browserProfile|venue\w*)/.test(d.tool)) setVenueActive(true);
         setActivity((prev) =>
           [
             ...prev,
