@@ -53,6 +53,20 @@ Este documento es OBLIGATORIO para todo agente Devin que modifique UI en UNIK.
 5. Confirmar: NO `DROP TABLE`, NO `DROP COLUMN`, NO `prisma db push`
 6. **NO aplicar la migration**
 
+#### Regla permanente — migraciones idempotentes (producción tiene datos sincronizados)
+
+Toda `migration.sql` debe poder correr dos veces sin fallar y nunca bloquearse
+por datos existentes:
+
+- `CREATE TABLE IF NOT EXISTS`, `CREATE INDEX IF NOT EXISTS`
+- `DROP ... IF EXISTS` en cualquier drop
+- **Foreign keys siempre `NOT VALID` dentro de guardas `pg_constraint`** — la
+  data de Zoho puede tener huérfanos; validar filas viejas brickea el deploy.
+  `NOT VALID` deja la restricción activa para escrituras nuevas sin validar lo viejo.
+- Renames/`ALTER` dentro de `DO $$ … IF EXISTS … $$`
+- El pre-deploy de Railway corre `bash scripts/prisma-deploy.sh` (resuelve
+  migraciones fallidas → `migrate deploy`). NUNCA volver a `npx prisma migrate deploy` directo.
+
 El USUARIO aplicará después: `npx prisma migrate deploy` mediante el Pre-deploy ya configurado en Railway.
 
 ### Testing — Reporte final

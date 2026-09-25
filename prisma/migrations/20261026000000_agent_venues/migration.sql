@@ -1,5 +1,8 @@
+-- Venue sessions + encrypted browser profiles for the virtual-computer layer.
+-- Idempotent: IF NOT EXISTS everywhere, FKs guarded + NOT VALID.
+
 -- CreateTable
-CREATE TABLE "VenueSession" (
+CREATE TABLE IF NOT EXISTS "VenueSession" (
     "id" TEXT NOT NULL,
     "userId" TEXT NOT NULL,
     "kind" TEXT NOT NULL DEFAULT 'daytona',
@@ -17,7 +20,7 @@ CREATE TABLE "VenueSession" (
 );
 
 -- CreateTable
-CREATE TABLE "BrowserProfile" (
+CREATE TABLE IF NOT EXISTS "BrowserProfile" (
     "id" TEXT NOT NULL,
     "userId" TEXT NOT NULL,
     "name" TEXT NOT NULL,
@@ -28,12 +31,3 @@ CREATE TABLE "BrowserProfile" (
 
     CONSTRAINT "BrowserProfile_pkey" PRIMARY KEY ("id")
 );
-
--- CreateIndex
-CREATE INDEX "VenueSession_userId_status_idx" ON "VenueSession"("userId", "status");
-
--- CreateIndex
-CREATE INDEX "VenueSession_status_lastUsedAt_idx" ON "VenueSession"("status", "lastUsedAt");
-
--- CreateIndex
-CREATE UNIQUE INDEX "BrowserProfile_userId_host_key" ON "BrowserProfile"("userId", "host");

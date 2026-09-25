@@ -1,8 +1,9 @@
 -- Agent memory (episodic/semantic/procedural), missions, and venue playbooks.
--- Additive only: new tables + indexes, no drops, no renames.
+-- Additive + idempotent: IF NOT EXISTS everywhere; the FK is guarded and
+-- NOT VALID so it can never fail on existing data.
 
 -- CreateTable
-CREATE TABLE "AgentEpisode" (
+CREATE TABLE IF NOT EXISTS "AgentEpisode" (
     "id" TEXT NOT NULL,
     "userId" TEXT NOT NULL,
     "conversationId" TEXT,
@@ -17,7 +18,7 @@ CREATE TABLE "AgentEpisode" (
 );
 
 -- CreateTable
-CREATE TABLE "AgentFact" (
+CREATE TABLE IF NOT EXISTS "AgentFact" (
     "id" TEXT NOT NULL,
     "userId" TEXT NOT NULL,
     "entity" TEXT NOT NULL,
@@ -35,7 +36,7 @@ CREATE TABLE "AgentFact" (
 );
 
 -- CreateTable
-CREATE TABLE "AgentPlaybook" (
+CREATE TABLE IF NOT EXISTS "AgentPlaybook" (
     "id" TEXT NOT NULL,
     "userId" TEXT NOT NULL,
     "trigger" TEXT NOT NULL,
@@ -52,7 +53,7 @@ CREATE TABLE "AgentPlaybook" (
 );
 
 -- CreateTable
-CREATE TABLE "Mission" (
+CREATE TABLE IF NOT EXISTS "Mission" (
     "id" TEXT NOT NULL,
     "userId" TEXT NOT NULL,
     "conversationId" TEXT,
@@ -72,7 +73,7 @@ CREATE TABLE "Mission" (
 );
 
 -- CreateTable
-CREATE TABLE "MissionEvent" (
+CREATE TABLE IF NOT EXISTS "MissionEvent" (
     "id" TEXT NOT NULL,
     "missionId" TEXT NOT NULL,
     "type" TEXT NOT NULL,
@@ -83,7 +84,7 @@ CREATE TABLE "MissionEvent" (
 );
 
 -- CreateTable
-CREATE TABLE "VenuePlaybook" (
+CREATE TABLE IF NOT EXISTS "VenuePlaybook" (
     "id" TEXT NOT NULL,
     "userId" TEXT NOT NULL,
     "name" TEXT NOT NULL,
@@ -100,34 +101,21 @@ CREATE TABLE "VenuePlaybook" (
 );
 
 -- CreateIndex
-CREATE INDEX "AgentEpisode_userId_createdAt_idx" ON "AgentEpisode"("userId", "createdAt");
+CREATE INDEX IF NOT EXISTS "AgentEpisode_userId_createdAt_idx" ON "AgentEpisode"("userId", "createdAt");
+CREATE INDEX IF NOT EXISTS "AgentEpisode_userId_importance_idx" ON "AgentEpisode"("userId", "importance");
+CREATE INDEX IF NOT EXISTS "AgentFact_userId_status_entity_idx" ON "AgentFact"("userId", "status", "entity");
+CREATE INDEX IF NOT EXISTS "AgentFact_userId_entity_attribute_idx" ON "AgentFact"("userId", "entity", "attribute");
+CREATE INDEX IF NOT EXISTS "AgentPlaybook_userId_successCount_idx" ON "AgentPlaybook"("userId", "successCount");
+CREATE INDEX IF NOT EXISTS "AgentPlaybook_userId_trigger_idx" ON "AgentPlaybook"("userId", "trigger");
+CREATE INDEX IF NOT EXISTS "Mission_userId_status_idx" ON "Mission"("userId", "status");
+CREATE INDEX IF NOT EXISTS "Mission_status_nextRunAt_idx" ON "Mission"("status", "nextRunAt");
+CREATE INDEX IF NOT EXISTS "MissionEvent_missionId_createdAt_idx" ON "MissionEvent"("missionId", "createdAt");
+CREATE INDEX IF NOT EXISTS "VenuePlaybook_userId_status_idx" ON "VenuePlaybook"("userId", "status");
 
--- CreateIndex
-CREATE INDEX "AgentEpisode_userId_importance_idx" ON "AgentEpisode"("userId", "importance");
-
--- CreateIndex
-CREATE INDEX "AgentFact_userId_status_entity_idx" ON "AgentFact"("userId", "status", "entity");
-
--- CreateIndex
-CREATE INDEX "AgentFact_userId_entity_attribute_idx" ON "AgentFact"("userId", "entity", "attribute");
-
--- CreateIndex
-CREATE INDEX "AgentPlaybook_userId_successCount_idx" ON "AgentPlaybook"("userId", "successCount");
-
--- CreateIndex
-CREATE INDEX "AgentPlaybook_userId_trigger_idx" ON "AgentPlaybook"("userId", "trigger");
-
--- CreateIndex
-CREATE INDEX "Mission_userId_status_idx" ON "Mission"("userId", "status");
-
--- CreateIndex
-CREATE INDEX "Mission_status_nextRunAt_idx" ON "Mission"("status", "nextRunAt");
-
--- CreateIndex
-CREATE INDEX "MissionEvent_missionId_createdAt_idx" ON "MissionEvent"("missionId", "createdAt");
-
--- CreateIndex
-CREATE INDEX "VenuePlaybook_userId_status_idx" ON "VenuePlaybook"("userId", "status");
-
--- AddForeignKey
-ALTER TABLE "MissionEvent" ADD CONSTRAINT "MissionEvent_missionId_fkey" FOREIGN KEY ("missionId") REFERENCES "Mission"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+-- AddForeignKey (guarded + NOT VALID)
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'MissionEvent_missionId_fkey') THEN
+    ALTER TABLE "MissionEvent" ADD CONSTRAINT "MissionEvent_missionId_fkey" FOREIGN KEY ("missionId") REFERENCES "Mission"("id") ON DELETE CASCADE ON UPDATE CASCADE NOT VALID;
+  END IF;
+END $$;
