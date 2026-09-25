@@ -13,3 +13,5 @@ import '@/modules/ai/ai-jobs';
 import '@/modules/notifications/notification-jobs';
 import '@/modules/venues/venue-jobs';
 import '@/modules/missions/mission-jobs';
+import '@/modules/agents/delegation';
+import '@/modules/agents/trigger-service';

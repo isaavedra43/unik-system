@@ -4,14 +4,14 @@ Ruta `/app/packages`. Solo lectura: Zoho es la fuente de verdad; UNIK sincroniza
 
 ## Piezas
 
-| Pieza | Archivo |
-| --- | --- |
-| Lectura tolerante del payload de Zoho (lista y detalle) | `src/modules/packages/packages-payload.ts` |
-| Normalizador snapshot → `Package` + `PackageItem` | `src/modules/packages/packages-normalizer.ts` |
-| Adaptador de sync (lista + detalle por paquete) | `src/modules/integrations/zoho/packages-sync.ts` |
-| Botón "Actualizar" (sync `quick`, 25 s de espera, luego 202) | `src/app/app/packages/sync/route.ts` |
-| PDF oficial de Zoho (`GET /packages/{id}?accept=pdf`) | `src/app/app/packages/[id]/pdf/route.ts` |
-| UI: workspace, detalle, cajón de vista previa | `src/components/packages/*` |
+| Pieza                                                        | Archivo                                          |
+| ------------------------------------------------------------ | ------------------------------------------------ |
+| Lectura tolerante del payload de Zoho (lista y detalle)      | `src/modules/packages/packages-payload.ts`       |
+| Normalizador snapshot → `Package` + `PackageItem`            | `src/modules/packages/packages-normalizer.ts`    |
+| Adaptador de sync (lista + detalle por paquete)              | `src/modules/integrations/zoho/packages-sync.ts` |
+| Botón "Actualizar" (sync `quick`, 25 s de espera, luego 202) | `src/app/app/packages/sync/route.ts`             |
+| PDF oficial de Zoho (`GET /packages/{id}?accept=pdf`)        | `src/app/app/packages/[id]/pdf/route.ts`         |
+| UI: workspace, detalle, cajón de vista previa                | `src/components/packages/*`                      |
 
 ## Datos que se guardan
 

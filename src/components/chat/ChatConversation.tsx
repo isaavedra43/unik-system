@@ -19,19 +19,12 @@ export interface ChatConversationProps {
   onBack?: () => void;
   /** Callback when SSE detects an incoming call in this channel */
   onIncomingCall?: (call: ChatCallDTO) => void;
-  /** Copilot aside toggle (same AI as the assistant). */
-  aiOpen?: boolean;
-  onToggleAi?: () => void;
-  /** Text the copilot asked to insert into the composer. */
-  insertRequest?: { text: string; nonce: number } | null;
-  /** Fired when a message from someone else arrives (drives copilot auto-analysis). */
-  onForeignMessage?: (createdAt: string) => void;
   /** Deep link (?call=audio|video): start a call as soon as the channel loads. */
   autoStartCall?: 'audio' | 'video' | null;
   onAutoStartConsumed?: () => void;
 }
 
-export function ChatConversation({ channelId, user, onRefresh, onBack, onIncomingCall, aiOpen, onToggleAi, insertRequest, onForeignMessage, autoStartCall, onAutoStartConsumed }: ChatConversationProps) {
+export function ChatConversation({ channelId, user, onRefresh, onBack, onIncomingCall, autoStartCall, onAutoStartConsumed }: ChatConversationProps) {
   const [channel, setChannel] = useState<ChatChannelDTO | null>(null);
   const [messages, setMessages] = useState<ChatMessageDTO[]>([]);
   const [loading, setLoading] = useState(true);
@@ -62,8 +55,6 @@ export function ChatConversation({ channelId, user, onRefresh, onBack, onIncomin
   onRefreshRef.current = onRefresh;
   const onIncomingCallRef = useRef(onIncomingCall);
   onIncomingCallRef.current = onIncomingCall;
-  const onForeignMessageRef = useRef(onForeignMessage);
-  onForeignMessageRef.current = onForeignMessage;
 
   // Load channel info
   useEffect(() => {
@@ -141,7 +132,6 @@ export function ChatConversation({ channelId, user, onRefresh, onBack, onIncomin
             // Auto mark as read
             fetch(`/app/chat/api/channels/${channelId}/read`, { method: 'POST' }).catch(() => {});
             onRefreshRef.current();
-            if (evt.data.senderId !== user.id) onForeignMessageRef.current?.(evt.data.createdAt);
             break;
           case 'edit':
             setMessages((prev) =>
@@ -594,8 +584,6 @@ export function ChatConversation({ channelId, user, onRefresh, onBack, onIncomin
         onShowSettings={() => setShowSettings(true)}
         onCallAudio={() => startCall('audio')}
         onCallVideo={() => startCall('video')}
-        aiOpen={aiOpen}
-        onToggleAi={onToggleAi}
       />
 
       {/* Messages */}
@@ -637,7 +625,6 @@ export function ChatConversation({ channelId, user, onRefresh, onBack, onIncomin
         user={user}
         members={channel?.members}
         threadId={activeThread?.threadId}
-        insertRequest={insertRequest}
       />
 
       {/* Thread panel */}

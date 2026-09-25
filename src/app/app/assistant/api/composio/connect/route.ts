@@ -16,7 +16,11 @@ export async function POST(request: Request) {
   try {
     const { toolkit } = Body.parse(await readJson(request));
     const res = await connectToolkit(auth.user, toolkit);
-    return NextResponse.json({ toolkit: res.toolkit, redirectUrl: res.redirectUrl });
+    return NextResponse.json({
+      toolkit: res.toolkit,
+      redirectUrl: res.redirectUrl,
+      connected: res.connected,
+    });
   } catch (err) {
     return composioErrorResponse(err);
   }

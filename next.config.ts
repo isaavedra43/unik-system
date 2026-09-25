@@ -68,6 +68,16 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
+  // Slim runtime bundle for the Docker image (Dockerfile copies
+  // .next/standalone). Keeps the repo root explicit — a stray lockfile outside
+  // the project would otherwise widen the trace scope.
+  output: 'standalone',
+  outputFileTracingRoot: process.cwd(),
+  // Prisma's generated client + query engine live under node_modules/.prisma —
+  // nft tracing doesn't reliably follow its dynamic requires, so include them.
+  outputFileTracingIncludes: {
+    '/**': ['./node_modules/.prisma/**', './node_modules/@prisma/client/**'],
+  },
   reactStrictMode: true,
   poweredByHeader: false,
   serverExternalPackages: ['pdf-parse', 'pdfkit', '@modelcontextprotocol/sdk', '@composio/core'],

@@ -2,23 +2,31 @@
 
 ## CORE INSTALLED
 
-| Dependency                 | Purpose                              | Production | Where used                                    |
-| -------------------------- | ------------------------------------ | ---------- | --------------------------------------------- |
-| `tailwindcss`              | Motor de estilos utility-first       | build      | `postcss.config.mjs`, `src/styles/shadcn.css` |
-| `@tailwindcss/postcss`     | PostCSS plugin v4                    | build      | `postcss.config.mjs`                          |
-| `class-variance-authority` | Variants tipadas                     | yes        | shadcn components                             |
-| `clsx`                     | Concatenación condicional de clases  | yes        | `cn()`                                        |
-| `tailwind-merge`           | Merge inteligente de clases Tailwind | yes        | `cn()`                                        |
-| `lucide-react`             | Iconos oficiales                     | yes        | toda UI                                       |
-| `motion`                   | Animaciones                          | yes        | `src/lib/motion`                              |
-| `next-themes`              | Light/Dark/System                    | yes        | `src/components/providers.tsx`                |
-| `sonner`                   | Toast                                | yes        | `src/components/providers.tsx`                |
-| `react-hook-form`          | Forms complejos client-side          | yes        | forms avanzados                               |
-| `@hookform/resolvers`      | Integración Zod con RHF              | yes        | forms avanzados                               |
-| `date-fns`                 | Manipulación de fechas               | yes        | date pickers, formatos                        |
-| `recharts`                 | Gráficas                             | yes        | dashboards futuros                            |
-| `@tanstack/react-table`    | Tablas avanzadas                     | yes        | `DataTable`                                   |
-| `@tanstack/react-virtual`  | Virtualización                       | yes        | listas/tablas grandes                         |
+| Dependency                    | Purpose                               | Production | Where used                                    |
+| ----------------------------- | ------------------------------------- | ---------- | --------------------------------------------- |
+| `tailwindcss`                 | Motor de estilos utility-first        | build      | `postcss.config.mjs`, `src/styles/shadcn.css` |
+| `@tailwindcss/postcss`        | PostCSS plugin v4                     | build      | `postcss.config.mjs`                          |
+| `class-variance-authority`    | Variants tipadas                      | yes        | shadcn components                             |
+| `clsx`                        | Concatenación condicional de clases   | yes        | `cn()`                                        |
+| `tailwind-merge`              | Merge inteligente de clases Tailwind  | yes        | `cn()`                                        |
+| `lucide-react`                | Iconos oficiales                      | yes        | toda UI                                       |
+| `motion`                      | Animaciones                           | yes        | `src/lib/motion`                              |
+| `next-themes`                 | Light/Dark/System                     | yes        | `src/components/providers.tsx`                |
+| `sonner`                      | Toast                                 | yes        | `src/components/providers.tsx`                |
+| `react-hook-form`             | Forms complejos client-side           | yes        | forms avanzados                               |
+| `@hookform/resolvers`         | Integración Zod con RHF               | yes        | forms avanzados                               |
+| `date-fns`                    | Manipulación de fechas                | yes        | date pickers, formatos                        |
+| `recharts`                    | Gráficas                              | yes        | dashboards, reportes IA                       |
+| `@tanstack/react-table`       | Tablas avanzadas                      | yes        | `DataTable`                                   |
+| `@tanstack/react-virtual`     | Virtualización                        | yes        | listas/tablas grandes                         |
+| `@dnd-kit/*`                  | Drag & drop (core/sortable/utilities) | yes        | reorden de columnas en workspaces             |
+| `radix-ui` / `@base-ui/react` | Primitivas accesibles                 | yes        | componentes `src/components/shadcn`           |
+| `cmdk`                        | Command palette                       | yes        | `command.tsx`                                 |
+| `vaul`                        | Drawer                                | yes        | `drawer.tsx`                                  |
+| `react-day-picker`            | Date picker                           | yes        | `calendar.tsx`                                |
+| `leaflet` + `react-leaflet`   | Mapas                                 | yes        | ubicaciones de chat                           |
+| `livekit-client`              | WebRTC cliente                        | yes        | `CallRoom.tsx`                                |
+| `@mcp-ui/client`              | Renderer `ui://` de servidores MCP    | yes        | `McpUiFrame` (asistente)                      |
 
 ## STORYBOOK / TESTING
 
@@ -37,8 +45,6 @@
 NO instalar hasta que un módulo realmente lo necesite:
 
 - `@tanstack/react-query`
-- `@dnd-kit/core`
-- `@dnd-kit/sortable`
 - `react-resizable-panels`
 - `react-dropzone`
 - `MapLibre GL`
@@ -46,6 +52,9 @@ NO instalar hasta que un módulo realmente lo necesite:
 - `Tiptap`
 - `Embla Carousel`
 - `MSW`
+
+(Nota: `@dnd-kit/*`, `cmdk`, `vaul`, `react-day-picker` y `leaflet` ya están
+instalados — ver tabla CORE.)
 
 ## NOT ALLOWED WITHOUT REVIEW
 

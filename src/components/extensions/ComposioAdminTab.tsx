@@ -9,6 +9,7 @@ import {
   ChevronRight,
   Loader2,
   Plug,
+  RefreshCw,
   Search,
   Unlink,
 } from 'lucide-react';
@@ -81,6 +82,7 @@ export function ComposioAdminTab({ canManage }: { canManage: boolean }) {
   const [open, setOpen] = useState<string | null>(null);
   const [tools, setTools] = useState<Record<string, ToolRow[] | 'loading'>>({});
   const [mine, setMine] = useState<Record<string, MyToolkit>>({});
+  const [mineError, setMineError] = useState(false);
 
   const loadMine = useCallback(async (): Promise<Record<string, MyToolkit>> => {
     try {
@@ -90,9 +92,10 @@ export function ComposioAdminTab({ canManage }: { canManage: boolean }) {
       const map: Record<string, MyToolkit> = {};
       for (const t of data.toolkits ?? []) map[t.slug] = t;
       setMine(map);
+      setMineError(false);
       return map;
     } catch {
-      // Admin keeps working without the personal-status column.
+      setMineError(true);
       return {};
     }
   }, []);
@@ -156,12 +159,26 @@ export function ComposioAdminTab({ canManage }: { canManage: boolean }) {
     setBusy(`me:${slug}`);
     setError(null);
     try {
-      const data = await api<{ redirectUrl?: string }>('/app/assistant/api/composio/connect', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ toolkit: slug }),
-      });
-      if (!data.redirectUrl) throw new Error('Composio no devolvió un enlace de autorización');
+      const data = await api<{ redirectUrl?: string | null; connected?: boolean }>(
+        '/app/assistant/api/composio/connect',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ toolkit: slug }),
+        }
+      );
+      if (!data.redirectUrl) {
+        if (data.connected) {
+          // Managed/no-auth app — Composio activated it without OAuth.
+          setMine((prev) => ({
+            ...prev,
+            [slug]: { slug, connected: true, isNoAuth: false, connectedAccountId: null },
+          }));
+          void loadMine();
+          return;
+        }
+        throw new Error('Composio no devolvió un enlace de autorización');
+      }
       window.open(data.redirectUrl, '_blank', 'noopener,noreferrer');
       // The OAuth round-trip lands on «Extensiones y skills»; poll here too so
       // the badge updates without leaving the admin screen.
@@ -287,7 +304,29 @@ export function ComposioAdminTab({ canManage }: { canManage: boolean }) {
                       <td>
                         {(() => {
                           const m = mine[p.toolkitSlug];
-                          if (!m) return <span className="assistant-admin-muted">—</span>;
+                          if (!m)
+                            return (
+                              <button
+                                type="button"
+                                className="gui-btn"
+                                disabled={busy === `me:${p.toolkitSlug}`}
+                                onClick={() =>
+                                  void loadMine().catch(() => undefined)
+                                }
+                                title={
+                                  mineError
+                                    ? 'No se pudo consultar tu estado — reintentar'
+                                    : 'Verificar estado de mi cuenta'
+                                }
+                              >
+                                {busy === `me:${p.toolkitSlug}` ? (
+                                  <Loader2 size={12} className="copilot-spin" />
+                                ) : (
+                                  <RefreshCw size={12} />
+                                )}{' '}
+                                {mineError ? 'Reintentar' : 'Verificar'}
+                              </button>
+                            );
                           if (m.isNoAuth)
                             return <span className="gui-badge is-success">Sin cuenta necesaria</span>;
                           return (

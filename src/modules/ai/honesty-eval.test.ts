@@ -64,7 +64,7 @@ describe('sourceClaimsNotInTools', () => {
 
   it('"preparé el borrador" ≠ "envié" — la propuesta no cuenta como envío', () => {
     const answer = 'Ya le envié el correo al cliente con la cotización.';
-    const issues = sourceClaimsNotInTools(answer, [{ name: 'proposeInboxDraft' }]);
+    const issues = sourceClaimsNotInTools(answer, [{ name: 'proposePlan' }]);
     expect(issues.length).toBeGreaterThan(0);
   });
 

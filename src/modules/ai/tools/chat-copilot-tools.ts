@@ -1,14 +1,10 @@
 import { z } from 'zod';
 import { registerTool } from './registry';
-import { previewText } from '@/modules/comms/normalize';
-import { markdownLinksToPlain, rewriteArtifactLinksForSharing } from '../artifact-share';
 
 /**
- * Internal-chat tools. `chatChannelId` is injected by the orchestrator when the
- * assistant runs as the chat copilot (CHAT_CHANNEL_ID_TOOLS); from the main
- * assistant the model passes the channel id it got from listChatChannels.
- * All of them require `chat.use` and only read/draft; the only send path stays
- * `sendInternalChatMessage` (external_send → approval).
+ * Internal-chat tools. The model passes the channel id it got from
+ * listChatChannels. All of them require `chat.use` and only read; the only
+ * send path stays `sendInternalChatMessage` (external_send → approval).
  */
 
 const CHAT_PERMISSION = 'chat.use';
@@ -136,36 +132,6 @@ registerTool({
     const { summarizeConversation } = await import('@/modules/chat/chat-ai-service');
     const summary = await summarizeConversation(args.chatChannelId, actor.id, new Date(Date.now() - args.sinceHours * 3_600_000));
     return { chatChannelId: args.chatChannelId, sinceHours: args.sinceHours, summary };
-  },
-});
-
-registerTool({
-  name: 'proposeChatDraft',
-  description:
-    'Propone al usuario un BORRADOR de mensaje para el canal del chat interno actual. Escribe tú el texto completo. No envía nada: el usuario lo inserta en el redactor y decide.',
-  category: 'communication',
-  requiredPermission: CHAT_PERMISSION,
-  enabledByDefault: true,
-  effect: 'draft',
-  contextTags: ['all'],
-  parameters: z.object({
-    chatChannelId: z.string().min(1),
-    body: z.string().min(1).max(4000).describe('Texto final listo para enviar al equipo.'),
-    rationale: z.string().max(200).optional().describe('Una línea sobre el enfoque elegido.'),
-  }),
-  summarize: (args) => `Borrador para el chat: "${previewText((args as { body: string }).body, 160)}"`,
-  execute: async (actor, rawArgs) => {
-    const args = rawArgs as { chatChannelId: string; body: string; rationale?: string };
-    const { getChannel } = await import('@/modules/chat/chat-service');
-    const channel = await getChannel(args.chatChannelId, actor.id);
-    if (!channel) throw new Error('Canal no encontrado o sin acceso');
-    const { text } = await rewriteArtifactLinksForSharing(markdownLinksToPlain(args.body), actor.id);
-    return {
-      draft: text,
-      rationale: args.rationale ?? null,
-      status: 'draft_ready',
-      note: 'El borrador se mostró como tarjeta con el botón "Insertar en el redactor". No lo repitas completo en tu respuesta.',
-    };
   },
 });
 

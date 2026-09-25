@@ -31,7 +31,7 @@ describe('tool selection against the real registry', () => {
 
   for (const c of cases) {
     it(`offers ≤96 tools with the right ones for: "${c.message.slice(0, 40)}…"`, () => {
-      const res = selectToolsForTurn({ tools, message: c.message, maxTools: 96, pinned: ['proposeChatDraft', 'suggestNextActions'] });
+      const res = selectToolsForTurn({ tools, message: c.message, maxTools: 96, pinned: ['listChatChannels', 'listInboxConversations'] });
       expect(res.offered.length).toBeLessThanOrEqual(96);
       const names = new Set(res.offered.map((t) => t.name));
       for (const core of CORE_TOOL_NAMES) if (tools.some((t) => t.name === core)) expect(names.has(core)).toBe(true);

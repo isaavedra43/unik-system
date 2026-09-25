@@ -78,10 +78,7 @@ import './campaigns-tools';
 // Comms tools (bandeja omnicanal, compromisos, duplicados)
 import './comms-tools';
 
-// Inbox copilot tools (acciones sugeridas, borradores, estado/notas de la conversación)
-import './inbox-copilot-tools';
-
-// Internal chat copilot tools (canales, mensajes, borradores, resumen, fijar)
+// Internal chat tools (canales, mensajes, resumen, fijar)
 import './chat-copilot-tools';
 
 // Quotes (cotizaciones de Zoho Books: consultar, previsualizar, crear/editar con aprobación, PDF oficial)
@@ -98,6 +95,7 @@ import './insights-tools';
 
 // Orchestration helpers (más tools bajo demanda, planes antes de ejecutar)
 import './planning-tools';
+import './agent-tools';
 
 // Documents (adjuntos de la conversación, extracción estructurada de facturas/recibos, borrador de bill)
 import './documents-tools';

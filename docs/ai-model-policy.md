@@ -9,14 +9,14 @@ tarifa plana (Canopy Wave: Kimi K2.6 / MiniMax M3) y el proveedor por token
 
 ## Tareas
 
-| Tarea | Setting | Quién la pide |
-|---|---|---|
-| `simple` | `routingSimpleModel` | Turnos del asistente clasificados como simples (saludos, confirmaciones). |
-| `routine` | `routingStandardModel` | Turnos "estándar": consultas y acciones diarias (ventas, clientes, cotizaciones, mensajes, bandeja, chat, copilotos). |
-| `complex` | `routingComplexModel` | Análisis, comparaciones, reportes ejecutivos, adjuntos, planes multi-paso. |
-| `utility` | `utilityModel` | Procesos de fondo: resumen de hilos (`ai-conversation-summary`), digest diario (`ai-digest-service`), borradores/resúmenes de bandeja (`comms-ai`) y chat (`chat-ai-service`), copiloto y resumen de llamadas (`voice-ai-service`), re-ranking RAG (`knowledge-service`). |
-| `judge` | `qualityJudgeModel` | Juez de calidad (`ai-quality-judge`). |
-| `vision` | — | Extracción de documentos (`documents-tools`): el modelo complejo si ve imágenes, si no el principal. |
+| Tarea     | Setting                | Quién la pide                                                                                                                                                                                                                                                                                                              |
+| --------- | ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `simple`  | `routingSimpleModel`   | Turnos del asistente clasificados como simples (saludos, confirmaciones).                                                                                                                                                                                                                                                  |
+| `routine` | `routingStandardModel` | Turnos "estándar": consultas y acciones diarias (ventas, clientes, cotizaciones, mensajes, bandeja, chat).                                                                                                                                                                                                                 |
+| `complex` | `routingComplexModel`  | Análisis, comparaciones, reportes ejecutivos, adjuntos, planes multi-paso.                                                                                                                                                                                                                                                 |
+| `utility` | `utilityModel`         | Procesos de fondo: resumen de hilos (`ai-conversation-summary`), digest diario (`ai-digest-service`), resúmenes de bandeja (`comms-ai`) y chat (`chat-ai-service`), copiloto de llamadas y resumen (`voice-ai-service`), re-ranking RAG (`knowledge-service`), aprendizaje (`ai-learning`), revisión (`ai-answer-review`). |
+| `judge`   | `qualityJudgeModel`    | Juez de calidad (`ai-quality-judge`).                                                                                                                                                                                                                                                                                      |
+| `vision`  | —                      | Extracción de documentos (`documents-tools`): el modelo complejo si ve imágenes, si no el principal.                                                                                                                                                                                                                       |
 
 Cadena de respaldo cuando una fila está vacía: tarea → rutina → `deployment`
 (principal). `utility` hereda de `simple`; `judge` hereda de `utility`. Una
@@ -47,15 +47,15 @@ fila puede apuntar a OpenAI o a Canopy sin más configuración.
 
 Preset recomendado:
 
-| Fila | Modelo |
-|---|---|
-| Simples | `minimax/minimax-m3` |
-| Rutina | `moonshotai/kimi-k2.6` |
-| Complejas | `gpt-4o` |
-| Fondo | `minimax/minimax-m3` |
-| Juez | `minimax/minimax-m3` |
-| Principal | `gpt-4o` |
-| Emergencia | `gpt-4o-mini` |
+| Fila       | Modelo                 |
+| ---------- | ---------------------- |
+| Simples    | `minimax/minimax-m3`   |
+| Rutina     | `moonshotai/kimi-k2.6` |
+| Complejas  | `gpt-4o`               |
+| Fondo      | `minimax/minimax-m3`   |
+| Juez       | `minimax/minimax-m3`   |
+| Principal  | `gpt-4o`               |
+| Emergencia | `gpt-4o-mini`          |
 
 Voz (Whisper/TTS), embeddings y OCR de imágenes siguen en OpenAI; el agente de
 voz usa su propio `agentSettings.model`.

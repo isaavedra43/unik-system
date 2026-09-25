@@ -126,6 +126,10 @@ export interface ToolExecutionContext {
   skipCache?: boolean;
   /** Sales-order numbers found in the text attachments of this turn (a PDF/CSV listing orders): the universe to reconcile handwritten folios against. */
   attachmentOrderNumbers?: string[];
+  /** UNIVERSO: run/agent/task que ejecuta la tool (delegación, trazabilidad). */
+  runId?: string;
+  agentId?: string;
+  taskId?: string;
 }
 
 export interface ProposalSummary {
@@ -474,6 +478,26 @@ export async function executeTool(
         errorCode: 'forbidden',
         durationMs: 0,
       };
+    }
+  }
+
+  // 4d. UNIVERSO — puerta de agente (B10): cuando la tool corre dentro de un
+  // run de agente, su autonomía y grants deciden: 'deny' bloquea,
+  // 'require_approval' fuerza tarjeta aunque el effect sea bajo. Solo acota —
+  // el chequeo de permisos del dueño ya pasó (paso 3).
+  if (ctx.agentId && !ctx.approvedProposalId && !ctx.skipApproval) {
+    const { checkAgentGate, agentBudgetExceeded } = await import('@/modules/agents/policy');
+    if (await agentBudgetExceeded(ctx.agentId)) {
+      await recordDenied(tool, actor, ctx, 'budget');
+      return { success: false, error: 'Presupuesto del agente agotado', errorCode: 'forbidden', durationMs: 0 };
+    }
+    const gate = await checkAgentGate(ctx.agentId, { name: tool.name, effect });
+    if (gate.decision === 'deny') {
+      await recordDenied(tool, actor, ctx, 'agent_gate');
+      return { success: false, error: `Acción bloqueada por la política del agente (${gate.reason})`, errorCode: 'forbidden', durationMs: 0 };
+    }
+    if (gate.decision === 'require_approval') {
+      ctx = { ...ctx, forceApproval: true };
     }
   }
 

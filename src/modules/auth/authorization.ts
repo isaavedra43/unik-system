@@ -28,6 +28,8 @@ export interface CurrentUser {
   roleKeys: string[];
   permissionKeys: PermissionKey[];
   isSuperAdmin: boolean;
+  /** Tenant resuelto (membresía); 'unik' hasta que exista multiempresa. */
+  tenantId?: string;
 }
 
 export interface CurrentSession {
@@ -81,6 +83,9 @@ export async function getCurrentSession(): Promise<CurrentSession | null> {
     ...new Set(activeRoles.flatMap((role) => role.permissions.map((p) => p.permissionKey))),
   ].filter((key): key is PermissionKey => isKnownPermission(key));
 
+  const { resolveTenantId } = await import('@/modules/agents/tenancy');
+  const tenantId = await resolveTenantId(session.user.id);
+
   return {
     sessionId: session.id,
     user: {
@@ -92,6 +97,7 @@ export async function getCurrentSession(): Promise<CurrentSession | null> {
       roleKeys,
       permissionKeys,
       isSuperAdmin: roleKeys.includes(SUPER_ADMIN_ROLE_KEY),
+      tenantId,
     },
   };
 }

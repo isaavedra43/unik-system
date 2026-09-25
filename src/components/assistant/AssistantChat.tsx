@@ -1,29 +1,58 @@
 'use client';
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { AlertCircle, Bot, Loader2, Check, X, ListChecks } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import {
+  AlertCircle,
+  Loader2,
+  Check,
+  X,
+  Flag,
+  MessageSquare,
+  SlidersHorizontal,
+} from 'lucide-react';
 import { AnimatePresence } from 'framer-motion';
 import type { CurrentUser } from '@/modules/auth/authorization';
 import { AssistantMessage, type AssistantMessageData, ThinkingBlock } from './AssistantMessage';
 import { AssistantInput, type AttachmentDraft } from './AssistantInput';
 import { ModelSelector } from './ModelSelector';
 import { ArtifactRenderer, type ArtifactData } from './ArtifactRenderer';
-import { actionFailedMessage, performUiAction, toolStepLabel, uiActionFromResult, type UiAction } from '@/components/copilot/copilot-types';
 import {
-  AssistantSuggestions,
-  getSuggestionsForPage,
-} from './AssistantSuggestions';
+  actionFailedMessage,
+  performUiAction,
+  toolStepLabel,
+  uiActionFromResult,
+  type UiAction,
+} from '@/components/copilot/copilot-types';
+import { AssistantSuggestions, getSuggestionsForPage } from './AssistantSuggestions';
 import { VoiceMode } from './VoiceMode';
 import { AssistantProposalCard, type ProposalData } from './AssistantProposalCard';
 import { createConversationAction } from '@/app/app/assistant/actions';
 import { GenerativeUi } from './generative/GenerativeUi';
 import type { UiComponent } from '@/modules/ai/generative-ui/types';
+import { AgentAvatar } from './agents/AgentAvatar';
+import { AGENT_SUGGESTIONS } from './agents/NewAgentSheet';
+import { PRINCIPAL_AGENT, type AgentInfo } from './agents/agent-types';
+import { cn } from '@/lib/utils';
+
+type AgentTemplate = { name: string; purpose: string; icon: string; color: number };
 
 export interface AssistantChatProps {
   conversationId: string | null;
   context?: { page?: string };
   user: CurrentUser;
   onConversationCreated?: (id: string) => void;
+  /** Active agent shown in the chat head (defaults to the Principal). */
+  agent?: AgentInfo;
+  /** Team for the mobile agent strip under the chat head. */
+  agents?: AgentInfo[];
+  onSelectAgent?: (agentId: string) => void;
+  /** Composer default mode — 'mission' maps to plan-first semantics. */
+  composerMode?: 'mission' | 'message';
+  /** Empty-state suggestion cards open the new-agent sheet pre-filled. */
+  onNewAgent?: (template?: AgentTemplate) => void;
+  /** Chat head missions button → toggles the ops panel. */
+  onToggleOps?: () => void;
 }
 
 interface ActiveToolCall {
@@ -38,6 +67,12 @@ export function AssistantChat({
   context,
   user,
   onConversationCreated,
+  agent,
+  agents,
+  onSelectAgent,
+  composerMode = 'message',
+  onNewAgent,
+  onToggleOps,
 }: AssistantChatProps) {
   const [conversationId, setConversationId] = useState<string | null>(externalId);
   const [messages, setMessages] = useState<AssistantMessageData[]>([]);
@@ -51,10 +86,15 @@ export function AssistantChat({
   const [error, setError] = useState<string | null>(null);
   const [loadingConv, setLoadingConv] = useState(false);
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
-  const [planFirst, setPlanFirst] = useState(false);
+  // Composer mode pills: 'mission' = plan-first semantics (la IA propone los
+  // pasos y espera confirmación), 'message' = respuesta directa.
+  const [planFirst, setPlanFirst] = useState(composerMode === 'mission');
   const [voiceModeOpen, setVoiceModeOpen] = useState(false);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const router = useRouter();
+  const shownAgent = agent ?? PRINCIPAL_AGENT;
+  const working = streaming || activeToolCalls.length > 0;
 
   const canUseVoice = user.permissionKeys.includes('assistant.voice') || user.isSuperAdmin;
 
@@ -63,6 +103,11 @@ export function AssistantChat({
   useEffect(() => {
     setConversationId(externalId);
   }, [externalId]);
+
+  // The tweaks panel can change the composer's default mode — sync new turns.
+  useEffect(() => {
+    setPlanFirst(composerMode === 'mission');
+  }, [composerMode]);
 
   const loadConversation = useCallback(async (id: string) => {
     setLoadingConv(true);
@@ -154,14 +199,15 @@ export function AssistantChat({
       id: `temp-${Date.now()}`,
       role: 'user',
       content: text,
-      attachments: attachments.length > 0
-        ? attachments.map((a) => ({
-            id: a.id,
-            fileName: a.fileName,
-            mimeType: a.mimeType,
-            sizeBytes: a.sizeBytes,
-          }))
-        : undefined,
+      attachments:
+        attachments.length > 0
+          ? attachments.map((a) => ({
+              id: a.id,
+              fileName: a.fileName,
+              mimeType: a.mimeType,
+              sizeBytes: a.sizeBytes,
+            }))
+          : undefined,
       createdAt: new Date().toISOString(),
     };
     setMessages((prev) => [...prev, userMsg]);
@@ -172,7 +218,7 @@ export function AssistantChat({
     setActiveToolCalls([]);
     setArtifacts([]);
     setLiveUi([]);
-    setPlanFirst(false);
+    setPlanFirst(composerMode === 'mission');
 
     const controller = new AbortController();
     abortRef.current = controller;
@@ -186,6 +232,9 @@ export function AssistantChat({
           message: text,
           context,
           model: selectedModel ?? undefined,
+          // Real agent id (cuid) — the 'principal' sentinel only exists when
+          // the agents API/tables are absent, so it's never sent.
+          agentId: shownAgent.id !== 'principal' ? shownAgent.id : undefined,
           planFirst: planFirst || undefined,
           // Only ids: the server resolves ownership, conversation and READY state.
           attachments: attachments.length > 0 ? attachments.map((a) => a.id) : undefined,
@@ -244,7 +293,10 @@ export function AssistantChat({
             } else if (event.type === 'ui' && Array.isArray(event.data?.components)) {
               setLiveUi((prev) => [...prev, ...(event.data.components as UiComponent[])].slice(-6));
             } else if (event.type === 'proposal') {
-              setProposals((prev) => [...prev.filter((p) => p.id !== event.data.id), event.data as ProposalData]);
+              setProposals((prev) => [
+                ...prev.filter((p) => p.id !== event.data.id),
+                event.data as ProposalData,
+              ]);
             } else if (event.type === 'action') {
               performUiAction(event.data as UiAction);
             } else if (event.type === 'done') {
@@ -271,13 +323,17 @@ export function AssistantChat({
         // The stream was cut (proxy idle limit, phone lock, flaky network) but the run keeps
         // going on the server and its answer is persisted: wait for it instead of failing.
         if (convId) {
-          setError('Se perdió la conexión, pero el asistente sigue trabajando. Esperando la respuesta…');
+          setError(
+            'Se perdió la conexión, pero el asistente sigue trabajando. Esperando la respuesta…'
+          );
           const recovered = await waitForPersistedAnswer(convId, userMsg.createdAt);
           if (recovered) {
             setError(null);
             await loadConversation(convId);
           } else {
-            setError('Se perdió la conexión. Recarga la conversación en unos minutos para ver la respuesta.');
+            setError(
+              'Se perdió la conexión. Recarga la conversación en unos minutos para ver la respuesta.'
+            );
           }
         } else {
           setError(e instanceof Error ? e.message : 'Error de conexión');
@@ -301,9 +357,21 @@ export function AssistantChat({
       try {
         const res = await fetch(`/app/assistant/api/conversations/${convId}`);
         if (!res.ok) continue;
-        const data = (await res.json()) as { messages?: Array<{ role: string; content: string | null; createdAt: string; toolCalls?: unknown }> };
+        const data = (await res.json()) as {
+          messages?: Array<{
+            role: string;
+            content: string | null;
+            createdAt: string;
+            toolCalls?: unknown;
+          }>;
+        };
         const done = (data.messages ?? []).some(
-          (m) => m.role === 'assistant' && Date.parse(m.createdAt) > since && typeof m.content === 'string' && m.content.trim().length > 0 && !m.toolCalls
+          (m) =>
+            m.role === 'assistant' &&
+            Date.parse(m.createdAt) > since &&
+            typeof m.content === 'string' &&
+            m.content.trim().length > 0 &&
+            !m.toolCalls
         );
         if (done) return true;
       } catch {
@@ -321,27 +389,113 @@ export function AssistantChat({
 
   return (
     <div className={`assistant-chat ${isEmpty ? 'assistant-chat-empty' : ''}`}>
-      <div className="assistant-chat-messages" ref={scrollContainerRef} role="log" aria-live="polite">
+      {/* Chat head — the agent that owns this thread. */}
+      <div className="agent-chat-head">
+        <AgentAvatar agent={shownAgent} size="sm" status={working ? 'working' : 'idle'} />
+        <div className="agent-chat-head-text">
+          <span className="agent-chat-head-name">
+            {shownAgent.name}
+            {shownAgent.kind === 'principal' && <span className="agent-badge-jefe">Jefe</span>}
+          </span>
+          <span className={cn('agent-chat-head-status', working && 'is-working')}>
+            {working ? 'Trabajando…' : 'Disponible'}
+          </span>
+        </div>
+        <div className="agent-chat-head-actions">
+          {onToggleOps && (
+            <button
+              type="button"
+              className="agent-head-btn"
+              onClick={onToggleOps}
+              aria-label="Ver operación del equipo"
+              title="Operación del equipo"
+            >
+              <Flag size={15} />
+            </button>
+          )}
+          <button
+            type="button"
+            className="agent-head-btn"
+            onClick={() => router.push('/app/assistant?settings=1')}
+            aria-label="Configurar el asistente"
+            title="Configuración"
+          >
+            <SlidersHorizontal size={15} />
+          </button>
+        </div>
+        {/* Mobile agent strip — the team stays reachable without the drawer. */}
+        {agents && agents.length > 0 && onSelectAgent && (
+          <div className="agent-strip" role="tablist" aria-label="Equipo">
+            {agents.map((a) => (
+              <button
+                key={a.id}
+                type="button"
+                role="tab"
+                aria-selected={shownAgent.id === a.id}
+                className={cn('agent-strip-item', shownAgent.id === a.id && 'is-active')}
+                onClick={() => onSelectAgent(a.id)}
+                title={a.name}
+              >
+                <AgentAvatar agent={a} status={a.status ?? 'idle'} />
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div
+        className="assistant-chat-messages"
+        ref={scrollContainerRef}
+        role="log"
+        aria-live="polite"
+      >
         {loadingConv && <div className="assistant-chat-loading">Cargando…</div>}
         {!loadingConv && messages.length === 0 && !streaming && (
-          <div className="assistant-welcome">
-            <div className="assistant-welcome-icon">
-              <Bot size={40} />
-            </div>
-            <h3 className="assistant-welcome-title">Asistente de UNIK</h3>
+          <div className="assistant-welcome agent-hero">
+            <AgentAvatar agent={shownAgent} size="lg" />
+            <h3 className="assistant-welcome-title">{shownAgent.name}</h3>
             <p className="assistant-welcome-text">
-              Pregúntame sobre tus ventas, productos, vendedores y más.
+              {(agents?.length ?? 1) <= 1
+                ? 'Crea tu primer agente — especialistas con su propio chat, misiones y herramientas.'
+                : (shownAgent.purpose ??
+                  'Tu coordinador: conversa, delega misiones al equipo y te avisa cuando algo necesita tu aprobación.')}
             </p>
+            {onNewAgent && (
+              <div className="agent-hero-cards">
+                {AGENT_SUGGESTIONS.map((s) => (
+                  <button
+                    key={s.name}
+                    type="button"
+                    className="agent-suggestion"
+                    onClick={() => onNewAgent(s)}
+                  >
+                    <AgentAvatar agent={{ name: s.name, color: s.color, icon: s.icon }} size="xs" />
+                    <span>
+                      <span className="agent-suggestion-name">{s.name}</span>
+                      <span className="agent-suggestion-sub">{s.purpose}</span>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         )}
         {messages.map((m, i) => (
-          <AssistantMessage key={m.id} message={m} onSendText={(text) => void handleSend(text)} isLatest={i > lastUserIndex && !streaming} />
+          <AssistantMessage
+            key={m.id}
+            message={m}
+            onSendText={(text) => void handleSend(text)}
+            isLatest={i > lastUserIndex && !streaming}
+          />
         ))}
         {(streaming || streamingContent || streamingReasoning || activeToolCalls.length > 0) && (
           <div className="assistant-msg-row assistant-msg-row-assistant">
-            <div className="assistant-msg-avatar">
-              <Bot size={18} />
-            </div>
+            <AgentAvatar
+              agent={shownAgent}
+              size="sm"
+              status="working"
+              className="assistant-msg-avatar"
+            />
             <div className="assistant-msg assistant-msg-assistant">
               {streamingReasoning && <ThinkingBlock text={streamingReasoning} live />}
               {streamingContent && (
@@ -352,21 +506,44 @@ export function AssistantChat({
               {activeToolCalls.length > 0 && (
                 <div className="assistant-steps-row">
                   {activeToolCalls.map((tc, idx) => (
-                    <span key={idx} className={`assistant-step ${tc.success === undefined ? 'is-running' : tc.success ? 'is-done' : 'is-failed'}`}>
-                      {tc.success === undefined ? <Loader2 size={11} className="copilot-spin" /> : tc.success ? <Check size={11} /> : <X size={11} />}
-                      {toolStepLabel(tc.name, tc.args, tc.success === undefined ? 'running' : 'done')}
+                    <span
+                      key={idx}
+                      className={`assistant-step ${tc.success === undefined ? 'is-running' : tc.success ? 'is-done' : 'is-failed'}`}
+                    >
+                      {tc.success === undefined ? (
+                        <Loader2 size={11} className="copilot-spin" />
+                      ) : tc.success ? (
+                        <Check size={11} />
+                      ) : (
+                        <X size={11} />
+                      )}
+                      {toolStepLabel(
+                        tc.name,
+                        tc.args,
+                        tc.success === undefined ? 'running' : 'done'
+                      )}
                     </span>
                   ))}
                 </div>
               )}
-              {liveUi.length > 0 && <GenerativeUi components={liveUi} onSendText={(text) => void handleSend(text)} />}
-              {streaming && !streamingContent && !streamingReasoning && activeToolCalls.length === 0 && liveUi.length === 0 && (
-                <div className="assistant-typing">
-                  <span className="assistant-typing-dot" />
-                  <span className="assistant-typing-dot" />
-                  <span className="assistant-typing-dot" />
-                </div>
+              {liveUi.length > 0 && (
+                <GenerativeUi
+                  components={liveUi}
+                  onSendText={(text) => void handleSend(text)}
+                  interactive
+                />
               )}
+              {streaming &&
+                !streamingContent &&
+                !streamingReasoning &&
+                activeToolCalls.length === 0 &&
+                liveUi.length === 0 && (
+                  <div className="assistant-typing">
+                    <span className="assistant-typing-dot" />
+                    <span className="assistant-typing-dot" />
+                    <span className="assistant-typing-dot" />
+                  </div>
+                )}
             </div>
           </div>
         )}
@@ -394,7 +571,9 @@ export function AssistantChat({
                       if (action) performUiAction(action);
                     } else if (!execution.uncertain) {
                       // Let the assistant read the error and fix it by itself.
-                      void handleSend(actionFailedMessage(updated.toolName, execution.error ?? 'La acción falló'));
+                      void handleSend(
+                        actionFailedMessage(updated.toolName, execution.error ?? 'La acción falló')
+                      );
                     }
                   }}
                 />
@@ -413,16 +592,30 @@ export function AssistantChat({
       )}
       <div className="assistant-input-bar">
         <div className="assistant-input-topbar">
+          {/* Mode pills — Misión = plan-first semantics, Mensaje = direct. */}
+          <div className="composer-modes" role="radiogroup" aria-label="Modo del mensaje">
+            <button
+              type="button"
+              role="radio"
+              aria-checked={planFirst}
+              className={cn('composer-mode', planFirst && 'is-active')}
+              onClick={() => setPlanFirst(true)}
+              title="La IA propone un plan o misión y espera tu confirmación antes de ejecutar"
+            >
+              <Flag size={12} /> Misión
+            </button>
+            <button
+              type="button"
+              role="radio"
+              aria-checked={!planFirst}
+              className={cn('composer-mode', !planFirst && 'is-active')}
+              onClick={() => setPlanFirst(false)}
+              title="Respuesta directa, sin plan"
+            >
+              <MessageSquare size={12} /> Mensaje
+            </button>
+          </div>
           <ModelSelector value={selectedModel} onChange={setSelectedModel} />
-          <button
-            type="button"
-            className={`assistant-plan-toggle ${planFirst ? 'is-on' : ''}`}
-            onClick={() => setPlanFirst((v) => !v)}
-            aria-pressed={planFirst}
-            title="La IA propone los pasos y espera tu confirmación antes de ejecutar"
-          >
-            <ListChecks size={13} /> Planear primero
-          </button>
         </div>
         <AssistantInput
           onSend={handleSend}
@@ -444,7 +637,12 @@ export function AssistantChat({
               setConversationId(id);
               onConversationCreated?.(id);
             }}
-            user={{ id: user.id, name: user.name, username: user.username, isSuperAdmin: user.isSuperAdmin }}
+            user={{
+              id: user.id,
+              name: user.name,
+              username: user.username,
+              isSuperAdmin: user.isSuperAdmin,
+            }}
           />
         )}
       </AnimatePresence>

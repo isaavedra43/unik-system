@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { ArrowLeft, MoreVertical, Users, Phone, Video, Search, Pin, Sparkles } from 'lucide-react';
+import { ArrowLeft, MoreVertical, Users, Phone, Video, Search, Pin } from 'lucide-react';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator,
 } from '@/components/shadcn/dropdown-menu';
@@ -21,8 +21,6 @@ export interface ChatConversationHeaderProps {
   onSearchInChannel?: () => void;
   pinnedCount?: number;
   onShowPinned?: () => void;
-  aiOpen?: boolean;
-  onToggleAi?: () => void;
 }
 
 export function ChatConversationHeader({
@@ -37,8 +35,6 @@ export function ChatConversationHeader({
   onSearchInChannel,
   pinnedCount,
   onShowPinned,
-  aiOpen,
-  onToggleAi,
 }: ChatConversationHeaderProps) {
   const isGroup = channel?.type === 'group';
   const otherUser = channel?.members.find((m) => m.userId !== user.id);
@@ -115,18 +111,6 @@ export function ChatConversationHeader({
       </div>
 
       <div className="chat-conversation-actions">
-        {onToggleAi && (
-          <button
-            type="button"
-            className={cn('chat-icon-btn', aiOpen && 'is-active')}
-            onClick={onToggleAi}
-            aria-pressed={Boolean(aiOpen)}
-            aria-label={aiOpen ? 'Ocultar copiloto' : 'Mostrar copiloto'}
-            title={aiOpen ? 'Ocultar copiloto' : 'Mostrar copiloto (misma IA del asistente)'}
-          >
-            <Sparkles size={18} />
-          </button>
-        )}
         {canCall && channel && (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>

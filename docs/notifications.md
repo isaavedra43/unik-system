@@ -24,28 +24,28 @@ productor (chat, bandeja, voz, IA, seguimiento)
 
 ## Configuración
 
-| Variable | Descripción |
-|---|---|
+| Variable                                 | Descripción                                                                             |
+| ---------------------------------------- | --------------------------------------------------------------------------------------- |
 | `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` | `npx web-push generate-vapid-keys`. Sin ellas el push queda desactivado (in-app sigue). |
-| `VAPID_SUBJECT` | `mailto:` o `https:` de contacto (default: `APP_URL`). |
-| `AI_NOTIFY_MIN_SECONDS` | Segundos mínimos de un turno del asistente para avisar "la IA terminó" (default 20). |
+| `VAPID_SUBJECT`                          | `mailto:` o `https:` de contacto (default: `APP_URL`).                                  |
+| `AI_NOTIFY_MIN_SECONDS`                  | Segundos mínimos de un turno del asistente para avisar "la IA terminó" (default 20).    |
 
 Producción requiere HTTPS. El SW ya está en scope `/` (`src/app/layout.tsx`).
 
 ## Catálogo de categorías (`catalog.ts`)
 
-| Categoría | Cuándo | Productor |
-|---|---|---|
-| `call_incoming` (urgente) | Llamada entrante que debe atender una persona, transferencia (humana o de la IA) | `voice-service.registerInboundCall`, `transferToHuman`, `voice-agent-service` (transfer_requested) |
-| `call_missed` | Llamada entrante no contestada | `voice-service.finishCall('missed')` |
-| `call_summary` | Resumen IA de la llamada listo | `voice-ai-service.summarizeCall` |
-| `chat_message` / `chat_mention` | Mensaje / mención en chat interno (respeta preferencia `all/mentions/none` y mute por canal) | `chat-service.sendMessage`, `broadcastMessage` → `chat-notifications.ts` |
-| `inbox_message` | Cliente escribe (asignado → solo asignado; sin asignar → agentes del equipo de la cuenta) | `comms-service.recordInboundMessage` → `comms-notifications.ts` |
-| `inbox_assigned` | Te asignan una conversación | `comms-service.updateConversation` |
-| `ai_task_done` | Turno del asistente ≥ umbral o `notifyWhenDone: true` en el request | `ai-orchestrator` → `ai-notifications.ts` |
-| `ai_user_message` | Tool `notifyUser` ("avísale a Karla que…") | `tools/notifications-tools.ts` |
-| `entity_change` | Cambio en un registro seguido (11 tipos: OV, cotización, factura, paquete, pago, OC, bill, nota de crédito, producto, cliente, proveedor) | `entity-change-service.ts` + `<módulo>-change-events.ts` desde cada normalizer Zoho |
-| `system` | Avisos administrativos | — |
+| Categoría                       | Cuándo                                                                                                                                    | Productor                                                                                          |
+| ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `call_incoming` (urgente)       | Llamada entrante que debe atender una persona, transferencia (humana o de la IA)                                                          | `voice-service.registerInboundCall`, `transferToHuman`, `voice-agent-service` (transfer_requested) |
+| `call_missed`                   | Llamada entrante no contestada                                                                                                            | `voice-service.finishCall('missed')`                                                               |
+| `call_summary`                  | Resumen IA de la llamada listo                                                                                                            | `voice-ai-service.summarizeCall`                                                                   |
+| `chat_message` / `chat_mention` | Mensaje / mención en chat interno (respeta preferencia `all/mentions/none` y mute por canal)                                              | `chat-service.sendMessage`, `broadcastMessage` → `chat-notifications.ts`                           |
+| `inbox_message`                 | Cliente escribe (asignado → solo asignado; sin asignar → agentes del equipo de la cuenta)                                                 | `comms-service.recordInboundMessage` → `comms-notifications.ts`                                    |
+| `inbox_assigned`                | Te asignan una conversación                                                                                                               | `comms-service.updateConversation`                                                                 |
+| `ai_task_done`                  | Turno del asistente ≥ umbral o `notifyWhenDone: true` en el request                                                                       | `ai-orchestrator` → `ai-notifications.ts`                                                          |
+| `ai_user_message`               | Tool `notifyUser` ("avísale a Karla que…")                                                                                                | `tools/notifications-tools.ts`                                                                     |
+| `entity_change`                 | Cambio en un registro seguido (11 tipos: OV, cotización, factura, paquete, pago, OC, bill, nota de crédito, producto, cliente, proveedor) | `entity-change-service.ts` + `<módulo>-change-events.ts` desde cada normalizer Zoho                |
+| `system`                        | Avisos administrativos                                                                                                                    | —                                                                                                  |
 
 Las categorías `urgent` (llamada entrante) ignoran mute y horario silencioso.
 

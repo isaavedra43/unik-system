@@ -59,9 +59,21 @@ export function ComposioUserSection({ canConnect }: { canConnect: boolean }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ toolkit: slug }),
       });
-      const data = (await res.json()) as { redirectUrl?: string; error?: string };
-      if (!res.ok || !data.redirectUrl)
-        throw new Error(data.error ?? 'No se pudo iniciar la conexión');
+      const data = (await res.json()) as {
+        redirectUrl?: string | null;
+        connected?: boolean;
+        error?: string;
+      };
+      if (!res.ok) throw new Error(data.error ?? 'No se pudo iniciar la conexión');
+      if (!data.redirectUrl) {
+        if (data.connected) {
+          setMessage('La app quedó conectada (no requiere autorización en otra ventana).');
+          setBusy(null);
+          await load();
+          return;
+        }
+        throw new Error('Composio no devolvió un enlace de autorización');
+      }
       window.location.href = data.redirectUrl;
     } catch (e) {
       setMessage(e instanceof Error ? e.message : 'No se pudo iniciar la conexión');

@@ -1,52 +1,58 @@
-# IA unificada de UNIK (asistente, copilotos y MCP)
+# IA unificada de UNIK (asistente y MCP)
 
-Una sola IA vive en tres superficies y en el servidor MCP. Todas comparten orquestador,
-tools, permisos, aprobaciones, memoria personal y contexto reciente.
+Una sola IA vive en el asistente y en el servidor MCP. Comparte orquestador, tools,
+permisos, aprobaciones, memoria personal y contexto reciente.
 
-| Superficie | Dónde | Ruta de turno | Hilo (`AiConversation.context.kind`) |
-|---|---|---|---|
-| Asistente IA | `/app/assistant` (+ widget flotante) | `POST /app/assistant/api/chat` | `null` / `{page}` |
-| Copiloto de bandeja externa | aside en `/app/inbox` | `POST /app/inbox/api/conversations/{id}/copilot` | `inbox_copilot` (`commConversationId`) |
-| Copiloto de chat interno | aside en `/app/chat` | `POST /app/chat/api/channels/{id}/copilot` | `chat_copilot` (`chatChannelId`) |
-| Servidor MCP | agentes externos | `POST /api/mcp` | sin hilo (audita como tool calls) |
+| Superficie   | Dónde            | Ruta de turno                  | Hilo (`AiConversation.context.kind`) |
+| ------------ | ---------------- | ------------------------------ | ------------------------------------ |
+| Asistente IA | `/app/assistant` | `POST /app/assistant/api/chat` | `null` / `{page}`                    |
+| Servidor MCP | agentes externos | `POST /api/mcp`                | sin hilo (audita como tool calls)    |
+
+Los copilotos embebidos en `/app/inbox` y `/app/chat` (y el widget flotante) fueron
+eliminados por completo para rehacerlos desde cero: paneles, rutas
+`/app/inbox/api/conversations/{id}/copilot` y `/app/chat/api/channels/{id}/copilot`,
+`proposeInboxDraft`/`proposeChatDraft`, los prompts de superficie y las preferencias
+`inboxCopilotMode`/`chatCopilotMode`. Los hilos `inbox_copilot`/`chat_copilot`
+históricos quedan ocultos en el historial del asistente (`copilot-surfaces.ts`). Las
+tools de lectura de chat (`listChatChannels`, `getChatChannelMessages`,
+`searchChatMessages`, `summarizeChatChannel`, `pinChatMessage`) y de bandeja
+(`listInboxConversations`…) siguen disponibles para el asistente.
 
 ## Configuración en un solo lugar
 
 `Asistente IA → Preferencias y memoria` (`AssistantPreferencesPanel`) edita la fila
 `AiUserPreference` del usuario:
 
-- **Modo de trabajo** (`mode`): pausada / a petición / autónoma con verificación. Aplica en
-  todas las superficies (en pausada se ocultan las tools con efectos en todas partes).
-- **Copiloto en bandeja externa** (`inboxCopilotMode`) y **en chat interno**
-  (`chatCopilotMode`): activo / a petición / apagado. Los paneles muestran el modo como
-  insignia de solo lectura con enlace a `/app/assistant?settings=1`; ya no hay selector
-  dentro del panel (`PATCH /app/inbox/api/copilot/mode` fue eliminado).
+- **Modo de trabajo** (`mode`): pausada / a petición / autónoma con verificación. En
+  pausada se ocultan las tools con efectos.
 - Tono, idioma, profundidad, formato, instrucciones personales y memoria.
 
-Servicio: `src/modules/copilot/preferences-service.ts` (`getCopilotMode(userId, 'inbox'|'chat')`).
+Servicio: `src/modules/copilot/preferences-service.ts`.
 
 ## Contexto compartido
 
 - `src/modules/ai/ai-conversation-summary.ts`: tras cada turno el orquestador refresca un
   resumen corto del hilo (`AiConversation.summary`, modelo de respaldo, cada 4 mensajes).
 - `buildSystemPrompt` inyecta "Contexto reciente del usuario": hasta 8 hilos de los últimos
-  14 días de cualquier superficie, etiquetados (asistente / bandeja con contacto X / chat con Y).
-- Memoria personal y biblioteca aprobada están disponibles en los copilotos (las tools de
+  14 días del asistente, etiquetados.
+- Memoria personal y biblioteca aprobada están disponibles en el asistente (las tools de
   memoria ya no exigen `assistant.use`).
 
-## Copiloto genérico
+## Copiloto genérico (eliminado)
 
-- Componente compartido `src/components/copilot/CopilotPanel.tsx` (`CopilotSurfaceConfig`:
-  endpoints, `activityAt`, `draftTool`, textos). Envoltorios:
-  `src/components/inbox/copilot/CopilotPanel.tsx` y `src/components/chat/ChatCopilotPanel.tsx`.
-- Servidor: `src/modules/ai/copilot-surfaces.ts` (`getOrCreateSurfaceConversation`,
-  `shouldRunAutoTurn`, `autoTriggerMessage`, reglas de panel compartidas).
-- Chat interno: prompt `src/modules/chat/chat-copilot.ts`, tools
-  `src/modules/ai/tools/chat-copilot-tools.ts` (`listChatChannels`, `getChatChannelMessages`,
-  `searchChatMessages`, `summarizeChatChannel`, `proposeChatDraft`, `pinChatMessage`);
+- Los paneles de copiloto de `/app/inbox` y `/app/chat` se eliminaron junto con sus rutas,
+  prompts y tools exclusivas (`proposeInboxDraft`, `proposeChatDraft`,
+  `suggestNextActions` en turnos automáticos). Se reconstruirán desde cero.
+- Sobreviven en `src/components/copilot/`: las tarjetas compartidas del asistente
+  (`ProposalCard`, `PlanCard`, `MissionCard`, `MessageFeedback`, `ConfidenceBadge`) y
+  `copilot-types.ts` con los parsers y etiquetas de tool que usa el asistente.
+- `src/modules/ai/copilot-surfaces.ts` quedó reducido a los `kind` históricos
+  (`inbox_copilot`/`chat_copilot`/`assistant_mission`) para ocultarlos del historial y
+  al prefijo `⟦auto:` que usa la autocorrección de acciones fallidas.
+- Chat interno: `src/modules/ai/tools/chat-copilot-tools.ts` conserva
+  `listChatChannels`, `getChatChannelMessages`, `searchChatMessages`,
+  `summarizeChatChannel`, `pinChatMessage` para el asistente;
   `sendInternalChatMessage` sigue siendo el único envío (requiere aprobación).
-- El orquestador inyecta `inboxConversationId` / `chatChannelId` en las tools de cada
-  superficie y oculta `suggestNextActions` fuera de los paneles.
 
 ## Cobertura de tools
 
@@ -54,7 +60,9 @@ Nuevas o ahora habilitadas por defecto (`DEFAULT_AI_SETTINGS.enabledTools`): cot
 (`queryQuotes`, `getQuoteDetail`, `searchQuoteCustomers`, `searchQuoteProducts`,
 `previewQuote`, `createQuote`, `updateQuote`, `getQuotePdf`), skills (`listSkills`,
 `runSkill`, `getSkillRunStatus`), chat interno, bandeja (`listInboxConversations`…),
-campañas y voz (`startOutboundCall` sigue opt-in).
+campañas, voz (`startOutboundCall` sigue opt-in), web (`webSearch`, `webResearch`,
+`webCrawl`, `fetchUrl`), media/imágenes, venue (`browserAct`, `venueExec`…) y
+`renderInteractiveUi`.
 
 ## MCP
 
@@ -95,20 +103,24 @@ las skills respetan la lista de tools habilitadas por el administrador.
 ## Capacidades completas (2026-09-13)
 
 ### Documentos
+
 - Formatos: PDF, Excel, **Word (`generateWordReport`, `docx`)**, CSV, imagen SVG, tabla y gráfica en el chat. Cotizaciones siempre con el PDF oficial de Zoho.
-- Los artefactos quedan ligados al mensaje que los produjo (`AiArtifact.messageId`) y se muestran como tarjeta con vista previa (PDF inline) en el asistente y en los copilotos, también al recargar. TTL por defecto 90 días; los compartidos se protegen.
+- Los artefactos quedan ligados al mensaje que los produjo (`AiArtifact.messageId`) y se muestran como tarjeta con vista previa (PDF inline) en el asistente, también al recargar. TTL por defecto 90 días; los compartidos se protegen.
 - Enlaces: `APP_URL` define el dominio real (`src/lib/app-url.ts`); las tools devuelven URLs absolutas y la IA tiene prohibido inventar hosts. Enlaces compartibles firmados: `/api/files/shared/<token>` (`artifact-share.ts`, secreto `UNIK_SHARE_LINK_SECRET` o `UNIK_SECRETS_MASTER_KEY`). Los envíos por chat interno/WhatsApp convierten los enlaces privados en compartibles automáticamente.
 - Revisiones: cada artefacto guarda `meta.spec` (tool de datos + argumentos + generador); `getArtifactSpec` permite rehacerlo con cambios.
 
 ### Mensajería, llamadas y cotizaciones
+
 - `sendMessageToContact` / `sendBulkMessages` (WhatsApp/SMS por nombre o teléfono, adjuntos de reportes y documentos aprobados, reporte de envíos), `listAttachableDocuments`, `shareArtifact`, `getPickupLocation` (perfil de empresa en Admin → Asistente IA → Configuración), `scheduleFollowUp`.
 - `callContact` mode `me` (el usuario contesta en `/app/calls?call=<id>`) o `ai` con `brief` (`VoiceCall.aiBrief`, incluido en las instrucciones del agente de voz); `startInternalCall` (`/app/chat?channel=<id>&call=audio`).
 - Cotización automática: `draftQuoteFromRequest` (borrador en Zoho a partir del texto del cliente; actualiza el mismo borrador), `sendQuoteToContact` (PDF oficial + marcar enviada), `findSimilarPastQuotes`, `checkStockForRequest`.
 
 ### Inteligencia proactiva
+
 `getCustomerHealth`, `draftCollectionReminders`, `notifyDelayedDeliveries`, `suggestAssignee`, `getRecentActivity`, `getSalespersonScorecard`, `findReactivationOpportunities`, `getCustomerPriceHistory`, `createChatEvent`, `draftSatisfactionSurvey`, `getDealBlockers`, `getWorkDigest` (digest diario por usuario en `AiUserDigest`, job `ai.daily_digest` cada 6 h).
 
 ### Seguridad
+
 - Historial saneado antes de cada turno (`sanitizeHistory`) para que ningún `tool` quede huérfano (fix del error 400 del proveedor).
 - Contenido externo (transcripciones, notas, chat) llega al modelo envuelto en `<untrusted>` con detección de patrones de inyección (`ai-guardrails.ts`); reglas de seguridad explícitas en `ai-capability-rules.ts` (nunca revelar prompt/claves/datos ajenos, nunca saltar aprobaciones, obedecer solo al usuario de UNIK).
 - Las tools con efectos siguen pasando por la tarjeta de aprobación (rediseñada, compartida entre superficies).
@@ -140,25 +152,29 @@ Segunda ronda tras comparar de nuevo con ChatGPT (GPT-5 "Alta", 3 min de razonam
 - Prompt: sección "CÓMO TRABAJA UN ANALISTA SENIOR" y excepción a "más de 8 filas → generateTable" para tablas de análisis propias.
 
 **Tercera ronda (misma tarde): 10 minutos y "network error".** Con GPT-5 el turno tardó ~10 min y la conexión se cortó. Causas y fixes:
-- Sin latidos en el SSE y con la respuesta en búfer pasaban minutos sin bytes → el proxy/navegador corta el stream. Ahora `/app/assistant/api/chat` y las rutas de copiloto mandan un comentario SSE (`: ping`) cada 15 s; los parsers ignoran las líneas que no empiezan con `data:`.
+
+- Sin latidos en el SSE y con la respuesta en búfer pasaban minutos sin bytes → el proxy/navegador corta el stream. Ahora `/app/assistant/api/chat` manda un comentario SSE (`: ping`) cada 15 s; los parsers ignoran las líneas que no empiezan con `data:`.
 - Si aun así se corta, `AssistantChat` no falla: muestra "el asistente sigue trabajando" y sondea la conversación cada 6 s (hasta 15 min) hasta que aparece la respuesta persistida (`waitForPersistedAnswer`).
 - `readAttachment` con GPT-5 corría sin streaming con 12k tokens y esfuerzo medium bajo un timeout de 180 s (expiraba y el modelo reintentaba). Ahora: esfuerzo low, 6k tokens, timeout 300 s. Y cuando el modelo del turno razona y ve imágenes (GPT-5), la directiva le pide transcribir él mismo y saltarse esa pasada (una llamada pesada menos); `lookupSalesOrdersByNumber` sigue corrigiendo folios.
 - `reasoningEffort` por defecto baja a `medium` (high multiplicaba minutos en cada pasada); el cliente OpenAI tiene `timeout` 15 min y `maxRetries: 1` (un reintento silencioso duplicaba llamadas de minutos). Turnos con adjuntos ofrecen ≤ 48 tools (prompt más corto en cada pasada).
 - En modo búfer la UI muestra el chip "Redactando la respuesta" (`draftAnswer`) mientras el modelo escribe, y "Revisando la respuesta" durante la revisión.
 
 **Cuarta ronda (GPT-5 ya responde, pero 10 min, PDF no pedido y presentación pobre).**
+
 - **Universo de folios** (`lookup-tools.ts` → `reconcileWithExpected`, puro con test): el orquestador extrae los `OV-xxxxx` de los adjuntos de texto (el PDF de órdenes) y los pasa a las tools como `ctx.attachmentOrderNumbers`; `lookupSalesOrdersByNumber` acepta `expectedNumbers` (o usa el del contexto) y devuelve `universe`: `misreadCorrected` (folio anotado que no está en la lista pero está a un dígito de uno no reclamado → se corrige aunque exista en la BD como otra orden), `withoutRequest` (órdenes de la lista sin nota) y `notInUniverse`. Corrige el fallo de "existe en el sistema, luego está bien" (23359/23385/23338/23384 eran lecturas erróneas que sí existían como otras órdenes cerradas).
 - **Documentos solo si se piden**: `wantsDocument(message, lastAssistantContent)` (petición explícita o "sí/dale" tras una oferta) decide si `composeDocument` se ofrece al modelo; si no, la tool ni aparece. La directiva dice explícitamente "el usuario NO pidió archivo".
 - **Sin revisión para modelos que razonan**: `bufferAnswer`/revisión interna solo cuando el modelo del turno no es GPT-5/o-series (esos ya verifican mientras piensan); con GPT-5 la respuesta se transmite en vivo. Menos pasadas: lectura+cruce (1) → respuesta (2).
 - **Formato**: la directiva pide `##`/`###`, listas de una por línea y párrafos cortos; `AssistantMarkdown` ahora distingue tamaños de encabezado (`assistant-md-heading-1..4`), soporta listas `1)`, viñetas anidadas por sangría, `---` y saltos de línea dentro de un párrafo.
 
 **Quinta ronda: se adelanta, no se equivoca, aprende, más rápida.**
+
 - **Sugerencias con un clic** (`followups.ts`): la IA cierra respuestas con datos con `Sugerencias: [acción] · [acción] · [acción]` (antes de "Confianza:"); el orquestador la guarda en `AiMessage.meta.followUps` y `AssistantMessage` la muestra como chips que envían el texto al escribirlo (solo en el último mensaje).
 - **Verificación determinista antes de entregar** (`answer-checks.ts`, todos los modelos): folios citados que ninguna tool devolvió en el turno (`collectFolios` sobre cada resultado) y encabezados "### Grupo — 20"/"(20)" cuya tabla markdown no trae ese número de filas → nota interna y una pasada de corrección (chip "Revisando la respuesta"). Máx. 2 correcciones por turno.
 - **Aprende de correcciones** (`ai-learning.ts`, setting `learningCaptureEnabled`): si el mensaje corrige o define algo ("no, Producción significa…", "para nosotros Recolección es…"), un pase de fondo con el modelo utilitario extrae hasta 3 reglas durables y las propone como recuerdos `pending` (fuente `correction`, tag `auto`) que el usuario confirma en Preferencias y memoria; evita duplicados por similitud. El prompt pide aplicar las definiciones de la memoria al clasificar.
 - **Caché de prompt**: la fecha/hora sale del encabezado y va al final del system prompt; las tools ofrecidas se ordenan por nombre → prefijo estable entre pasadas y turnos (OpenAI reutiliza el prefijo cacheado: primer token más rápido y más barato).
 
 **Sexta ronda: dinero solo si se pide, encabezado del PDF, versiones del mismo archivo.**
+
 - **Dinero estrictamente opt-in** (`report-customization.ts`): `resolveReportCustomization(message, model, base)` decide `showTotals` solo con las palabras del usuario en ese mensaje (o lo que tenía la versión anterior); `enforceMoneyOptIn` quita Total/Saldo de `columns`/`addColumns`/`asColumn` y apaga la fila de totales; `applySummaryCardCustomization` descarta tarjetas de dinero aunque el modelo pase `showSummaryCards: true`; `applyColumnCustomization` ya no acepta columnas de dinero "explícitas" del modelo. Cierra el hueco por el que aparecieron Total y Saldo pendiente sin pedirlos.
 - **Encabezado** (`pdf-generator.ts`): pdfkit envuelve el título aunque se pida una línea; ahora se reduce la fuente (18→13) y si aún no cabe se envuelve a propósito y el subtítulo baja según la altura medida (antes se encimaban).
 - **Cambios sobre el mismo archivo** (`revisions.ts` + orquestador 8.66): `isRevisionRequest` detecta "quita/agrega/cambia/ponlo en vertical/mismo reporte…"; se busca el último artefacto de la conversación con `meta.spec`, se agrega al prompt "CAMBIOS SOBRE EL ÚLTIMO ARCHIVO" (tool, versión y parámetros), y cuando el modelo llama la misma tool los parámetros previos van debajo de los nuevos (`mergeRevisionArgs`; la customización se re-mezcla base → modelo → palabras del usuario). El nuevo artefacto lleva `meta.version = n+1` y `revisionOf`; el anterior `supersededBy`; la tarjeta muestra "v2" y "sustituido por una versión nueva"; el resultado de la tool trae `revision.note` para que lo presente como versión, no como archivo nuevo. Un `blocks` mayor de 200k chars no se guarda en el spec.
@@ -172,27 +188,34 @@ Fix raíz del error `400 Invalid 'tools': array too long … 130` de OpenAI: ya 
 - **Selección de tools por turno** (`src/modules/ai/tool-selector.ts`): núcleo siempre presente (`CORE_TOOL_NAMES`) + tools fijadas por superficie + tools usadas antes en el hilo + las más relevantes al mensaje (palabras clave con sinónimos español/inglés y dominios). Tope `maxToolsPerTurn` (default 96; nunca > 128). El proveedor OpenAI recorta a 128 como último seguro. `loadMoreTools(topic)` la resuelve el orquestador: agrega las tools del tema al siguiente paso. Un tool call a una tool disponible pero no ofrecida también se ejecuta.
 - **Routing de modelo** (`model-router.ts`): "Automático" en el selector (`AUTO_MODEL_ID='auto'`, default cuando `routingEnabled`) → simple (saludos/confirmaciones) usa `routingSimpleModel` (gpt-4o-mini), estándar usa `deployment`, complejo (análisis, multi-dominio, adjuntos, "Planear primero") usa `routingComplexModel || deployment`. Con imágenes/PDF escaneado se exige modelo con visión. La decisión queda en `AiMessage.meta.routing`.
 - **Ejecución paralela**: en cada iteración, las tool calls consecutivas con efecto `read` (no artefactos ni planificación) corren con `Promise.all`; los resultados se finalizan en el orden del modelo. Envíos/escrituras/eliminaciones siguen secuenciales (aprobación).
-- **Plan-then-execute**: tool `proposePlan` + preferencia `AiUserPreference.planMode` (auto | always | never, en "Preferencias y memoria") + botón "Planear primero" en el asistente (`planFirst` en `/app/assistant/api/chat`). La tarjeta `PlanCard` (asistente y copilotos) tiene "Ejecutar plan" (manda `RUN_PLAN_MESSAGE`) y "Ajustar".
+- **Plan-then-execute**: tool `proposePlan` + preferencia `AiUserPreference.planMode` (auto | always | never, en "Preferencias y memoria") + botón "Planear primero" en el asistente (`planFirst` en `/app/assistant/api/chat`). La tarjeta `PlanCard` tiene "Ejecutar plan" (manda `RUN_PLAN_MESSAGE`) y "Ajustar".
 - **RAG híbrido** (`embeddings-service.ts`, `rag-fusion.ts`, `knowledge-service.searchKnowledge`): `KnowledgeChunk.embedding` (double precision[], sin extensión de Postgres) con `text-embedding-3-small`; búsqueda léxica + semántica fusionadas con RRF, re-ranking opcional con modelo (`ragRerankEnabled`); fallback léxico si no hay clave. Embeddings al procesar una versión y job `ai.embeddings_backfill` cada 30 min. Cada hit trae `match: lexical|semantic|hybrid`.
 - **Adjuntos**: DOCX (mammoth), XLSX (exceljs, hasta 6 hojas × 300 filas), audio (Whisper vía proveedor OpenAI), imágenes webp/gif, video (aviso de no soportado), PDF escaneado → se manda el archivo al modelo como `ContentPart` `file` (OCR con visión, `ocrFallbackEnabled`). Defaults de `allowedMimeTypes` ampliados (se migran solos si nunca se personalizaron); `maxAttachmentSizeMb` 25.
 - **Documentos** (`tools/documents-tools.ts`): `listConversationAttachments`, `extractDocumentData` (JSON estricto: emisor/receptor con RFC, folio, UUID, fecha, conceptos, impuestos, totales, `checks.totalsMatch`), `draftBillFromDocument` (proveedor por RFC/nombre + productos por SKU/nombre; la bill se captura en Zoho Books, UNIK solo la sincroniza: `canCreateInZoho:false`).
 - **Caché de lecturas** (`tools/tool-cache.ts`, en `executeTool` paso 6): solo tools builtin `read` de categorías de datos; TTL `toolCacheTtlLiveSeconds` (30) para periodos vivos y `toolCacheTtlHistoricalSeconds` (300) para cerrados; las tools de datos puras se comparten entre usuarios con el MISMO conjunto de permisos, las demás por usuario; cualquier tool con efecto limpia la caché; "actualiza / en tiempo real" en el mensaje → `skipCache`. Resultado marcado `cached:true, cachedAt`.
 - **Confianza** (`confidence.ts`): regla de prompt "Confianza: Verificado/Estimación/Suposición — motivo" al final de respuestas con datos; el orquestador la parsea (`meta.confidence`), y si el modelo la omite la infiere de las tools del turno. La UI la quita del texto y muestra `ConfidenceBadge` (+ modelo, "auto", "en paralelo", "caché ×n").
-- **Calidad** (`ai-feedback-service.ts`, `AiMessageFeedback`, `POST/DELETE /app/assistant/api/messages/[id]/feedback`): 👍/👎 con comentario en asistente y copilotos (`MessageFeedback`). Juez opcional (`ai-quality-judge.ts`, `qualityJudgeEnabled`, no bloquea) guarda `meta.judge.score` 1-5. Admin → Asistente IA → Resumen: "Calidad de respuestas" (útiles %, juez, % con datos verificados, comentarios).
+- **Calidad** (`ai-feedback-service.ts`, `AiMessageFeedback`, `POST/DELETE /app/assistant/api/messages/[id]/feedback`): 👍/👎 con comentario en el asistente (`MessageFeedback`). Juez opcional (`ai-quality-judge.ts`, `qualityJudgeEnabled`, no bloquea) guarda `meta.judge.score` 1-5. Admin → Asistente IA → Resumen: "Calidad de respuestas" (útiles %, juez, % con datos verificados, comentarios).
 - Config nueva en Admin → Asistente IA → Configuración: routing, tools por turno, caché, RAG, OCR, juez.
 
 ## Fiabilidad de acciones (2026-09-13, noche)
 
-Correcciones tras pruebas reales en producción:
+Correcciones tras pruebas reales en producción. **Nota:** las entradas que mencionan
+"copiloto de bandeja/chat", `proposeInboxDraft`, `suggestNextActions`,
+`listSurfaceConversations`, `INBOX_CONTEXT_TOOLS`, `autoInsertDrafts` o
+`onInsertAttachment` describen mecanismos de los paneles embebidos **retirados el
+2026-09-25**; se conservan aquí como historial. Las tools de negocio citadas
+(`sendInboxMessage`, `draftQuoteFromRequest`, `sendQuoteToContact`, `callContact`…)
+siguen vigentes en el asistente.
 
 - **Cotizaciones**: `createQuote`/`previewQuote`/`updateQuote` aceptan alias del modelo (`productId`, `price`, `qty`…), buscan el producto por nombre cuando falta `itemId` y aplican el precio de lista si `rate` es 0 (`normalizeQuoteItems` + `enrichQuoteItems`). Los errores de Zoho llegan legibles con pista (`friendlyQuoteError`: scope, org, producto/cliente no encontrado, conflicto). Nuevo `getZohoBooksStatus` (simulación, credenciales, org, lectura de prueba, última cotización sincronizada).
-- **Auto-corrección**: cuando una acción aprobada falla, la tarjeta roja muestra el motivo y el copiloto/asistente recibe un turno automático `⟦auto:action_failed⟧` (routes de copiloto: `trigger: 'action_failed'` + `detail`; en el asistente el cliente manda `actionFailedMessage`) para diagnosticar y volver a proponer la acción corregida.
+- **Auto-corrección**: cuando una acción aprobada falla, la tarjeta roja muestra el motivo y el asistente recibe un turno automático `⟦auto:action_failed⟧` (el cliente manda `actionFailedMessage`) para diagnosticar y volver a proponer la acción corregida.
 - **Llamadas**: dock flotante global (`src/components/calls/CallDockProvider.tsx`, montado en `AppShell`) que sobrevive al cambio de módulo: sonando/en llamada/terminada, timer, micrófono (`CallRoom compact`), Pasar a la IA / Pausar IA, Escalar (transferir a compañero), Grabar, Colgar, enlace al detalle. Se abre solo cuando la IA marca (`callContact` aprobado → `uiActionFromResult` → evento `unik:call:join`) o desde el botón **Llamar** del encabezado de la bandeja (`unik:call:dial`). El orquestador emite eventos `action` (join_call / open_url) para tools ejecutadas sin aprobación (`startInternalCall` abre el chat y marca).
 - **Mensajes a clientes**: `customer-message-format.ts` (markdown → WhatsApp, sin placeholders "[Tu Nombre]", sin stock/datos internos salvo `keepInternalData`) aplicado en `sendInboxMessage`, `proposeInboxDraft` y `deliverToContact`. `sendInboxMessage` acepta `attachments` y **auto-adjunta** cualquier reporte cuya liga venga en el texto (`prepareCustomerMessage`): el cliente recibe el documento como media (Twilio `MediaUrl` firmado), no una liga. Enlaces compartidos toleran puntuación pegada (`verifyShareToken`) y `markdownLinksToPlain` deja espacio antes del punto.
 - **Copiloto de bandeja**: regla "ENVIAR vs REDACTAR" (dile/mándale/envíale → `sendInboxMessage` con tarjeta de aprobación; redacta/sugiere → `proposeInboxDraft`) y reglas de formato/firma/datos internos/adjuntos en el prompt.
 - **Modo del copiloto**: la insignia del panel abre un menú para cambiar el modo de ESA superficie escribiendo la misma preferencia unificada (`PATCH /app/assistant/api/preferences`), con enlace a todas las preferencias; el panel refresca el modo al volver a la pestaña.
 
 ### Segunda ronda de pruebas (misma noche)
+
 - **Cotizar desde la bandeja**: `createQuote`/`previewQuote` se ocultan en la superficie de bandeja (`INBOX_HIDDEN_TOOLS`); la regla 4b del prompt obliga a `draftQuoteFromRequest` → `sendQuoteToContact` (una sola aprobación). Los conceptos aceptan `item_id`, `line_item_id`, `sku`, `productName`, `cantidad`, `precio`; al crear, `lineItemId` nunca viaja a Zoho (era el "line_item_id no válido") y se reutiliza como candidato de `itemId`; sin nombre se usa la descripción o el SKU.
 - **Acciones sugeridas con un clic**: en los turnos automáticos del copiloto (abrir / mensaje nuevo) la primera llamada al modelo fuerza `suggestNextActions` (`toolChoice` en `ChatCompletionOptions`, soportado por el proveedor OpenAI), así siempre salen chips en vez de prosa.
 - **Borrador editable con Enviar**: `DraftCard` permite editar el texto y enviarlo directo (`onSendDraft`: bandeja → `POST /app/inbox/api/conversations/[id]/messages`, chat → `POST /app/chat/api/channels/[id]/messages`); el clic es la aprobación.

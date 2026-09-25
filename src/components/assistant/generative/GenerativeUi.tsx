@@ -181,10 +181,28 @@ function ConnectCard({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ toolkit }),
       });
-      const data = (await res.json()) as { redirectUrl?: string; error?: string };
-      if (!res.ok || !data.redirectUrl) {
+      const data = (await res.json()) as {
+        redirectUrl?: string | null;
+        connected?: boolean;
+        error?: string;
+      };
+      if (!res.ok) {
         setState('error');
         setMessage(data.error ?? 'No se pudo iniciar la conexión');
+        return;
+      }
+      if (!data.redirectUrl) {
+        // Managed/no-auth app: Composio activated it without an OAuth window.
+        if (data.connected) {
+          setState('connected');
+          if (interactive && !announced.current) {
+            announced.current = true;
+            onSendText?.(`Ya conecté ${name}, continúa con lo que te pedí.`);
+          }
+          return;
+        }
+        setState('error');
+        setMessage('Composio no devolvió un enlace de autorización');
         return;
       }
       window.open(data.redirectUrl, '_blank', 'noopener,noreferrer');

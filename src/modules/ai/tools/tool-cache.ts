@@ -198,7 +198,8 @@ export function cacheKeyFor(tool: Pick<ToolDefinition, 'name'>, actor: CurrentUs
   delete cleanArgs.conversationId;
   const perms = [...actor.permissionKeys].sort().join('|');
   const scope = SHARED_CACHE_TOOLS.has(tool.name) ? `perm:${sha1(`${actor.isSuperAdmin ? 'sa' : ''}:${perms}`)}` : `user:${actor.id}`;
-  return `${tool.name}:${scope}:${sha1(stableStringify(cleanArgs))}`;
+  // tenantId en la key: el caché compartido jamás cruza empresas.
+  return `t:${actor.tenantId ?? 'unik'}:${tool.name}:${scope}:${sha1(stableStringify(cleanArgs))}`;
 }
 
 const HISTORICAL_RANGES = new Set(['last_month', 'last_year', 'last_quarter', 'previous_month', 'previous_year', 'all', 'historic', 'historico']);

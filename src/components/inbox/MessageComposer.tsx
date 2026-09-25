@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import { Paperclip, Send, X } from 'lucide-react';
 import { VoiceDictationButton } from '@/components/voice/VoiceDictationButton';
 import { TemplatePicker } from './TemplatePicker';
@@ -15,16 +15,6 @@ interface PendingAttachment {
   abort: AbortController;
 }
 
-/** A file that already lives in storage (e.g. a report or the official quote PDF) to attach without re-uploading. */
-export interface ComposerAttachment {
-  objectId: string;
-  name: string;
-  mimeType?: string;
-  sizeBytes?: number;
-  /** Changes on every request so the same file can be attached again after removal. */
-  key?: string;
-}
-
 interface Props {
   conversationId: string;
   value: string;
@@ -34,9 +24,6 @@ interface Props {
   disabledReason?: string | null;
   /** When true, shows the WhatsApp template picker (Content SID). */
   showTemplatePicker?: boolean;
-  /** External attachment request (from the copilot); consumed once. */
-  insertAttachment?: ComposerAttachment | null;
-  onInsertAttachmentConsumed?: () => void;
 }
 
 const ACCEPT = 'image/png,image/jpeg,image/gif,image/webp,application/pdf,audio/*,video/mp4';
@@ -49,22 +36,8 @@ export function MessageComposer({
   disabled,
   disabledReason,
   showTemplatePicker,
-  insertAttachment,
-  onInsertAttachmentConsumed,
 }: Props) {
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
-
-  // Files handed over by the copilot (already stored): attach instantly, no upload.
-  useEffect(() => {
-    if (!insertAttachment) return;
-    setAttachments((prev) =>
-      prev.some((a) => a.objectId === insertAttachment.objectId)
-        ? prev
-        : [...prev, { localId: `ext-${insertAttachment.key ?? insertAttachment.objectId}`, objectId: insertAttachment.objectId, name: insertAttachment.name, progress: 100, error: null, abort: new AbortController() }]
-    );
-    onInsertAttachmentConsumed?.();
-    textarea.current?.focus();
-  }, [insertAttachment, onInsertAttachmentConsumed]);
   const [sending, setSending] = useState(false);
   const [templateKey, setTemplateKey] = useState('');
   const fileInput = useRef<HTMLInputElement>(null);

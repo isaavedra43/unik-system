@@ -1,15 +1,3 @@
-export type CopilotMode = 'active' | 'on_demand' | 'paused';
-
-export interface CopilotToolRecord {
-  id: string;
-  toolName: string;
-  args: unknown;
-  result: unknown;
-  durationMs: number;
-  success: boolean;
-  errorCode: string | null;
-}
-
 export interface TurnMeta {
   model?: string;
   routing?: { tier?: string; reason?: string; routed?: boolean };
@@ -17,46 +5,30 @@ export interface TurnMeta {
   confidenceNote?: string | null;
   /** Server-derived list of the sources that REALLY ran ("búsqueda web · base de datos UNIK"). */
   sourcesLabel?: string | null;
-  tools?: { calls?: number; cachedHits?: number; parallelBatches?: number; offered?: number; loadedMore?: number };
+  tools?: {
+    calls?: number;
+    cachedHits?: number;
+    parallelBatches?: number;
+    offered?: number;
+    loadedMore?: number;
+  };
   judge?: { score?: number; issues?: string[]; summary?: string };
   planFirst?: boolean;
   /** One-click follow-ups the assistant proposed at the end of the answer. */
   followUps?: string[];
   /** The model's thinking for this turn (truncated) — shown collapsed under "Pensamiento". */
   reasoning?: string;
+  /** Which agent produced this turn (multi-agent runs). */
+  agent?: { id?: string; name?: string; color?: number; icon?: string } | null;
+  /** Folded inter-agent chatter: "Mensajes de Investigador y Cobranza". */
+  agentMessages?: { agents?: string[]; summary?: string } | null;
+  /** A routine/vigil was created this turn → RoutineChip. */
+  routineCreated?: { name?: string; schedule?: string } | null;
 }
 
 export interface MessageFeedbackData {
   rating: number;
   comment: string | null;
-}
-
-export interface CopilotMessage {
-  id: string;
-  role: 'user' | 'assistant' | 'tool' | 'system';
-  content: string | null;
-  toolCalls?: Array<{ id: string; name: string; arguments: string }> | null;
-  toolCallRecords?: CopilotToolRecord[];
-  meta?: TurnMeta | null;
-  feedback?: MessageFeedbackData | null;
-  artifacts?: Array<{
-    artifactId: string;
-    type: 'pdf' | 'xlsx' | 'docx' | 'csv' | 'table' | 'chart' | 'image';
-    title: string;
-    filename?: string;
-    downloadUrl?: string;
-    inlineRender?: boolean;
-    rowCount?: number;
-    sizeBytes?: number;
-    pageCount?: number;
-    chartType?: string;
-    shared?: boolean;
-    storageObjectId?: string;
-    mimeType?: string;
-    quoteId?: string;
-    createdAt?: string;
-  }>;
-  createdAt: string;
 }
 
 export interface CopilotProposal {
@@ -69,34 +41,6 @@ export interface CopilotProposal {
   recipient?: string | null;
   status?: string;
   error?: string | null;
-}
-
-export type ActionKind = 'reply' | 'task' | 'lookup' | 'status' | 'note' | 'escalate' | 'send' | 'other';
-
-export interface SuggestedAction {
-  label: string;
-  instruction: string;
-  kind: ActionKind;
-}
-
-export interface SuggestedActionsData {
-  situation: string;
-  sentiment: 'positivo' | 'neutral' | 'negativo' | 'molesto';
-  urgency: 'baja' | 'media' | 'alta';
-  actions: SuggestedAction[];
-}
-
-export interface DraftData {
-  draft: string;
-  rationale: string | null;
-}
-
-export interface LiveStep {
-  id: string;
-  name: string;
-  status: 'running' | 'done' | 'failed' | 'pending';
-  /** Failure reason (or the tool's own `error` field) shown under a red chip. */
-  detail?: string | null;
 }
 
 export const AUTO_PREFIX = '⟦auto:';
@@ -136,10 +80,19 @@ export function uiActionFromResult(toolName: string, result: unknown): UiAction 
   if (!result || typeof result !== 'object') return null;
   const r = result as Record<string, unknown>;
   if (r.error) return null;
-  if ((toolName === 'callContact' || toolName === 'startOutboundCall') && typeof r.callId === 'string') {
-    return { kind: 'join_call', callId: r.callId, label: (r.to as string | undefined) ?? (r.phone as string | undefined) ?? null, aiCall: r.mode === 'ai' };
+  if (
+    (toolName === 'callContact' || toolName === 'startOutboundCall') &&
+    typeof r.callId === 'string'
+  ) {
+    return {
+      kind: 'join_call',
+      callId: r.callId,
+      label: (r.to as string | undefined) ?? (r.phone as string | undefined) ?? null,
+      aiCall: r.mode === 'ai',
+    };
   }
-  if (toolName === 'startInternalCall' && typeof r.openUrl === 'string') return { kind: 'open_url', url: r.openUrl, reason: 'internal_call' };
+  if (toolName === 'startInternalCall' && typeof r.openUrl === 'string')
+    return { kind: 'open_url', url: r.openUrl, reason: 'internal_call' };
   return null;
 }
 
@@ -147,7 +100,15 @@ export function uiActionFromResult(toolName: string, result: unknown): UiAction 
 export function performUiAction(action: UiAction): void {
   if (typeof window === 'undefined') return;
   if (action.kind === 'join_call' && action.callId) {
-    window.dispatchEvent(new CustomEvent('unik:call:join', { detail: { callId: action.callId, label: action.label ?? null, aiCall: Boolean(action.aiCall) } }));
+    window.dispatchEvent(
+      new CustomEvent('unik:call:join', {
+        detail: {
+          callId: action.callId,
+          label: action.label ?? null,
+          aiCall: Boolean(action.aiCall),
+        },
+      })
+    );
   } else if (action.kind === 'open_url' && action.url) {
     const url = action.url.replace(/^https?:\/\/[^/]+/, '') || action.url;
     window.location.assign(url);
@@ -158,7 +119,8 @@ export function performUiAction(action: UiAction): void {
 export function extractResultAction(text: string): UiAction | null {
   const callId = /"callId"\s*:\s*"([^"]+)"/.exec(text)?.[1];
   if (callId) {
-    const to = /"to"\s*:\s*"([^"]+)"/.exec(text)?.[1] ?? /"phone"\s*:\s*"([^"]+)"/.exec(text)?.[1] ?? null;
+    const to =
+      /"to"\s*:\s*"([^"]+)"/.exec(text)?.[1] ?? /"phone"\s*:\s*"([^"]+)"/.exec(text)?.[1] ?? null;
     return { kind: 'join_call', callId, label: to, aiCall: /"mode"\s*:\s*"ai"/.test(text) };
   }
   const openUrl = /"openUrl"\s*:\s*"([^"]+)"/.exec(text)?.[1];
@@ -173,31 +135,9 @@ export function extractFailureReason(text: string): string | null {
   return reason && reason.length > 0 ? reason.slice(0, 400) : null;
 }
 
-export const MODE_META: Record<CopilotMode, { label: string; hint: string }> = {
-  active: {
-    label: 'Activo',
-    hint: 'Analiza por su cuenta al abrir la conversación y cada vez que alguien escribe.',
-  },
-  on_demand: {
-    label: 'A petición',
-    hint: 'Solo actúa cuando tú le hablas.',
-  },
-  paused: {
-    label: 'Apagado',
-    hint: 'El copiloto está en pausa en esta superficie. Se cambia en Asistente IA → Preferencias y memoria.',
-  },
-};
-
-/** Where the unified AI configuration lives (one place for every surface). */
-export const AI_SETTINGS_HREF = '/app/assistant?settings=1';
-
 /** Human labels for tool activity ("qué está haciendo") — falls back to the tool name. */
 const TOOL_LABELS: Record<string, { running: string; done: string }> = {
-  suggestNextActions: { running: 'Preparando acciones', done: 'Acciones listas' },
-  proposeInboxDraft: { running: 'Redactando respuesta', done: 'Borrador listo' },
   draftReply: { running: 'Redactando respuesta', done: 'Borrador listo' },
-  updateInboxConversation: { running: 'Actualizando la conversación', done: 'Conversación actualizada' },
-  addInboxNote: { running: 'Guardando nota interna', done: 'Nota interna guardada' },
   sendInboxMessage: { running: 'Preparando envío', done: 'Envío propuesto' },
   getConversationMessages: { running: 'Releyendo la conversación', done: 'Conversación releída' },
   listInboxConversations: { running: 'Revisando la bandeja', done: 'Bandeja revisada' },
@@ -214,12 +154,14 @@ const TOOL_LABELS: Record<string, { running: string; done: string }> = {
   queryProducts: { running: 'Buscando productos', done: 'Productos revisados' },
   getProductSearch: { running: 'Buscando productos', done: 'Productos revisados' },
   searchKnowledgeLibrary: { running: 'Buscando en la biblioteca', done: 'Biblioteca consultada' },
-  findShareableDocument: { running: 'Buscando el archivo autorizado', done: 'Archivo autorizado revisado' },
+  findShareableDocument: {
+    running: 'Buscando el archivo autorizado',
+    done: 'Archivo autorizado revisado',
+  },
   universalSearch: { running: 'Buscando en todo UNIK', done: 'Búsqueda completa' },
   getDatabaseOverview: { running: 'Revisando datos disponibles', done: 'Datos revisados' },
   sendInternalChatMessage: { running: 'Preparando aviso al equipo', done: 'Aviso propuesto' },
   findUsers: { running: 'Buscando usuarios', done: 'Usuarios encontrados' },
-  proposeChatDraft: { running: 'Redactando mensaje para el equipo', done: 'Borrador listo' },
   listChatChannels: { running: 'Revisando canales del chat', done: 'Canales revisados' },
   getChatChannelMessages: { running: 'Releyendo el canal', done: 'Canal releído' },
   searchChatMessages: { running: 'Buscando en el chat', done: 'Búsqueda en chat completa' },
@@ -242,7 +184,10 @@ const TOOL_LABELS: Record<string, { running: string; done: string }> = {
   generateTable: { running: 'Armando tabla', done: 'Tabla lista' },
   loadMoreTools: { running: 'Cargando más herramientas', done: 'Herramientas cargadas' },
   composioListToolkits: { running: 'Revisando tus apps conectadas', done: 'Apps revisadas' },
-  composioSearchTools: { running: 'Buscando la herramienta adecuada', done: 'Herramienta encontrada' },
+  composioSearchTools: {
+    running: 'Buscando la herramienta adecuada',
+    done: 'Herramienta encontrada',
+  },
   composioConnect: { running: 'Preparando la conexión', done: 'Conexión preparada' },
   composioExecute: { running: 'Usando tu app externa', done: 'App externa consultada' },
   proposePlan: { running: 'Armando el plan', done: 'Plan propuesto' },
@@ -263,13 +208,19 @@ const TOOL_LABELS: Record<string, { running: string; done: string }> = {
   lookupSalesOrdersByNumber: { running: 'Cruzando folios con el sistema', done: 'Folios cruzados' },
   reviewAnswer: { running: 'Revisando la respuesta', done: 'Respuesta revisada' },
   draftAnswer: { running: 'Redactando la respuesta', done: 'Respuesta redactada' },
-  draftBillFromDocument: { running: 'Preparando factura de proveedor', done: 'Borrador de factura listo' },
+  draftBillFromDocument: {
+    running: 'Preparando factura de proveedor',
+    done: 'Borrador de factura listo',
+  },
   callContact: { running: 'Preparando llamada', done: 'Llamada propuesta' },
   startInternalCall: { running: 'Preparando llamada interna', done: 'Llamada interna lista' },
   sendMessageToContact: { running: 'Preparando mensaje', done: 'Mensaje propuesto' },
   sendBulkMessages: { running: 'Preparando envío masivo', done: 'Envío masivo propuesto' },
   draftQuoteFromRequest: { running: 'Armando cotización en Zoho', done: 'Cotización en borrador' },
-  sendQuoteToContact: { running: 'Preparando envío de cotización', done: 'Envío de cotización propuesto' },
+  sendQuoteToContact: {
+    running: 'Preparando envío de cotización',
+    done: 'Envío de cotización propuesto',
+  },
   getPickupLocation: { running: 'Buscando ubicación de bodega', done: 'Ubicación lista' },
   getWorkDigest: { running: 'Calculando tu digest', done: 'Digest listo' },
   web_search: { running: 'Buscando en internet', done: 'Busqué en internet' },
@@ -291,7 +242,11 @@ const TOOL_LABELS: Record<string, { running: string; done: string }> = {
  * Step line with the meaningful argument when there is one — "Buscando en
  * internet: arena de gato", "Leyendo https://x.com/…" — like ChatGPT's rail.
  */
-export function toolStepLabel(name: string, args: unknown, status: 'running' | 'done' = 'done'): string {
+export function toolStepLabel(
+  name: string,
+  args: unknown,
+  status: 'running' | 'done' = 'done'
+): string {
   const base = toolLabel(name, status);
   const obj = asObject(args);
   if (!obj) return base;
@@ -354,7 +309,9 @@ export function parsePlan(args: unknown): PlanData | null {
   return {
     goal: obj.goal,
     steps,
-    assumptions: Array.isArray(obj.assumptions) ? obj.assumptions.filter((a): a is string => typeof a === 'string') : [],
+    assumptions: Array.isArray(obj.assumptions)
+      ? obj.assumptions.filter((a): a is string => typeof a === 'string')
+      : [],
     deliverable: typeof obj.deliverable === 'string' ? obj.deliverable : null,
   };
 }
@@ -364,6 +321,8 @@ export interface MissionCardData {
   goal: string;
   steps: Array<{ title: string; status: string }>;
   schedule?: string | null;
+  /** Status from the tool result ("awaiting_approval", "active"…) — live values come from the mission API. */
+  initialStatus?: string;
 }
 
 /** Mission proposed with `proposeMission` (missionId from the tool result, plan from args). */
@@ -378,11 +337,18 @@ export function parseMission(args: unknown, result: unknown): MissionCardData | 
         .filter((s): s is string => typeof s === 'string')
         .map((title) => ({ title, status: 'pending' }))
     : [];
-  return { missionId, goal: a.goal, steps, schedule: typeof a.schedule === 'string' ? a.schedule : null };
+  return {
+    missionId,
+    goal: a.goal,
+    steps,
+    schedule: typeof a.schedule === 'string' ? a.schedule : null,
+    initialStatus: typeof r?.status === 'string' ? r.status : undefined,
+  };
 }
 
 /** Message the host sends when the user confirms a plan. */
-export const RUN_PLAN_MESSAGE = 'Ejecuta el plan propuesto tal cual, paso por paso, e infórmame el avance de cada paso.';
+export const RUN_PLAN_MESSAGE =
+  'Ejecuta el plan propuesto tal cual, paso por paso, e infórmame el avance de cada paso.';
 
 export function toolLabel(name: string, status: 'running' | 'done' = 'done'): string {
   const meta = TOOL_LABELS[name];
@@ -400,42 +366,4 @@ function asObject(value: unknown): Record<string, unknown> | null {
     }
   }
   return value && typeof value === 'object' ? (value as Record<string, unknown>) : null;
-}
-
-const SENTIMENTS = new Set(['positivo', 'neutral', 'negativo', 'molesto']);
-const URGENCIES = new Set(['baja', 'media', 'alta']);
-
-/** Tolerant to the model's variants: {title,text}, {name,prompt}, plain strings… */
-export function parseSuggestedActions(args: unknown): SuggestedActionsData | null {
-  const obj = asObject(args);
-  if (!obj) return null;
-  const rawList = Array.isArray(obj.actions) ? obj.actions : Array.isArray(obj.suggestions) ? obj.suggestions : Array.isArray(obj.options) ? obj.options : null;
-  if (!rawList) return null;
-  const actions = rawList
-    .map((a) => {
-      if (typeof a === 'string') return { label: a.trim().slice(0, 60), instruction: a.trim(), kind: 'other' as ActionKind };
-      const o = asObject(a);
-      if (!o) return null;
-      const label = String(o.label ?? o.title ?? o.name ?? o.action ?? '').trim();
-      const instruction = String(o.instruction ?? o.prompt ?? o.command ?? o.text ?? o.description ?? o.detail ?? label).trim();
-      return { label: (label || instruction).slice(0, 60), instruction, kind: (typeof o.kind === 'string' ? o.kind : 'other') as ActionKind };
-    })
-    .filter((a): a is { label: string; instruction: string; kind: ActionKind } => Boolean(a && a.label && a.instruction));
-  if (actions.length === 0) return null;
-  const sentiment = String(obj.sentiment ?? '').toLowerCase();
-  const urgency = String(obj.urgency ?? '').toLowerCase();
-  return {
-    situation: String(obj.situation ?? obj.summary ?? obj.reading ?? ''),
-    sentiment: (SENTIMENTS.has(sentiment) ? sentiment : 'neutral') as SuggestedActionsData['sentiment'],
-    urgency: (URGENCIES.has(urgency) ? urgency : 'media') as SuggestedActionsData['urgency'],
-    actions,
-  };
-}
-
-export function parseDraft(args: unknown): DraftData | null {
-  const obj = asObject(args);
-  if (!obj) return null;
-  const body = typeof obj.body === 'string' ? obj.body : typeof obj.draft === 'string' ? obj.draft : null;
-  if (!body || !body.trim()) return null;
-  return { draft: body, rationale: typeof obj.rationale === 'string' ? obj.rationale : null };
 }

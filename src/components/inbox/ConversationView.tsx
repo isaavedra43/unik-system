@@ -10,14 +10,13 @@ import {
   Image as ImageIcon,
   MessageSquareText,
   Phone,
-  Sparkles,
   StickyNote,
   TriangleAlert,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { useCallDock } from '@/components/calls/CallDockProvider';
-import { MessageComposer, type ComposerAttachment } from './MessageComposer';
+import { MessageComposer } from './MessageComposer';
 import {
   apiJson,
   formatDateTime,
@@ -41,10 +40,6 @@ interface Props {
   threadVersion: number;
   onConversationChanged: (conversation: CommConversationDTO) => void;
   onBack?: () => void;
-  onToggleAi: () => void;
-  aiOpen: boolean;
-  insertAttachment?: ComposerAttachment | null;
-  onInsertAttachmentConsumed?: () => void;
 }
 
 function StatusIcon({ message }: { message: CommMessageDTO }) {
@@ -146,9 +141,7 @@ export function ConversationView({
   onDraftChange,
   threadVersion,
   onConversationChanged,
-  onBack,
-  onToggleAi,
-  aiOpen, insertAttachment, onInsertAttachmentConsumed }: Props) {
+  onBack }: Props) {
   const [messages, setMessages] = useState<CommMessageDTO[]>([]);
   const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -392,15 +385,6 @@ export function ConversationView({
           >
             <StickyNote size={16} /> {notes.length > 0 ? notes.length : ''}
           </button>
-          <button
-            type="button"
-            className={cn('btn btn-sm', aiOpen ? 'btn-secondary' : 'btn-ghost')}
-            onClick={onToggleAi}
-            aria-pressed={aiOpen}
-            aria-label="Panel de IA"
-          >
-            <Sparkles size={16} />
-          </button>
         </div>
       </header>
 
@@ -532,8 +516,6 @@ export function ConversationView({
         onSend={send}
         disabledReason={sendError}
         showTemplatePicker={conversation.account.provider === 'twilio_whatsapp'}
-        insertAttachment={insertAttachment}
-        onInsertAttachmentConsumed={onInsertAttachmentConsumed}
       />
     </div>
   );

@@ -6,27 +6,33 @@ Este documento cierra la Entrega 16 del plan. Nada de lo aquí descrito se ha ej
 
 1. Migraciones y almacenamiento R2 (Entregas 1–6).
 2. Secretos y ejecutor común (7), luego una extensión de prueba (8–10).
-3. Copiloto y biblioteca (11): no requieren servicios externos.
+3. Asistente (preferencias, memoria) y biblioteca (11): no requieren servicios externos.
 4. Un número de WhatsApp o un bot de Telegram en la bandeja (13-A).
 5. Voz con LiveKit + Twilio en una sola cuenta (14).
-7. Una campaña de ensayo con 10 destinatarios, después lotes reales (15).
+6. Una campaña de ensayo con 10 destinatarios, después lotes reales (15).
 
 Cada paso se activa por variables de entorno y permisos: sin variables, la funcionalidad queda visible pero inactiva (modo mock o error claro), nunca escribe en proveedores reales.
 
 ## 1. Migraciones (Railway Pre-deploy)
 
 ```bash
-npx prisma migrate deploy
+node scripts/prisma-deploy.mjs
 ```
 
-Migraciones nuevas (todas aditivas, sin DROP):
+Nunca `npx prisma migrate deploy` directo: `prisma-deploy.mjs` marca como
+rolled-back cualquier migración fallida antes de aplicar, para que un error puntual
+no deje el deploy bloqueado en P3009. Las migraciones nuevas deben ser
+**idempotentes** (`IF NOT EXISTS`, FKs `NOT VALID` dentro de guardas
+`pg_constraint`) — `src/modules/shared/prisma-migrations.test.ts` lo exige.
 
-| Migración                                         | Contenido                                                                                                                                                           |
-| ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `20260912100000_add_object_storage_jobs_realtime` | StorageObject, UploadSession, StorageConfig, BackgroundJob, RealtimeEvent; columnas opcionales en adjuntos/artefactos                                               |
-| `20260912110000_add_extensions_skills_proposals`  | Extension*, ExtensionConnection, OAuthState, AiProposal, ExtensionExecution, Skill, SkillRun, UsageMeter                                                            |
+Migraciones de esta fase (las más recientes viven en `prisma/migrations/`):
+
+| Migración                                         | Contenido                                                                                                                                                                                         |
+| ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `20260912100000_add_object_storage_jobs_realtime` | StorageObject, UploadSession, StorageConfig, BackgroundJob, RealtimeEvent; columnas opcionales en adjuntos/artefactos                                                                             |
+| `20260912110000_add_extensions_skills_proposals`  | Extension*, ExtensionConnection, OAuthState, AiProposal, ExtensionExecution, Skill, SkillRun, UsageMeter                                                                                          |
 | `20260912120000_add_copilot_studio_comms_voice`   | AiUserPreference, AiMemory, Knowledge*, Comm*, Responsible, Commitment, ConsentRecord, Campaign*, Voice* + índice GIN de búsqueda (Studio*, InternalRequest* y Quote se eliminan en la siguiente) |
-| `20260912130000_drop_studio_requests_quotes`      | Elimina las tablas del estudio visual, solicitudes internas y cotizaciones locales (módulos retirados)                                                              |
+| `20260912130000_drop_studio_requests_quotes`      | Elimina las tablas del estudio visual, solicitudes internas y cotizaciones locales (módulos retirados)                                                                                            |
 
 Después de aplicar: `GET /api/health` debe seguir respondiendo `database: connected`.
 
@@ -72,7 +78,7 @@ Sigue `docs/extensions.md`. Verificación:
 - [ ] Propuesta aprobada se ejecuta una sola vez; segundo clic → 409.
 - [ ] Suspender extensión con jobs pendientes → jobs cancelados.
 
-## 6. Copiloto y biblioteca
+## 6. Asistente y biblioteca
 
 - [ ] Cambiar modo a **Pausada** y comprobar que el asistente no ofrece envíos ni cambios comerciales.
 - [ ] Corrección propuesta por el asistente aparece como pendiente y solo cuenta al confirmarla.

@@ -1,152 +1,122 @@
 # UNIK System - Current State
 
+> Última actualización: 2026-09-25. Este documento resume el estado del **código**;
+> la validación contra servicios reales se registra en `docs/pilot-runbook.md` y
+> en las secciones "pendiente de validación manual" de cada doc de módulo.
+
 ## Architecture
 
-- **Modular Monolith**
-- Un solo repositorio.
-- Frontend y backend coexisten dentro de Next.js.
+- **Modular Monolith**: un solo repositorio; frontend y backend coexisten en Next.js (App Router).
+- **Deploy**: GitHub → Railway. `Dockerfile` multi-stage (deps → build → runner)
+  con `output: 'standalone'`: la imagen final solo carga `.next/standalone`
+  (node_modules trazados por nft), `public`, `.next/static`, los assets del
+  venue (`src/modules/venues/assets`) y el CLI de Prisma para el pre-deploy.
+  El pre-deploy ejecuta `node scripts/prisma-deploy.mjs`
+  (marca migraciones fallidas como rolled-back y luego `migrate deploy`); nunca se usa
+  `npx prisma migrate deploy` directo. Las migraciones nuevas deben ser idempotentes
+  y aditivas — `src/modules/shared/prisma-migrations.test.ts` lo verifica en CI.
+- **Runtime**: Node.js `>=22`, PostgreSQL + Prisma. Schedulers y cola de jobs corren
+  dentro del mismo proceso web (una sola réplica asumida para schedulers; la cola
+  `BackgroundJob` sí tolera réplicas por reclamo atómico).
 
-## Infrastructure
+## Infraestructura implementada
 
-- **GitHub**: fuente del repositorio y del deployment.
-- **Railway**: entorno de deployment actual.
-- **PostgreSQL**: base de datos conectada y operativa.
+- **Autenticación/RBAC** (`src/modules/auth`, `docs/authentication.md`): sesiones en
+  PostgreSQL (hash SHA-256, cookie HttpOnly `unik_session`, 12 h), bcrypt, lockout,
+  permission registry code-first (~89 claves), `super_admin`, deny-by-default,
+  auditoría (`AuditLog`).
+- **Almacenamiento** (`src/modules/storage`, `docs/storage.md`): Cloudflare R2/S3,
+  cuarentena → promoción, validación por firma de formato, URLs firmadas, streaming
+  con `Range`, respaldo incremental.
+- **Jobs** (`src/modules/jobs`): cola durable en `BackgroundJob`, schedulers recurrentes
+  con dedupe keys, arranque en `instrumentation.ts` (`UNIK_JOB_WORKER_ENABLED`).
+- **Realtime** (`src/modules/realtime`): SSE con cursor durable (`RealtimeEvent`),
+  canales `user:{id}`, `inbox:{team}`, `call:{id}`, `campaign:{id}`, `assistant:{conv}`, `venue:{id}`.
+- **Notificaciones** (`src/modules/notifications`, `docs/notifications.md`): `notifyUser`,
+  preferencias por categoría, Web Push VAPID, despachador post-transacción.
 
-## Currently Working
+## Integración Zoho (fases 1-5, implementadas)
 
-- Deployment automático GitHub → Railway.
-- Aplicación Next.js ejecutándose en Railway.
-- Dominio público asignado por Railway.
-- Prisma Client generado y operativo.
-- Conexión PostgreSQL verificada.
-- `GET /api/health` responde correctamente.
-- Health check devuelve `database: connected` cuando la conexión es exitosa.
+`src/modules/integrations/zoho/`: OAuth con refresh token cacheado, cliente GET,
+y un **motor de sync genérico** (`zoho-sync-engine.ts`) + scheduler por entidad
+(`zoho-scheduler-factory.ts`). Patrón por entidad:
 
-## Phase 1 - Zoho Read Integration (implementada)
+```
+Zoho list → IntegrationEntityState (needsSync) → detalle → IntegrationSnapshot (RAW)
+  → normalizer → tabla de negocio → snapshot-diff → EntityChangeEvent → Notification
+```
 
-Capa interna en `src/modules/integrations/zoho/`:
+Entidades sincronizadas: **sales orders, estimates/quotes, invoices, purchase orders,
+bills, payments, products/items, packages (con shipment_order), contacts (customers/
+vendors), vendor credits**. Modo `baseline` para históricos sin descargar detalle.
+Botones "Actualizar" por módulo disparan sync `quick` manual.
 
-- `config.ts` — configuración validada con Zod, carga lazy.
-- `auth.ts` — OAuth vía refresh token, access token cacheado en memoria con renovación automática y una sola renovación concurrente.
-- `client.ts` — cliente HTTP genérico solo GET hacia Zoho Inventory.
-- `sales-orders.ts` — `listSalesOrders({ page, perPage })` y `getSalesOrder(id)`, devolviendo JSON RAW.
+## Workspaces de negocio
 
-## Phase 2 - Railway Verification (completada)
+Patrón compartido (`src/components/common/EntityWorkspace.tsx` + column registry +
+filtros Zod por módulo): tabla con DnD/resize/pinning/density, filtros avanzados,
+vistas guardadas (`TableView`, privadas/compartidas), export CSV/XLSX auditado,
+`EntityWatch` → notificaciones de cambios. Rutas: `/app/sales/orders`, `/app/quotes`,
+`/app/invoices`, `/app/payments`, `/app/purchase-orders`, `/app/bills`,
+`/app/vendor-credits`, `/app/products`, `/app/packages`, `/app/contacts/*`.
+Detalle en `docs/modules/sales-orders.md` (referencia del patrón) y
+`docs/modules/packages.md`.
 
-Endpoints internos protegidos con `X-UNIK-API-Key`, verificados en Railway contra Zoho real:
+## Comunicaciones (implementadas; verificación externa por runbook)
 
-- `GET /api/internal/zoho/sales-orders`
-- `GET /api/internal/zoho/sales-orders/{id}`
+- **Bandeja omnicanal** `/app/inbox` (`src/modules/comms`, `docs/communications.md`):
+  WhatsApp/SMS vía Twilio y Telegram Bot API; webhooks firmados e idempotentes,
+  consentimiento BAJA/ALTA, compromisos, responsables, duplicados revisables.
+  _El panel de copiloto embebido fue retirado (2026-09-25): la IA asiste desde
+  `/app/assistant` vía `comms-tools.ts`._
+- **Chat interno** `/app/chat` (`src/modules/chat`): canales, DMs, threads,
+  reacciones, polls, eventos RSVP, mensajes programados, snippets, llamadas internas.
+  _Copiloto embebido retirado igual que el de la bandeja; quedan utilidades AI
+  ligeras (traducción por mensaje)._
+- **Campañas** `/app/campaigns` (`docs/campaigns.md`): audiencia y contenido
+  congelados, ensayo con mock adapter, presupuesto, lotes recuperables.
+- **Voz** `/app/calls` (`docs/voice.md`): LiveKit + Twilio SIP, IA en llamadas
+  (worker aparte en `services/voice-agent`, OpenAI Realtime), grabación R2 con
+  retención, supervisión listen/whisper/barge.
 
-## Phase 3 - Sales Orders Polling Sync (verificada en producción)
+## Asistente IA (`/app/assistant` + MCP server)
 
-- Motor de polling en `sales-orders-sync.ts` con modos `scan`, `sync` y `baseline`.
-- Detección de cambios mediante `last_modified_time` del listado.
-- Snapshots RAW, límite `maxDetailFetches` (default 50, máx 200).
-- Modo `baseline` para convertir un `scan` histórico en punto de partida sin descargar detalles ni crear snapshots.
-- Endpoint `POST /api/internal/zoho/sync/sales-orders`.
-- Migración Prisma versionada y aplicada.
-- Baseline histórico ejecutado (22.954 Sales Orders) y protegido contra reejecución.
-- Sync real verificado: una Sales Order modificada en Zoho quedó almacenada en `IntegrationSnapshot`.
+`src/modules/ai/` + `docs/ai-unified.md`. Un solo agente: orquestador SSE con loop
+de tools, selección semántica de tools, routing de modelos por tier (OpenAI,
+Anthropic, Gemini, Ollama, CanopyWave, OpenRouter, local; GPT-5/o-series con
+reasoning effort), memoria personal (`AiMemory`), biblioteca de conocimiento
+(`KnowledgeSource` + FTS + embeddings), misiones, artefactos (PDF/Word/Excel/CSV/
+charts/tablas), UI generativa (spec JSON cerrada + iframes sandboxed
+`renderInteractiveUi`), verificación determinista de respuestas y revisión interna.
+Escrituras → `AiProposal` con aprobación humana exacta.
 
-## Phase 4 - Internal Scheduler (implementada, pendiente de activación)
+- **Venue** (`src/modules/venues`): VM Daytona desechable, controller Playwright,
+  screenshots post-acción, `secureInput` para credenciales sin pasar por el modelo.
+- **Extensiones** (`src/modules/extensions`, `docs/extensions.md`): MCP remoto,
+  OpenAPI→tools, skills declarativas, plugins ZIP; secretos AES-256-GCM, egreso
+  policiado (`safe-fetch`), `UsageMeter`.
+- **Composio** (`docs/composio.md`): catálogo real de apps vía REST v3.1, política
+  por toolkit/rol, efectos clasificados por UNIK.
+- **MCP server** (`/api/mcp`): UNIK expone sus tools a agentes externos;
+  efectos → `needs_approval`.
 
-- `src/instrumentation.ts` arranca `startSalesOrdersScheduler()` una vez por instancia, solo en runtime Node.
-- `sales-orders-scheduler.ts` hace un tick cada 5 min que consulta **solo PostgreSQL** y sincroniza Zoho como máximo cada 60 min.
-- `IntegrationSyncRun` (`mode = 'sync'`, `status = 'COMPLETED'`) es la fuente durable, así que un reinicio no reinicia el reloj.
-- Sin Railway Cron Service y sin segundo servicio: todo vive dentro de `unik-system`.
-- Feature flag `ZOHO_SALES_ORDERS_SCHEDULER_ENABLED`, desactivado por defecto.
-- El lock de sincronización se guarda en `globalThis` para que scheduler y endpoint manual compartan un único lock por proceso.
+## Retirados
 
-**FASE 4 internal scheduler implemented, pending production enablement.** Requiere una sola réplica del servicio web.
+- Estudio visual, solicitudes internas y cotizaciones locales (2026-09-12,
+  migración `20260912130000_drop_studio_requests_quotes`).
+- Módulo Visual Studio (2026-09-23+, migración `20260923231444_visual_studio`
+  eliminada del schema; verificar estado de la tabla en producción).
+- Widget flotante del asistente y copilotos embebidos de inbox/chat (2026-09-25).
 
-## Phase 5 - Business Normalization (implementada, pendiente de migración y verificación)
+## Estado del repositorio
 
-- Nuevos modelos `SalesOrder` y `SalesOrderItem` en `prisma/schema.prisma`.
-- Migración versionada aditiva `20260901000000_add_business_sales_orders`.
-- Metadata de normalización en `IntegrationSnapshot`: `normalizedAt`, `normalizationVersion`, `normalizationErrorCode`.
-- `src/modules/sales/sales-orders-normalizer.ts` mapea Zoho RAW a datos de negocio con Zod + `Prisma.Decimal`.
-- `CURRENT_SALES_ORDER_NORMALIZER_VERSION = 1`.
-- Normalización automática después de cada sync y scheduler tick.
-- Endpoint manual `POST /api/internal/zoho/normalize/sales-orders`.
-- Endpoints de lectura `GET /api/internal/sales-orders` y `GET /api/internal/sales-orders/{id}`.
-- Serialización de `Decimal` como string.
-- No backfill de 23.000 históricas; no se toca `IntegrationSnapshot.payload`.
+- ~113 modelos Prisma, ~79 migraciones versionadas, 300+ rutas API, ~200 K líneas
+  `src/`, tests con Vitest (`*.test.ts` junto a módulos) + Playwright (`e2e/`) +
+  Storybook.
 
-**FASE 5 implementation complete, pending production migration, deployment and verification with real Zoho payloads.**
+## Pendiente de validación manual (nunca marcada como pasada por agentes)
 
-## Phase 6.1 - Authentication / Users / Roles / Permissions (implementada, pendiente de migración, bootstrap y verificación en producción)
-
-- Sesiones respaldadas por PostgreSQL (`AuthSession` guarda solo SHA-256 del token; el token vive en cookie HttpOnly `unik_session`, SameSite=Lax, Secure en producción, TTL 12 h).
-- Modelos nuevos: `User`, `Role`, `UserRole`, `RolePermission`, `AuthSession`, `AuditLog` (migración aditiva `20260831190000_add_auth_foundation`).
-- Passwords con bcryptjs (cost 12); política mínimo 12 caracteres; contraseñas temporales generadas con `crypto.randomBytes`, mostradas una sola vez y nunca persistidas en claro.
-- Lockout: 5 intentos fallidos → 15 minutos de bloqueo (campos en `User`, sin Redis).
-- Permission Registry code-first (`src/modules/auth/permissions.ts`): permisos `users.*` y `roles.*`; `RolePermission.permissionKey` se valida contra el registry. Agregar módulos futuros no requiere migración.
-- `super_admin` (rol de sistema) bypass total de permisos, protegido contra delete/edición, con protecciones de último super admin y escalación de privilegios.
-- Autorización deny-by-default server-side: `requireAuthenticatedUser`, `requirePermission`, `assertPermission`, etc. (`src/modules/auth/authorization.ts`).
-- UI: `/login`, `/change-password` (forzado), `/app` layout protegido, `/app/account/security`, `/app/admin/users`, `/app/admin/roles`, `/app/admin/roles/[id]`; Server Actions + service layer.
-- Bootstrap del primer super_admin: `POST /api/internal/auth/bootstrap` (X-UNIK-API-Key, solo con 0 usuarios, luego 409 permanente).
-- Audit log de eventos administrativos/seguridad (sin UI todavía).
-
-**FASE 6.1 Authentication / Users / Roles / Permissions implemented, pending production migration/bootstrap/verification.**
-
-## External Zoho Verification
-
-Fuera del código de UNIK se probaron manualmente:
-
-- Zoho Self Client.
-- OAuth authorization.
-- Refresh token y access token.
-- Alcance `ZohoInventory.salesorders.READ`.
-- GET de Sales Orders y GET de Sales Order por ID.
-
-## Database
-
-- PostgreSQL está conectado.
-- Existen **3 modelos técnicos de integración**: `IntegrationEntityState`, `IntegrationSnapshot`, `IntegrationSyncRun`.
-- Existen **2 modelos de negocio iniciales**: `SalesOrder`, `SalesOrderItem`.
-- Existen **6 modelos de autenticación/autorización**: `User`, `Role`, `UserRole`, `RolePermission`, `AuthSession`, `AuditLog`.
-- Migraciones versionadas: `20260831182914_add_integration_sync_foundation`, `20260831183000_add_business_sales_orders` y `20260831190000_add_auth_foundation`.
-- Los datos de Zoho se guardan como snapshots RAW + modelos de negocio normalizados.
-
-## Not Implemented Yet
-
-- Activación del scheduler interno en producción (`ZOHO_SALES_ORDERS_SCHEDULER_ENABLED=true` en Railway).
-- Migración/bootstrap/verificación de FASE 6.1 en producción.
-- Detección de eliminaciones.
-- Webhooks de Zoho.
-- Modelos de negocio adicionales (Customer, Item, Invoice, Payment, Vendor).
-- Otros módulos de Zoho fuera de Sales Orders.
-- Módulos de ventas, compras, inventario, logística, finanzas, reportes e IA (frontend de negocio).
-- UI de Audit Log.
-
-## Endpoints
-
-| Método | Ruta                                        | Auth             |
-| ------ | ------------------------------------------- | ---------------- |
-| `GET`  | `/api/health`                               | No               |
-| `GET`  | `/api/internal/zoho/sales-orders`           | `X-UNIK-API-Key` |
-| `GET`  | `/api/internal/zoho/sales-orders/{id}`      | `X-UNIK-API-Key` |
-| `POST` | `/api/internal/zoho/sync/sales-orders`      | `X-UNIK-API-Key` |
-| `POST` | `/api/internal/zoho/normalize/sales-orders` | `X-UNIK-API-Key` |
-| `GET`  | `/api/internal/sales-orders`                | `X-UNIK-API-Key` |
-| `GET`  | `/api/internal/sales-orders/{id}`           | `X-UNIK-API-Key` |
-| `POST` | `/api/internal/auth/bootstrap`              | `X-UNIK-API-Key` |
-
-Rutas web autenticadas por sesión (cookie `unik_session`): `/login`, `/change-password`, `/app`, `/app/account/security`, `/app/admin/users`, `/app/admin/roles`, `/app/admin/roles/[id]`.
-
-## Next Planned Phase
-
-Activar el scheduler interno en Railway (`ZOHO_SALES_ORDERS_SCHEDULER_ENABLED=true`) y observar el consumo real de API durante varios ciclos antes de decidir la normalización de datos.
-
-## Phase 8 — Almacenamiento seguro, asistente extensible y comunicaciones (implementado, pendiente de migración y validación externa)
-
-Plan maestro ejecutado en 16 entregas (ver `docs/pilot-runbook.md` para el orden de activación):
-
-- **Almacenamiento** (`src/modules/storage`, `docs/storage.md`): Cloudflare R2 privado vía AWS SDK v3, registro central `StorageObject` + `UploadSession`, subida directa multipart a cuarentena, validación por firma real del formato, promoción a clave final, descargas con URL firmada corta o streaming autenticado con `Range`, migración reanudable de archivos heredados, respaldo incremental a cuenta separada y restauración con checksum. Cola durable de jobs en PostgreSQL (`src/modules/jobs`) y eventos SSE con cursor (`src/modules/realtime`).
-- **Extensiones** (`src/modules/extensions`, `docs/extensions.md`): ejecutor común con clasificación de efectos y propuestas de aprobación, conexiones cifradas (AES-256-GCM) con OAuth PKCE, control de egreso (HTTPS, dominios, DNS, redirecciones), MCP remoto (SDK oficial), APIs tipadas desde OpenAPI, skills declarativas y plugins versionados.
-- **Copiloto** (`src/modules/copilot`, `docs/copilot.md`): modos, personalización, memoria personal con aprendizaje controlado, biblioteca aprobada con búsqueda de texto completo.
-- **Comunicaciones omnicanal** (`src/modules/comms`, `docs/communications.md`), **campañas** (`src/modules/campaigns`), **voz LiveKit/Twilio** (`src/modules/voice`, `docs/voice.md`).
-- Retirados (2026-09-12): estudio visual, solicitudes internas, cotizaciones locales y mapa de pendientes; sus tablas se eliminan en la migración `20260912130000_drop_studio_requests_quotes`.
-
-Migraciones: `20260912100000`, `20260912110000`, `20260912120000` (aditivas) y `20260912130000` (elimina tablas de módulos retirados). Ninguna aplicada; ningún servicio externo validado.
+Sync real por entidad en producción, webhooks Twilio/Telegram firmados, R2 real,
+LiveKit/SIP real, Composio real, venue Daytona real, MCP externo real. El detalle
+por bloque está en `docs/pilot-runbook.md` y en la sección "pendiente de
+validación manual" de cada documento de módulo.

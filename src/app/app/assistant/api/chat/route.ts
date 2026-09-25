@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { getCurrentSession, hasPermission } from '@/modules/auth/authorization';
 import { runAssistant } from '@/modules/ai/ai-orchestrator';
+import { executeAgentTurn } from '@/modules/agents/agent-runtime';
+import { assignConversationAgent } from '@/modules/agents/agent-service';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -20,6 +22,8 @@ const chatRequestSchema = z.object({
   planFirst: z.boolean().optional(),
   /** Notify (bell + push) when the answer is ready even if the turn is short. */
   notifyWhenDone: z.boolean().optional(),
+  /** UNIVERSO: agente del sidebar que atiende esta conversación. */
+  agentId: z.string().max(80).optional(),
   // Attachments are referenced by ID only. Older clients may still send objects
   // with fileName/mimeType/storagePath: only the id is used, the rest is ignored.
   attachments: z
@@ -90,16 +94,36 @@ export async function POST(request: NextRequest) {
         }
       }, 15_000);
       try {
-        for await (const event of runAssistant({
-          conversationId: parsed.data.conversationId,
-          message: parsed.data.message,
-          actor: session.user,
-          context: parsed.data.context,
-          model: parsed.data.model,
-          planFirst: parsed.data.planFirst,
-          notifyWhenDone: parsed.data.notifyWhenDone,
-          attachmentIds: parsed.data.attachments,
-        })) {
+        // UNIVERSO B2: cuando el runtime V2 está activo, el turno corre con
+        // identidad de agente (persona, allowlist, routing envelope). Sin el
+        // flag, el camino es el asistente actual, byte a byte.
+        const runtimeV2 = process.env.UNIK_AGENT_RUNTIME_V2 === 'true';
+        if (parsed.data.agentId) {
+          await assignConversationAgent(parsed.data.conversationId, session.user.id, parsed.data.agentId);
+        }
+        const events = runtimeV2
+          ? executeAgentTurn({
+              conversationId: parsed.data.conversationId,
+              message: parsed.data.message,
+              actor: session.user,
+              agentId: parsed.data.agentId,
+              context: parsed.data.context,
+              model: parsed.data.model,
+              planFirst: parsed.data.planFirst,
+              notifyWhenDone: parsed.data.notifyWhenDone,
+              attachmentIds: parsed.data.attachments,
+            })
+          : runAssistant({
+              conversationId: parsed.data.conversationId,
+              message: parsed.data.message,
+              actor: session.user,
+              context: parsed.data.context,
+              model: parsed.data.model,
+              planFirst: parsed.data.planFirst,
+              notifyWhenDone: parsed.data.notifyWhenDone,
+              attachmentIds: parsed.data.attachments,
+            });
+        for await (const event of events) {
           write(event);
         }
       } catch (e) {

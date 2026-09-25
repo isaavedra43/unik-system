@@ -19,6 +19,7 @@ export async function loadUserActor(where: { id?: string; username?: string }): 
   const permissionKeys = [...new Set(activeRoles.flatMap((role) => role.permissions.map((p) => p.permissionKey)))].filter(
     (key): key is PermissionKey => isKnownPermission(key)
   );
+  const { resolveTenantId } = await import('@/modules/agents/tenancy');
   return {
     id: user.id,
     username: user.username,
@@ -28,5 +29,6 @@ export async function loadUserActor(where: { id?: string; username?: string }): 
     roleKeys,
     permissionKeys,
     isSuperAdmin: roleKeys.includes(SUPER_ADMIN_ROLE_KEY),
+    tenantId: await resolveTenantId(user.id),
   };
 }

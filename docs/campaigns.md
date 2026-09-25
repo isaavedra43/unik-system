@@ -76,7 +76,6 @@ draft ──congelar──▶ rehearsal ──ensayar + solicitar──▶ pendi
 
 ## 7. Checklist de validación manual (pendiente del usuario)
 
-- [ ] Añadir `import '@/modules/campaigns/campaigns-jobs';` en `register-handlers.ts` y los imports de tools en `tools/index.ts` (ver reporte de integración).
 - [ ] Con una cuenta Twilio/Telegram real (adaptadores de la bandeja) crear una campaña de prueba con 3-5 contactos propios con consentimiento `opted_in`.
 - [ ] Congelar, ensayar, aprobar con `scheduledAt` futuro y comprobar que el scheduler la inicia (≤ 5 min) y que `/app/campaigns` muestra progreso en vivo.
 - [ ] Responder "BAJA" desde un contacto durante el envío (la bandeja registra `opted_out`) y verificar que ese destinatario queda `opted_out` sin mensaje.

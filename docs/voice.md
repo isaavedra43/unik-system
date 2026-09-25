@@ -68,7 +68,7 @@ Sin `LIVEKIT_URL` el módulo funciona en **mock** (salas, tokens, egress y SIP e
 | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `calls.use`       | Crear llamadas internas/salientes, atender entrantes de cuentas cuyos `teamKeys` cruzan con sus `roleKeys` (o sin equipos), controlar llamadas donde participa, leer su transcripción y grabación.                                                |
 | `calls.supervise` | Listar, escuchar, leer transcripciones e intervenir en llamadas internas y en las de cuentas cuyos `teamKeys` cruzan con sus `roleKeys`. Cuentas sin `teamKeys` solo las supervisa super_admin. Sin este permiso **no se emite token ni medios**. |
-| `calls.admin`     | `/app/admin/voice`: IA por cuenta, grabación por defecto; muestra retención (editable en Archivos).                                                                                                                                              |
+| `calls.admin`     | `/app/admin/voice`: IA por cuenta, grabación por defecto; muestra retención (editable en Archivos).                                                                                                                                               |
 | super_admin       | Todo.                                                                                                                                                                                                                                             |
 
 Los equipos de una cuenta (`CommAccount.teamKeys`) se comparan con las claves de rol del usuario (misma convención que la bandeja de comunicaciones). Conocer un id de llamada u objeto no concede acceso: fuera del alcance la API responde 404.
@@ -122,7 +122,6 @@ Canal `call:{id}` (SSE `/app/realtime/api/stream?channels=call:{id}`): `call_upd
 - [ ] Resumen con compromisos y seguimientos tras terminar.
 - [ ] Job `voice.retention` tras vencimiento: objetos borrados en R2 y referencias limpias.
 
-
 ## Agente de voz (services/voice-agent)
 
 La IA habla en las llamadas a través de un **worker de LiveKit Agents** desplegado como servicio aparte
@@ -135,12 +134,12 @@ Twilio ─SIP─▶ sala call-_{id} ◀─ worker unik-voice (OpenAI Realtime, v
         /api/internal/voice/agent/{context,state,transcript,tool,event}
 ```
 
-| Pieza | Archivo |
-| --- | --- |
-| Despacho, brief, estado, transcripción, herramientas y eventos del worker | `src/modules/voice/voice-agent-service.ts` |
-| Cliente de despacho (`AgentDispatchClient`) y mock | `src/modules/voice/livekit-service.ts` (`dispatchAgent`) |
-| API interna del worker | `src/app/api/internal/voice/agent/**` |
-| Worker | `services/voice-agent/src/agent.ts`, `services/voice-agent/src/unik-client.ts` |
+| Pieza                                                                     | Archivo                                                                        |
+| ------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| Despacho, brief, estado, transcripción, herramientas y eventos del worker | `src/modules/voice/voice-agent-service.ts`                                     |
+| Cliente de despacho (`AgentDispatchClient`) y mock                        | `src/modules/voice/livekit-service.ts` (`dispatchAgent`)                       |
+| API interna del worker                                                    | `src/app/api/internal/voice/agent/**`                                          |
+| Worker                                                                    | `services/voice-agent/src/agent.ts`, `services/voice-agent/src/unik-client.ts` |
 
 **Flujo.** `registerInboundCall` despacha al worker cuando la cuenta está en "IA atiende". El worker pide el brief
 (`buildAgentContext`: persona, reglas, saludo, voz, modelo, llave de OpenAI del panel Asistente IA y las herramientas

@@ -55,8 +55,6 @@ export interface ChatMessageInputProps {
   user: CurrentUser;
   members?: ChatChannelMemberDTO[];
   threadId?: string | null;
-  /** Text to insert into the composer (from the copilot). `nonce` changes per request. */
-  insertRequest?: { text: string; nonce: number } | null;
 }
 
 interface PendingUpload {
@@ -76,7 +74,6 @@ export function ChatMessageInput({
   channelId,
   members,
   threadId,
-  insertRequest,
 }: ChatMessageInputProps) {
   const [text, setText] = useState('');
   const [pendingUploads, setPendingUploads] = useState<PendingUpload[]>([]);
@@ -99,21 +96,6 @@ export function ChatMessageInput({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isTypingRef = useRef(false);
-
-  // Copilot → composer: insert (or append to) the current text and focus.
-  const lastInsertNonce = useRef<number | null>(null);
-  useEffect(() => {
-    if (!insertRequest || insertRequest.nonce === lastInsertNonce.current) return;
-    lastInsertNonce.current = insertRequest.nonce;
-    setText((prev) => (prev.trim() ? `${prev.trimEnd()}\n${insertRequest.text}` : insertRequest.text));
-    requestAnimationFrame(() => {
-      const el = textareaRef.current;
-      if (!el) return;
-      el.focus();
-      el.style.height = 'auto';
-      el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
-    });
-  }, [insertRequest]);
 
   // Draft persistence — save/restore text per channel via localStorage
   const draftKey = `chat-draft:${channelId}`;

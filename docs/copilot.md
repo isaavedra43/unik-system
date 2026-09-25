@@ -1,4 +1,11 @@
-# Copiloto: modos, personalización, memoria y biblioteca aprobada
+# Asistente: modos, personalización, memoria y biblioteca aprobada
+
+> **2026-09-25:** los paneles de copiloto embebidos en `/app/inbox` y `/app/chat`
+> fueron retirados. Este documento cubre lo que sobrevive en el módulo
+> `src/modules/copilot/`: las **preferencias del asistente** (`AiUserPreference`),
+> la **memoria personal** (`AiMemory`) y la **biblioteca de conocimiento**
+> (`KnowledgeSource`). Los modos por superficie (`inboxCopilotMode`,
+> `chatCopilotMode`) ya no existen; quedan `mode` y `planMode`.
 
 ## Modos (por usuario, `AiUserPreference.mode`)
 

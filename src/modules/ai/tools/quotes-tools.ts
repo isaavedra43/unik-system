@@ -661,7 +661,7 @@ registerTool({
   enabledByDefault: true,
   effect: 'draft',
   parameters: z.object({
-    inboxConversationId: z.string().optional().describe('Conversación de bandeja (se inyecta en el copiloto)'),
+    inboxConversationId: z.string().optional().describe('Conversación de bandeja del cliente (de listInboxConversations)'),
     customer: z.string().optional().describe('Nombre o zohoContactId (customerId) del cliente cuando no hay conversación de bandeja. Si el sistema devuelve candidatos, vuelve a llamar con el customerId elegido.'),
     items: z.array(z.object({
       query: z.string().min(2).describe('Producto tal como lo pidió el cliente, ej. "piel de elefante 5xll"'),
@@ -807,7 +807,7 @@ registerTool({
   contextTags: ['all'],
   parameters: z.object({
     quoteId: z.string().min(1),
-    inboxConversationId: z.string().optional().describe('Conversación de bandeja del cliente (se inyecta en el copiloto)'),
+    inboxConversationId: z.string().optional().describe('Conversación de bandeja del cliente (de listInboxConversations)'),
     contact: z.string().optional().describe('Nombre/teléfono si no hay conversación'),
     message: z.string().min(1).max(3000).describe('Mensaje de venta para el cliente (breve, claro, sin markdown)'),
     markAsSent: z.boolean().default(true),

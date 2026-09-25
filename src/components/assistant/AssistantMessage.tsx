@@ -1,10 +1,37 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Bot, Brain, Check, ChevronDown, ChevronRight, Clock, Database, FileText, Image as ImageIcon, ShieldCheck, ShieldX, Sparkles, User as UserIcon, X } from 'lucide-react';
+import {
+  Bot,
+  Brain,
+  Check,
+  ChevronDown,
+  ChevronRight,
+  Clock,
+  Database,
+  FileText,
+  Image as ImageIcon,
+  ShieldCheck,
+  ShieldX,
+  Sparkles,
+  User as UserIcon,
+  X,
+} from 'lucide-react';
 import { AssistantMarkdown } from './AssistantMarkdown';
 import { ArtifactRenderer, type ArtifactData } from './ArtifactRenderer';
-import { AUTO_EVENT_LABELS, autoKind, extractFailureReason, extractResultAction, parseMission, parsePlan, performUiAction, toolLabel, toolStepLabel, type MessageFeedbackData, type TurnMeta } from '@/components/copilot/copilot-types';
+import {
+  AUTO_EVENT_LABELS,
+  autoKind,
+  extractFailureReason,
+  extractResultAction,
+  parseMission,
+  parsePlan,
+  performUiAction,
+  toolLabel,
+  toolStepLabel,
+  type MessageFeedbackData,
+  type TurnMeta,
+} from '@/components/copilot/copilot-types';
 import { ExternalLink, Phone } from 'lucide-react';
 import { ConfidenceBadge } from '@/components/copilot/ConfidenceBadge';
 import { parseFollowUps } from '@/modules/ai/followups';
@@ -14,6 +41,13 @@ import { MissionCard } from '@/components/copilot/MissionCard';
 import { parseConfidence } from '@/modules/ai/confidence';
 import { buildUiComponents } from '@/modules/ai/generative-ui/build-ui';
 import { GenerativeUi } from './generative/GenerativeUi';
+import { ActivityCard } from './agents/ActivityCard';
+import { AgentMessageCard } from './agents/AgentMessageCard';
+import { RoutineChip } from './agents/RoutineChip';
+import { AgentAvatar } from './agents/AgentAvatar';
+
+/** Tools whose actions live in the ops panel (screen / terminal). */
+const PANEL_TOOL_RE = /^(browser|venueExec|venueScreenshot|browser\.)/;
 
 export interface AttachmentDisplay {
   id: string;
@@ -56,7 +90,9 @@ function isImage(mimeType: string): boolean {
 }
 
 function wasCached(result: unknown): boolean {
-  return Boolean(result && typeof result === 'object' && (result as { cached?: unknown }).cached === true);
+  return Boolean(
+    result && typeof result === 'object' && (result as { cached?: unknown }).cached === true
+  );
 }
 
 /**
@@ -102,8 +138,20 @@ function ToolSteps({ records }: { records: ToolCallRecordDisplay[] }) {
               onClick={() => setOpen((v) => (v === r.id ? null : r.id))}
               title={`${r.toolName} · ${r.durationMs} ms${cached ? ' · desde caché' : ''}`}
             >
-              {status === 'done' ? cached ? <Database size={11} /> : <Check size={11} /> : status === 'pending' ? <Clock size={11} /> : <X size={11} />}
-              {pending ? `${toolLabel(r.toolName, 'done')} · esperando aprobación` : toolStepLabel(r.toolName, r.args, 'done')}
+              {status === 'done' ? (
+                cached ? (
+                  <Database size={11} />
+                ) : (
+                  <Check size={11} />
+                )
+              ) : status === 'pending' ? (
+                <Clock size={11} />
+              ) : (
+                <X size={11} />
+              )}
+              {pending
+                ? `${toolLabel(r.toolName, 'done')} · esperando aprobación`
+                : toolStepLabel(r.toolName, r.args, 'done')}
               {open === r.id ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
             </button>
           );
@@ -139,15 +187,36 @@ function ToolSteps({ records }: { records: ToolCallRecordDisplay[] }) {
   );
 }
 
-function parseSystemEvent(text: string): { kind: 'approved' | 'rejected' | 'other'; title: string; detail: string | null; failed: boolean } {
+function parseSystemEvent(text: string): {
+  kind: 'approved' | 'rejected' | 'other';
+  title: string;
+  detail: string | null;
+  failed: boolean;
+} {
   const clean = text.replace(/^\[Sistema\]\s*/, '');
   const approved = /APROBÓ/.test(clean);
   const rejected = /RECHAZÓ/.test(clean);
   const failed = /fall[oó]:/i.test(clean);
   const action = /Acción:\s*([^]*?)(?:\s+Resultado:|$)/.exec(clean)?.[1]?.trim() ?? null;
   const reason = failed ? extractFailureReason(clean) : null;
-  if (approved) return { kind: 'approved', title: failed ? 'Aprobaste la acción, pero falló' : /incierto/.test(clean) ? 'Aprobaste la acción · resultado por confirmar' : 'Aprobaste la acción · ejecutada', detail: failed && reason ? `${reason}${action ? ` — ${action}` : ''}` : action, failed };
-  if (rejected) return { kind: 'rejected', title: 'Rechazaste la acción', detail: /RECHAZÓ la propuesta [^\s]+ \([^)]+\)(?::\s*(.*))?/.exec(clean)?.[1] ?? null, failed: false };
+  if (approved)
+    return {
+      kind: 'approved',
+      title: failed
+        ? 'Aprobaste la acción, pero falló'
+        : /incierto/.test(clean)
+          ? 'Aprobaste la acción · resultado por confirmar'
+          : 'Aprobaste la acción · ejecutada',
+      detail: failed && reason ? `${reason}${action ? ` — ${action}` : ''}` : action,
+      failed,
+    };
+  if (rejected)
+    return {
+      kind: 'rejected',
+      title: 'Rechazaste la acción',
+      detail: /RECHAZÓ la propuesta [^\s]+ \([^)]+\)(?::\s*(.*))?/.exec(clean)?.[1] ?? null,
+      failed: false,
+    };
   return { kind: 'other', title: clean, detail: null, failed: false };
 }
 
@@ -164,16 +233,39 @@ export function AssistantMessage({ message, onSendText, isLatest = false }: Assi
 
   if (message.role === 'system') {
     const ev = parseSystemEvent(message.content ?? '');
-    const action = ev.kind === 'approved' && !ev.failed ? extractResultAction(message.content ?? '') : null;
+    const action =
+      ev.kind === 'approved' && !ev.failed ? extractResultAction(message.content ?? '') : null;
     return (
       <div className={`assistant-sysevent is-${ev.kind} ${ev.failed ? 'is-failed' : ''}`}>
-        {ev.kind === 'approved' ? (ev.failed ? <ShieldX size={14} /> : <ShieldCheck size={14} />) : ev.kind === 'rejected' ? <ShieldX size={14} /> : <Sparkles size={14} />}
+        {ev.kind === 'approved' ? (
+          ev.failed ? (
+            <ShieldX size={14} />
+          ) : (
+            <ShieldCheck size={14} />
+          )
+        ) : ev.kind === 'rejected' ? (
+          <ShieldX size={14} />
+        ) : (
+          <Sparkles size={14} />
+        )}
         <div>
           <div className="assistant-sysevent-title">{ev.title}</div>
           {ev.detail && <div className="assistant-sysevent-detail">{ev.detail}</div>}
           {action && (
-            <button type="button" className="proposal-btn proposal-btn-primary copilot-sysevent-btn" onClick={() => performUiAction(action)}>
-              {action.kind === 'join_call' ? <><Phone size={13} /> Abrir la llamada</> : <><ExternalLink size={13} /> Abrir</>}
+            <button
+              type="button"
+              className="proposal-btn proposal-btn-primary copilot-sysevent-btn"
+              onClick={() => performUiAction(action)}
+            >
+              {action.kind === 'join_call' ? (
+                <>
+                  <Phone size={13} /> Abrir la llamada
+                </>
+              ) : (
+                <>
+                  <ExternalLink size={13} /> Abrir
+                </>
+              )}
             </button>
           )}
         </div>
@@ -195,32 +287,80 @@ export function AssistantMessage({ message, onSendText, isLatest = false }: Assi
   }
   const records = message.toolCallRecords ?? [];
   const artifacts = message.artifacts ?? [];
+  // Venue/browser records render inside a collapsible ActivityCard; the rest
+  // stay as step chips. Cards (plan/mission) are pulled out below.
+  const panelRecords = records.filter((r) => PANEL_TOOL_RE.test(r.toolName));
+  const chipRecords = records.filter(
+    (r) =>
+      !PANEL_TOOL_RE.test(r.toolName) &&
+      r.toolName !== 'proposePlan' &&
+      r.toolName !== 'proposeMission'
+  );
+  const metaAgent = message.meta?.agent ?? null;
   // Generative UI: results of external tools (Composio, MCP) drawn as cards. Rebuilt from the
   // persisted tool records, so history looks the same as the live turn.
   const uiComponents = !isUser
-    ? records.flatMap((r) => (r.success ? buildUiComponents({ toolName: r.toolName, args: r.args, result: r.result, success: true }) : []))
+    ? records.flatMap((r) =>
+        r.success
+          ? buildUiComponents({
+              toolName: r.toolName,
+              args: r.args,
+              result: r.result,
+              success: true,
+            })
+          : []
+      )
     : [];
-  const planRecord = !isUser ? records.find((r) => r.toolName === 'proposePlan' && r.success) : undefined;
+  const planRecord = !isUser
+    ? records.find((r) => r.toolName === 'proposePlan' && r.success)
+    : undefined;
   const plan = planRecord ? parsePlan(planRecord.args) : null;
-  const missionRecord = !isUser ? records.find((r) => r.toolName === 'proposeMission' && r.success) : undefined;
+  const missionRecord = !isUser
+    ? records.find((r) => r.toolName === 'proposeMission' && r.success)
+    : undefined;
   const mission = missionRecord ? parseMission(missionRecord.args, missionRecord.result) : null;
   const parsed = !isUser ? parseConfidence(message.content) : null;
   const followParsed = parsed ? parseFollowUps(parsed.content) : null;
   const content = followParsed ? followParsed.content : parsed ? parsed.content : message.content;
-  const followUps = !isUser ? (message.meta?.followUps && message.meta.followUps.length > 0 ? message.meta.followUps : followParsed?.followUps ?? []) : [];
+  const followUps = !isUser
+    ? message.meta?.followUps && message.meta.followUps.length > 0
+      ? message.meta.followUps
+      : (followParsed?.followUps ?? [])
+    : [];
   const confidence = message.meta?.confidence ?? parsed?.level ?? null;
   // Fuentes reales primero (server-derived); la nota del modelo solo si no hay.
-  const confidenceNote = message.meta?.sourcesLabel ?? message.meta?.confidenceNote ?? parsed?.note ?? null;
+  const confidenceNote =
+    message.meta?.sourcesLabel ?? message.meta?.confidenceNote ?? parsed?.note ?? null;
 
   return (
-    <div className={`assistant-msg-row ${isUser ? 'assistant-msg-row-user' : 'assistant-msg-row-assistant'}`}>
-      <div className="assistant-msg-avatar">{isUser ? <UserIcon size={18} /> : <Bot size={18} />}</div>
+    <div
+      className={`assistant-msg-row ${isUser ? 'assistant-msg-row-user' : 'assistant-msg-row-assistant'}`}
+    >
+      {isUser ? (
+        <div className="assistant-msg-avatar">
+          <UserIcon size={18} />
+        </div>
+      ) : metaAgent?.name || metaAgent?.icon ? (
+        <AgentAvatar
+          agent={{ name: metaAgent.name ?? 'Agente', color: metaAgent.color, icon: metaAgent.icon }}
+          size="sm"
+          className="assistant-msg-avatar"
+        />
+      ) : (
+        <div className="assistant-msg-avatar">
+          <Bot size={18} />
+        </div>
+      )}
       <div className={`assistant-msg ${isUser ? 'assistant-msg-user' : 'assistant-msg-assistant'}`}>
         {message.attachments && message.attachments.length > 0 && (
           <div className="assistant-msg-attachments">
             {message.attachments.map((att) => (
               <div key={att.id} className="assistant-msg-attachment">
-                {isImage(att.mimeType) ? <ImageIcon size={14} className="assistant-msg-attachment-icon" /> : <FileText size={14} className="assistant-msg-attachment-icon" />}
+                {isImage(att.mimeType) ? (
+                  <ImageIcon size={14} className="assistant-msg-attachment-icon" />
+                ) : (
+                  <FileText size={14} className="assistant-msg-attachment-icon" />
+                )}
                 <span className="assistant-msg-attachment-name" title={att.fileName}>
                   {att.fileName}
                 </span>
@@ -229,13 +369,39 @@ export function AssistantMessage({ message, onSendText, isLatest = false }: Assi
             ))}
           </div>
         )}
-        {!isUser && message.meta?.reasoning ? <ThinkingBlock text={message.meta.reasoning} /> : null}
-        {!isUser && <ToolSteps records={records.filter((r) => r.toolName !== 'proposePlan' && r.toolName !== 'proposeMission')} />}
-        {uiComponents.length > 0 && <GenerativeUi components={uiComponents} onSendText={onSendText} interactive={isLatest} />}
+        {!isUser && message.meta?.reasoning ? (
+          <ThinkingBlock text={message.meta.reasoning} />
+        ) : null}
+        {!isUser && <ToolSteps records={chipRecords} />}
+        {!isUser && panelRecords.length > 0 && (
+          <ActivityCard
+            records={panelRecords}
+            agent={
+              metaAgent?.name
+                ? {
+                    id: metaAgent.id ?? 'agent',
+                    name: metaAgent.name,
+                    kind: 'specialist',
+                    color: metaAgent.color,
+                    icon: metaAgent.icon,
+                  }
+                : null
+            }
+          />
+        )}
+        {!isUser && message.meta?.agentMessages && (
+          <AgentMessageCard data={message.meta.agentMessages} />
+        )}
+        {uiComponents.length > 0 && (
+          <GenerativeUi components={uiComponents} onSendText={onSendText} interactive={isLatest} />
+        )}
         {content && (
           <div className="assistant-msg-content">
             <AssistantMarkdown content={content} />
           </div>
+        )}
+        {!isUser && message.meta?.routineCreated && (
+          <RoutineChip data={message.meta.routineCreated} />
         )}
         {plan && onSendText && <PlanCard plan={plan} active={isLatest} onRun={onSendText} />}
         {mission && <MissionCard mission={mission} active={isLatest} />}
@@ -258,7 +424,12 @@ export function AssistantMessage({ message, onSendText, isLatest = false }: Assi
         {!isUser && isLatest && onSendText && followUps.length > 0 && (
           <div className="assistant-followups" aria-label="Sugerencias de siguiente paso">
             {followUps.map((f) => (
-              <button key={f} type="button" className="assistant-followup-chip" onClick={() => onSendText(f)}>
+              <button
+                key={f}
+                type="button"
+                className="assistant-followup-chip"
+                onClick={() => onSendText(f)}
+              >
                 {f}
               </button>
             ))}

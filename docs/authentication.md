@@ -116,12 +116,22 @@ el control de acceso real.
 definiciones viven en código y `RolePermission.permissionKey` se valida contra el
 registry antes de persistir (`isKnownPermission`).
 
-Permisos iniciales:
+El registry (`PERMISSION_REGISTRY` en `src/modules/auth/permissions.ts`) agrega las
+definiciones de cada módulo vía `src/modules/*/permissions.ts`. Hoy cubre ~89 claves
+agrupadas por dominio, p. ej.:
 
-- `users.view`, `users.create`, `users.update`, `users.change_status`,
-  `users.assign_roles`, `users.reset_password`
-- `roles.view`, `roles.create`, `roles.update`, `roles.delete`,
-  `roles.manage_permissions`
+- `users.*`, `roles.*` (administración)
+- `sales_orders.*`, `quotes.*`, `invoices.*`, `payments.*`, `purchase_orders.*`,
+  `bills.*`, `vendor_credits.*`, `products.*`, `packages.*`, `customers.*`,
+  `vendors.*` (`view`, `export`, `watch`, `share_views` por módulo; quotes además
+  `create`, `edit`, `change_status`, `send_email`; packages además `edit`, `ship`)
+- `inbox.use/assign/admin`, `chat.use/admin`, `campaigns.view/manage/approve`,
+  `calls.use/supervise/admin`
+- `assistant.use/upload/export/voice/admin`, `knowledge.manage`, `files.admin`
+- `extensions.view/manage/connect`, `skills.manage`, `integrations.view/manage`
+- `web.search/fetch/crawl`, `venue.exec/files`, `browser.use`
+
+La lista exacta y vigente es el código: `grep -h "key: '" src/modules/*/permissions.ts`.
 
 ### Cómo agregar permisos de un módulo futuro (ejemplo: Inventory)
 

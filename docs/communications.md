@@ -20,22 +20,22 @@ Bandeja (/app/inbox) ──POST messages──▶ sendOutboundMessage (consentim
                                              └─▶ getChannelAdapter(provider).send (idempotencyKey = message.id)
 ```
 
-| Pieza                                                | Archivo                                                                         |
-| ---------------------------------------------------- | ------------------------------------------------------------------------------- |
-| Contrato de adaptadores                              | `src/modules/comms/channel-adapters.ts`                                         |
-| Adaptador Twilio (WhatsApp/SMS)                      | `src/modules/comms/adapters/twilio-adapter.ts`                                  |
-| Adaptador Telegram                                   | `src/modules/comms/adapters/telegram-adapter.ts`                                |
-| Registro de adaptadores                              | `src/modules/comms/adapters/index.ts`                                           |
-| Cuentas (números/bots) y credenciales                | `src/modules/comms/comms-accounts-service.ts`                                   |
-| Contactos y duplicados revisables                    | `src/modules/comms/comms-contacts-service.ts`                                   |
-| Conversaciones, mensajes, notas, relevo              | `src/modules/comms/comms-service.ts`                                            |
-| IA asistiva (resumen, respuesta, traducción, relevo) | `src/modules/comms/comms-ai.ts`                                                 |
-| Directorio de responsables                           | `src/modules/comms/responsibles-service.ts`                                     |
-| Compromisos y sugerencias heurísticas                | `src/modules/comms/commitments-service.ts`                                      |
-| Almacenamiento (upload/acceso)                       | `src/modules/comms/comms-storage.ts`                                            |
-| Jobs                                                 | `src/modules/comms/comms-jobs.ts`                                               |
-| Tools del asistente                                  | `src/modules/ai/tools/comms-tools.ts`                                           |
-| UI bandeja / admin                                   | `src/components/inbox`, `src/components/comms-admin`                            |
+| Pieza                                                | Archivo                                              |
+| ---------------------------------------------------- | ---------------------------------------------------- |
+| Contrato de adaptadores                              | `src/modules/comms/channel-adapters.ts`              |
+| Adaptador Twilio (WhatsApp/SMS)                      | `src/modules/comms/adapters/twilio-adapter.ts`       |
+| Adaptador Telegram                                   | `src/modules/comms/adapters/telegram-adapter.ts`     |
+| Registro de adaptadores                              | `src/modules/comms/adapters/index.ts`                |
+| Cuentas (números/bots) y credenciales                | `src/modules/comms/comms-accounts-service.ts`        |
+| Contactos y duplicados revisables                    | `src/modules/comms/comms-contacts-service.ts`        |
+| Conversaciones, mensajes, notas, relevo              | `src/modules/comms/comms-service.ts`                 |
+| IA asistiva (resumen, respuesta, traducción, relevo) | `src/modules/comms/comms-ai.ts`                      |
+| Directorio de responsables                           | `src/modules/comms/responsibles-service.ts`          |
+| Compromisos y sugerencias heurísticas                | `src/modules/comms/commitments-service.ts`           |
+| Almacenamiento (upload/acceso)                       | `src/modules/comms/comms-storage.ts`                 |
+| Jobs                                                 | `src/modules/comms/comms-jobs.ts`                    |
+| Tools del asistente                                  | `src/modules/ai/tools/comms-tools.ts`                |
+| UI bandeja / admin                                   | `src/components/inbox`, `src/components/comms-admin` |
 
 ### Reglas que no cambian
 
@@ -45,7 +45,7 @@ Bandeja (/app/inbox) ──POST messages──▶ sendOutboundMessage (consentim
 - **Equipos.** `CommAccount.teamKeys` son claves de rol. Un usuario con `inbox.use` ve una cuenta si alguno de sus roles está en `teamKeys`; `inbox.admin` y `super_admin` ven todo. Los ids nunca conceden acceso.
 - **Secretos.** Credenciales en `ExtensionConnection` cifrada (extensión `comm.twilio` / `comm.telegram`, kind `api`, egreso limitado a `api.twilio.com` / `api.telegram.org`). Nunca vuelven al navegador ni a logs. Fallback: variables de entorno.
 - **Salidas HTTP** solo con `safeFetch` (HTTPS, hosts aprobados, DNS público, tamaño y timeout acotados).
-- **La IA nunca envía sola.** El panel de IA produce texto para el operador; la tool `sendInboxMessage` es `external_send` y siempre genera una propuesta que el usuario aprueba.
+- **La IA nunca envía sola.** La tool `sendInboxMessage` del asistente es `external_send` y siempre genera una propuesta que el usuario aprueba.
 
 ## 2. Permisos
 
@@ -88,7 +88,8 @@ El asignado de una conversación puede cambiar su estado y relevarla aunque no t
 
 ## 5. Bandeja (`/app/inbox`)
 
-- Tres columnas: lista con filtros (canal, estado, asignación, búsqueda ILIKE en contacto/mensajes, paginación por cursor), conversación (mensajes, estados de entrega, media, notas internas, asignación, estado, prioridad, redactor con adjuntos) y **panel fijo de IA** (resumen, sugerencia insertable, traducción, compromisos sugeridos, compromisos del contacto y relevo asistido). En móvil se muestra una columna a la vez.
+- Dos columnas: lista con filtros (canal, estado, asignación, búsqueda ILIKE en contacto/mensajes, paginación por cursor) y conversación (mensajes, estados de entrega, media, notas internas, asignación, estado, prioridad, redactor con adjuntos). En móvil se muestra una columna a la vez.
+- **IA:** el panel de copiloto embebido fue retirado (2026-09-25). Sobreviven: el **relevo asistido** (nota interna con resumen generado por IA al reasignar), la heurística de compromisos (`suggestCommitments`, endpoint `POST /app/inbox/api/commitments/suggest`) y toda la asistencia desde `/app/assistant` vía `comms-tools.ts` (`draftReply`, `sendInboxMessage` con aprobación, etc.).
 - Tiempo real: SSE `/app/realtime/api/stream` con canales `inbox:{roleKey}` y `user:{id}`. Los eventos solo llevan ids (nunca texto), el cliente vuelve a pedir lo que muestra.
 - Adjuntos: `uploadFile` con destino `{ type: 'comm_conversation', id }` (imagen/PDF/audio/mp4, 25 MB). Los ids viajan como `mediaObjectIds`; el servidor vuelve a validar que el remitente pueda leerlos.
 - **Relevo asistido de operador**: reasigna y añade una nota interna con un resumen generado por IA a partir de los últimos mensajes; si la IA falla, la nota lleva los últimos 5 mensajes en texto plano.
@@ -105,15 +106,15 @@ El asignado de una conversación puede cambiar su estado y relevarla aunque no t
 
 ## 8. Tools del asistente (`comms-tools.ts`)
 
-| Tool                      | Efecto                                                                             | Permiso        |
-| ------------------------- | ---------------------------------------------------------------------------------- | -------------- |
-| `listInboxConversations`  | read                                                                               | `inbox.use`    |
-| `getConversationMessages` | read                                                                               | `inbox.use`    |
-| `draftReply`              | draft                                                                              | `inbox.use`    |
-| `sendInboxMessage`        | **external_send** (propuesta obligatoria; el resumen muestra destinatario y texto) | `inbox.use`    |
-| `listCommitments`         | read                                                                               | `inbox.use`    |
-| `createCommitment`        | internal_task                                                                      | `inbox.use`    |
-| `findDuplicateContacts`   | read                                                                               | `inbox.use`    |
+| Tool                      | Efecto                                                                             | Permiso     |
+| ------------------------- | ---------------------------------------------------------------------------------- | ----------- |
+| `listInboxConversations`  | read                                                                               | `inbox.use` |
+| `getConversationMessages` | read                                                                               | `inbox.use` |
+| `draftReply`              | draft                                                                              | `inbox.use` |
+| `sendInboxMessage`        | **external_send** (propuesta obligatoria; el resumen muestra destinatario y texto) | `inbox.use` |
+| `listCommitments`         | read                                                                               | `inbox.use` |
+| `createCommitment`        | internal_task                                                                      | `inbox.use` |
+| `findDuplicateContacts`   | read                                                                               | `inbox.use` |
 
 ## 9. Variables de entorno
 

@@ -36,7 +36,7 @@ import {
   Radio,
   SlidersHorizontal,
 } from 'lucide-react';
-import { AssistantWidget } from '@/components/assistant/AssistantWidget';
+
 import { CallDockProvider } from '@/components/calls/CallDockProvider';
 import { ThemeToggle } from '@/components/layout/ThemeToggle';
 import { NotificationBell } from '@/components/notifications/NotificationBell';
@@ -784,8 +784,6 @@ export default function AppShell({ user, children, demoSeedEnabled = false }: Ap
   const isChatPage = pathname.startsWith('/app/chat');
   const isInboxPage = pathname.startsWith('/app/inbox');
   const isFlush = isWorkspace || isAssistantPage || isChatPage || isInboxPage;
-  const canUseAssistant = user.permissionKeys.includes('assistant.use') || user.isSuperAdmin;
-  const showWidget = canUseAssistant && !isAssistantPage;
 
   return (
     <CallDockProvider user={user}>
@@ -797,7 +795,6 @@ export default function AppShell({ user, children, demoSeedEnabled = false }: Ap
             {children}
           </main>
         </div>
-        {showWidget && <AssistantWidget user={user} context={{ page: pathname }} />}
         <PushEnablePrompt />
       </div>
     </CallDockProvider>

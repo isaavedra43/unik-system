@@ -6,9 +6,8 @@ import { modelForTask } from '@/modules/ai/model-policy';
 /**
  * Assistive AI helpers for the inbox. Everything here produces TEXT for a
  * human; nothing is sent to a customer without an explicit user action.
- * The conversational copilot itself runs through the assistant orchestrator
- * (see inbox-copilot.ts); this file keeps the transcript builder and the
- * standalone draft generator used by the `draftReply` tool.
+ * This file keeps the transcript builder and the standalone draft generator
+ * used by the `draftReply` tool.
  */
 
 export interface TranscriptMessage {

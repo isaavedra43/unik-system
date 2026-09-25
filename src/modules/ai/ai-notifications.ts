@@ -23,7 +23,6 @@ export interface AiTaskDoneInput {
   content: string;
   elapsedMs: number;
   toolCalls: number;
-  surface: { inboxConversationId?: string; chatChannelId?: string };
   /** Forces the notification regardless of elapsed time (client asked for it). */
   force?: boolean;
 }
@@ -37,13 +36,7 @@ function firstMeaningfulLine(text: string): string {
   return cleaned.length > 140 ? `${cleaned.slice(0, 137)}…` : cleaned;
 }
 
-export function surfaceUrl(input: Pick<AiTaskDoneInput, 'conversationId' | 'surface'>): string {
-  if (input.surface.inboxConversationId) {
-    return `/app/inbox?conversation=${encodeURIComponent(input.surface.inboxConversationId)}`;
-  }
-  if (input.surface.chatChannelId) {
-    return `/app/chat?channel=${encodeURIComponent(input.surface.chatChannelId)}`;
-  }
+export function surfaceUrl(input: Pick<AiTaskDoneInput, 'conversationId'>): string {
   return `/app/assistant?c=${encodeURIComponent(input.conversationId)}`;
 }
 

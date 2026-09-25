@@ -173,9 +173,7 @@ export async function getConnectionState(
       403
     );
   }
-  const found = (await listToolkits(actor, { search: slug, limit: 10 })).find(
-    (t) => t.slug === slug
-  );
+  const found = (await listToolkits(actor, { limit: 100 })).find((t) => t.slug === slug);
   return { toolkit: slug, name: found?.name ?? slug, connected: Boolean(found?.connected) };
 }
 
@@ -183,7 +181,13 @@ export async function getConnectionState(
 export async function connectToolkit(
   actor: CurrentUser,
   toolkit: string
-): Promise<{ toolkit: string; redirectUrl: string; connectionId: string }> {
+): Promise<{
+  toolkit: string;
+  redirectUrl: string | null;
+  connectionId: string | null;
+  /** true cuando Composio ya la dejó ACTIVA (managed/no-auth): no hay OAuth que abrir. */
+  connected: boolean;
+}> {
   const { toolkit: slug } = await getConnectionState(actor, toolkit);
   const allowed = await allowedToolkitsFor(actor);
   try {
@@ -193,11 +197,21 @@ export async function connectToolkit(
         `/app/assistant/api/composio/callback?toolkit=${encodeURIComponent(slug)}`
       ),
     });
+    invalidateConnectionCaches(actor.id);
     if (!request.redirectUrl) {
+      // Managed/credential-less toolkits come back ACTIVE without an OAuth
+      // round-trip — reporting it as an error was what hid the "connected" state.
+      if (request.status === 'ACTIVE') {
+        return { toolkit: slug, redirectUrl: null, connectionId: request.id, connected: true };
+      }
       throw new ComposioError('Composio no devolvió un enlace de autorización.', 'upstream', 502);
     }
-    invalidateConnectionCaches(actor.id);
-    return { toolkit: slug, redirectUrl: request.redirectUrl, connectionId: request.id };
+    return {
+      toolkit: slug,
+      redirectUrl: request.redirectUrl,
+      connectionId: request.id,
+      connected: false,
+    };
   } catch (err) {
     if (err instanceof ComposioError) throw err;
     throw upstream(err, 'No se pudo iniciar la conexión');

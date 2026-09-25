@@ -1,17 +1,27 @@
-# Zoho Inventory - Integración
+# Zoho Inventory/Books - Integración
 
 ## Qué está implementado
 
-Capa interna de lectura (READ) hacia Zoho Inventory, ubicada en:
+Capa interna de lectura (READ) hacia Zoho Inventory/Books, con sync por polling y
+normalización a tablas de negocio. Estructura:
 
 ```
 src/modules/integrations/zoho/
-├── config.ts        # Configuración validada con Zod (carga lazy)
-├── auth.ts          # OAuth: access token vía refresh token, con cache en memoria
-├── client.ts             # Cliente HTTP genérico (solo GET) para Zoho Inventory
-├── sales-orders.ts       # listSalesOrders() y getSalesOrder(salesOrderId)
-└── sales-orders-sync.ts  # Motor de polling: syncSalesOrders({ mode, maxDetailFetches })
+├── config.ts                    # Configuración validada con Zod (carga lazy)
+├── auth.ts                      # OAuth: refresh token, access token cacheado
+├── client.ts                    # Cliente HTTP genérico (GET + operaciones puntuales)
+├── zoho-sync-engine.ts          # Motor genérico scan/sync/baseline por entidad
+├── zoho-scheduler-factory.ts    # Scheduler recurrente por entidad
+├── snapshot-diff.ts             # Diff de snapshots → EntityChangeEvent
+├── <entity>.ts                  # Cliente de lectura por entidad
+├── <entity>-sync.ts             # Adaptador de sync por entidad
+└── <entity>-scheduler.ts        # Scheduler por entidad
 ```
+
+Entidades con sync implementado (`<entity>`): `sales-orders`, `estimates` (→
+quotes), `invoices`, `purchase-orders`, `bills`, `payments`, `products` (items),
+`packages`, `contacts` (customers/vendors), `vendor-credits`. A continuación el
+patrón se documenta con **sales orders** como implementación de referencia.
 
 ## OAuth
 

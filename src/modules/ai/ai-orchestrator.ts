@@ -74,10 +74,6 @@ interface OrchestratorInput {
   context?: {
     page?: string;
     voice?: boolean;
-    /** Set when the assistant runs as the inbox copilot of this conversation. */
-    inboxConversationId?: string;
-    /** Set when the assistant runs as the internal-chat copilot of this channel. */
-    chatChannelId?: string;
   };
   /** Optional model override — user can pick a model in the chat UI ("auto" = routing). */
   model?: string;
@@ -91,6 +87,34 @@ interface OrchestratorInput {
    * unlinked and READY. Paths are never accepted from the client.
    */
   attachmentIds?: string[];
+  /**
+   * UNIVERSO: agente que ejecuta el turno. Cuando está presente, su persona se
+   * inyecta al system prompt, su toolAllowlist acota el menú (solo reduce —
+   * nunca amplía) y su modelDefault aplica si el usuario no eligió modelo.
+   */
+  agent?: {
+    id: string;
+    name?: string;
+    persona?: string | null;
+    toolAllowlist?: string[];
+    modelDefault?: string | null;
+    /** Avatar del front (paleta --agent-hue-N + icono lucide). */
+    color?: string | null;
+    icon?: string | null;
+    /** 'worker' = ejecución delegada (subagente), 'principal' = agente central */
+    mode?: 'principal' | 'worker';
+  };
+  /** UNIVERSO: linaje de ejecución (delegación, misión, trigger). */
+  parentRunId?: string;
+  taskId?: string;
+  missionId?: string;
+  /** UNIVERSO: envelope de routing ya resuelto (Jev B3); se registra en el journal. */
+  route?: unknown;
+  /**
+   * UNIVERSO: contenedor mutable que el wrapper llena con el runId real una vez
+   * creado el AgentRun — las tools (delegate_task) leen su linaje de aquí.
+   */
+  runRef?: { id?: string };
 }
 
 interface OrchestratorEvent {
@@ -103,36 +127,6 @@ const UI_ACTION_TOOLS = new Set(['callContact', 'startOutboundCall', 'startInter
 
 const EXPORT_MAX_ROWS = 5000;
 const EXPORT_PAGE_SIZE = 200; // querySalesOrders' Zod max
-
-/** Tools that only make sense inside a copilot side panel (any surface). */
-const SURFACE_ONLY_TOOLS = new Set(['suggestNextActions']);
-/** Tools that only exist inside the inbox copilot (take `inboxConversationId`). */
-const INBOX_ONLY_TOOLS = new Set([
-  'proposeInboxDraft',
-  'updateInboxConversation',
-  'addInboxNote',
-]);
-/** Tools that take the inbox conversation as context (customer = the contact of this conversation). */
-const INBOX_CONTEXT_TOOLS = new Set(['draftQuoteFromRequest', 'sendQuoteToContact']);
-/** Tools that only exist inside the internal-chat copilot. */
-const CHAT_ONLY_TOOLS = new Set(['proposeChatDraft']);
-/** In the inbox the quote path is draftQuoteFromRequest → sendQuoteToContact (one approval); the manual builders only confuse the model there. */
-const INBOX_HIDDEN_TOOLS = new Set(['createQuote', 'previewQuote']);
-/** Chat tools whose `chatChannelId` defaults to the current channel. */
-const CHAT_CHANNEL_ID_TOOLS = new Set([
-  'getChatChannelMessages',
-  'summarizeChatChannel',
-  'proposeChatDraft',
-  'pinChatMessage',
-  'searchChatMessages',
-]);
-/** Existing comms tools whose `conversationId` means the inbox conversation. */
-const INBOX_CONVERSATION_ID_TOOLS = new Set([
-  'getConversationMessages',
-  'draftReply',
-  'sendInboxMessage',
-  'createCommitment',
-]);
 
 /**
  * Drops orphan tool replies (no preceding assistant tool_calls in the window)
@@ -226,7 +220,7 @@ async function fetchAllRowsForExport(
   return all.length >= fallbackRows.length ? all : fallbackRows;
 }
 
-export async function* runAssistant(
+async function* runAssistantInner(
   input: OrchestratorInput
 ): AsyncGenerator<OrchestratorEvent> {
   // 1. Check if AI is enabled (before any work)
@@ -307,14 +301,19 @@ export async function* runAssistant(
   // 5.5. Resolve the tools the actor can actually use BEFORE the prompt — the
   // capability list the model sees must be truthful (what is enabled, not what
   // exists in code). `isAutoTrigger` is derived early: filters depend on it.
-  const inboxConversationId = input.context?.inboxConversationId;
-  const chatChannelId = input.context?.chatChannelId;
   const isAutoTrigger = input.message.startsWith('⟦auto:');
   const actorPreferences = await getPreferences(input.actor.id).catch(() => null);
   const lastAssistantContent = [...history].reverse().find((m) => m.role === 'assistant' && typeof m.content === 'string' && m.content.trim().length > 0)?.content ?? null;
   const documentRequested = wantsDocument(input.message, lastAssistantContent);
   await refreshExternalTools();
-  const loadedTools = await loadAvailableTools(input.actor, settings.enabledTools, {
+  // UNIVERSO: el toolAllowlist del agente solo puede ACOTAR el menú del dueño —
+  // la intersección con settings.enabledTools mantiene los toggles admin y la
+  // lista efectiva como candado (un agente nunca gana tools que su dueño no tiene).
+  const agentAllowlist = input.agent?.toolAllowlist;
+  const enabledForAgent = agentAllowlist?.length
+    ? settings.enabledTools.filter((n) => agentAllowlist.includes(n))
+    : settings.enabledTools;
+  const loadedTools = await loadAvailableTools(input.actor, enabledForAgent, {
     page: input.context?.page,
   });
   // Paused mode: the assistant keeps answering and drafting, but tools with side
@@ -326,11 +325,7 @@ export async function* runAssistant(
   )
     // An elaborate document is only offered when the user asked for one (or accepted an offer):
     // otherwise the model spends minutes writing a 15-page file nobody requested.
-    .filter((t) => documentRequested || isAutoTrigger || t.name !== 'composeDocument')
-    .filter((t) => inboxConversationId || chatChannelId || !SURFACE_ONLY_TOOLS.has(t.name))
-    .filter((t) => inboxConversationId || !INBOX_ONLY_TOOLS.has(t.name))
-    .filter((t) => !inboxConversationId || !INBOX_HIDDEN_TOOLS.has(t.name))
-    .filter((t) => chatChannelId || !CHAT_ONLY_TOOLS.has(t.name));
+    .filter((t) => documentRequested || isAutoTrigger || t.name !== 'composeDocument');
 
   // 6. Build system prompt (+ the live inbox context when running as copilot)
   let systemPrompt = await buildSystemPrompt(input.actor, { ...input.context, conversationId: input.conversationId });
@@ -348,13 +343,7 @@ export async function* runAssistant(
   } catch (err) {
     console.warn('[orchestrator] composio prompt skipped:', err instanceof Error ? err.message : err);
   }
-  if (inboxConversationId) {
-    const { buildInboxCopilotPrompt } = await import('@/modules/comms/inbox-copilot');
-    systemPrompt += `\n\n${await buildInboxCopilotPrompt(input.actor, inboxConversationId)}`;
-  } else if (chatChannelId) {
-    const { buildChatCopilotPrompt } = await import('@/modules/chat/chat-copilot');
-    systemPrompt += `\n\n${await buildChatCopilotPrompt(input.actor, chatChannelId)}`;
-  }
+
 
   // 6.5. Agent memory recall: episodes, confirmed facts and playbooks relevant to THIS
   // message. Injected before classification so it informs tool choice and routing.
@@ -363,6 +352,26 @@ export async function* runAssistant(
     const { buildRecallBlock } = await import('@/modules/memory/memory-service');
     const recallBlock = await buildRecallBlock(input.actor.id, input.message).catch(() => '');
     if (recallBlock) systemPrompt += `\n\n${recallBlock}`;
+  }
+
+  // 6.7. Agent persona (UNIVERSO): un especialista/worker corre el turno con sus
+  // propias instrucciones — identidad, rol y límites, después de la memoria.
+  if (input.agent?.persona) {
+    systemPrompt += `\n\n## AGENTE — ${input.agent.name ?? 'Especialista'}\n${input.agent.persona}`;
+  }
+
+  // 6.8. Memoria del agente (B8): scope user+agent, nunca cruza tenant.
+  // Workers ('worker') van en modo on_demand por default — solo memoria del
+  // usuario; la suya la buscan con tools si la necesitan.
+  if (input.agent?.id) {
+    const { recallFor } = await import('@/modules/agents/memory-router');
+    const block = await recallFor({
+      userId: input.actor.id,
+      tenantId: input.actor.tenantId,
+      agentId: input.agent.id,
+      mode: input.agent.mode === 'worker' ? 'on_demand' : 'full',
+    }).catch(() => '');
+    if (block) systemPrompt += `\n\n## MEMORIA DEL AGENTE\n${block}`;
   }
 
   // 7. Build messages (history is sanitized so every `tool` reply follows its
@@ -551,12 +560,8 @@ export async function* runAssistant(
   ]);
 
   // 8.5. Offer only the tools that matter this turn (OpenAI accepts ≤128; every tool costs tokens).
-  // Core + surface tools are always present; the rest is chosen by relevance and recent use.
+  // Core tools are always present; the rest is chosen by relevance and recent use.
   // `loadMoreTools` lets the model pull any other tool by topic in one extra step.
-  const pinnedTools = [
-    ...(inboxConversationId ? [...INBOX_ONLY_TOOLS, ...INBOX_CONVERSATION_ID_TOOLS, 'suggestNextActions', 'draftQuoteFromRequest', 'sendQuoteToContact'] : []),
-    ...(chatChannelId ? [...CHAT_ONLY_TOOLS, ...CHAT_CHANNEL_ID_TOOLS, 'suggestNextActions', 'listChatChannels', 'startInternalCall', 'createChatEvent'] : []),
-  ];
   // A "simple" turn (greeting, thanks, short clarification — no data intent and no
   // recent tool context) gets the cheap model AND a minimal prompt: three tool
   // specs instead of ~30. `loadMoreTools` is the escape valve — if the classifier
@@ -569,7 +574,7 @@ export async function* runAssistant(
   );
   const SIMPLE_TIER_TOOLS = new Set(['loadMoreTools', 'getSystemTime', 'recallMemory']);
   const selection =
-    classification.tier === 'simple' && pinnedTools.length === 0 && forced.size === 0
+    classification.tier === 'simple' && forced.size === 0
       ? {
           offered: availableTools.filter((t) => SIMPLE_TIER_TOOLS.has(t.name)),
           dropped: [] as ToolDefinition[],
@@ -579,7 +584,6 @@ export async function* runAssistant(
           tools: availableTools,
           message: input.message,
           recentToolNames,
-          pinned: pinnedTools,
           extraDomains: jevDomains,
           // Attachment turns are long already: fewer tools = smaller prompt on every pass.
           maxTools: Math.min(Math.max(8, Number(settings.maxToolsPerTurn) || 96), PROVIDER_MAX_TOOLS, attachmentsForContext.length > 0 ? 48 : PROVIDER_MAX_TOOLS),
@@ -599,7 +603,7 @@ export async function* runAssistant(
 
   // 8.6. Model routing: explicit choice wins; "auto"/none → the classification above
   // (Jev when enabled, heuristics otherwise) picks the cheapest capable model.
-  const routing = resolveTurnModel(settings, input.model, classification);
+  const routing = resolveTurnModel(settings, input.model ?? input.agent?.modelDefault ?? undefined, classification);
   const effectiveModel = routing.model;
   const fallbackModel = settings.fallbackDeployment;
 
@@ -692,7 +696,7 @@ El mensaje del usuario delega trabajo que dura más que este turno${kind === 'ru
     void prefetchLikelyRead(input.message, input.actor, offeredTools, {
       userId: input.actor.id,
       conversationId: input.conversationId,
-      enabledToolNames: settings.enabledTools,
+      enabledToolNames: enabledForAgent,
     })
       .then((p) => {
         if (p) console.log(JSON.stringify({ event: 'ai.tools.prefetch', conversationId: input.conversationId, tool: p.tool, warmed: p.warmed, cached: p.cached }));
@@ -745,6 +749,7 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
   const knownTotals = { counts: new Set<number>(), money: new Set<number>() };
   const turnStats = { calls: 0, cachedHits: 0, parallelBatches: 0, dataToolsSucceeded: 0, failed: 0, loadedMore: 0 };
   const toolsUsedThisTurn: Array<{ name: string; success: boolean; cached?: boolean }> = [];
+  let routineCreatedMeta: { name: string | null; schedule: string | null } | null = null;
   // Provenance collected from real tool results — feeds the episode memory.
   const turnSources: string[] = [];
   const turnArtifacts: string[] = [];
@@ -987,29 +992,6 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
     }
     if (!parsedArgs || typeof parsedArgs !== 'object') return parsedArgs;
     const argsObj = parsedArgs as Record<string, unknown>;
-    // Inbox tools work on the INBOX conversation, never on this AI thread.
-    if (inboxConversationId) {
-      if ((INBOX_ONLY_TOOLS.has(tc.name) || INBOX_CONTEXT_TOOLS.has(tc.name)) && !argsObj.inboxConversationId) {
-        argsObj.inboxConversationId = inboxConversationId;
-      }
-      if (INBOX_CONVERSATION_ID_TOOLS.has(tc.name) && !argsObj.conversationId) {
-        argsObj.conversationId = inboxConversationId;
-      }
-    }
-    // Chat tools work on the current internal-chat channel by default.
-    if (chatChannelId) {
-      if (CHAT_CHANNEL_ID_TOOLS.has(tc.name) && !argsObj.chatChannelId) {
-        argsObj.chatChannelId = chatChannelId;
-      }
-      if (
-        tc.name === 'sendInternalChatMessage' &&
-        !argsObj.channelId &&
-        !argsObj.recipient &&
-        !argsObj.recipientUserId
-      ) {
-        argsObj.channelId = chatChannelId;
-      }
-    }
     if (!argsObj.conversationId) {
       argsObj.conversationId = input.conversationId;
     }
@@ -1179,7 +1161,7 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
     if (added.length > 0) {
       let next = [...offeredTools, ...added];
       if (next.length > PROVIDER_MAX_TOOLS) {
-        const keep = new Set<string>([...CORE_TOOL_NAMES, ...pinnedTools, ...recentToolNames, ...toolsUsedThisTurn.map((t) => t.name), ...added.map((t) => t.name)]);
+        const keep = new Set<string>([...CORE_TOOL_NAMES, ...recentToolNames, ...toolsUsedThisTurn.map((t) => t.name), ...added.map((t) => t.name)]);
         const removable = next.filter((t) => !keep.has(t.name)).map((t) => t.name);
         const drop = new Set(removable.slice(Math.max(0, removable.length - (next.length - PROVIDER_MAX_TOOLS))));
         next = next.filter((t) => !drop.has(t.name));
@@ -1215,9 +1197,12 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
   const execCtx = (assistantMessageId: string) => ({
     conversationId: input.conversationId,
     messageId: assistantMessageId,
-    enabledToolNames: settings.enabledTools,
+    enabledToolNames: enabledForAgent,
     skipCache: wantsFreshData,
     attachmentOrderNumbers: attachmentOrderNumbers.length > 0 ? attachmentOrderNumbers : undefined,
+    runId: input.runRef?.id,
+    agentId: input.agent?.id,
+    taskId: input.taskId,
   });
 
   async function runTool(tc: { id: string; name: string; arguments: string }, parsedArgs: unknown, assistantMessageId: string): Promise<ToolExecutionResult> {
@@ -1244,6 +1229,12 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
     if (result.cached) turnStats.cachedHits += 1;
     if (!result.success && !result.needsApproval) turnStats.failed += 1;
     toolsUsedThisTurn.push({ name: tc.name, success: result.success, cached: result.cached });
+
+    // UNIVERSO: una misión/rutina creada este turno sale como RoutineChip.
+    if (tc.name === 'proposeMission' && result.success && !routineCreatedMeta) {
+      const a = parsedArgs as { goal?: string; schedule?: string };
+      routineCreatedMeta = { name: a?.goal ?? null, schedule: a?.schedule ?? null };
+    }
 
     // Agent Workspace feed — the third column mirrors what the agent does.
     // Fire-and-forget: the feed never delays or breaks the answer.
@@ -1502,14 +1493,6 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
     let finishReason: string | undefined;
 
     const modelToUse = usingFallback ? fallbackModel : escalatedModel ?? effectiveModel;
-    // Copilot auto-analysis (open / inbound): the first call MUST produce the clickable
-    // action chips instead of prose, so the user only clicks.
-    const forceActions =
-      iteration === 1 &&
-      isAutoTrigger &&
-      !input.message.startsWith('⟦auto:action_failed') &&
-      Boolean(inboxConversationId || chatChannelId) &&
-      offeredTools.some((t) => t.name === 'suggestNextActions');
 
     // Buffered turns show a chip while the answer is being written instead of a blank wait.
     const draftStartedAt = Date.now();
@@ -1524,7 +1507,6 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
       for await (const chunk of chatCompletionStream({
         messages,
         tools: toolSpecs.length > 0 ? toolSpecs : undefined,
-        toolChoice: forceActions ? { type: 'function', function: { name: 'suggestNextActions' } } : undefined,
         temperature: settings.temperature,
         maxTokens: resolveTurnMaxTokens(modelToUse),
         reasoningEffort: turnReasoningEffort,
@@ -1745,6 +1727,17 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
         tools: { ...turnStats, offered: offeredTools.length, used: toolsUsedThisTurn.map((t) => t.name) },
         planFirst: Boolean(input.planFirst),
         followUps,
+        // UNIVERSO: qué agente produjo el turno (avatar/etiqueta en el chat).
+        agent: input.agent
+          ? {
+              id: input.agent.id,
+              name: input.agent.name ?? null,
+              color: input.agent.color ?? null,
+              icon: input.agent.icon ?? null,
+            }
+          : undefined,
+        // Rutina/vigía creada en este turno → RoutineChip en el front.
+        routineCreated: routineCreatedMeta ?? undefined,
       };
       await mergeMessageMeta(finalMessage.id, meta);
 
@@ -1798,7 +1791,6 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
           content: iterationContent,
           elapsedMs: Date.now() - runStartedAt,
           toolCalls: turnStats.calls,
-          surface: { inboxConversationId, chatChannelId },
           force: Boolean(input.notifyWhenDone),
         }).catch((err) => console.warn('[ai-orchestrator] notify failed:', err instanceof Error ? err.message : err));
       }
@@ -1882,4 +1874,63 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
     type: 'error',
     data: { message: 'El asistente alcanzó el límite de iteraciones de tools.' },
   };
+}
+
+/**
+ * UNIVERSO B0 — envoltura de observabilidad. Cada turno persiste un AgentRun
+ * (traceId + tokens + estado) con eventos append-only. Todo fail-soft: si las
+ * tablas del runtime aún no están migradas, `run` queda null y el chat se
+ * comporta exactamente igual que antes.
+ */
+export async function* runAssistant(
+  input: OrchestratorInput
+): AsyncGenerator<OrchestratorEvent> {
+  const { startRun, finishRun, emitRunEvent } = await import('@/modules/agents/run-recorder');
+  const routePath = (input.route as { path?: string } | undefined)?.path ?? null;
+  const run = await startRun({
+    userId: input.actor.id,
+    tenantId: input.actor.tenantId,
+    conversationId: input.conversationId,
+    agentId: input.agent?.id ?? null,
+    ownerName: input.actor.name,
+    source: input.agent?.mode === 'worker' ? 'task' : input.context?.voice ? 'voice' : 'chat',
+    parentRunId: input.agent?.mode === 'worker' ? input.parentRunId ?? null : null,
+    taskId: input.taskId ?? null,
+    missionId: input.missionId ?? null,
+    route: routePath,
+    runtime: input.route ? 'V2' : 'LEGACY',
+  }).catch(() => null);
+  if (run && input.route) {
+    void emitRunEvent(run.runId, 'route', { route: input.route });
+  }
+  if (run) {
+    // Las tools del turno (delegate_task) leen el runId de aquí — el inner
+    // generator aún no arrancó cuando el run se crea.
+    input.runRef = input.runRef ?? {};
+    input.runRef.id = run.runId;
+  }
+  try {
+    for await (const ev of runAssistantInner(input)) {
+      if (run && ev.type === 'done') {
+        const d = ev.data as { promptTokens?: number; completionTokens?: number } | undefined;
+        void finishRun(run.runId, {
+          status: 'done',
+          tokensIn: d?.promptTokens ?? 0,
+          tokensOut: d?.completionTokens ?? 0,
+        });
+      } else if (run && ev.type === 'error') {
+        const d = ev.data as { message?: string } | undefined;
+        void finishRun(run.runId, { status: 'failed', error: d?.message?.slice(0, 500) });
+      }
+      yield ev;
+    }
+  } catch (err) {
+    if (run) {
+      void finishRun(run.runId, {
+        status: 'failed',
+        error: err instanceof Error ? err.message.slice(0, 500) : 'error',
+      });
+    }
+    throw err;
+  }
 }

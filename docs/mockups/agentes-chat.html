@@ -1,1487 +1,2913 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="es">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>UNIK — Agentes (maquetado)</title>
-<style>
-/* =====================================================
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>UNIK — Agentes (maquetado)</title>
+    <style>
+      /* =====================================================
    UNIK DESIGN TOKENS — verbatim de src/app/globals.css
    ===================================================== */
-:root {
-  --unik-bg: #f6f7f9;
-  --unik-surface: #ffffff;
-  --unik-surface-hover: #f5f6f8;
-  --unik-surface-pressed: #eef0f3;
-  --unik-border: #e4e7ec;
-  --unik-border-subtle: #eff1f4;
-  --unik-text: #111318;
-  --unik-text-secondary: #4b5563;
-  --unik-text-muted: #7d8795;
-  --unik-text-inverse: #ffffff;
+      :root {
+        --unik-bg: #f6f7f9;
+        --unik-surface: #ffffff;
+        --unik-surface-hover: #f5f6f8;
+        --unik-surface-pressed: #eef0f3;
+        --unik-border: #e4e7ec;
+        --unik-border-subtle: #eff1f4;
+        --unik-text: #111318;
+        --unik-text-secondary: #4b5563;
+        --unik-text-muted: #7d8795;
+        --unik-text-inverse: #ffffff;
 
-  --unik-brand: #1e3a5f;
-  --unik-brand-hover: #162c4a;
-  --unik-brand-pressed: #0f2038;
-  --unik-brand-subtle: #e9eef5;
-  --unik-brand-text: #1e3a5f;
+        --unik-brand: #1e3a5f;
+        --unik-brand-hover: #162c4a;
+        --unik-brand-pressed: #0f2038;
+        --unik-brand-subtle: #e9eef5;
+        --unik-brand-text: #1e3a5f;
 
-  --unik-success: #1c7b45;
-  --unik-success-bg: #e8f5ee;
-  --unik-danger: #b3261e;
-  --unik-danger-bg: #fdecea;
-  --unik-danger-hover: #8f1d17;
-  --unik-warning: #9c6e08;
-  --unik-warning-bg: #fff7e0;
-  --unik-info: #1f4e8c;
-  --unik-info-bg: #e8f1fa;
+        --unik-success: #1c7b45;
+        --unik-success-bg: #e8f5ee;
+        --unik-danger: #b3261e;
+        --unik-danger-bg: #fdecea;
+        --unik-danger-hover: #8f1d17;
+        --unik-warning: #9c6e08;
+        --unik-warning-bg: #fff7e0;
+        --unik-info: #1f4e8c;
+        --unik-info-bg: #e8f1fa;
 
-  --unik-radius-sm: 6px;
-  --unik-radius-md: 8px;
-  --unik-radius-lg: 10px;
-  --unik-radius-xl: 12px;
-  --unik-radius-full: 999px;
+        --unik-radius-sm: 6px;
+        --unik-radius-md: 8px;
+        --unik-radius-lg: 10px;
+        --unik-radius-xl: 12px;
+        --unik-radius-full: 999px;
 
-  --unik-shadow-sm: 0 1px 2px rgba(17, 19, 24, 0.05);
-  --unik-shadow-md: 0 4px 12px rgba(17, 19, 24, 0.06);
-  --unik-shadow-lg: 0 12px 40px rgba(17, 19, 24, 0.1);
-  --unik-shadow-focus: 0 0 0 3px rgba(30, 58, 95, 0.18);
+        --unik-shadow-sm: 0 1px 2px rgba(17, 19, 24, 0.05);
+        --unik-shadow-md: 0 4px 12px rgba(17, 19, 24, 0.06);
+        --unik-shadow-lg: 0 12px 40px rgba(17, 19, 24, 0.1);
+        --unik-shadow-focus: 0 0 0 3px rgba(30, 58, 95, 0.18);
 
-  --unik-space-1: 0.25rem;
-  --unik-space-2: 0.5rem;
-  --unik-space-3: 0.75rem;
-  --unik-space-4: 1rem;
-  --unik-space-5: 1.25rem;
-  --unik-space-6: 1.5rem;
-  --unik-space-8: 2rem;
+        --unik-space-1: 0.25rem;
+        --unik-space-2: 0.5rem;
+        --unik-space-3: 0.75rem;
+        --unik-space-4: 1rem;
+        --unik-space-5: 1.25rem;
+        --unik-space-6: 1.5rem;
+        --unik-space-8: 2rem;
 
-  --unik-font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif;
-  --unik-font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, 'Cascadia Code', 'Courier New', monospace;
+        --unik-font-sans:
+          -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
+          'Noto Sans', sans-serif;
+        --unik-font-mono:
+          ui-monospace, SFMono-Regular, Menlo, Monaco, 'Cascadia Code', 'Courier New', monospace;
 
-  --unik-text-xs: 0.75rem;
-  --unik-text-sm: 0.8125rem;
-  --unik-text-base: 0.9375rem;
-  --unik-text-md: 1rem;
-  --unik-text-lg: 1.25rem;
+        --unik-text-xs: 0.75rem;
+        --unik-text-sm: 0.8125rem;
+        --unik-text-base: 0.9375rem;
+        --unik-text-md: 1rem;
+        --unik-text-lg: 1.25rem;
 
-  --unik-transition: 120ms ease;
+        --unik-transition: 120ms ease;
 
-  /* Hues para avatares de agentes — derivados de la marca vía oklch */
-  --hue-central: oklch(0.32 0.07 255);
-  --hue-research: oklch(0.55 0.12 200);
-  --hue-data: oklch(0.45 0.13 290);
-  --hue-msg: oklch(0.50 0.14 150);
-  --hue-watch: oklch(0.55 0.13 60);
-  --hue-code: oklch(0.42 0.10 20);
-}
+        /* Hues para avatares de agentes — derivados de la marca vía oklch */
+        --hue-central: oklch(0.32 0.07 255);
+        --hue-research: oklch(0.55 0.12 200);
+        --hue-data: oklch(0.45 0.13 290);
+        --hue-msg: oklch(0.5 0.14 150);
+        --hue-watch: oklch(0.55 0.13 60);
+        --hue-code: oklch(0.42 0.1 20);
+      }
 
-html.dark {
-  --unik-bg: #000000;
-  --unik-surface: #0a0a0a;
-  --unik-surface-hover: #141414;
-  --unik-surface-pressed: #1f1f1f;
-  --unik-border: #262626;
-  --unik-border-subtle: #1a1a1a;
-  --unik-text: #ffffff;
-  --unik-text-secondary: #a8a8a8;
-  --unik-text-muted: #6b6b6b;
-  --unik-text-inverse: #000000;
-  --unik-brand: #e5e5e5;
-  --unik-brand-hover: #ffffff;
-  --unik-brand-pressed: #b0b0b0;
-  --unik-brand-subtle: #1a1a1a;
-  --unik-brand-text: #ffffff;
-  --unik-success: #4ade80;
-  --unik-success-bg: #0a1f0e;
-  --unik-danger: #f87171;
-  --unik-danger-bg: #2a0e0c;
-  --unik-warning: #fbbf24;
-  --unik-warning-bg: #261a02;
-  --unik-info: #60a5fa;
-  --unik-info-bg: #0a1628;
-}
+      html.dark {
+        --unik-bg: #000000;
+        --unik-surface: #0a0a0a;
+        --unik-surface-hover: #141414;
+        --unik-surface-pressed: #1f1f1f;
+        --unik-border: #262626;
+        --unik-border-subtle: #1a1a1a;
+        --unik-text: #ffffff;
+        --unik-text-secondary: #a8a8a8;
+        --unik-text-muted: #6b6b6b;
+        --unik-text-inverse: #000000;
+        --unik-brand: #e5e5e5;
+        --unik-brand-hover: #ffffff;
+        --unik-brand-pressed: #b0b0b0;
+        --unik-brand-subtle: #1a1a1a;
+        --unik-brand-text: #ffffff;
+        --unik-success: #4ade80;
+        --unik-success-bg: #0a1f0e;
+        --unik-danger: #f87171;
+        --unik-danger-bg: #2a0e0c;
+        --unik-warning: #fbbf24;
+        --unik-warning-bg: #261a02;
+        --unik-info: #60a5fa;
+        --unik-info-bg: #0a1628;
+      }
 
-* { margin: 0; padding: 0; box-sizing: border-box; }
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
 
-body {
-  font-family: var(--unik-font-sans);
-  background: var(--unik-bg);
-  color: var(--unik-text);
-  font-size: var(--unik-text-base);
-  height: 100vh;
-  overflow: hidden;
-  -webkit-font-smoothing: antialiased;
-}
+      body {
+        font-family: var(--unik-font-sans);
+        background: var(--unik-bg);
+        color: var(--unik-text);
+        font-size: var(--unik-text-base);
+        height: 100vh;
+        overflow: hidden;
+        -webkit-font-smoothing: antialiased;
+      }
 
-button { font-family: inherit; }
-svg { display: block; }
+      button {
+        font-family: inherit;
+      }
+      svg {
+        display: block;
+      }
 
-/* ===================== TOPBAR ===================== */
-.topbar {
-  height: 60px;
-  background: var(--unik-surface);
-  border-bottom: 1px solid var(--unik-border);
-  display: flex;
-  align-items: center;
-  padding: 0 var(--unik-space-6);
-  gap: var(--unik-space-4);
-}
-.topbar-logo {
-  font-weight: 700;
-  font-size: var(--unik-text-md);
-  color: var(--unik-brand);
-  letter-spacing: -0.01em;
-}
-.topbar-logo span { color: var(--unik-text-muted); font-weight: 500; }
-.topbar-crumb {
-  font-size: var(--unik-text-sm);
-  color: var(--unik-text-muted);
-  display: flex;
-  align-items: center;
-  gap: var(--unik-space-2);
-}
-.topbar-crumb b { color: var(--unik-text); font-weight: 600; }
-.topbar-right { margin-left: auto; display: flex; align-items: center; gap: var(--unik-space-3); }
-.topbar-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: var(--unik-text-xs);
-  color: var(--unik-text-secondary);
-  border: 1px solid var(--unik-border);
-  border-radius: var(--unik-radius-full);
-  padding: 4px 10px;
-  background: var(--unik-surface);
-}
-.topbar-avatar {
-  width: 32px; height: 32px; border-radius: var(--unik-radius-full);
-  background: var(--unik-brand-subtle); color: var(--unik-brand-text);
-  display: flex; align-items: center; justify-content: center;
-  font-size: var(--unik-text-xs); font-weight: 600;
-}
+      /* ===================== TOPBAR ===================== */
+      .topbar {
+        height: 60px;
+        background: var(--unik-surface);
+        border-bottom: 1px solid var(--unik-border);
+        display: flex;
+        align-items: center;
+        padding: 0 var(--unik-space-6);
+        gap: var(--unik-space-4);
+      }
+      .topbar-logo {
+        font-weight: 700;
+        font-size: var(--unik-text-md);
+        color: var(--unik-brand);
+        letter-spacing: -0.01em;
+      }
+      .topbar-logo span {
+        color: var(--unik-text-muted);
+        font-weight: 500;
+      }
+      .topbar-crumb {
+        font-size: var(--unik-text-sm);
+        color: var(--unik-text-muted);
+        display: flex;
+        align-items: center;
+        gap: var(--unik-space-2);
+      }
+      .topbar-crumb b {
+        color: var(--unik-text);
+        font-weight: 600;
+      }
+      .topbar-right {
+        margin-left: auto;
+        display: flex;
+        align-items: center;
+        gap: var(--unik-space-3);
+      }
+      .topbar-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: var(--unik-text-xs);
+        color: var(--unik-text-secondary);
+        border: 1px solid var(--unik-border);
+        border-radius: var(--unik-radius-full);
+        padding: 4px 10px;
+        background: var(--unik-surface);
+      }
+      .topbar-avatar {
+        width: 32px;
+        height: 32px;
+        border-radius: var(--unik-radius-full);
+        background: var(--unik-brand-subtle);
+        color: var(--unik-brand-text);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: var(--unik-text-xs);
+        font-weight: 600;
+      }
 
-/* ===================== LAYOUT ===================== */
-.shell { display: flex; height: calc(100vh - 60px); }
+      /* ===================== LAYOUT ===================== */
+      .shell {
+        display: flex;
+        height: calc(100vh - 60px);
+      }
 
-/* ===================== AGENT SIDEBAR ===================== */
-.agent-sidebar {
-  width: 288px;
-  flex-shrink: 0;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  background: var(--unik-surface);
-  border-right: 1px solid var(--unik-border);
-}
-.agent-sidebar-header {
-  padding: var(--unik-space-3);
-  border-bottom: 1px solid var(--unik-border-subtle);
-  display: flex;
-  flex-direction: column;
-  gap: var(--unik-space-2);
-}
-.btn-primary {
-  display: inline-flex; align-items: center; justify-content: center; gap: var(--unik-space-2);
-  padding: 0.5rem 0.75rem;
-  border: 1px solid var(--unik-border);
-  border-radius: var(--unik-radius-md);
-  background: var(--unik-brand); color: var(--unik-text-inverse);
-  font-size: var(--unik-text-sm); font-weight: 600; cursor: pointer;
-  transition: background var(--unik-transition);
-}
-.btn-primary:hover { background: var(--unik-brand-hover); }
-.search-box {
-  display: flex; align-items: center; gap: var(--unik-space-2);
-  padding: 0.35rem 0.6rem;
-  border: 1px solid var(--unik-border); border-radius: var(--unik-radius-md);
-  background: var(--unik-surface); color: var(--unik-text-muted);
-}
-.search-box input {
-  flex: 1; border: none; outline: none; background: transparent;
-  font-size: var(--unik-text-sm); color: var(--unik-text); min-width: 0;
-}
-.agent-list { flex: 1; min-height: 0; overflow-y: auto; padding: var(--unik-space-2); }
-.agent-section-label {
-  font-size: 0.6875rem; font-weight: 600; text-transform: uppercase;
-  letter-spacing: 0.06em; color: var(--unik-text-muted);
-  padding: var(--unik-space-3) var(--unik-space-3) var(--unik-space-1);
-}
-.agent-item {
-  display: flex; align-items: center; gap: var(--unik-space-3);
-  padding: 8px var(--unik-space-3);
-  border-radius: var(--unik-radius-md); cursor: pointer;
-  transition: background var(--unik-transition);
-}
-.agent-item:hover { background: var(--unik-surface-hover); }
-.agent-item.active { background: var(--unik-brand-subtle); }
-.agent-avatar {
-  width: 34px; height: 34px; border-radius: var(--unik-radius-full);
-  display: flex; align-items: center; justify-content: center;
-  color: #fff; font-size: var(--unik-text-xs); font-weight: 600;
-  flex-shrink: 0; position: relative;
-}
-.agent-avatar svg { width: 16px; height: 16px; }
-.agent-status-dot {
-  position: absolute; bottom: -1px; right: -1px;
-  width: 11px; height: 11px; border-radius: 50%;
-  border: 2px solid var(--unik-surface);
-}
-.dot-working { background: var(--unik-success); animation: pulse-dot 1.6s infinite; }
-.dot-waiting { background: var(--unik-warning); }
-.dot-idle { background: #c2c9d1; }
-html.dark .dot-idle { background: #3a3a3a; }
-@keyframes pulse-dot {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(28, 123, 69, 0.45); }
-  50% { box-shadow: 0 0 0 4px rgba(28, 123, 69, 0); }
-}
-.agent-meta { flex: 1; min-width: 0; }
-.agent-name {
-  font-size: var(--unik-text-sm); font-weight: 600;
-  display: flex; align-items: center; gap: 6px;
-}
-.agent-name .badge-central {
-  font-size: 0.6rem; font-weight: 700; letter-spacing: 0.05em;
-  background: var(--unik-brand); color: var(--unik-text-inverse);
-  border-radius: var(--unik-radius-sm); padding: 1px 5px;
-}
-.agent-status-line {
-  font-size: var(--unik-text-xs); color: var(--unik-text-muted);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
-.agent-status-line.live { color: var(--unik-success); font-weight: 500; }
-.agent-status-line.wait { color: var(--unik-warning); font-weight: 500; }
-.agent-time { font-size: 0.6875rem; color: var(--unik-text-muted); flex-shrink: 0; }
-.sidebar-footer {
-  padding: var(--unik-space-3);
-  border-top: 1px solid var(--unik-border-subtle);
-  display: flex; flex-direction: column; gap: var(--unik-space-2);
-}
-.sidebar-link {
-  display: flex; align-items: center; gap: var(--unik-space-2);
-  padding: 0.5rem 0.75rem; border-radius: var(--unik-radius-md);
-  border: 1px solid var(--unik-border); background: transparent;
-  font-size: var(--unik-text-sm); font-weight: 500; color: var(--unik-text);
-  cursor: pointer; transition: background var(--unik-transition);
-  width: 100%; text-align: left;
-}
-.sidebar-link:hover { background: var(--unik-surface-hover); }
+      /* ===================== AGENT SIDEBAR ===================== */
+      .agent-sidebar {
+        width: 288px;
+        flex-shrink: 0;
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+        background: var(--unik-surface);
+        border-right: 1px solid var(--unik-border);
+      }
+      .agent-sidebar-header {
+        padding: var(--unik-space-3);
+        border-bottom: 1px solid var(--unik-border-subtle);
+        display: flex;
+        flex-direction: column;
+        gap: var(--unik-space-2);
+      }
+      .btn-primary {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: var(--unik-space-2);
+        padding: 0.5rem 0.75rem;
+        border: 1px solid var(--unik-border);
+        border-radius: var(--unik-radius-md);
+        background: var(--unik-brand);
+        color: var(--unik-text-inverse);
+        font-size: var(--unik-text-sm);
+        font-weight: 600;
+        cursor: pointer;
+        transition: background var(--unik-transition);
+      }
+      .btn-primary:hover {
+        background: var(--unik-brand-hover);
+      }
+      .search-box {
+        display: flex;
+        align-items: center;
+        gap: var(--unik-space-2);
+        padding: 0.35rem 0.6rem;
+        border: 1px solid var(--unik-border);
+        border-radius: var(--unik-radius-md);
+        background: var(--unik-surface);
+        color: var(--unik-text-muted);
+      }
+      .search-box input {
+        flex: 1;
+        border: none;
+        outline: none;
+        background: transparent;
+        font-size: var(--unik-text-sm);
+        color: var(--unik-text);
+        min-width: 0;
+      }
+      .agent-list {
+        flex: 1;
+        min-height: 0;
+        overflow-y: auto;
+        padding: var(--unik-space-2);
+      }
+      .agent-section-label {
+        font-size: 0.6875rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--unik-text-muted);
+        padding: var(--unik-space-3) var(--unik-space-3) var(--unik-space-1);
+      }
+      .agent-item {
+        display: flex;
+        align-items: center;
+        gap: var(--unik-space-3);
+        padding: 8px var(--unik-space-3);
+        border-radius: var(--unik-radius-md);
+        cursor: pointer;
+        transition: background var(--unik-transition);
+      }
+      .agent-item:hover {
+        background: var(--unik-surface-hover);
+      }
+      .agent-item.active {
+        background: var(--unik-brand-subtle);
+      }
+      .agent-avatar {
+        width: 34px;
+        height: 34px;
+        border-radius: var(--unik-radius-full);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #fff;
+        font-size: var(--unik-text-xs);
+        font-weight: 600;
+        flex-shrink: 0;
+        position: relative;
+      }
+      .agent-avatar svg {
+        width: 16px;
+        height: 16px;
+      }
+      .agent-status-dot {
+        position: absolute;
+        bottom: -1px;
+        right: -1px;
+        width: 11px;
+        height: 11px;
+        border-radius: 50%;
+        border: 2px solid var(--unik-surface);
+      }
+      .dot-working {
+        background: var(--unik-success);
+        animation: pulse-dot 1.6s infinite;
+      }
+      .dot-waiting {
+        background: var(--unik-warning);
+      }
+      .dot-idle {
+        background: #c2c9d1;
+      }
+      html.dark .dot-idle {
+        background: #3a3a3a;
+      }
+      @keyframes pulse-dot {
+        0%,
+        100% {
+          box-shadow: 0 0 0 0 rgba(28, 123, 69, 0.45);
+        }
+        50% {
+          box-shadow: 0 0 0 4px rgba(28, 123, 69, 0);
+        }
+      }
+      .agent-meta {
+        flex: 1;
+        min-width: 0;
+      }
+      .agent-name {
+        font-size: var(--unik-text-sm);
+        font-weight: 600;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .agent-name .badge-central {
+        font-size: 0.6rem;
+        font-weight: 700;
+        letter-spacing: 0.05em;
+        background: var(--unik-brand);
+        color: var(--unik-text-inverse);
+        border-radius: var(--unik-radius-sm);
+        padding: 1px 5px;
+      }
+      .agent-status-line {
+        font-size: var(--unik-text-xs);
+        color: var(--unik-text-muted);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .agent-status-line.live {
+        color: var(--unik-success);
+        font-weight: 500;
+      }
+      .agent-status-line.wait {
+        color: var(--unik-warning);
+        font-weight: 500;
+      }
+      .agent-time {
+        font-size: 0.6875rem;
+        color: var(--unik-text-muted);
+        flex-shrink: 0;
+      }
+      .sidebar-footer {
+        padding: var(--unik-space-3);
+        border-top: 1px solid var(--unik-border-subtle);
+        display: flex;
+        flex-direction: column;
+        gap: var(--unik-space-2);
+      }
+      .sidebar-link {
+        display: flex;
+        align-items: center;
+        gap: var(--unik-space-2);
+        padding: 0.5rem 0.75rem;
+        border-radius: var(--unik-radius-md);
+        border: 1px solid var(--unik-border);
+        background: transparent;
+        font-size: var(--unik-text-sm);
+        font-weight: 500;
+        color: var(--unik-text);
+        cursor: pointer;
+        transition: background var(--unik-transition);
+        width: 100%;
+        text-align: left;
+      }
+      .sidebar-link:hover {
+        background: var(--unik-surface-hover);
+      }
 
-/* ===================== CHAT ===================== */
-.chat { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; }
-.chat-head {
-  padding: var(--unik-space-3) var(--unik-space-6);
-  border-bottom: 1px solid var(--unik-border-subtle);
-  background: var(--unik-surface);
-  display: flex; align-items: center; gap: var(--unik-space-3);
-}
-.chat-head-title { font-size: var(--unik-text-base); font-weight: 600; }
-.chat-head-sub { font-size: var(--unik-text-xs); color: var(--unik-text-muted); }
-.chat-head-actions { margin-left: auto; display: flex; gap: var(--unik-space-2); }
-.icon-btn {
-  width: 32px; height: 32px; border-radius: var(--unik-radius-md);
-  border: 1px solid var(--unik-border); background: var(--unik-surface);
-  color: var(--unik-text-secondary); cursor: pointer;
-  display: inline-flex; align-items: center; justify-content: center;
-  transition: background var(--unik-transition);
-}
-.icon-btn:hover { background: var(--unik-surface-hover); }
+      /* ===================== CHAT ===================== */
+      .chat {
+        display: flex;
+        flex-direction: column;
+        flex: 1;
+        min-width: 0;
+        min-height: 0;
+      }
+      .chat-head {
+        padding: var(--unik-space-3) var(--unik-space-6);
+        border-bottom: 1px solid var(--unik-border-subtle);
+        background: var(--unik-surface);
+        display: flex;
+        align-items: center;
+        gap: var(--unik-space-3);
+      }
+      .chat-head-title {
+        font-size: var(--unik-text-base);
+        font-weight: 600;
+      }
+      .chat-head-sub {
+        font-size: var(--unik-text-xs);
+        color: var(--unik-text-muted);
+      }
+      .chat-head-actions {
+        margin-left: auto;
+        display: flex;
+        gap: var(--unik-space-2);
+      }
+      .icon-btn {
+        width: 32px;
+        height: 32px;
+        border-radius: var(--unik-radius-md);
+        border: 1px solid var(--unik-border);
+        background: var(--unik-surface);
+        color: var(--unik-text-secondary);
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        transition: background var(--unik-transition);
+      }
+      .icon-btn:hover {
+        background: var(--unik-surface-hover);
+      }
 
-.chat-messages {
-  flex: 1; min-height: 0; overflow-y: auto;
-  padding: var(--unik-space-6) var(--unik-space-6) var(--unik-space-4);
-  display: flex; flex-direction: column; gap: var(--unik-space-5);
-}
-.msg-row { display: flex; gap: var(--unik-space-3); align-items: flex-start; max-width: 880px; width: 100%; margin: 0 auto; }
-.msg-row.user { flex-direction: row-reverse; }
-.msg-avatar {
-  width: 32px; height: 32px; border-radius: var(--unik-radius-full);
-  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
-  font-size: var(--unik-text-xs); font-weight: 600;
-}
-.msg-avatar.ai { background: var(--hue-central); color: #fff; }
-.msg-avatar.user { background: var(--unik-surface-hover); color: var(--unik-text-secondary); }
-.msg {
-  max-width: 82%;
-  padding: var(--unik-space-3) var(--unik-space-4);
-  border-radius: var(--unik-radius-lg);
-  font-size: var(--unik-text-sm); line-height: 1.6;
-  overflow-wrap: break-word;
-}
-.msg.user { background: var(--unik-brand); color: var(--unik-text-inverse); border-bottom-right-radius: var(--unik-radius-sm); }
-.msg.ai { background: var(--unik-surface); color: var(--unik-text); border: 1px solid var(--unik-border-subtle); border-bottom-left-radius: var(--unik-radius-sm); box-shadow: var(--unik-shadow-sm); }
-.msg.ai p + p { margin-top: var(--unik-space-2); }
-.msg ul { margin: var(--unik-space-2) 0; padding-left: var(--unik-space-5); }
-.msg li { margin: 2px 0; }
-.msg strong { font-weight: 600; }
-.msg code, .mono { font-family: var(--unik-font-mono); font-size: 0.86em; background: var(--unik-surface-pressed); padding: 1px 5px; border-radius: var(--unik-radius-sm); }
-.msg.user code { background: rgba(255,255,255,0.15); }
-.msg-meta { font-size: 0.6875rem; color: var(--unik-text-muted); margin-top: var(--unik-space-2); display: flex; gap: var(--unik-space-2); align-items: center; flex-wrap: wrap; }
+      .chat-messages {
+        flex: 1;
+        min-height: 0;
+        overflow-y: auto;
+        padding: var(--unik-space-6) var(--unik-space-6) var(--unik-space-4);
+        display: flex;
+        flex-direction: column;
+        gap: var(--unik-space-5);
+      }
+      .msg-row {
+        display: flex;
+        gap: var(--unik-space-3);
+        align-items: flex-start;
+        max-width: 880px;
+        width: 100%;
+        margin: 0 auto;
+      }
+      .msg-row.user {
+        flex-direction: row-reverse;
+      }
+      .msg-avatar {
+        width: 32px;
+        height: 32px;
+        border-radius: var(--unik-radius-full);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+        font-size: var(--unik-text-xs);
+        font-weight: 600;
+      }
+      .msg-avatar.ai {
+        background: var(--hue-central);
+        color: #fff;
+      }
+      .msg-avatar.user {
+        background: var(--unik-surface-hover);
+        color: var(--unik-text-secondary);
+      }
+      .msg {
+        max-width: 82%;
+        padding: var(--unik-space-3) var(--unik-space-4);
+        border-radius: var(--unik-radius-lg);
+        font-size: var(--unik-text-sm);
+        line-height: 1.6;
+        overflow-wrap: break-word;
+      }
+      .msg.user {
+        background: var(--unik-brand);
+        color: var(--unik-text-inverse);
+        border-bottom-right-radius: var(--unik-radius-sm);
+      }
+      .msg.ai {
+        background: var(--unik-surface);
+        color: var(--unik-text);
+        border: 1px solid var(--unik-border-subtle);
+        border-bottom-left-radius: var(--unik-radius-sm);
+        box-shadow: var(--unik-shadow-sm);
+      }
+      .msg.ai p + p {
+        margin-top: var(--unik-space-2);
+      }
+      .msg ul {
+        margin: var(--unik-space-2) 0;
+        padding-left: var(--unik-space-5);
+      }
+      .msg li {
+        margin: 2px 0;
+      }
+      .msg strong {
+        font-weight: 600;
+      }
+      .msg code,
+      .mono {
+        font-family: var(--unik-font-mono);
+        font-size: 0.86em;
+        background: var(--unik-surface-pressed);
+        padding: 1px 5px;
+        border-radius: var(--unik-radius-sm);
+      }
+      .msg.user code {
+        background: rgba(255, 255, 255, 0.15);
+      }
+      .msg-meta {
+        font-size: 0.6875rem;
+        color: var(--unik-text-muted);
+        margin-top: var(--unik-space-2);
+        display: flex;
+        gap: var(--unik-space-2);
+        align-items: center;
+        flex-wrap: wrap;
+      }
 
-/* Mission card — la pieza nueva central */
-.mission-card {
-  margin-top: var(--unik-space-3);
-  border: 1px solid var(--unik-border);
-  border-radius: var(--unik-radius-lg);
-  background: var(--unik-surface);
-  overflow: hidden;
-  box-shadow: var(--unik-shadow-sm);
-}
-html.dark .mission-card { background: var(--unik-surface-hover); }
-.mission-head {
-  display: flex; align-items: center; gap: var(--unik-space-3);
-  padding: var(--unik-space-3) var(--unik-space-4);
-  border-bottom: 1px solid var(--unik-border-subtle);
-  background: var(--unik-surface-hover);
-}
-html.dark .mission-head { background: var(--unik-surface-pressed); }
-.mission-icon {
-  width: 28px; height: 28px; border-radius: var(--unik-radius-md);
-  background: var(--unik-brand); color: var(--unik-text-inverse);
-  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
-}
-.mission-title { font-size: var(--unik-text-sm); font-weight: 600; flex: 1; }
-.mission-state {
-  font-size: 0.6875rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em;
-  padding: 3px 8px; border-radius: var(--unik-radius-full);
-}
-.mission-state.running { background: var(--unik-info-bg); color: var(--unik-info); }
-.mission-state.waiting { background: var(--unik-warning-bg); color: var(--unik-warning); }
-.mission-state.done { background: var(--unik-success-bg); color: var(--unik-success); }
+      /* Mission card — la pieza nueva central */
+      .mission-card {
+        margin-top: var(--unik-space-3);
+        border: 1px solid var(--unik-border);
+        border-radius: var(--unik-radius-lg);
+        background: var(--unik-surface);
+        overflow: hidden;
+        box-shadow: var(--unik-shadow-sm);
+      }
+      html.dark .mission-card {
+        background: var(--unik-surface-hover);
+      }
+      .mission-head {
+        display: flex;
+        align-items: center;
+        gap: var(--unik-space-3);
+        padding: var(--unik-space-3) var(--unik-space-4);
+        border-bottom: 1px solid var(--unik-border-subtle);
+        background: var(--unik-surface-hover);
+      }
+      html.dark .mission-head {
+        background: var(--unik-surface-pressed);
+      }
+      .mission-icon {
+        width: 28px;
+        height: 28px;
+        border-radius: var(--unik-radius-md);
+        background: var(--unik-brand);
+        color: var(--unik-text-inverse);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+      }
+      .mission-title {
+        font-size: var(--unik-text-sm);
+        font-weight: 600;
+        flex: 1;
+      }
+      .mission-state {
+        font-size: 0.6875rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        padding: 3px 8px;
+        border-radius: var(--unik-radius-full);
+      }
+      .mission-state.running {
+        background: var(--unik-info-bg);
+        color: var(--unik-info);
+      }
+      .mission-state.waiting {
+        background: var(--unik-warning-bg);
+        color: var(--unik-warning);
+      }
+      .mission-state.done {
+        background: var(--unik-success-bg);
+        color: var(--unik-success);
+      }
 
-.task-list { padding: var(--unik-space-2) 0; }
-.task {
-  display: flex; align-items: flex-start; gap: var(--unik-space-3);
-  padding: 8px var(--unik-space-4);
-}
-.task + .task { border-top: 1px solid var(--unik-border-subtle); }
-.task-check {
-  width: 20px; height: 20px; border-radius: var(--unik-radius-full);
-  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
-  margin-top: 1px;
-}
-.task-check.done { background: var(--unik-success-bg); color: var(--unik-success); }
-.task-check.running { background: var(--unik-info-bg); color: var(--unik-info); }
-.task-check.running svg { animation: spin 1.4s linear infinite; }
-.task-check.pending { border: 1.5px solid var(--unik-border); color: var(--unik-text-muted); }
-.task-check.waiting { background: var(--unik-warning-bg); color: var(--unik-warning); }
-@keyframes spin { to { transform: rotate(360deg); } }
-.task-body { flex: 1; min-width: 0; }
-.task-line { font-size: var(--unik-text-sm); display: flex; align-items: center; gap: var(--unik-space-2); flex-wrap: wrap; }
-.task-agent {
-  display: inline-flex; align-items: center; gap: 5px;
-  font-size: var(--unik-text-xs); font-weight: 600;
-  padding: 1px 7px; border-radius: var(--unik-radius-full);
-  color: #fff;
-}
-html.dark .task-agent { color: #0a0a0a; }
-.task-agent .mini-av { width: 14px; height: 14px; border-radius: 50%; background: rgba(255,255,255,0.25); display: flex; align-items: center; justify-content: center; font-size: 8px; }
-.task-status { font-size: var(--unik-text-xs); color: var(--unik-text-muted); }
-.task-status.ok { color: var(--unik-success); }
-.task-status.live { color: var(--unik-info); }
-.task-sub { font-size: var(--unik-text-xs); color: var(--unik-text-muted); margin-top: 2px; }
-.mission-foot {
-  display: flex; align-items: center; gap: var(--unik-space-3);
-  padding: var(--unik-space-2) var(--unik-space-4);
-  border-top: 1px solid var(--unik-border-subtle);
-  font-size: var(--unik-text-xs); color: var(--unik-text-muted);
-  flex-wrap: wrap;
-}
-.mission-foot .spacer { flex: 1; }
-.cost-chip {
-  font-family: var(--unik-font-mono); font-size: 0.6875rem;
-  background: var(--unik-surface-pressed); border-radius: var(--unik-radius-sm);
-  padding: 2px 7px;
-}
-.mission-progress {
-  height: 4px; background: var(--unik-surface-pressed); border-radius: 2px; overflow: hidden;
-  flex: 0 0 90px;
-}
-.mission-progress i {
-  display: block; height: 100%; border-radius: 2px;
-  background: var(--unik-success); width: 66%;
-  transition: width 400ms ease;
-}
+      .task-list {
+        padding: var(--unik-space-2) 0;
+      }
+      .task {
+        display: flex;
+        align-items: flex-start;
+        gap: var(--unik-space-3);
+        padding: 8px var(--unik-space-4);
+      }
+      .task + .task {
+        border-top: 1px solid var(--unik-border-subtle);
+      }
+      .task-check {
+        width: 20px;
+        height: 20px;
+        border-radius: var(--unik-radius-full);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+        margin-top: 1px;
+      }
+      .task-check.done {
+        background: var(--unik-success-bg);
+        color: var(--unik-success);
+      }
+      .task-check.running {
+        background: var(--unik-info-bg);
+        color: var(--unik-info);
+      }
+      .task-check.running svg {
+        animation: spin 1.4s linear infinite;
+      }
+      .task-check.pending {
+        border: 1.5px solid var(--unik-border);
+        color: var(--unik-text-muted);
+      }
+      .task-check.waiting {
+        background: var(--unik-warning-bg);
+        color: var(--unik-warning);
+      }
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      .task-body {
+        flex: 1;
+        min-width: 0;
+      }
+      .task-line {
+        font-size: var(--unik-text-sm);
+        display: flex;
+        align-items: center;
+        gap: var(--unik-space-2);
+        flex-wrap: wrap;
+      }
+      .task-agent {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        font-size: var(--unik-text-xs);
+        font-weight: 600;
+        padding: 1px 7px;
+        border-radius: var(--unik-radius-full);
+        color: #fff;
+      }
+      html.dark .task-agent {
+        color: #0a0a0a;
+      }
+      .task-agent .mini-av {
+        width: 14px;
+        height: 14px;
+        border-radius: 50%;
+        background: rgba(255, 255, 255, 0.25);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 8px;
+      }
+      .task-status {
+        font-size: var(--unik-text-xs);
+        color: var(--unik-text-muted);
+      }
+      .task-status.ok {
+        color: var(--unik-success);
+      }
+      .task-status.live {
+        color: var(--unik-info);
+      }
+      .task-sub {
+        font-size: var(--unik-text-xs);
+        color: var(--unik-text-muted);
+        margin-top: 2px;
+      }
+      .mission-foot {
+        display: flex;
+        align-items: center;
+        gap: var(--unik-space-3);
+        padding: var(--unik-space-2) var(--unik-space-4);
+        border-top: 1px solid var(--unik-border-subtle);
+        font-size: var(--unik-text-xs);
+        color: var(--unik-text-muted);
+        flex-wrap: wrap;
+      }
+      .mission-foot .spacer {
+        flex: 1;
+      }
+      .cost-chip {
+        font-family: var(--unik-font-mono);
+        font-size: 0.6875rem;
+        background: var(--unik-surface-pressed);
+        border-radius: var(--unik-radius-sm);
+        padding: 2px 7px;
+      }
+      .mission-progress {
+        height: 4px;
+        background: var(--unik-surface-pressed);
+        border-radius: 2px;
+        overflow: hidden;
+        flex: 0 0 90px;
+      }
+      .mission-progress i {
+        display: block;
+        height: 100%;
+        border-radius: 2px;
+        background: var(--unik-success);
+        width: 66%;
+        transition: width 400ms ease;
+      }
 
-/* Activity/tool card (extiende assistant-tool-card) */
-.activity-card {
-  margin-top: var(--unik-space-2);
-  border: 1px solid var(--unik-border-subtle);
-  border-radius: var(--unik-radius-md);
-  background: var(--unik-surface-hover);
-  font-size: var(--unik-text-xs);
-  overflow: hidden;
-}
-html.dark .activity-card { background: var(--unik-surface-pressed); }
-.activity-head {
-  display: flex; align-items: center; gap: var(--unik-space-2);
-  padding: 6px 10px; cursor: pointer; border: none; background: none; width: 100%;
-  text-align: left; font-size: var(--unik-text-xs); color: var(--unik-text-secondary);
-}
-.activity-head:hover { background: var(--unik-surface-pressed); }
-.activity-agent-tag { font-weight: 700; color: var(--unik-text); }
-.activity-tool {
-  font-family: var(--unik-font-mono); font-size: 0.6875rem;
-  background: var(--unik-brand-subtle); color: var(--unik-brand-text);
-  padding: 1px 6px; border-radius: var(--unik-radius-sm);
-}
-.activity-badge { margin-left: auto; font-weight: 600; font-size: 0.6875rem; }
-.activity-badge.ok { color: var(--unik-success); }
-.activity-badge.err { color: var(--unik-danger); }
-.activity-body { padding: 8px 10px; border-top: 1px solid var(--unik-border-subtle); display: none; }
-.activity-card.open .activity-body { display: block; }
-.activity-body pre {
-  font-family: var(--unik-font-mono); font-size: 0.6875rem;
-  white-space: pre-wrap; color: var(--unik-text-secondary);
-}
+      /* Activity/tool card (extiende assistant-tool-card) */
+      .activity-card {
+        margin-top: var(--unik-space-2);
+        border: 1px solid var(--unik-border-subtle);
+        border-radius: var(--unik-radius-md);
+        background: var(--unik-surface-hover);
+        font-size: var(--unik-text-xs);
+        overflow: hidden;
+      }
+      html.dark .activity-card {
+        background: var(--unik-surface-pressed);
+      }
+      .activity-head {
+        display: flex;
+        align-items: center;
+        gap: var(--unik-space-2);
+        padding: 6px 10px;
+        cursor: pointer;
+        border: none;
+        background: none;
+        width: 100%;
+        text-align: left;
+        font-size: var(--unik-text-xs);
+        color: var(--unik-text-secondary);
+      }
+      .activity-head:hover {
+        background: var(--unik-surface-pressed);
+      }
+      .activity-agent-tag {
+        font-weight: 700;
+        color: var(--unik-text);
+      }
+      .activity-tool {
+        font-family: var(--unik-font-mono);
+        font-size: 0.6875rem;
+        background: var(--unik-brand-subtle);
+        color: var(--unik-brand-text);
+        padding: 1px 6px;
+        border-radius: var(--unik-radius-sm);
+      }
+      .activity-badge {
+        margin-left: auto;
+        font-weight: 600;
+        font-size: 0.6875rem;
+      }
+      .activity-badge.ok {
+        color: var(--unik-success);
+      }
+      .activity-badge.err {
+        color: var(--unik-danger);
+      }
+      .activity-body {
+        padding: 8px 10px;
+        border-top: 1px solid var(--unik-border-subtle);
+        display: none;
+      }
+      .activity-card.open .activity-body {
+        display: block;
+      }
+      .activity-body pre {
+        font-family: var(--unik-font-mono);
+        font-size: 0.6875rem;
+        white-space: pre-wrap;
+        color: var(--unik-text-secondary);
+      }
 
-/* Approval card */
-.approval-card {
-  margin-top: var(--unik-space-3);
-  border: 1px solid var(--unik-warning);
-  border-radius: var(--unik-radius-lg);
-  background: var(--unik-warning-bg);
-  overflow: hidden;
-}
-html.dark .approval-card { border-color: oklch(0.45 0.08 80); }
-.approval-head {
-  display: flex; align-items: center; gap: var(--unik-space-2);
-  padding: var(--unik-space-3) var(--unik-space-4);
-  font-size: var(--unik-text-xs); font-weight: 700;
-  text-transform: uppercase; letter-spacing: 0.05em; color: var(--unik-warning);
-}
-.approval-body { padding: 0 var(--unik-space-4) var(--unik-space-3); }
-.approval-summary { font-size: var(--unik-text-sm); font-weight: 600; color: var(--unik-text); }
-.approval-detail {
-  margin-top: var(--unik-space-2);
-  font-size: var(--unik-text-xs); color: var(--unik-text-secondary);
-  background: var(--unik-surface); border: 1px solid var(--unik-border-subtle);
-  border-radius: var(--unik-radius-md); padding: var(--unik-space-3);
-}
-.approval-detail .wa-bubble {
-  background: var(--unik-success-bg); border-radius: var(--unik-radius-md);
-  padding: var(--unik-space-2) var(--unik-space-3); margin-top: var(--unik-space-2);
-  font-size: var(--unik-text-xs); color: var(--unik-text);
-}
-.approval-actions { display: flex; gap: var(--unik-space-2); padding: 0 var(--unik-space-4) var(--unik-space-3); }
-.btn-approve, .btn-reject {
-  display: inline-flex; align-items: center; gap: 6px;
-  font-size: var(--unik-text-sm); font-weight: 600;
-  padding: 6px 14px; border-radius: var(--unik-radius-md); cursor: pointer;
-  border: 1px solid transparent; transition: all var(--unik-transition);
-}
-.btn-approve { background: var(--unik-success); color: #fff; }
-.btn-approve:hover { filter: brightness(0.92); }
-.btn-reject { background: transparent; color: var(--unik-text-secondary); border-color: var(--unik-border); }
-.btn-reject:hover { background: var(--unik-surface); }
-.approval-expires { font-size: 0.6875rem; color: var(--unik-text-muted); padding: 0 var(--unik-space-4) var(--unik-space-3); }
-.approval-done {
-  padding: var(--unik-space-2) var(--unik-space-4) var(--unik-space-3);
-  font-size: var(--unik-text-xs); font-weight: 600; color: var(--unik-success);
-  display: none; align-items: center; gap: 6px;
-}
-.approval-card.approved .approval-actions { display: none; }
-.approval-card.approved .approval-done { display: flex; }
-.approval-card.approved { border-color: var(--unik-success); background: var(--unik-surface); }
+      /* Approval card */
+      .approval-card {
+        margin-top: var(--unik-space-3);
+        border: 1px solid var(--unik-warning);
+        border-radius: var(--unik-radius-lg);
+        background: var(--unik-warning-bg);
+        overflow: hidden;
+      }
+      html.dark .approval-card {
+        border-color: oklch(0.45 0.08 80);
+      }
+      .approval-head {
+        display: flex;
+        align-items: center;
+        gap: var(--unik-space-2);
+        padding: var(--unik-space-3) var(--unik-space-4);
+        font-size: var(--unik-text-xs);
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--unik-warning);
+      }
+      .approval-body {
+        padding: 0 var(--unik-space-4) var(--unik-space-3);
+      }
+      .approval-summary {
+        font-size: var(--unik-text-sm);
+        font-weight: 600;
+        color: var(--unik-text);
+      }
+      .approval-detail {
+        margin-top: var(--unik-space-2);
+        font-size: var(--unik-text-xs);
+        color: var(--unik-text-secondary);
+        background: var(--unik-surface);
+        border: 1px solid var(--unik-border-subtle);
+        border-radius: var(--unik-radius-md);
+        padding: var(--unik-space-3);
+      }
+      .approval-detail .wa-bubble {
+        background: var(--unik-success-bg);
+        border-radius: var(--unik-radius-md);
+        padding: var(--unik-space-2) var(--unik-space-3);
+        margin-top: var(--unik-space-2);
+        font-size: var(--unik-text-xs);
+        color: var(--unik-text);
+      }
+      .approval-actions {
+        display: flex;
+        gap: var(--unik-space-2);
+        padding: 0 var(--unik-space-4) var(--unik-space-3);
+      }
+      .btn-approve,
+      .btn-reject {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: var(--unik-text-sm);
+        font-weight: 600;
+        padding: 6px 14px;
+        border-radius: var(--unik-radius-md);
+        cursor: pointer;
+        border: 1px solid transparent;
+        transition: all var(--unik-transition);
+      }
+      .btn-approve {
+        background: var(--unik-success);
+        color: #fff;
+      }
+      .btn-approve:hover {
+        filter: brightness(0.92);
+      }
+      .btn-reject {
+        background: transparent;
+        color: var(--unik-text-secondary);
+        border-color: var(--unik-border);
+      }
+      .btn-reject:hover {
+        background: var(--unik-surface);
+      }
+      .approval-expires {
+        font-size: 0.6875rem;
+        color: var(--unik-text-muted);
+        padding: 0 var(--unik-space-4) var(--unik-space-3);
+      }
+      .approval-done {
+        padding: var(--unik-space-2) var(--unik-space-4) var(--unik-space-3);
+        font-size: var(--unik-text-xs);
+        font-weight: 600;
+        color: var(--unik-success);
+        display: none;
+        align-items: center;
+        gap: 6px;
+      }
+      .approval-card.approved .approval-actions {
+        display: none;
+      }
+      .approval-card.approved .approval-done {
+        display: flex;
+      }
+      .approval-card.approved {
+        border-color: var(--unik-success);
+        background: var(--unik-surface);
+      }
 
-/* Units result table inside message */
-.units-table { width: 100%; border-collapse: collapse; margin-top: var(--unik-space-2); font-size: var(--unik-text-xs); }
-.units-table th { text-align: left; font-weight: 600; color: var(--unik-text-muted); padding: 4px 8px; border-bottom: 1px solid var(--unik-border); text-transform: uppercase; font-size: 0.625rem; letter-spacing: 0.05em; }
-.units-table td { padding: 6px 8px; border-bottom: 1px solid var(--unik-border-subtle); }
-.units-table tr:last-child td { border-bottom: none; }
-.tag { display: inline-block; font-size: 0.625rem; font-weight: 700; padding: 1px 6px; border-radius: var(--unik-radius-full); }
-.tag.ok { background: var(--unik-success-bg); color: var(--unik-success); }
-.tag.warn { background: var(--unik-warning-bg); color: var(--unik-warning); }
+      /* Units result table inside message */
+      .units-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: var(--unik-space-2);
+        font-size: var(--unik-text-xs);
+      }
+      .units-table th {
+        text-align: left;
+        font-weight: 600;
+        color: var(--unik-text-muted);
+        padding: 4px 8px;
+        border-bottom: 1px solid var(--unik-border);
+        text-transform: uppercase;
+        font-size: 0.625rem;
+        letter-spacing: 0.05em;
+      }
+      .units-table td {
+        padding: 6px 8px;
+        border-bottom: 1px solid var(--unik-border-subtle);
+      }
+      .units-table tr:last-child td {
+        border-bottom: none;
+      }
+      .tag {
+        display: inline-block;
+        font-size: 0.625rem;
+        font-weight: 700;
+        padding: 1px 6px;
+        border-radius: var(--unik-radius-full);
+      }
+      .tag.ok {
+        background: var(--unik-success-bg);
+        color: var(--unik-success);
+      }
+      .tag.warn {
+        background: var(--unik-warning-bg);
+        color: var(--unik-warning);
+      }
 
-/* Suggestions chips */
-.suggestions { display: flex; flex-wrap: wrap; gap: var(--unik-space-2); padding: 0 var(--unik-space-6) var(--unik-space-3); max-width: 880px; margin: 0 auto; width: 100%; }
-.chip {
-  display: inline-flex; align-items: center; gap: 6px;
-  padding: 0.35rem 0.75rem;
-  border: 1px solid var(--unik-border); border-radius: var(--unik-radius-full);
-  background: var(--unik-surface); color: var(--unik-text-secondary);
-  font-size: var(--unik-text-xs); font-weight: 500; cursor: pointer;
-  transition: all var(--unik-transition);
-}
-.chip:hover { background: var(--unik-brand-subtle); border-color: var(--unik-brand); color: var(--unik-brand-text); }
+      /* Suggestions chips */
+      .suggestions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--unik-space-2);
+        padding: 0 var(--unik-space-6) var(--unik-space-3);
+        max-width: 880px;
+        margin: 0 auto;
+        width: 100%;
+      }
+      .chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 0.35rem 0.75rem;
+        border: 1px solid var(--unik-border);
+        border-radius: var(--unik-radius-full);
+        background: var(--unik-surface);
+        color: var(--unik-text-secondary);
+        font-size: var(--unik-text-xs);
+        font-weight: 500;
+        cursor: pointer;
+        transition: all var(--unik-transition);
+      }
+      .chip:hover {
+        background: var(--unik-brand-subtle);
+        border-color: var(--unik-brand);
+        color: var(--unik-brand-text);
+      }
 
-/* Composer */
-.composer {
-  padding: var(--unik-space-3) var(--unik-space-6) var(--unik-space-4);
-  border-top: 1px solid var(--unik-border-subtle);
-  background: var(--unik-surface);
-}
-.composer-inner { max-width: 880px; margin: 0 auto; display: flex; flex-direction: column; gap: var(--unik-space-2); }
-.composer-row { display: flex; align-items: flex-end; gap: var(--unik-space-2); }
-.composer-box {
-  flex: 1; display: flex; align-items: center; gap: var(--unik-space-2);
-  border: 1px solid var(--unik-border); border-radius: var(--unik-radius-xl);
-  background: var(--unik-bg); padding: 8px 12px;
-}
-.composer-box:focus-within { border-color: var(--unik-brand); box-shadow: var(--unik-shadow-focus); }
-.composer-box input {
-  flex: 1; border: none; outline: none; background: transparent;
-  font-size: var(--unik-text-sm); color: var(--unik-text); font-family: inherit;
-}
-.composer-box input::placeholder { color: var(--unik-text-muted); }
-.composer-send {
-  width: 36px; height: 36px; border-radius: var(--unik-radius-full);
-  border: none; background: var(--unik-brand); color: var(--unik-text-inverse);
-  display: flex; align-items: center; justify-content: center; cursor: pointer;
-  transition: background var(--unik-transition); flex-shrink: 0;
-}
-.composer-send:hover { background: var(--unik-brand-hover); }
-.composer-modes { display: flex; gap: var(--unik-space-2); align-items: center; }
-.mode-pill {
-  display: inline-flex; align-items: center; gap: 6px;
-  font-size: var(--unik-text-xs); font-weight: 500;
-  border: 1px solid var(--unik-border); background: var(--unik-surface);
-  color: var(--unik-text-secondary); border-radius: var(--unik-radius-full);
-  padding: 4px 10px; cursor: pointer; transition: all var(--unik-transition);
-}
-.mode-pill:hover { background: var(--unik-surface-hover); }
-.mode-pill.on { background: var(--unik-brand-subtle); border-color: var(--unik-brand); color: var(--unik-brand-text); font-weight: 600; }
-.mode-sep { flex: 1; }
-.composer-note { font-size: 0.6875rem; color: var(--unik-text-muted); }
+      /* Composer */
+      .composer {
+        padding: var(--unik-space-3) var(--unik-space-6) var(--unik-space-4);
+        border-top: 1px solid var(--unik-border-subtle);
+        background: var(--unik-surface);
+      }
+      .composer-inner {
+        max-width: 880px;
+        margin: 0 auto;
+        display: flex;
+        flex-direction: column;
+        gap: var(--unik-space-2);
+      }
+      .composer-row {
+        display: flex;
+        align-items: flex-end;
+        gap: var(--unik-space-2);
+      }
+      .composer-box {
+        flex: 1;
+        display: flex;
+        align-items: center;
+        gap: var(--unik-space-2);
+        border: 1px solid var(--unik-border);
+        border-radius: var(--unik-radius-xl);
+        background: var(--unik-bg);
+        padding: 8px 12px;
+      }
+      .composer-box:focus-within {
+        border-color: var(--unik-brand);
+        box-shadow: var(--unik-shadow-focus);
+      }
+      .composer-box input {
+        flex: 1;
+        border: none;
+        outline: none;
+        background: transparent;
+        font-size: var(--unik-text-sm);
+        color: var(--unik-text);
+        font-family: inherit;
+      }
+      .composer-box input::placeholder {
+        color: var(--unik-text-muted);
+      }
+      .composer-send {
+        width: 36px;
+        height: 36px;
+        border-radius: var(--unik-radius-full);
+        border: none;
+        background: var(--unik-brand);
+        color: var(--unik-text-inverse);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        transition: background var(--unik-transition);
+        flex-shrink: 0;
+      }
+      .composer-send:hover {
+        background: var(--unik-brand-hover);
+      }
+      .composer-modes {
+        display: flex;
+        gap: var(--unik-space-2);
+        align-items: center;
+      }
+      .mode-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: var(--unik-text-xs);
+        font-weight: 500;
+        border: 1px solid var(--unik-border);
+        background: var(--unik-surface);
+        color: var(--unik-text-secondary);
+        border-radius: var(--unik-radius-full);
+        padding: 4px 10px;
+        cursor: pointer;
+        transition: all var(--unik-transition);
+      }
+      .mode-pill:hover {
+        background: var(--unik-surface-hover);
+      }
+      .mode-pill.on {
+        background: var(--unik-brand-subtle);
+        border-color: var(--unik-brand);
+        color: var(--unik-brand-text);
+        font-weight: 600;
+      }
+      .mode-sep {
+        flex: 1;
+      }
+      .composer-note {
+        font-size: 0.6875rem;
+        color: var(--unik-text-muted);
+      }
 
-/* ===================== RIGHT PANEL ===================== */
-.ops-panel {
-  width: 360px; flex-shrink: 0;
-  border-left: 1px solid var(--unik-border);
-  background: var(--unik-surface);
-  display: flex; flex-direction: column; min-height: 0;
-  overflow-y: auto;
-}
-.ops-section { padding: var(--unik-space-4); border-bottom: 1px solid var(--unik-border-subtle); }
-.ops-title {
-  font-size: 0.6875rem; font-weight: 700; text-transform: uppercase;
-  letter-spacing: 0.06em; color: var(--unik-text-muted);
-  margin-bottom: var(--unik-space-3); display: flex; align-items: center; gap: 6px;
-}
-.ops-title .count-badge {
-  background: var(--unik-warning); color: #fff;
-  font-size: 0.625rem; border-radius: var(--unik-radius-full);
-  padding: 1px 6px; font-weight: 700;
-}
+      /* ===================== RIGHT PANEL ===================== */
+      .ops-panel {
+        width: 360px;
+        flex-shrink: 0;
+        border-left: 1px solid var(--unik-border);
+        background: var(--unik-surface);
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+        overflow-y: auto;
+      }
+      .ops-section {
+        padding: var(--unik-space-4);
+        border-bottom: 1px solid var(--unik-border-subtle);
+      }
+      .ops-title {
+        font-size: 0.6875rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--unik-text-muted);
+        margin-bottom: var(--unik-space-3);
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .ops-title .count-badge {
+        background: var(--unik-warning);
+        color: #fff;
+        font-size: 0.625rem;
+        border-radius: var(--unik-radius-full);
+        padding: 1px 6px;
+        font-weight: 700;
+      }
 
-/* Venue screen — la "computadora virtual" del agente */
-.venue-frame {
-  border: 1px solid var(--unik-border); border-radius: var(--unik-radius-md);
-  overflow: hidden; background: #fff;
-}
-html.dark .venue-frame { background: #111; }
-.venue-bar {
-  display: flex; align-items: center; gap: 8px;
-  background: var(--unik-surface-hover); padding: 6px 10px;
-  border-bottom: 1px solid var(--unik-border);
-}
-html.dark .venue-bar { background: #1a1a1a; }
-.venue-dots { display: flex; gap: 4px; }
-.venue-dots i { width: 8px; height: 8px; border-radius: 50%; }
-.venue-dots i:nth-child(1) { background: #ff5f57; }
-.venue-dots i:nth-child(2) { background: #febc2e; }
-.venue-dots i:nth-child(3) { background: #28c840; }
-.venue-url {
-  flex: 1; font-family: var(--unik-font-mono); font-size: 0.625rem;
-  background: var(--unik-surface); border: 1px solid var(--unik-border);
-  border-radius: var(--unik-radius-sm); padding: 3px 8px;
-  color: var(--unik-text-secondary);
-  display: flex; align-items: center; gap: 5px;
-}
-html.dark .venue-url { background: #0a0a0a; }
-.venue-screen { position: relative; }
-.venue-screen svg { width: 100%; height: auto; display: block; }
-.venue-live {
-  position: absolute; top: 8px; right: 8px;
-  display: flex; align-items: center; gap: 5px;
-  background: rgba(17,19,24,0.8); color: #fff;
-  font-size: 0.625rem; font-weight: 600; padding: 3px 8px;
-  border-radius: var(--unik-radius-full);
-}
-.venue-live i { width: 6px; height: 6px; border-radius: 50%; background: #4ade80; animation: pulse-dot 1.6s infinite; }
-.venue-caption { font-size: 0.6875rem; color: var(--unik-text-muted); margin-top: var(--unik-space-2); display: flex; justify-content: space-between; }
-.venue-caption b { color: var(--unik-text-secondary); font-weight: 600; }
+      /* Venue screen — la "computadora virtual" del agente */
+      .venue-frame {
+        border: 1px solid var(--unik-border);
+        border-radius: var(--unik-radius-md);
+        overflow: hidden;
+        background: #fff;
+      }
+      html.dark .venue-frame {
+        background: #111;
+      }
+      .venue-bar {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        background: var(--unik-surface-hover);
+        padding: 6px 10px;
+        border-bottom: 1px solid var(--unik-border);
+      }
+      html.dark .venue-bar {
+        background: #1a1a1a;
+      }
+      .venue-dots {
+        display: flex;
+        gap: 4px;
+      }
+      .venue-dots i {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+      }
+      .venue-dots i:nth-child(1) {
+        background: #ff5f57;
+      }
+      .venue-dots i:nth-child(2) {
+        background: #febc2e;
+      }
+      .venue-dots i:nth-child(3) {
+        background: #28c840;
+      }
+      .venue-url {
+        flex: 1;
+        font-family: var(--unik-font-mono);
+        font-size: 0.625rem;
+        background: var(--unik-surface);
+        border: 1px solid var(--unik-border);
+        border-radius: var(--unik-radius-sm);
+        padding: 3px 8px;
+        color: var(--unik-text-secondary);
+        display: flex;
+        align-items: center;
+        gap: 5px;
+      }
+      html.dark .venue-url {
+        background: #0a0a0a;
+      }
+      .venue-screen {
+        position: relative;
+      }
+      .venue-screen svg {
+        width: 100%;
+        height: auto;
+        display: block;
+      }
+      .venue-live {
+        position: absolute;
+        top: 8px;
+        right: 8px;
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        background: rgba(17, 19, 24, 0.8);
+        color: #fff;
+        font-size: 0.625rem;
+        font-weight: 600;
+        padding: 3px 8px;
+        border-radius: var(--unik-radius-full);
+      }
+      .venue-live i {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: #4ade80;
+        animation: pulse-dot 1.6s infinite;
+      }
+      .venue-caption {
+        font-size: 0.6875rem;
+        color: var(--unik-text-muted);
+        margin-top: var(--unik-space-2);
+        display: flex;
+        justify-content: space-between;
+      }
+      .venue-caption b {
+        color: var(--unik-text-secondary);
+        font-weight: 600;
+      }
 
-/* ===================== TERMINAL DEL VENUE =====================
+      /* ===================== TERMINAL DEL VENUE =====================
    Ventana interactiva: qué está haciendo el agente en la máquina.
    Oscura por convención de terminal — se ve igual en ambos temas. */
-.venue-term {
-  margin-top: var(--unik-space-3);
-  border-radius: var(--unik-radius-md);
-  border: 1px solid var(--unik-border);
-  background: #0d1117;
-  overflow: hidden;
-  font-family: var(--unik-font-mono);
-}
-.venue-term-bar {
-  display: flex; align-items: center; gap: var(--unik-space-2);
-  padding: 6px 10px;
-  background: #161b22;
-  border-bottom: 1px solid #21262d;
-}
-.venue-term-title {
-  font-size: 0.625rem; color: #8b949e; font-weight: 600;
-  display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
-.venue-term-elapsed { font-size: 0.625rem; color: #6e7681; font-variant-numeric: tabular-nums; }
-.venue-term-replay {
-  border: none; background: transparent; color: #8b949e; cursor: pointer;
-  width: 20px; height: 20px; display: flex; align-items: center; justify-content: center;
-  border-radius: 4px;
-}
-.venue-term-replay:hover { background: #21262d; color: #e6edf3; }
-.venue-term-log {
-  height: 176px; overflow-y: auto;
-  padding: 8px 10px;
-  font-size: 0.625rem; line-height: 1.7;
-}
-.venue-term-log::-webkit-scrollbar { width: 6px; }
-.venue-term-log::-webkit-scrollbar-thumb { background: #30363d; border-radius: 3px; }
-.term-line { display: flex; gap: 6px; color: #c9d1d9; animation: term-in 160ms ease; }
-@keyframes term-in { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
-.term-line .t-prompt { color: #7ee787; flex-shrink: 0; font-weight: 700; }
-.term-line .t-act { color: #79c0ff; flex-shrink: 0; font-weight: 700; }
-.term-line .t-ok { color: #56d364; flex-shrink: 0; font-weight: 700; }
-.term-line .t-warn { color: #e3b341; flex-shrink: 0; font-weight: 700; }
-.term-line .t-dim { color: #6e7681; }
-.term-line.has-detail { cursor: pointer; }
-.term-line.has-detail:hover { background: #161b22; border-radius: 4px; }
-.term-line.has-detail::after { content: '▸'; margin-left: auto; color: #484f58; }
-.term-line.has-detail.expanded::after { content: '▾'; }
-.term-detail {
-  display: none; margin: 2px 0 4px 14px; padding: 5px 8px;
-  background: #161b22; border-left: 2px solid #30363d; border-radius: 0 4px 4px 0;
-  color: #8b949e; white-space: pre-wrap; word-break: break-word;
-}
-.term-detail.show { display: block; }
-.term-cursor {
-  display: inline-block; width: 6px; height: 11px;
-  background: #7ee787; vertical-align: -2px;
-  animation: term-blink 1s steps(1) infinite;
-}
-@keyframes term-blink { 50% { opacity: 0; } }
-.term-idle { color: #6e7681; font-style: normal; }
+      .venue-term {
+        margin-top: var(--unik-space-3);
+        border-radius: var(--unik-radius-md);
+        border: 1px solid var(--unik-border);
+        background: #0d1117;
+        overflow: hidden;
+        font-family: var(--unik-font-mono);
+      }
+      .venue-term-bar {
+        display: flex;
+        align-items: center;
+        gap: var(--unik-space-2);
+        padding: 6px 10px;
+        background: #161b22;
+        border-bottom: 1px solid #21262d;
+      }
+      .venue-term-title {
+        font-size: 0.625rem;
+        color: #8b949e;
+        font-weight: 600;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex: 1;
+        min-width: 0;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .venue-term-elapsed {
+        font-size: 0.625rem;
+        color: #6e7681;
+        font-variant-numeric: tabular-nums;
+      }
+      .venue-term-replay {
+        border: none;
+        background: transparent;
+        color: #8b949e;
+        cursor: pointer;
+        width: 20px;
+        height: 20px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 4px;
+      }
+      .venue-term-replay:hover {
+        background: #21262d;
+        color: #e6edf3;
+      }
+      .venue-term-log {
+        height: 176px;
+        overflow-y: auto;
+        padding: 8px 10px;
+        font-size: 0.625rem;
+        line-height: 1.7;
+      }
+      .venue-term-log::-webkit-scrollbar {
+        width: 6px;
+      }
+      .venue-term-log::-webkit-scrollbar-thumb {
+        background: #30363d;
+        border-radius: 3px;
+      }
+      .term-line {
+        display: flex;
+        gap: 6px;
+        color: #c9d1d9;
+        animation: term-in 160ms ease;
+      }
+      @keyframes term-in {
+        from {
+          opacity: 0;
+          transform: translateY(3px);
+        }
+        to {
+          opacity: 1;
+          transform: none;
+        }
+      }
+      .term-line .t-prompt {
+        color: #7ee787;
+        flex-shrink: 0;
+        font-weight: 700;
+      }
+      .term-line .t-act {
+        color: #79c0ff;
+        flex-shrink: 0;
+        font-weight: 700;
+      }
+      .term-line .t-ok {
+        color: #56d364;
+        flex-shrink: 0;
+        font-weight: 700;
+      }
+      .term-line .t-warn {
+        color: #e3b341;
+        flex-shrink: 0;
+        font-weight: 700;
+      }
+      .term-line .t-dim {
+        color: #6e7681;
+      }
+      .term-line.has-detail {
+        cursor: pointer;
+      }
+      .term-line.has-detail:hover {
+        background: #161b22;
+        border-radius: 4px;
+      }
+      .term-line.has-detail::after {
+        content: '▸';
+        margin-left: auto;
+        color: #484f58;
+      }
+      .term-line.has-detail.expanded::after {
+        content: '▾';
+      }
+      .term-detail {
+        display: none;
+        margin: 2px 0 4px 14px;
+        padding: 5px 8px;
+        background: #161b22;
+        border-left: 2px solid #30363d;
+        border-radius: 0 4px 4px 0;
+        color: #8b949e;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+      .term-detail.show {
+        display: block;
+      }
+      .term-cursor {
+        display: inline-block;
+        width: 6px;
+        height: 11px;
+        background: #7ee787;
+        vertical-align: -2px;
+        animation: term-blink 1s steps(1) infinite;
+      }
+      @keyframes term-blink {
+        50% {
+          opacity: 0;
+        }
+      }
+      .term-idle {
+        color: #6e7681;
+        font-style: normal;
+      }
 
-/* Ops list items */
-.ops-item {
-  display: flex; gap: var(--unik-space-3); align-items: flex-start;
-  padding: var(--unik-space-2) 0;
-}
-.ops-item + .ops-item { border-top: 1px solid var(--unik-border-subtle); }
-.ops-item-icon {
-  width: 26px; height: 26px; border-radius: var(--unik-radius-sm);
-  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
-  background: var(--unik-brand-subtle); color: var(--unik-brand-text);
-}
-.ops-item-body { flex: 1; min-width: 0; }
-.ops-item-title { font-size: var(--unik-text-xs); font-weight: 600; }
-.ops-item-sub { font-size: 0.6875rem; color: var(--unik-text-muted); margin-top: 1px; }
-.ops-item-time { font-size: 0.625rem; color: var(--unik-text-muted); flex-shrink: 0; }
-.mini-progress { height: 3px; background: var(--unik-surface-pressed); border-radius: 2px; margin-top: 6px; overflow: hidden; }
-.mini-progress i { display: block; height: 100%; background: var(--unik-info); }
+      /* Ops list items */
+      .ops-item {
+        display: flex;
+        gap: var(--unik-space-3);
+        align-items: flex-start;
+        padding: var(--unik-space-2) 0;
+      }
+      .ops-item + .ops-item {
+        border-top: 1px solid var(--unik-border-subtle);
+      }
+      .ops-item-icon {
+        width: 26px;
+        height: 26px;
+        border-radius: var(--unik-radius-sm);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+        background: var(--unik-brand-subtle);
+        color: var(--unik-brand-text);
+      }
+      .ops-item-body {
+        flex: 1;
+        min-width: 0;
+      }
+      .ops-item-title {
+        font-size: var(--unik-text-xs);
+        font-weight: 600;
+      }
+      .ops-item-sub {
+        font-size: 0.6875rem;
+        color: var(--unik-text-muted);
+        margin-top: 1px;
+      }
+      .ops-item-time {
+        font-size: 0.625rem;
+        color: var(--unik-text-muted);
+        flex-shrink: 0;
+      }
+      .mini-progress {
+        height: 3px;
+        background: var(--unik-surface-pressed);
+        border-radius: 2px;
+        margin-top: 6px;
+        overflow: hidden;
+      }
+      .mini-progress i {
+        display: block;
+        height: 100%;
+        background: var(--unik-info);
+      }
 
-/* ===================== TWEAKS ===================== */
-.tweaks-fab {
-  position: fixed; bottom: 20px; right: 20px; z-index: 60;
-  width: 44px; height: 44px; border-radius: var(--unik-radius-full);
-  border: 1px solid var(--unik-border); background: var(--unik-surface);
-  box-shadow: var(--unik-shadow-lg); cursor: pointer;
-  display: flex; align-items: center; justify-content: center;
-  color: var(--unik-text-secondary);
-}
-.tweaks-panel {
-  position: fixed; bottom: 76px; right: 20px; z-index: 60;
-  width: 280px; background: var(--unik-surface);
-  border: 1px solid var(--unik-border); border-radius: var(--unik-radius-lg);
-  box-shadow: var(--unik-shadow-lg); padding: var(--unik-space-4);
-  display: none;
-}
-.tweaks-panel.open { display: block; }
-.tweaks-title { font-size: var(--unik-text-sm); font-weight: 700; margin-bottom: var(--unik-space-3); }
-.tweak-row { margin-bottom: var(--unik-space-3); }
-.tweak-label { font-size: var(--unik-text-xs); font-weight: 600; color: var(--unik-text-secondary); margin-bottom: 6px; display: block; }
-.tweak-opts { display: flex; gap: 6px; flex-wrap: wrap; }
-.tweak-opt {
-  font-size: var(--unik-text-xs); padding: 4px 10px;
-  border: 1px solid var(--unik-border); border-radius: var(--unik-radius-full);
-  background: var(--unik-surface); color: var(--unik-text-secondary); cursor: pointer;
-}
-.tweak-opt.on { background: var(--unik-brand); border-color: var(--unik-brand); color: var(--unik-text-inverse); font-weight: 600; }
+      /* ===================== TWEAKS ===================== */
+      .tweaks-fab {
+        position: fixed;
+        bottom: 20px;
+        right: 20px;
+        z-index: 60;
+        width: 44px;
+        height: 44px;
+        border-radius: var(--unik-radius-full);
+        border: 1px solid var(--unik-border);
+        background: var(--unik-surface);
+        box-shadow: var(--unik-shadow-lg);
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: var(--unik-text-secondary);
+      }
+      .tweaks-panel {
+        position: fixed;
+        bottom: 76px;
+        right: 20px;
+        z-index: 60;
+        width: 280px;
+        background: var(--unik-surface);
+        border: 1px solid var(--unik-border);
+        border-radius: var(--unik-radius-lg);
+        box-shadow: var(--unik-shadow-lg);
+        padding: var(--unik-space-4);
+        display: none;
+      }
+      .tweaks-panel.open {
+        display: block;
+      }
+      .tweaks-title {
+        font-size: var(--unik-text-sm);
+        font-weight: 700;
+        margin-bottom: var(--unik-space-3);
+      }
+      .tweak-row {
+        margin-bottom: var(--unik-space-3);
+      }
+      .tweak-label {
+        font-size: var(--unik-text-xs);
+        font-weight: 600;
+        color: var(--unik-text-secondary);
+        margin-bottom: 6px;
+        display: block;
+      }
+      .tweak-opts {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+      }
+      .tweak-opt {
+        font-size: var(--unik-text-xs);
+        padding: 4px 10px;
+        border: 1px solid var(--unik-border);
+        border-radius: var(--unik-radius-full);
+        background: var(--unik-surface);
+        color: var(--unik-text-secondary);
+        cursor: pointer;
+      }
+      .tweak-opt.on {
+        background: var(--unik-brand);
+        border-color: var(--unik-brand);
+        color: var(--unik-text-inverse);
+        font-weight: 600;
+      }
 
-/* Density tweak */
-body.compact { font-size: var(--unik-text-sm); }
-body.compact .msg { font-size: var(--unik-text-xs); padding: var(--unik-space-2) var(--unik-space-3); }
-body.compact .chat-messages { gap: var(--unik-space-3); padding: var(--unik-space-4); }
-body.compact .agent-item { padding: 5px var(--unik-space-3); }
-body.compact .ops-section { padding: var(--unik-space-3); }
+      /* Density tweak */
+      body.compact {
+        font-size: var(--unik-text-sm);
+      }
+      body.compact .msg {
+        font-size: var(--unik-text-xs);
+        padding: var(--unik-space-2) var(--unik-space-3);
+      }
+      body.compact .chat-messages {
+        gap: var(--unik-space-3);
+        padding: var(--unik-space-4);
+      }
+      body.compact .agent-item {
+        padding: 5px var(--unik-space-3);
+      }
+      body.compact .ops-section {
+        padding: var(--unik-space-3);
+      }
 
-body.no-panel .ops-panel { display: none; }
+      body.no-panel .ops-panel {
+        display: none;
+      }
 
-@media (max-width: 1200px) { .ops-panel { width: 300px; } }
-@media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
-}
-</style>
-</head>
-<body>
-
-<!-- ===================== TOPBAR ===================== -->
-<header class="topbar">
-  <div class="topbar-logo">UNIK <span>System</span></div>
-  <div class="topbar-crumb">Asistente IA <span>›</span> <b>Agentes</b></div>
-  <div class="topbar-right">
-    <span class="topbar-pill">
-      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
-      2 misiones activas
-    </span>
-    <span class="topbar-pill" style="color: var(--unik-warning); border-color: var(--unik-warning);">
-      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2 4 6v6c0 5 3.5 8.5 8 10 4.5-1.5 8-5 8-10V6l-8-4z"/><path d="M12 8v4"/></svg>
-      1 aprobación
-    </span>
-    <div class="topbar-avatar">IC</div>
-  </div>
-</header>
-
-<div class="shell">
-
-  <!-- ===================== AGENT SIDEBAR ===================== -->
-  <aside class="agent-sidebar">
-    <div class="agent-sidebar-header">
-      <button class="btn-primary">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
-        Nueva misión
-      </button>
-      <div class="search-box">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
-        <input placeholder="Buscar agente o misión…">
+      @media (max-width: 1200px) {
+        .ops-panel {
+          width: 300px;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        *,
+        *::before,
+        *::after {
+          animation-duration: 0.01ms !important;
+          transition-duration: 0.01ms !important;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <!-- ===================== TOPBAR ===================== -->
+    <header class="topbar">
+      <div class="topbar-logo">UNIK <span>System</span></div>
+      <div class="topbar-crumb">Asistente IA <span>›</span> <b>Agentes</b></div>
+      <div class="topbar-right">
+        <span class="topbar-pill">
+          <svg
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <circle cx="12" cy="12" r="9" />
+            <path d="M12 7v5l3 2" />
+          </svg>
+          2 misiones activas
+        </span>
+        <span
+          class="topbar-pill"
+          style="color: var(--unik-warning); border-color: var(--unik-warning)"
+        >
+          <svg
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <path d="M12 2 4 6v6c0 5 3.5 8.5 8 10 4.5-1.5 8-5 8-10V6l-8-4z" />
+            <path d="M12 8v4" />
+          </svg>
+          1 aprobación
+        </span>
+        <div class="topbar-avatar">IC</div>
       </div>
-    </div>
+    </header>
 
-    <div class="agent-list">
-      <div class="agent-section-label">Tu equipo</div>
+    <div class="shell">
+      <!-- ===================== AGENT SIDEBAR ===================== -->
+      <aside class="agent-sidebar">
+        <div class="agent-sidebar-header">
+          <button class="btn-primary">
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2.5"
+            >
+              <path d="M12 5v14M5 12h14" />
+            </svg>
+            Nueva misión
+          </button>
+          <div class="search-box">
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <circle cx="11" cy="11" r="7" />
+              <path d="m21 21-4.3-4.3" />
+            </svg>
+            <input placeholder="Buscar agente o misión…" />
+          </div>
+        </div>
 
-      <!-- Agente Central -->
-      <div class="agent-item active">
-        <div class="agent-avatar" style="background: var(--hue-central);">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l2.4 4.9 5.4.8-3.9 3.8.9 5.4-4.8-2.5-4.8 2.5.9-5.4L4.2 7.7l5.4-.8L12 2z"/></svg>
-          <span class="agent-status-dot dot-working"></span>
-        </div>
-        <div class="agent-meta">
-          <div class="agent-name">UNIK Central <span class="badge-central">JEFE</span></div>
-          <div class="agent-status-line live">Coordinando 3 tareas</div>
-        </div>
-        <span class="agent-time">ahora</span>
-      </div>
+        <div class="agent-list">
+          <div class="agent-section-label">Tu equipo</div>
 
-      <!-- Especialistas -->
-      <div class="agent-item">
-        <div class="agent-avatar" style="background: var(--hue-research);">IW
-          <span class="agent-status-dot dot-working"></span>
-        </div>
-        <div class="agent-meta">
-          <div class="agent-name">Investigador Web</div>
-          <div class="agent-status-line live">Navegando plataforma GPS…</div>
-        </div>
-        <span class="agent-time">2 min</span>
-      </div>
-
-      <div class="agent-item">
-        <div class="agent-avatar" style="background: var(--hue-data);">AD
-          <span class="agent-status-dot dot-working"></span>
-        </div>
-        <div class="agent-meta">
-          <div class="agent-name">Analista de Datos</div>
-          <div class="agent-status-line live">Consultando ventas de hoy</div>
-        </div>
-        <span class="agent-time">1 min</span>
-      </div>
-
-      <div class="agent-item">
-        <div class="agent-avatar" style="background: var(--hue-msg);">MS
-          <span class="agent-status-dot dot-waiting"></span>
-        </div>
-        <div class="agent-meta">
-          <div class="agent-name">Mensajero</div>
-          <div class="agent-status-line wait">Esperando tu aprobación</div>
-        </div>
-        <span class="agent-time">ahora</span>
-      </div>
-
-      <div class="agent-item">
-        <div class="agent-avatar" style="background: var(--hue-watch);">VG
-          <span class="agent-status-dot dot-idle"></span>
-        </div>
-        <div class="agent-meta">
-          <div class="agent-name">Vigía</div>
-          <div class="agent-status-line">Monitoreando 3 fuentes</div>
-        </div>
-        <span class="agent-time">15 min</span>
-      </div>
-
-      <div class="agent-item">
-        <div class="agent-avatar" style="background: var(--hue-code);">OC
-          <span class="agent-status-dot dot-idle"></span>
-        </div>
-        <div class="agent-meta">
-          <div class="agent-name">Operador de Código</div>
-          <div class="agent-status-line">Inactivo</div>
-        </div>
-        <span class="agent-time">ayer</span>
-      </div>
-
-      <div class="agent-section-label">Misiones recientes</div>
-
-      <div class="agent-item">
-        <div class="agent-meta" style="padding-left: 2px;">
-          <div class="agent-name" style="font-weight: 500;">Ubicación de unidades + reporte</div>
-          <div class="agent-status-line">3 tareas · 1 aprobación pendiente</div>
-        </div>
-        <span class="agent-time">ahora</span>
-      </div>
-      <div class="agent-item">
-        <div class="agent-meta" style="padding-left: 2px;">
-          <div class="agent-name" style="font-weight: 500;">Auditoría de cotizaciones de ayer</div>
-          <div class="agent-status-line">Completada · 12 hallazgos</div>
-        </div>
-        <span class="agent-time">8:00 AM</span>
-      </div>
-      <div class="agent-item">
-        <div class="agent-meta" style="padding-left: 2px;">
-          <div class="agent-name" style="font-weight: 500;">Clientes sin compra en 60 días</div>
-          <div class="agent-status-line">Completada · reporte enviado</div>
-        </div>
-        <span class="agent-time">ayer</span>
-      </div>
-    </div>
-
-    <div class="sidebar-footer">
-      <button class="sidebar-link">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-        Preferencias y memoria
-      </button>
-      <button class="sidebar-link">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M9 15l2 2 4-4"/></svg>
-        Extensiones y skills
-      </button>
-    </div>
-  </aside>
-
-  <!-- ===================== CHAT ===================== -->
-  <main class="chat">
-    <div class="chat-head">
-      <div class="msg-avatar ai" style="width: 34px; height: 34px; background: var(--hue-central); color: #fff;">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l2.4 4.9 5.4.8-3.9 3.8.9 5.4-4.8-2.5-4.8 2.5.9-5.4L4.2 7.7l5.4-.8L12 2z"/></svg>
-      </div>
-      <div>
-        <div class="chat-head-title">UNIK Central</div>
-        <div class="chat-head-sub">Dirige a tu equipo de agentes · solo hablas con él, él coordina al resto</div>
-      </div>
-      <div class="chat-head-actions">
-        <button class="icon-btn" title="Ver todas las misiones" aria-label="Misiones">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r="1" fill="currentColor"/></svg>
-        </button>
-        <button class="icon-btn" title="Configuración del equipo" aria-label="Configuración">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-        </button>
-      </div>
-    </div>
-
-    <div class="chat-messages">
-
-      <!-- Usuario -->
-      <div class="msg-row user">
-        <div class="msg-avatar user">IC</div>
-        <div class="msg user">
-          Necesito dos cosas: dime dónde están las unidades ahorita en la plataforma de GPS y prepárale a Roberto el reporte de ventas de hoy por WhatsApp.
-        </div>
-      </div>
-
-      <!-- Central: misión -->
-      <div class="msg-row">
-        <div class="msg-avatar ai">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l2.4 4.9 5.4.8-3.9 3.8.9 5.4-4.8-2.5-4.8 2.5.9-5.4L4.2 7.7l5.4-.8L12 2z"/></svg>
-        </div>
-        <div class="msg ai" style="max-width: 640px; width: 100%;">
-          <p>Entendido. Lo tomo como una <strong>misión</strong> con dos objetivos: ubicar las unidades en la plataforma y entregar el reporte del día a Roberto. Le asigné el trabajo a mi equipo — te aviso conforme avanza.</p>
-
-          <!-- Mission card -->
-          <div class="mission-card">
-            <div class="mission-head">
-              <div class="mission-icon">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/></svg>
-              </div>
-              <div class="mission-title">Ubicación de unidades + reporte diario a Roberto</div>
-              <span class="mission-state running">En curso</span>
+          <!-- Agente Central -->
+          <div class="agent-item active">
+            <div class="agent-avatar" style="background: var(--hue-central)">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path
+                  d="M12 2l2.4 4.9 5.4.8-3.9 3.8.9 5.4-4.8-2.5-4.8 2.5.9-5.4L4.2 7.7l5.4-.8L12 2z"
+                />
+              </svg>
+              <span class="agent-status-dot dot-working"></span>
             </div>
-            <div class="task-list">
-              <div class="task">
-                <div class="task-check done">
-                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6 9 17l-5-5"/></svg>
-                </div>
-                <div class="task-body">
-                  <div class="task-line">
-                    <span class="task-agent" style="background: var(--hue-research);"><span class="mini-av">IW</span>Investigador</span>
-                    Entrar a la plataforma GPS y ubicar las 6 unidades
-                    <span class="task-status ok">completada · 6/6 ubicadas</span>
-                  </div>
-                  <div class="task-sub">Sesión guardada en la Mac Mini · 1 unidad fuera de geocerca</div>
-                </div>
-              </div>
-              <div class="task">
-                <div class="task-check running">
-                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M21 12a9 9 0 1 1-6.2-8.56"/></svg>
-                </div>
-                <div class="task-body">
-                  <div class="task-line">
-                    <span class="task-agent" style="background: var(--hue-data);"><span class="mini-av">AD</span>Analista</span>
-                    Ventas de hoy: efectivo y sucursal Bodega
-                    <span class="task-status live">ejecutando…</span>
-                  </div>
-                  <div class="task-sub">Revisando órdenes del día y cruzando métodos de pago</div>
-                </div>
-              </div>
-              <div class="task">
-                <div class="task-check waiting">
-                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><circle cx="12" cy="12" r="9"/><path d="M12 8v4l2.5 2"/></svg>
-                </div>
-                <div class="task-body">
-                  <div class="task-line">
-                    <span class="task-agent" style="background: var(--hue-msg);"><span class="mini-av">MS</span>Mensajero</span>
-                    Redactar y enviar WhatsApp a Roberto Camacho
-                    <span class="task-status">pendiente de aprobación</span>
-                  </div>
-                  <div class="task-sub">El mensaje ya está redactado — falta tu visto bueno abajo</div>
-                </div>
-              </div>
+            <div class="agent-meta">
+              <div class="agent-name">UNIK Central <span class="badge-central">JEFE</span></div>
+              <div class="agent-status-line live">Coordinando 3 tareas</div>
             </div>
-            <div class="mission-foot">
-              <span>14 decisiones</span>
-              <span class="cost-chip">$0.043 / $5.00</span>
-              <span class="spacer"></span>
-              <div class="mission-progress"><i style="width: 66%"></i></div>
-              <span>2/3 tareas</span>
+            <span class="agent-time">ahora</span>
+          </div>
+
+          <!-- Especialistas -->
+          <div class="agent-item">
+            <div class="agent-avatar" style="background: var(--hue-research)">
+              IW
+              <span class="agent-status-dot dot-working"></span>
+            </div>
+            <div class="agent-meta">
+              <div class="agent-name">Investigador Web</div>
+              <div class="agent-status-line live">Navegando plataforma GPS…</div>
+            </div>
+            <span class="agent-time">2 min</span>
+          </div>
+
+          <div class="agent-item">
+            <div class="agent-avatar" style="background: var(--hue-data)">
+              AD
+              <span class="agent-status-dot dot-working"></span>
+            </div>
+            <div class="agent-meta">
+              <div class="agent-name">Analista de Datos</div>
+              <div class="agent-status-line live">Consultando ventas de hoy</div>
+            </div>
+            <span class="agent-time">1 min</span>
+          </div>
+
+          <div class="agent-item">
+            <div class="agent-avatar" style="background: var(--hue-msg)">
+              MS
+              <span class="agent-status-dot dot-waiting"></span>
+            </div>
+            <div class="agent-meta">
+              <div class="agent-name">Mensajero</div>
+              <div class="agent-status-line wait">Esperando tu aprobación</div>
+            </div>
+            <span class="agent-time">ahora</span>
+          </div>
+
+          <div class="agent-item">
+            <div class="agent-avatar" style="background: var(--hue-watch)">
+              VG
+              <span class="agent-status-dot dot-idle"></span>
+            </div>
+            <div class="agent-meta">
+              <div class="agent-name">Vigía</div>
+              <div class="agent-status-line">Monitoreando 3 fuentes</div>
+            </div>
+            <span class="agent-time">15 min</span>
+          </div>
+
+          <div class="agent-item">
+            <div class="agent-avatar" style="background: var(--hue-code)">
+              OC
+              <span class="agent-status-dot dot-idle"></span>
+            </div>
+            <div class="agent-meta">
+              <div class="agent-name">Operador de Código</div>
+              <div class="agent-status-line">Inactivo</div>
+            </div>
+            <span class="agent-time">ayer</span>
+          </div>
+
+          <div class="agent-section-label">Misiones recientes</div>
+
+          <div class="agent-item">
+            <div class="agent-meta" style="padding-left: 2px">
+              <div class="agent-name" style="font-weight: 500">Ubicación de unidades + reporte</div>
+              <div class="agent-status-line">3 tareas · 1 aprobación pendiente</div>
+            </div>
+            <span class="agent-time">ahora</span>
+          </div>
+          <div class="agent-item">
+            <div class="agent-meta" style="padding-left: 2px">
+              <div class="agent-name" style="font-weight: 500">
+                Auditoría de cotizaciones de ayer
+              </div>
+              <div class="agent-status-line">Completada · 12 hallazgos</div>
+            </div>
+            <span class="agent-time">8:00 AM</span>
+          </div>
+          <div class="agent-item">
+            <div class="agent-meta" style="padding-left: 2px">
+              <div class="agent-name" style="font-weight: 500">Clientes sin compra en 60 días</div>
+              <div class="agent-status-line">Completada · reporte enviado</div>
+            </div>
+            <span class="agent-time">ayer</span>
+          </div>
+        </div>
+
+        <div class="sidebar-footer">
+          <button class="sidebar-link">
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <circle cx="12" cy="12" r="3" />
+              <path
+                d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"
+              />
+            </svg>
+            Preferencias y memoria
+          </button>
+          <button class="sidebar-link">
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+              <path d="M14 2v6h6M9 15l2 2 4-4" />
+            </svg>
+            Extensiones y skills
+          </button>
+        </div>
+      </aside>
+
+      <!-- ===================== CHAT ===================== -->
+      <main class="chat">
+        <div class="chat-head">
+          <div
+            class="msg-avatar ai"
+            style="width: 34px; height: 34px; background: var(--hue-central); color: #fff"
+          >
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <path
+                d="M12 2l2.4 4.9 5.4.8-3.9 3.8.9 5.4-4.8-2.5-4.8 2.5.9-5.4L4.2 7.7l5.4-.8L12 2z"
+              />
+            </svg>
+          </div>
+          <div>
+            <div class="chat-head-title">UNIK Central</div>
+            <div class="chat-head-sub">
+              Dirige a tu equipo de agentes · solo hablas con él, él coordina al resto
+            </div>
+          </div>
+          <div class="chat-head-actions">
+            <button class="icon-btn" title="Ver todas las misiones" aria-label="Misiones">
+              <svg
+                width="15"
+                height="15"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <circle cx="12" cy="12" r="9" />
+                <circle cx="12" cy="12" r="4" />
+                <circle cx="12" cy="12" r="1" fill="currentColor" />
+              </svg>
+            </button>
+            <button class="icon-btn" title="Configuración del equipo" aria-label="Configuración">
+              <svg
+                width="15"
+                height="15"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <circle cx="12" cy="12" r="3" />
+                <path
+                  d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"
+                />
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <div class="chat-messages">
+          <!-- Usuario -->
+          <div class="msg-row user">
+            <div class="msg-avatar user">IC</div>
+            <div class="msg user">
+              Necesito dos cosas: dime dónde están las unidades ahorita en la plataforma de GPS y
+              prepárale a Roberto el reporte de ventas de hoy por WhatsApp.
             </div>
           </div>
 
-          <!-- Activity card: browser -->
-          <div class="activity-card open">
-            <button class="activity-head" onclick="this.parentElement.classList.toggle('open')">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg>
-              <span class="activity-agent-tag">Investigador Web</span>
-              navegó <span class="activity-tool">fleet.unik-gps.mx/unidades</span>
-              <span class="activity-badge ok">✓ captura en panel →</span>
-            </button>
-            <div class="activity-body">
-              <pre>venue: mac-mini-local (docker)
+          <!-- Central: misión -->
+          <div class="msg-row">
+            <div class="msg-avatar ai">
+              <svg
+                width="15"
+                height="15"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <path
+                  d="M12 2l2.4 4.9 5.4.8-3.9 3.8.9 5.4-4.8-2.5-4.8 2.5.9-5.4L4.2 7.7l5.4-.8L12 2z"
+                />
+              </svg>
+            </div>
+            <div class="msg ai" style="max-width: 640px; width: 100%">
+              <p>
+                Entendido. Lo tomo como una <strong>misión</strong> con dos objetivos: ubicar las
+                unidades en la plataforma y entregar el reporte del día a Roberto. Le asigné el
+                trabajo a mi equipo — te aviso conforme avanza.
+              </p>
+
+              <!-- Mission card -->
+              <div class="mission-card">
+                <div class="mission-head">
+                  <div class="mission-icon">
+                    <svg
+                      width="14"
+                      height="14"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                    >
+                      <circle cx="12" cy="12" r="9" />
+                      <circle cx="12" cy="12" r="4" />
+                    </svg>
+                  </div>
+                  <div class="mission-title">Ubicación de unidades + reporte diario a Roberto</div>
+                  <span class="mission-state running">En curso</span>
+                </div>
+                <div class="task-list">
+                  <div class="task">
+                    <div class="task-check done">
+                      <svg
+                        width="11"
+                        height="11"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="3"
+                      >
+                        <path d="M20 6 9 17l-5-5" />
+                      </svg>
+                    </div>
+                    <div class="task-body">
+                      <div class="task-line">
+                        <span class="task-agent" style="background: var(--hue-research)"
+                          ><span class="mini-av">IW</span>Investigador</span
+                        >
+                        Entrar a la plataforma GPS y ubicar las 6 unidades
+                        <span class="task-status ok">completada · 6/6 ubicadas</span>
+                      </div>
+                      <div class="task-sub">
+                        Sesión guardada en la Mac Mini · 1 unidad fuera de geocerca
+                      </div>
+                    </div>
+                  </div>
+                  <div class="task">
+                    <div class="task-check running">
+                      <svg
+                        width="11"
+                        height="11"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="3"
+                      >
+                        <path d="M21 12a9 9 0 1 1-6.2-8.56" />
+                      </svg>
+                    </div>
+                    <div class="task-body">
+                      <div class="task-line">
+                        <span class="task-agent" style="background: var(--hue-data)"
+                          ><span class="mini-av">AD</span>Analista</span
+                        >
+                        Ventas de hoy: efectivo y sucursal Bodega
+                        <span class="task-status live">ejecutando…</span>
+                      </div>
+                      <div class="task-sub">
+                        Revisando órdenes del día y cruzando métodos de pago
+                      </div>
+                    </div>
+                  </div>
+                  <div class="task">
+                    <div class="task-check waiting">
+                      <svg
+                        width="11"
+                        height="11"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="3"
+                      >
+                        <circle cx="12" cy="12" r="9" />
+                        <path d="M12 8v4l2.5 2" />
+                      </svg>
+                    </div>
+                    <div class="task-body">
+                      <div class="task-line">
+                        <span class="task-agent" style="background: var(--hue-msg)"
+                          ><span class="mini-av">MS</span>Mensajero</span
+                        >
+                        Redactar y enviar WhatsApp a Roberto Camacho
+                        <span class="task-status">pendiente de aprobación</span>
+                      </div>
+                      <div class="task-sub">
+                        El mensaje ya está redactado — falta tu visto bueno abajo
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div class="mission-foot">
+                  <span>14 decisiones</span>
+                  <span class="cost-chip">$0.043 / $5.00</span>
+                  <span class="spacer"></span>
+                  <div class="mission-progress"><i style="width: 66%"></i></div>
+                  <span>2/3 tareas</span>
+                </div>
+              </div>
+
+              <!-- Activity card: browser -->
+              <div class="activity-card open">
+                <button class="activity-head" onclick="this.parentElement.classList.toggle('open')">
+                  <svg
+                    width="12"
+                    height="12"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                  >
+                    <path d="m9 18 6-6-6-6" />
+                  </svg>
+                  <span class="activity-agent-tag">Investigador Web</span>
+                  navegó <span class="activity-tool">fleet.unik-gps.mx/unidades</span>
+                  <span class="activity-badge ok">✓ captura en panel →</span>
+                </button>
+                <div class="activity-body">
+                  <pre>
+venue: mac-mini-local (docker)
 perfil: sesión persistente "unik-gps" — login OK
 extract: tabla "Unidades" → 6 filas · última señal &lt; 4 min
 diff vs. ayer: unidad U-04 cambió de "En ruta" a "Detenida"</pre>
-            </div>
-          </div>
-
-          <p style="margin-top: var(--unik-space-3);">Ya tengo la ubicación. <strong>Las 6 unidades responden</strong>; la U-04 está detenida en Av. de las Torres desde hace 38 minutos — fuera de la geocerca de la obra de Malacate:</p>
-
-          <table class="units-table">
-            <thead>
-              <tr><th>Unidad</th><th>Ubicación</th><th>Estado</th><th>Señal</th></tr>
-            </thead>
-            <tbody>
-              <tr><td><b>U-01</b></td><td>Obra Malacate 110</td><td><span class="tag ok">En sitio</span></td><td>hace 1 min</td></tr>
-              <tr><td><b>U-02</b></td><td>Bodega Central</td><td><span class="tag ok">En sitio</span></td><td>hace 2 min</td></tr>
-              <tr><td><b>U-03</b></td><td>En ruta → Pie de obra Col. Roma</td><td><span class="tag ok">En tránsito</span></td><td>hace 1 min</td></tr>
-              <tr><td><b>U-04</b></td><td>Av. de las Torres 1200</td><td><span class="tag warn">Fuera de geocerca</span></td><td>hace 4 min</td></tr>
-              <tr><td><b>U-05</b></td><td>Obra Malacate 110</td><td><span class="tag ok">En sitio</span></td><td>hace 3 min</td></tr>
-              <tr><td><b>U-06</b></td><td>Bodega Central</td><td><span class="tag ok">En sitio</span></td><td>hace 2 min</td></tr>
-            </tbody>
-          </table>
-
-          <p style="margin-top: var(--unik-space-3);">Le pedí al <strong>Vigía</strong> que monitoree la U-04 cada 15 min y te avise si no vuelve a geocerca en una hora. El Analista está cerrando el reporte de ventas.</p>
-        </div>
-      </div>
-
-      <!-- Central: reporte + aprobación -->
-      <div class="msg-row">
-        <div class="msg-avatar ai">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l2.4 4.9 5.4.8-3.9 3.8.9 5.4-4.8 2.5-4.8 2.5.9-5.4L4.2 7.7l5.4-.8L12 2z"/></svg>
-        </div>
-        <div class="msg ai" style="max-width: 640px; width: 100%;">
-
-          <div class="activity-card">
-            <button class="activity-head" onclick="this.parentElement.classList.toggle('open')">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg>
-              <span class="activity-agent-tag">Analista de Datos</span>
-              corrió <span class="activity-tool">querySalesOrders</span> · 23 órdenes hoy
-              <span class="activity-badge ok">OK · 412ms</span>
-            </button>
-            <div class="activity-body">
-              <pre>filtros: dateRange=hoy · paymentMethods=[EFECTIVO] · location=Bodega
-resultado: 6 en efectivo en Bodega · $41,250.00 MXN · 23 ventas totales del día</pre>
-            </div>
-          </div>
-
-          <p>El reporte ya quedó. Hoy: <strong>23 ventas</strong> por <strong>$182,940 MXN</strong> — de esas, <strong>6 en efectivo en Bodega</strong> ($41,250). El WhatsApp para Roberto está listo; como toca a un cliente, <strong>lo envío solo si lo apruebas</strong>:</p>
-
-          <!-- Approval card -->
-          <div class="approval-card" id="wa-approval">
-            <div class="approval-head">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2 4 6v6c0 5 3.5 8.5 8 10 4.5-1.5 8-5 8-10V6l-8-4z"/><path d="M12 8v4l2 2"/></svg>
-              Aprobación requerida · envío externo
-            </div>
-            <div class="approval-body">
-              <div class="approval-summary">Enviar WhatsApp a Roberto Camacho (+52 55 •• •• 4821)</div>
-              <div class="approval-detail">
-                Mensaje exacto que se enviará:
-                <div class="wa-bubble">
-                  Reporte UNIK — jueves 24 sep<br>
-                  • Ventas de hoy: 23 · $182,940 MXN<br>
-                  • Efectivo en Bodega: 6 · $41,250 MXN<br>
-                  • Pendientes de entrega: 8 pedidos<br>
-                  Detalle completo en el sistema. — UNIK Central
                 </div>
               </div>
+
+              <p style="margin-top: var(--unik-space-3)">
+                Ya tengo la ubicación. <strong>Las 6 unidades responden</strong>; la U-04 está
+                detenida en Av. de las Torres desde hace 38 minutos — fuera de la geocerca de la
+                obra de Malacate:
+              </p>
+
+              <table class="units-table">
+                <thead>
+                  <tr>
+                    <th>Unidad</th>
+                    <th>Ubicación</th>
+                    <th>Estado</th>
+                    <th>Señal</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><b>U-01</b></td>
+                    <td>Obra Malacate 110</td>
+                    <td><span class="tag ok">En sitio</span></td>
+                    <td>hace 1 min</td>
+                  </tr>
+                  <tr>
+                    <td><b>U-02</b></td>
+                    <td>Bodega Central</td>
+                    <td><span class="tag ok">En sitio</span></td>
+                    <td>hace 2 min</td>
+                  </tr>
+                  <tr>
+                    <td><b>U-03</b></td>
+                    <td>En ruta → Pie de obra Col. Roma</td>
+                    <td><span class="tag ok">En tránsito</span></td>
+                    <td>hace 1 min</td>
+                  </tr>
+                  <tr>
+                    <td><b>U-04</b></td>
+                    <td>Av. de las Torres 1200</td>
+                    <td><span class="tag warn">Fuera de geocerca</span></td>
+                    <td>hace 4 min</td>
+                  </tr>
+                  <tr>
+                    <td><b>U-05</b></td>
+                    <td>Obra Malacate 110</td>
+                    <td><span class="tag ok">En sitio</span></td>
+                    <td>hace 3 min</td>
+                  </tr>
+                  <tr>
+                    <td><b>U-06</b></td>
+                    <td>Bodega Central</td>
+                    <td><span class="tag ok">En sitio</span></td>
+                    <td>hace 2 min</td>
+                  </tr>
+                </tbody>
+              </table>
+
+              <p style="margin-top: var(--unik-space-3)">
+                Le pedí al <strong>Vigía</strong> que monitoree la U-04 cada 15 min y te avise si no
+                vuelve a geocerca en una hora. El Analista está cerrando el reporte de ventas.
+              </p>
             </div>
-            <div class="approval-actions">
-              <button class="btn-approve" onclick="approveWA()">
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6 9 17l-5-5"/></svg>
-                Aprobar y enviar
+          </div>
+
+          <!-- Central: reporte + aprobación -->
+          <div class="msg-row">
+            <div class="msg-avatar ai">
+              <svg
+                width="15"
+                height="15"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <path
+                  d="M12 2l2.4 4.9 5.4.8-3.9 3.8.9 5.4-4.8 2.5-4.8 2.5.9-5.4L4.2 7.7l5.4-.8L12 2z"
+                />
+              </svg>
+            </div>
+            <div class="msg ai" style="max-width: 640px; width: 100%">
+              <div class="activity-card">
+                <button class="activity-head" onclick="this.parentElement.classList.toggle('open')">
+                  <svg
+                    width="12"
+                    height="12"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                  >
+                    <path d="m9 18 6-6-6-6" />
+                  </svg>
+                  <span class="activity-agent-tag">Analista de Datos</span>
+                  corrió <span class="activity-tool">querySalesOrders</span> · 23 órdenes hoy
+                  <span class="activity-badge ok">OK · 412ms</span>
+                </button>
+                <div class="activity-body">
+                  <pre>
+filtros: dateRange=hoy · paymentMethods=[EFECTIVO] · location=Bodega
+resultado: 6 en efectivo en Bodega · $41,250.00 MXN · 23 ventas totales del día</pre>
+                </div>
+              </div>
+
+              <p>
+                El reporte ya quedó. Hoy: <strong>23 ventas</strong> por
+                <strong>$182,940 MXN</strong> — de esas,
+                <strong>6 en efectivo en Bodega</strong> ($41,250). El WhatsApp para Roberto está
+                listo; como toca a un cliente, <strong>lo envío solo si lo apruebas</strong>:
+              </p>
+
+              <!-- Approval card -->
+              <div class="approval-card" id="wa-approval">
+                <div class="approval-head">
+                  <svg
+                    width="13"
+                    height="13"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                  >
+                    <path d="M12 2 4 6v6c0 5 3.5 8.5 8 10 4.5-1.5 8-5 8-10V6l-8-4z" />
+                    <path d="M12 8v4l2 2" />
+                  </svg>
+                  Aprobación requerida · envío externo
+                </div>
+                <div class="approval-body">
+                  <div class="approval-summary">
+                    Enviar WhatsApp a Roberto Camacho (+52 55 •• •• 4821)
+                  </div>
+                  <div class="approval-detail">
+                    Mensaje exacto que se enviará:
+                    <div class="wa-bubble">
+                      Reporte UNIK — jueves 24 sep<br />
+                      • Ventas de hoy: 23 · $182,940 MXN<br />
+                      • Efectivo en Bodega: 6 · $41,250 MXN<br />
+                      • Pendientes de entrega: 8 pedidos<br />
+                      Detalle completo en el sistema. — UNIK Central
+                    </div>
+                  </div>
+                </div>
+                <div class="approval-actions">
+                  <button class="btn-approve" onclick="approveWA()">
+                    <svg
+                      width="13"
+                      height="13"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="3"
+                    >
+                      <path d="M20 6 9 17l-5-5" />
+                    </svg>
+                    Aprobar y enviar
+                  </button>
+                  <button class="btn-reject" onclick="rejectWA()">Rechazar</button>
+                </div>
+                <div class="approval-expires">
+                  Expira en 23 h 58 min · Lo que apruebes es exactamente lo que sale
+                </div>
+                <div class="approval-done" id="wa-done">
+                  <svg
+                    width="13"
+                    height="13"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="3"
+                  >
+                    <path d="M20 6 9 17l-5-5" />
+                  </svg>
+                  <span id="wa-done-text">Aprobada — Mensajero enviando…</span>
+                </div>
+              </div>
+
+              <div class="msg-meta">
+                <span>UNIK Central</span><span>·</span> <span>gpt-5.1 vía OpenRouter</span
+                ><span>·</span> <span>confianza alta</span><span>·</span>
+                <span>5 tools · 2 agentes</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Typing -->
+          <div class="msg-row">
+            <div class="msg-avatar ai">
+              <svg
+                width="15"
+                height="15"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <path
+                  d="M12 2l2.4 4.9 5.4.8-3.9 3.8.9 5.4-4.8 2.5-4.8 2.5.9-5.4L4.2 7.7l5.4-.8L12 2z"
+                />
+              </svg>
+            </div>
+            <div class="msg ai" style="padding: var(--unik-space-2) var(--unik-space-4)">
+              <span style="display: inline-flex; gap: 4px; align-items: center">
+                <i class="tdot"></i><i class="tdot"></i><i class="tdot"></i>
+                <span
+                  style="
+                    font-size: var(--unik-text-xs);
+                    color: var(--unik-text-muted);
+                    margin-left: 6px;
+                  "
+                  >Central integrando resultados…</span
+                >
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Suggestions -->
+        <div class="suggestions">
+          <button class="chip">¿Por qué está parada la U-04?</button>
+          <button class="chip">Mándame el reporte a mí también</button>
+          <button class="chip">Vigila las unidades toda la semana</button>
+        </div>
+
+        <!-- Composer -->
+        <div class="composer">
+          <div class="composer-inner">
+            <div class="composer-modes">
+              <button class="mode-pill on" id="mode-mission" onclick="setMode('mission')">
+                <svg
+                  width="12"
+                  height="12"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                >
+                  <circle cx="12" cy="12" r="9" />
+                  <circle cx="12" cy="12" r="4" />
+                </svg>
+                Misión
               </button>
-              <button class="btn-reject" onclick="rejectWA()">Rechazar</button>
+              <button class="mode-pill" id="mode-msg" onclick="setMode('msg')">
+                <svg
+                  width="12"
+                  height="12"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                >
+                  <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                </svg>
+                Mensaje
+              </button>
+              <button class="mode-pill">
+                <svg
+                  width="12"
+                  height="12"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                >
+                  <path d="M9 18l6-6-6-6" />
+                </svg>
+                Planear primero
+              </button>
+              <span class="mode-sep"></span>
+              <span class="composer-note" id="mode-note"
+                >La misión sigue trabajando aunque cierres esto — te avisa al terminar</span
+              >
             </div>
-            <div class="approval-expires">Expira en 23 h 58 min · Lo que apruebes es exactamente lo que sale</div>
-            <div class="approval-done" id="wa-done">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6 9 17l-5-5"/></svg>
-              <span id="wa-done-text">Aprobada — Mensajero enviando…</span>
+            <div class="composer-row">
+              <div class="composer-box">
+                <input placeholder="Pídele un objetivo a UNIK Central…" />
+                <button
+                  class="icon-btn"
+                  style="border: none; width: 28px; height: 28px"
+                  aria-label="Adjuntar"
+                >
+                  <svg
+                    width="15"
+                    height="15"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                  >
+                    <path
+                      d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"
+                    />
+                  </svg>
+                </button>
+                <button
+                  class="icon-btn"
+                  style="border: none; width: 28px; height: 28px"
+                  aria-label="Voz"
+                >
+                  <svg
+                    width="15"
+                    height="15"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                  >
+                    <rect x="9" y="2" width="6" height="12" rx="3" />
+                    <path d="M5 10a7 7 0 0 0 14 0M12 19v3" />
+                  </svg>
+                </button>
+              </div>
+              <button class="composer-send" aria-label="Enviar">
+                <svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                >
+                  <path d="m22 2-7 20-4-9-9-4z" />
+                  <path d="M22 2 11 13" />
+                </svg>
+              </button>
             </div>
           </div>
+        </div>
+      </main>
 
-          <div class="msg-meta">
-            <span>UNIK Central</span><span>·</span>
-            <span>gpt-5.1 vía OpenRouter</span><span>·</span>
-            <span>confianza alta</span><span>·</span>
-            <span>5 tools · 2 agentes</span>
+      <!-- ===================== OPS PANEL ===================== -->
+      <aside class="ops-panel">
+        <!-- Pantalla del venue -->
+        <div class="ops-section">
+          <div class="ops-title">
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <rect x="2" y="4" width="20" height="14" rx="2" />
+              <path d="M8 22h8M12 18v4" />
+            </svg>
+            Pantalla del agente
+          </div>
+          <div class="venue-frame">
+            <div class="venue-bar">
+              <div class="venue-dots"><i></i><i></i><i></i></div>
+              <div class="venue-url">
+                <svg
+                  width="9"
+                  height="9"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                >
+                  <rect x="4" y="10" width="16" height="11" rx="2" />
+                  <path d="M8 10V7a4 4 0 0 1 8 0v3" />
+                </svg>
+                fleet.unik-gps.mx/unidades
+              </div>
+            </div>
+            <div class="venue-screen">
+              <!-- Pantalla simulada: plataforma de flota -->
+              <svg viewBox="0 0 340 190" xmlns="http://www.w3.org/2000/svg">
+                <rect width="340" height="190" fill="#f4f6f8" />
+                <!-- nav de la plataforma externa -->
+                <rect width="340" height="26" fill="#23303e" />
+                <rect x="10" y="8" width="60" height="10" rx="2" fill="#3d5065" />
+                <rect x="230" y="8" width="34" height="10" rx="2" fill="#3d5065" />
+                <rect x="270" y="8" width="34" height="10" rx="2" fill="#3d5065" />
+                <!-- sidebar unidades -->
+                <rect x="0" y="26" width="96" height="164" fill="#ffffff" />
+                <g font-family="monospace" font-size="7" fill="#7d8795">
+                  <rect x="8" y="36" width="80" height="16" rx="3" fill="#eef1f4" />
+                  <text x="14" y="46" fill="#111318">U-01 · sitio</text>
+                  <rect x="8" y="56" width="80" height="16" rx="3" fill="#eef1f4" />
+                  <text x="14" y="66" fill="#111318">U-02 · bodega</text>
+                  <rect x="8" y="76" width="80" height="16" rx="3" fill="#eef1f4" />
+                  <text x="14" y="86" fill="#111318">U-03 · ruta</text>
+                  <rect x="8" y="96" width="80" height="16" rx="3" fill="#fff2d9" />
+                  <text x="14" y="106" fill="#9c6e08">U-04 · alerta</text>
+                  <rect x="8" y="116" width="80" height="16" rx="3" fill="#eef1f4" />
+                  <text x="14" y="126" fill="#111318">U-05 · sitio</text>
+                  <rect x="8" y="136" width="80" height="16" rx="3" fill="#eef1f4" />
+                  <text x="14" y="146" fill="#111318">U-06 · bodega</text>
+                </g>
+                <!-- mapa abstracto -->
+                <g stroke="#dfe3e8" stroke-width="6">
+                  <path d="M120 60 H320 M120 110 H320 M170 30 V180 M250 30 V180" />
+                </g>
+                <g stroke="#e9edf1" stroke-width="3">
+                  <path d="M120 85 H320 M205 30 V180 M285 30 V180 M120 150 H320" />
+                </g>
+                <!-- geocerca -->
+                <circle
+                  cx="170"
+                  cy="90"
+                  r="34"
+                  fill="rgba(28,123,69,0.07)"
+                  stroke="#1c7b45"
+                  stroke-width="1"
+                  stroke-dasharray="4 3"
+                />
+                <!-- pins -->
+                <g>
+                  <circle cx="160" cy="80" r="5" fill="#1c7b45" />
+                  <circle cx="182" cy="98" r="5" fill="#1c7b45" />
+                  <circle cx="250" cy="140" r="5" fill="#1c7b45" />
+                  <circle cx="262" cy="150" r="5" fill="#1c7b45" />
+                  <circle cx="290" cy="60" r="5" fill="#1c7b45" />
+                  <circle cx="300" cy="120" r="6" fill="#b3261e" />
+                  <circle
+                    cx="300"
+                    cy="120"
+                    r="11"
+                    fill="none"
+                    stroke="#b3261e"
+                    stroke-width="1.5"
+                    opacity="0.5"
+                  >
+                    <animate attributeName="r" values="6;14;6" dur="2s" repeatCount="indefinite" />
+                    <animate
+                      attributeName="opacity"
+                      values="0.6;0;0.6"
+                      dur="2s"
+                      repeatCount="indefinite"
+                    />
+                  </circle>
+                </g>
+                <!-- cursor del agente -->
+                <g transform="translate(216,118)">
+                  <path
+                    d="M0 0 L0 14 L4 10 L7 15 L9 14 L6 9 L11 9 Z"
+                    fill="#111318"
+                    stroke="#fff"
+                    stroke-width="1"
+                  />
+                  <rect x="12" y="12" width="52" height="11" rx="2" fill="#111318" />
+                  <text x="16" y="20" font-family="monospace" font-size="6" fill="#fff">
+                    UNIK agente
+                  </text>
+                </g>
+              </svg>
+              <span class="venue-live"><i></i>EN VIVO</span>
+            </div>
+          </div>
+          <div class="venue-caption">
+            <span><b>Venue:</b> Mac Mini local</span>
+            <span>Investigador Web</span>
+          </div>
+
+          <!-- Terminal vivo del venue: qué hace el agente en la máquina, en tiempo real -->
+          <div class="venue-term">
+            <div class="venue-term-bar">
+              <div class="venue-term-title">
+                <svg
+                  width="10"
+                  height="10"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                >
+                  <path d="m4 17 6-5-6-5M12 19h8" />
+                </svg>
+                investigador · mac-mini-local · docker unik-venue-01
+              </div>
+              <span class="venue-term-elapsed" id="term-elapsed">+0:00</span>
+              <button
+                class="venue-term-replay"
+                onclick="termReplay()"
+                title="Repetir"
+                aria-label="Repetir actividad"
+              >
+                <svg
+                  width="11"
+                  height="11"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                >
+                  <path d="M3 12a9 9 0 1 0 3-6.7L3 8" />
+                  <path d="M3 3v5h5" />
+                </svg>
+              </button>
+            </div>
+            <div class="venue-term-log" id="term-log"></div>
           </div>
         </div>
-      </div>
 
-      <!-- Typing -->
-      <div class="msg-row">
-        <div class="msg-avatar ai">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l2.4 4.9 5.4.8-3.9 3.8.9 5.4-4.8 2.5-4.8 2.5.9-5.4L4.2 7.7l5.4-.8L12 2z"/></svg>
+        <!-- Misiones activas -->
+        <div class="ops-section">
+          <div class="ops-title">
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <circle cx="12" cy="12" r="9" />
+              <circle cx="12" cy="12" r="4" />
+            </svg>
+            Misiones activas
+          </div>
+          <div class="ops-item">
+            <div class="ops-item-icon">
+              <svg
+                width="13"
+                height="13"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <circle cx="12" cy="12" r="9" />
+                <circle cx="12" cy="12" r="4" />
+              </svg>
+            </div>
+            <div class="ops-item-body">
+              <div class="ops-item-title">Ubicación de unidades + reporte a Roberto</div>
+              <div class="ops-item-sub">2/3 tareas · esperando tu aprobación</div>
+              <div class="mini-progress"><i style="width: 66%"></i></div>
+            </div>
+            <span class="ops-item-time">ahora</span>
+          </div>
+          <div class="ops-item">
+            <div
+              class="ops-item-icon"
+              style="background: var(--unik-info-bg); color: var(--unik-info)"
+            >
+              <svg
+                width="13"
+                height="13"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <circle cx="11" cy="11" r="7" />
+                <path d="m21 21-4.3-4.3" />
+              </svg>
+            </div>
+            <div class="ops-item-body">
+              <div class="ops-item-title">Contenido campaña octubre + 3 propuestas Higgsfield</div>
+              <div class="ops-item-sub">Programada · arranca mañana 8:00 AM</div>
+            </div>
+            <span class="ops-item-time">prog.</span>
+          </div>
         </div>
-        <div class="msg ai" style="padding: var(--unik-space-2) var(--unik-space-4);">
-          <span style="display:inline-flex;gap:4px;align-items:center;">
-            <i class="tdot"></i><i class="tdot"></i><i class="tdot"></i>
-            <span style="font-size: var(--unik-text-xs); color: var(--unik-text-muted); margin-left: 6px;">Central integrando resultados…</span>
-          </span>
+
+        <!-- Vigilancias -->
+        <div class="ops-section">
+          <div class="ops-title">
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z" />
+              <circle cx="12" cy="12" r="3" />
+            </svg>
+            Vigilancias
+          </div>
+          <div class="ops-item">
+            <div
+              class="ops-item-icon"
+              style="background: var(--unik-warning-bg); color: var(--unik-warning)"
+            >
+              <svg
+                width="13"
+                height="13"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <path
+                  d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"
+                />
+                <path d="M12 9v4M12 17h.01" />
+              </svg>
+            </div>
+            <div class="ops-item-body">
+              <div class="ops-item-title">U-04 fuera de geocerca</div>
+              <div class="ops-item-sub">cada 15 min · avisa si no regresa en 1 h</div>
+            </div>
+            <span class="ops-item-time">15 min</span>
+          </div>
+          <div class="ops-item">
+            <div class="ops-item-icon">
+              <svg
+                width="13"
+                height="13"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <circle cx="12" cy="12" r="9" />
+                <path d="M12 7v5l3 2" />
+              </svg>
+            </div>
+            <div class="ops-item-body">
+              <div class="ops-item-title">Cierre de tickets de venta</div>
+              <div class="ops-item-sub">diario · 6:00 PM</div>
+            </div>
+            <span class="ops-item-time">6:00 PM</span>
+          </div>
+          <div class="ops-item">
+            <div class="ops-item-icon">
+              <svg
+                width="13"
+                height="13"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
+              </svg>
+            </div>
+            <div class="ops-item-body">
+              <div class="ops-item-title">Briefing de ventas matutino</div>
+              <div class="ops-item-sub">diario · 8:00 AM · te llega aquí</div>
+            </div>
+            <span class="ops-item-time">8:00 AM</span>
+          </div>
         </div>
-      </div>
+
+        <!-- Aprobaciones -->
+        <div class="ops-section">
+          <div class="ops-title">
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <path d="M12 2 4 6v6c0 5 3.5 8.5 8 10 4.5-1.5 8-5 8-10V6l-8-4z" />
+              <path d="m9 12 2 2 4-4" />
+            </svg>
+            Aprobaciones
+            <span class="count-badge">1</span>
+          </div>
+          <div class="ops-item">
+            <div
+              class="ops-item-icon"
+              style="background: var(--unik-warning-bg); color: var(--unik-warning)"
+            >
+              <svg
+                width="13"
+                height="13"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+              </svg>
+            </div>
+            <div class="ops-item-body">
+              <div class="ops-item-title">WhatsApp → Roberto Camacho</div>
+              <div class="ops-item-sub">Mensajero · envío externo · espera tu OK</div>
+            </div>
+            <span class="ops-item-time">ahora</span>
+          </div>
+        </div>
+
+        <!-- Costo -->
+        <div class="ops-section" style="border-bottom: none">
+          <div class="ops-title">
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <circle cx="12" cy="12" r="9" />
+              <path
+                d="M12 6v12M15 9.5c0-1.4-1.3-2.5-3-2.5s-3 1-3 2.3c0 3.2 6 1.7 6 4.9 0 1.3-1.3 2.3-3 2.3s-3-1.1-3-2.5"
+              />
+            </svg>
+            Costo del equipo hoy
+          </div>
+          <div
+            style="
+              display: flex;
+              justify-content: space-between;
+              font-size: var(--unik-text-xs);
+              color: var(--unik-text-secondary);
+            "
+          >
+            <span>Decisiones (Jev)</span><span class="mono">$0.011</span>
+          </div>
+          <div
+            style="
+              display: flex;
+              justify-content: space-between;
+              font-size: var(--unik-text-xs);
+              color: var(--unik-text-secondary);
+              margin-top: 4px;
+            "
+          >
+            <span>LLMs (OpenRouter)</span><span class="mono">$0.032</span>
+          </div>
+          <div
+            style="
+              display: flex;
+              justify-content: space-between;
+              font-size: var(--unik-text-xs);
+              color: var(--unik-text-secondary);
+              margin-top: 4px;
+            "
+          >
+            <span>Venue (Mac Mini)</span><span class="mono">$0.00</span>
+          </div>
+          <div class="mini-progress" style="margin-top: 8px">
+            <i style="width: 4%; background: var(--unik-success)"></i>
+          </div>
+          <div class="ops-item-sub" style="margin-top: 4px">
+            $0.043 de $25.00 de presupuesto del día
+          </div>
+        </div>
+      </aside>
     </div>
 
-    <!-- Suggestions -->
-    <div class="suggestions">
-      <button class="chip">¿Por qué está parada la U-04?</button>
-      <button class="chip">Mándame el reporte a mí también</button>
-      <button class="chip">Vigila las unidades toda la semana</button>
-    </div>
-
-    <!-- Composer -->
-    <div class="composer">
-      <div class="composer-inner">
-        <div class="composer-modes">
-          <button class="mode-pill on" id="mode-mission" onclick="setMode('mission')">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/></svg>
+    <!-- ===================== TWEAKS ===================== -->
+    <button
+      class="tweaks-fab"
+      onclick="document.getElementById('tweaks').classList.toggle('open')"
+      aria-label="Tweaks"
+    >
+      <svg
+        width="18"
+        height="18"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+      >
+        <path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6" />
+      </svg>
+    </button>
+    <div class="tweaks-panel" id="tweaks">
+      <div class="tweaks-title">Tweaks</div>
+      <div class="tweak-row">
+        <span class="tweak-label">Tema</span>
+        <div class="tweak-opts">
+          <button class="tweak-opt on" onclick="setTheme(false, this)">Claro</button>
+          <button class="tweak-opt" onclick="setTheme(true, this)">Oscuro</button>
+        </div>
+      </div>
+      <div class="tweak-row">
+        <span class="tweak-label">Densidad</span>
+        <div class="tweak-opts">
+          <button class="tweak-opt on" onclick="setDensity(false, this)">Normal</button>
+          <button class="tweak-opt" onclick="setDensity(true, this)">Compacta</button>
+        </div>
+      </div>
+      <div class="tweak-row">
+        <span class="tweak-label">Panel de operación</span>
+        <div class="tweak-opts">
+          <button class="tweak-opt on" onclick="setPanel(false, this)">Visible</button>
+          <button class="tweak-opt" onclick="setPanel(true, this)">Oculto</button>
+        </div>
+      </div>
+      <div class="tweak-row">
+        <span class="tweak-label">Modo del composer</span>
+        <div class="tweak-opts">
+          <button class="tweak-opt on" id="tw-mission" onclick="setMode('mission', true)">
             Misión
           </button>
-          <button class="mode-pill" id="mode-msg" onclick="setMode('msg')">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-            Mensaje
-          </button>
-          <button class="mode-pill">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
-            Planear primero
-          </button>
-          <span class="mode-sep"></span>
-          <span class="composer-note" id="mode-note">La misión sigue trabajando aunque cierres esto — te avisa al terminar</span>
-        </div>
-        <div class="composer-row">
-          <div class="composer-box">
-            <input placeholder="Pídele un objetivo a UNIK Central…">
-            <button class="icon-btn" style="border:none; width:28px; height:28px;" aria-label="Adjuntar">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
-            </button>
-            <button class="icon-btn" style="border:none; width:28px; height:28px;" aria-label="Voz">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0M12 19v3"/></svg>
-            </button>
-          </div>
-          <button class="composer-send" aria-label="Enviar">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m22 2-7 20-4-9-9-4z"/><path d="M22 2 11 13"/></svg>
-          </button>
+          <button class="tweak-opt" id="tw-msg" onclick="setMode('msg', true)">Mensaje</button>
         </div>
       </div>
     </div>
-  </main>
 
-  <!-- ===================== OPS PANEL ===================== -->
-  <aside class="ops-panel">
+    <style>
+      .tdot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--unik-text-muted);
+        display: inline-block;
+        animation: tb 1.2s infinite ease-in-out;
+      }
+      .tdot:nth-child(2) {
+        animation-delay: 0.15s;
+      }
+      .tdot:nth-child(3) {
+        animation-delay: 0.3s;
+      }
+      @keyframes tb {
+        0%,
+        60%,
+        100% {
+          transform: translateY(0);
+          opacity: 0.5;
+        }
+        30% {
+          transform: translateY(-4px);
+          opacity: 1;
+        }
+      }
+    </style>
 
-    <!-- Pantalla del venue -->
-    <div class="ops-section">
-      <div class="ops-title">
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="14" rx="2"/><path d="M8 22h8M12 18v4"/></svg>
-        Pantalla del agente
-      </div>
-      <div class="venue-frame">
-        <div class="venue-bar">
-          <div class="venue-dots"><i></i><i></i><i></i></div>
-          <div class="venue-url">
-            <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
-            fleet.unik-gps.mx/unidades
-          </div>
-        </div>
-        <div class="venue-screen">
-          <!-- Pantalla simulada: plataforma de flota -->
-          <svg viewBox="0 0 340 190" xmlns="http://www.w3.org/2000/svg">
-            <rect width="340" height="190" fill="#f4f6f8"/>
-            <!-- nav de la plataforma externa -->
-            <rect width="340" height="26" fill="#23303e"/>
-            <rect x="10" y="8" width="60" height="10" rx="2" fill="#3d5065"/>
-            <rect x="230" y="8" width="34" height="10" rx="2" fill="#3d5065"/>
-            <rect x="270" y="8" width="34" height="10" rx="2" fill="#3d5065"/>
-            <!-- sidebar unidades -->
-            <rect x="0" y="26" width="96" height="164" fill="#ffffff"/>
-            <g font-family="monospace" font-size="7" fill="#7d8795">
-              <rect x="8" y="36" width="80" height="16" rx="3" fill="#eef1f4"/><text x="14" y="46" fill="#111318">U-01 · sitio</text>
-              <rect x="8" y="56" width="80" height="16" rx="3" fill="#eef1f4"/><text x="14" y="66" fill="#111318">U-02 · bodega</text>
-              <rect x="8" y="76" width="80" height="16" rx="3" fill="#eef1f4"/><text x="14" y="86" fill="#111318">U-03 · ruta</text>
-              <rect x="8" y="96" width="80" height="16" rx="3" fill="#fff2d9"/><text x="14" y="106" fill="#9c6e08">U-04 · alerta</text>
-              <rect x="8" y="116" width="80" height="16" rx="3" fill="#eef1f4"/><text x="14" y="126" fill="#111318">U-05 · sitio</text>
-              <rect x="8" y="136" width="80" height="16" rx="3" fill="#eef1f4"/><text x="14" y="146" fill="#111318">U-06 · bodega</text>
-            </g>
-            <!-- mapa abstracto -->
-            <g stroke="#dfe3e8" stroke-width="6">
-              <path d="M120 60 H320 M120 110 H320 M170 30 V180 M250 30 V180"/>
-            </g>
-            <g stroke="#e9edf1" stroke-width="3">
-              <path d="M120 85 H320 M205 30 V180 M285 30 V180 M120 150 H320"/>
-            </g>
-            <!-- geocerca -->
-            <circle cx="170" cy="90" r="34" fill="rgba(28,123,69,0.07)" stroke="#1c7b45" stroke-width="1" stroke-dasharray="4 3"/>
-            <!-- pins -->
-            <g>
-              <circle cx="160" cy="80" r="5" fill="#1c7b45"/><circle cx="182" cy="98" r="5" fill="#1c7b45"/>
-              <circle cx="250" cy="140" r="5" fill="#1c7b45"/><circle cx="262" cy="150" r="5" fill="#1c7b45"/>
-              <circle cx="290" cy="60" r="5" fill="#1c7b45"/>
-              <circle cx="300" cy="120" r="6" fill="#b3261e"/>
-              <circle cx="300" cy="120" r="11" fill="none" stroke="#b3261e" stroke-width="1.5" opacity="0.5">
-                <animate attributeName="r" values="6;14;6" dur="2s" repeatCount="indefinite"/>
-                <animate attributeName="opacity" values="0.6;0;0.6" dur="2s" repeatCount="indefinite"/>
-              </circle>
-            </g>
-            <!-- cursor del agente -->
-            <g transform="translate(216,118)">
-              <path d="M0 0 L0 14 L4 10 L7 15 L9 14 L6 9 L11 9 Z" fill="#111318" stroke="#fff" stroke-width="1"/>
-              <rect x="12" y="12" width="52" height="11" rx="2" fill="#111318"/>
-              <text x="16" y="20" font-family="monospace" font-size="6" fill="#fff">UNIK agente</text>
-            </g>
-          </svg>
-          <span class="venue-live"><i></i>EN VIVO</span>
-        </div>
-      </div>
-      <div class="venue-caption">
-        <span><b>Venue:</b> Mac Mini local</span>
-        <span>Investigador Web</span>
-      </div>
+    <script>
+      function setTheme(dark, btn) {
+        document.documentElement.classList.toggle('dark', dark);
+        btn.parentElement.querySelectorAll('.tweak-opt').forEach((b) => b.classList.remove('on'));
+        btn.classList.add('on');
+      }
+      function setDensity(compact, btn) {
+        document.body.classList.toggle('compact', compact);
+        btn.parentElement.querySelectorAll('.tweak-opt').forEach((b) => b.classList.remove('on'));
+        btn.classList.add('on');
+      }
+      function setPanel(hidden, btn) {
+        document.body.classList.toggle('no-panel', hidden);
+        btn.parentElement.querySelectorAll('.tweak-opt').forEach((b) => b.classList.remove('on'));
+        btn.classList.add('on');
+      }
+      function setMode(mode, fromTweaks) {
+        const isMission = mode === 'mission';
+        document.getElementById('mode-mission').classList.toggle('on', isMission);
+        document.getElementById('mode-msg').classList.toggle('on', !isMission);
+        document.getElementById('mode-note').textContent = isMission
+          ? 'La misión sigue trabajando aunque cierres esto — te avisa al terminar'
+          : 'Respuesta directa en este turno, como el asistente actual';
+        if (fromTweaks) {
+          document.getElementById('tw-mission').classList.toggle('on', isMission);
+          document.getElementById('tw-msg').classList.toggle('on', !isMission);
+        }
+      }
+      function approveWA() {
+        const card = document.getElementById('wa-approval');
+        card.classList.add('approved');
+        const t = document.getElementById('wa-done-text');
+        t.textContent = 'Aprobada — Mensajero enviando…';
+        setTimeout(() => {
+          t.textContent = 'Enviada ✓ 9:42 AM · WhatsApp entregado';
+        }, 1400);
+      }
+      function rejectWA() {
+        const card = document.getElementById('wa-approval');
+        card.style.opacity = '0.55';
+        card.querySelector('.approval-head').innerHTML = 'Rechazada — el Mensajero no envió nada';
+        card.querySelector('.approval-actions').style.display = 'none';
+        card.querySelector('.approval-expires').style.display = 'none';
+      }
 
-      <!-- Terminal vivo del venue: qué hace el agente en la máquina, en tiempo real -->
-      <div class="venue-term">
-        <div class="venue-term-bar">
-          <div class="venue-term-title">
-            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m4 17 6-5-6-5M12 19h8"/></svg>
-            investigador · mac-mini-local · docker unik-venue-01
-          </div>
-          <span class="venue-term-elapsed" id="term-elapsed">+0:00</span>
-          <button class="venue-term-replay" onclick="termReplay()" title="Repetir" aria-label="Repetir actividad">
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>
-          </button>
-        </div>
-        <div class="venue-term-log" id="term-log"></div>
-      </div>
-    </div>
-
-    <!-- Misiones activas -->
-    <div class="ops-section">
-      <div class="ops-title">
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/></svg>
-        Misiones activas
-      </div>
-      <div class="ops-item">
-        <div class="ops-item-icon">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/></svg>
-        </div>
-        <div class="ops-item-body">
-          <div class="ops-item-title">Ubicación de unidades + reporte a Roberto</div>
-          <div class="ops-item-sub">2/3 tareas · esperando tu aprobación</div>
-          <div class="mini-progress"><i style="width: 66%;"></i></div>
-        </div>
-        <span class="ops-item-time">ahora</span>
-      </div>
-      <div class="ops-item">
-        <div class="ops-item-icon" style="background: var(--unik-info-bg); color: var(--unik-info);">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
-        </div>
-        <div class="ops-item-body">
-          <div class="ops-item-title">Contenido campaña octubre + 3 propuestas Higgsfield</div>
-          <div class="ops-item-sub">Programada · arranca mañana 8:00 AM</div>
-        </div>
-        <span class="ops-item-time">prog.</span>
-      </div>
-    </div>
-
-    <!-- Vigilancias -->
-    <div class="ops-section">
-      <div class="ops-title">
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>
-        Vigilancias
-      </div>
-      <div class="ops-item">
-        <div class="ops-item-icon" style="background: var(--unik-warning-bg); color: var(--unik-warning);">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/></svg>
-        </div>
-        <div class="ops-item-body">
-          <div class="ops-item-title">U-04 fuera de geocerca</div>
-          <div class="ops-item-sub">cada 15 min · avisa si no regresa en 1 h</div>
-        </div>
-        <span class="ops-item-time">15 min</span>
-      </div>
-      <div class="ops-item">
-        <div class="ops-item-icon">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
-        </div>
-        <div class="ops-item-body">
-          <div class="ops-item-title">Cierre de tickets de venta</div>
-          <div class="ops-item-sub">diario · 6:00 PM</div>
-        </div>
-        <span class="ops-item-time">6:00 PM</span>
-      </div>
-      <div class="ops-item">
-        <div class="ops-item-icon">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
-        </div>
-        <div class="ops-item-body">
-          <div class="ops-item-title">Briefing de ventas matutino</div>
-          <div class="ops-item-sub">diario · 8:00 AM · te llega aquí</div>
-        </div>
-        <span class="ops-item-time">8:00 AM</span>
-      </div>
-    </div>
-
-    <!-- Aprobaciones -->
-    <div class="ops-section">
-      <div class="ops-title">
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2 4 6v6c0 5 3.5 8.5 8 10 4.5-1.5 8-5 8-10V6l-8-4z"/><path d="m9 12 2 2 4-4"/></svg>
-        Aprobaciones
-        <span class="count-badge">1</span>
-      </div>
-      <div class="ops-item">
-        <div class="ops-item-icon" style="background: var(--unik-warning-bg); color: var(--unik-warning);">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-        </div>
-        <div class="ops-item-body">
-          <div class="ops-item-title">WhatsApp → Roberto Camacho</div>
-          <div class="ops-item-sub">Mensajero · envío externo · espera tu OK</div>
-        </div>
-        <span class="ops-item-time">ahora</span>
-      </div>
-    </div>
-
-    <!-- Costo -->
-    <div class="ops-section" style="border-bottom: none;">
-      <div class="ops-title">
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 6v12M15 9.5c0-1.4-1.3-2.5-3-2.5s-3 1-3 2.3c0 3.2 6 1.7 6 4.9 0 1.3-1.3 2.3-3 2.3s-3-1.1-3-2.5"/></svg>
-        Costo del equipo hoy
-      </div>
-      <div style="display: flex; justify-content: space-between; font-size: var(--unik-text-xs); color: var(--unik-text-secondary);">
-        <span>Decisiones (Jev)</span><span class="mono">$0.011</span>
-      </div>
-      <div style="display: flex; justify-content: space-between; font-size: var(--unik-text-xs); color: var(--unik-text-secondary); margin-top: 4px;">
-        <span>LLMs (OpenRouter)</span><span class="mono">$0.032</span>
-      </div>
-      <div style="display: flex; justify-content: space-between; font-size: var(--unik-text-xs); color: var(--unik-text-secondary); margin-top: 4px;">
-        <span>Venue (Mac Mini)</span><span class="mono">$0.00</span>
-      </div>
-      <div class="mini-progress" style="margin-top: 8px;"><i style="width: 4%; background: var(--unik-success);"></i></div>
-      <div class="ops-item-sub" style="margin-top: 4px;">$0.043 de $25.00 de presupuesto del día</div>
-    </div>
-  </aside>
-</div>
-
-<!-- ===================== TWEAKS ===================== -->
-<button class="tweaks-fab" onclick="document.getElementById('tweaks').classList.toggle('open')" aria-label="Tweaks">
-  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></svg>
-</button>
-<div class="tweaks-panel" id="tweaks">
-  <div class="tweaks-title">Tweaks</div>
-  <div class="tweak-row">
-    <span class="tweak-label">Tema</span>
-    <div class="tweak-opts">
-      <button class="tweak-opt on" onclick="setTheme(false, this)">Claro</button>
-      <button class="tweak-opt" onclick="setTheme(true, this)">Oscuro</button>
-    </div>
-  </div>
-  <div class="tweak-row">
-    <span class="tweak-label">Densidad</span>
-    <div class="tweak-opts">
-      <button class="tweak-opt on" onclick="setDensity(false, this)">Normal</button>
-      <button class="tweak-opt" onclick="setDensity(true, this)">Compacta</button>
-    </div>
-  </div>
-  <div class="tweak-row">
-    <span class="tweak-label">Panel de operación</span>
-    <div class="tweak-opts">
-      <button class="tweak-opt on" onclick="setPanel(false, this)">Visible</button>
-      <button class="tweak-opt" onclick="setPanel(true, this)">Oculto</button>
-    </div>
-  </div>
-  <div class="tweak-row">
-    <span class="tweak-label">Modo del composer</span>
-    <div class="tweak-opts">
-      <button class="tweak-opt on" id="tw-mission" onclick="setMode('mission', true)">Misión</button>
-      <button class="tweak-opt" id="tw-msg" onclick="setMode('msg', true)">Mensaje</button>
-    </div>
-  </div>
-</div>
-
-<style>
-.tdot { width: 6px; height: 6px; border-radius: 50%; background: var(--unik-text-muted); display: inline-block; animation: tb 1.2s infinite ease-in-out; }
-.tdot:nth-child(2) { animation-delay: 0.15s; } .tdot:nth-child(3) { animation-delay: 0.3s; }
-@keyframes tb { 0%,60%,100% { transform: translateY(0); opacity: 0.5; } 30% { transform: translateY(-4px); opacity: 1; } }
-</style>
-
-<script>
-function setTheme(dark, btn) {
-  document.documentElement.classList.toggle('dark', dark);
-  btn.parentElement.querySelectorAll('.tweak-opt').forEach(b => b.classList.remove('on'));
-  btn.classList.add('on');
-}
-function setDensity(compact, btn) {
-  document.body.classList.toggle('compact', compact);
-  btn.parentElement.querySelectorAll('.tweak-opt').forEach(b => b.classList.remove('on'));
-  btn.classList.add('on');
-}
-function setPanel(hidden, btn) {
-  document.body.classList.toggle('no-panel', hidden);
-  btn.parentElement.querySelectorAll('.tweak-opt').forEach(b => b.classList.remove('on'));
-  btn.classList.add('on');
-}
-function setMode(mode, fromTweaks) {
-  const isMission = mode === 'mission';
-  document.getElementById('mode-mission').classList.toggle('on', isMission);
-  document.getElementById('mode-msg').classList.toggle('on', !isMission);
-  document.getElementById('mode-note').textContent = isMission
-    ? 'La misión sigue trabajando aunque cierres esto — te avisa al terminar'
-    : 'Respuesta directa en este turno, como el asistente actual';
-  if (fromTweaks) {
-    document.getElementById('tw-mission').classList.toggle('on', isMission);
-    document.getElementById('tw-msg').classList.toggle('on', !isMission);
-  }
-}
-function approveWA() {
-  const card = document.getElementById('wa-approval');
-  card.classList.add('approved');
-  const t = document.getElementById('wa-done-text');
-  t.textContent = 'Aprobada — Mensajero enviando…';
-  setTimeout(() => { t.textContent = 'Enviada ✓ 9:42 AM · WhatsApp entregado'; }, 1400);
-}
-function rejectWA() {
-  const card = document.getElementById('wa-approval');
-  card.style.opacity = '0.55';
-  card.querySelector('.approval-head').innerHTML = 'Rechazada — el Mensajero no envió nada';
-  card.querySelector('.approval-actions').style.display = 'none';
-  card.querySelector('.approval-expires').style.display = 'none';
-}
-
-/* ===================== TERMINAL DEL VENUE =====================
+      /* ===================== TERMINAL DEL VENUE =====================
    Feed vivo de lo que el agente hace en la máquina virtual.
    Tipos de línea: cmd ($), act (›), ok (✓), warn (!), dim (…). */
-const TERM_SCRIPT = [
-  { t: 'dim', text: 'venue conectado · mac-mini-local · docker unik-venue-01', d: 300 },
-  { t: 'cmd', text: 'browser.open https://fleet.unik-gps.mx/login', type: true },
-  { t: 'ok', text: 'sesión restaurada — perfil cifrado "unik-gps" (credencial de bóveda, uso único)', d: 500 },
-  { t: 'act', text: 'click nav → "Unidades"', d: 700 },
-  { t: 'ok', text: 'tabla visible · 6 filas detectadas', d: 450 },
-  {
-    t: 'act', text: 'extract tabla → unidades.json', d: 600,
-    detail: '[\n  { "unidad": "U-01", "ubicacion": "Obra Malacate 110", "senal": "hace 1 min" },\n  { "unidad": "U-02", "ubicacion": "Bodega Central", "senal": "hace 2 min" },\n  { "unidad": "U-03", "ubicacion": "En ruta → Pie de obra Roma", "senal": "hace 1 min" },\n  { "unidad": "U-04", "ubicacion": "Av. de las Torres 1200", "senal": "hace 4 min" },\n  { "unidad": "U-05", "ubicacion": "Obra Malacate 110", "senal": "hace 3 min" },\n  { "unidad": "U-06", "ubicacion": "Bodega Central", "senal": "hace 2 min" }\n]'
-  },
-  { t: 'ok', text: '6 unidades · última señal < 4 min', d: 400 },
-  { t: 'act', text: 'eval geocercas contra polígonos de obra', d: 800 },
-  { t: 'warn', text: 'U-04 fuera de geocerca "Malacate 110" — detenida 38 min', d: 700 },
-  { t: 'act', text: 'screenshot → artifacts/mission-47/unidades.png', d: 500 },
-  { t: 'ok', text: 'resultado entregado a UNIK Central · task completada', d: 600 },
-  { t: 'dim', text: 'vigilancia registrada: check U-04 cada 15 min', d: 400 },
-];
-const termLog = document.getElementById('term-log');
-const termElapsedEl = document.getElementById('term-elapsed');
-let termTimer = null, elapsedTimer = null, termStart = 0;
+      const TERM_SCRIPT = [
+        { t: 'dim', text: 'venue conectado · mac-mini-local · docker unik-venue-01', d: 300 },
+        { t: 'cmd', text: 'browser.open https://fleet.unik-gps.mx/login', type: true },
+        {
+          t: 'ok',
+          text: 'sesión restaurada — perfil cifrado "unik-gps" (credencial de bóveda, uso único)',
+          d: 500,
+        },
+        { t: 'act', text: 'click nav → "Unidades"', d: 700 },
+        { t: 'ok', text: 'tabla visible · 6 filas detectadas', d: 450 },
+        {
+          t: 'act',
+          text: 'extract tabla → unidades.json',
+          d: 600,
+          detail:
+            '[\n  { "unidad": "U-01", "ubicacion": "Obra Malacate 110", "senal": "hace 1 min" },\n  { "unidad": "U-02", "ubicacion": "Bodega Central", "senal": "hace 2 min" },\n  { "unidad": "U-03", "ubicacion": "En ruta → Pie de obra Roma", "senal": "hace 1 min" },\n  { "unidad": "U-04", "ubicacion": "Av. de las Torres 1200", "senal": "hace 4 min" },\n  { "unidad": "U-05", "ubicacion": "Obra Malacate 110", "senal": "hace 3 min" },\n  { "unidad": "U-06", "ubicacion": "Bodega Central", "senal": "hace 2 min" }\n]',
+        },
+        { t: 'ok', text: '6 unidades · última señal < 4 min', d: 400 },
+        { t: 'act', text: 'eval geocercas contra polígonos de obra', d: 800 },
+        { t: 'warn', text: 'U-04 fuera de geocerca "Malacate 110" — detenida 38 min', d: 700 },
+        { t: 'act', text: 'screenshot → artifacts/mission-47/unidades.png', d: 500 },
+        { t: 'ok', text: 'resultado entregado a UNIK Central · task completada', d: 600 },
+        { t: 'dim', text: 'vigilancia registrada: check U-04 cada 15 min', d: 400 },
+      ];
+      const termLog = document.getElementById('term-log');
+      const termElapsedEl = document.getElementById('term-elapsed');
+      let termTimer = null,
+        elapsedTimer = null,
+        termStart = 0;
 
-function fmtElapsed(ms) {
-  const s = Math.floor(ms / 1000);
-  return `+${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
-}
+      function fmtElapsed(ms) {
+        const s = Math.floor(ms / 1000);
+        return `+${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+      }
 
-function termLine(entry) {
-  const line = document.createElement('div');
-  line.className = 'term-line' + (entry.detail ? ' has-detail' : '');
-  const mark = { cmd: '$', act: '›', ok: '✓', warn: '!', dim: '…' }[entry.t] || '·';
-  const cls = { cmd: 't-prompt', act: 't-act', ok: 't-ok', warn: 't-warn', dim: 't-dim' }[entry.t];
-  line.innerHTML = `<span class="${cls}">${mark}</span><span></span>`;
-  const textEl = line.children[1];
-  termLog.appendChild(line);
-  let detailEl = null;
-  if (entry.detail) {
-    detailEl = document.createElement('div');
-    detailEl.className = 'term-detail';
-    detailEl.textContent = entry.detail;
-    termLog.appendChild(detailEl);
-    line.addEventListener('click', () => {
-      line.classList.toggle('expanded');
-      detailEl.classList.toggle('show');
-    });
-  }
-  termLog.scrollTop = termLog.scrollHeight;
-  return { line, textEl };
-}
+      function termLine(entry) {
+        const line = document.createElement('div');
+        line.className = 'term-line' + (entry.detail ? ' has-detail' : '');
+        const mark = { cmd: '$', act: '›', ok: '✓', warn: '!', dim: '…' }[entry.t] || '·';
+        const cls = { cmd: 't-prompt', act: 't-act', ok: 't-ok', warn: 't-warn', dim: 't-dim' }[
+          entry.t
+        ];
+        line.innerHTML = `<span class="${cls}">${mark}</span><span></span>`;
+        const textEl = line.children[1];
+        termLog.appendChild(line);
+        let detailEl = null;
+        if (entry.detail) {
+          detailEl = document.createElement('div');
+          detailEl.className = 'term-detail';
+          detailEl.textContent = entry.detail;
+          termLog.appendChild(detailEl);
+          line.addEventListener('click', () => {
+            line.classList.toggle('expanded');
+            detailEl.classList.toggle('show');
+          });
+        }
+        termLog.scrollTop = termLog.scrollHeight;
+        return { line, textEl };
+      }
 
-async function termType(textEl, text) {
-  for (const ch of text) {
-    textEl.textContent += ch;
-    termLog.scrollTop = termLog.scrollHeight;
-    await new Promise(r => setTimeout(r, 18));
-  }
-}
+      async function termType(textEl, text) {
+        for (const ch of text) {
+          textEl.textContent += ch;
+          termLog.scrollTop = termLog.scrollHeight;
+          await new Promise((r) => setTimeout(r, 18));
+        }
+      }
 
-async function termRun() {
-  termLog.innerHTML = '';
-  termStart = Date.now();
-  clearInterval(elapsedTimer);
-  elapsedTimer = setInterval(() => { termElapsedEl.textContent = fmtElapsed(Date.now() - termStart); }, 1000);
+      async function termRun() {
+        termLog.innerHTML = '';
+        termStart = Date.now();
+        clearInterval(elapsedTimer);
+        elapsedTimer = setInterval(() => {
+          termElapsedEl.textContent = fmtElapsed(Date.now() - termStart);
+        }, 1000);
 
-  for (const entry of TERM_SCRIPT) {
-    const { textEl } = termLine(entry);
-    if (entry.type) await termType(textEl, entry.text);
-    else textEl.textContent = entry.text;
-    await new Promise(r => setTimeout(r, entry.d ?? 350));
-  }
-  // Cursor vivo al final: el agente sigue ahí, esperando el siguiente paso.
-  const idle = document.createElement('div');
-  idle.className = 'term-line term-idle';
-  idle.innerHTML = '<span class="t-dim">…</span><span>esperando siguiente paso del Central <span class="term-cursor"></span></span>';
-  termLog.appendChild(idle);
-  termLog.scrollTop = termLog.scrollHeight;
-}
+        for (const entry of TERM_SCRIPT) {
+          const { textEl } = termLine(entry);
+          if (entry.type) await termType(textEl, entry.text);
+          else textEl.textContent = entry.text;
+          await new Promise((r) => setTimeout(r, entry.d ?? 350));
+        }
+        // Cursor vivo al final: el agente sigue ahí, esperando el siguiente paso.
+        const idle = document.createElement('div');
+        idle.className = 'term-line term-idle';
+        idle.innerHTML =
+          '<span class="t-dim">…</span><span>esperando siguiente paso del Central <span class="term-cursor"></span></span>';
+        termLog.appendChild(idle);
+        termLog.scrollTop = termLog.scrollHeight;
+      }
 
-function termReplay() { termRun(); }
-termRun();
-</script>
-</body>
+      function termReplay() {
+        termRun();
+      }
+      termRun();
+    </script>
+  </body>
 </html>

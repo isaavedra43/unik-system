@@ -54,10 +54,6 @@ export interface SystemPromptContext {
   voice?: boolean;
   /** Current AI thread (excluded from the recent-context block). */
   conversationId?: string;
-  /** Set when running as the inbox copilot. */
-  inboxConversationId?: string;
-  /** Set when running as the internal-chat copilot. */
-  chatChannelId?: string;
 }
 
 export async function buildSystemPrompt(
@@ -87,10 +83,7 @@ export async function buildSystemPrompt(
     ? ''
     : await buildRecentContextPrompt(actor.id, context?.conversationId).catch(() => '');
   const recentBlock = recentContext ? `\n\n${recentContext}` : '';
-  const surfaceBlock = context?.inboxConversationId || context?.chatChannelId
-    ? ''
-    : `\n\n## Superficies donde vives
-- Eres la MISMA IA en el Asistente IA, en el copiloto de la Bandeja externa y en el copiloto del Chat interno: mismo contexto, misma memoria, mismas tools y mismas reglas de aprobación.
+  const surfaceBlock = `\n\n## Datos relacionados
 - Cuando el usuario mencione una conversación de bandeja o un canal del chat interno, puedes consultarlos con listInboxConversations/getConversationMessages y listChatChannels/getChatChannelMessages.`;
   const libraryBlock = `
 

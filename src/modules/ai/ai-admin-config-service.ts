@@ -255,9 +255,7 @@ export const DEFAULT_AI_SETTINGS: AiSettings = {
     'listUserMemory',
     'forgetMemory',
     'sendInternalChatMessage',
-    // Inbox copilot
-    'suggestNextActions',
-    'proposeInboxDraft',
+    // Bandeja omnicanal (gestión desde el asistente)
     'updateInboxConversation',
     'addInboxNote',
     // Comms (bandeja omnicanal) — disponibles también desde el asistente
@@ -268,12 +266,11 @@ export const DEFAULT_AI_SETTINGS: AiSettings = {
     'listCommitments',
     'createCommitment',
     'findDuplicateContacts',
-    // Internal chat copilot
+    // Internal chat
     'listChatChannels',
     'getChatChannelMessages',
     'searchChatMessages',
     'summarizeChatChannel',
-    'proposeChatDraft',
     'pinChatMessage',
     // Campaigns
     'listCampaigns',

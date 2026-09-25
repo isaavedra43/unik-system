@@ -1024,6 +1024,8 @@ model UserNotificationSettings {
 model AiConversation {
   id                  String       @id @default(cuid())
   userId              String
+  tenantId            String?
+  agentId             String?
   title               String       @default("Nueva conversación")
   context             Json?
   isStarred           Boolean      @default(false)
@@ -1089,6 +1091,8 @@ model AiToolCall {
   result     Json?
   durationMs Int       @default(0)
   success    Boolean   @default(true)
+  agentId    String?
+  tenantId   String?
   errorCode  String?
   createdAt  DateTime  @default(now())
   message    AiMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
@@ -1102,6 +1106,8 @@ model AiToolCall {
 model AiApiCall {
   id               String   @id @default(cuid())
   userId           String?
+  agentId          String?
+  tenantId         String?
   conversationId   String?
   deployment       String
   promptTokens     Int      @default(0)
@@ -2112,6 +2118,7 @@ model KnowledgeSource {
   approvedAt       DateTime?
   createdAt        DateTime                 @default(now())
   updatedAt        DateTime                 @updatedAt
+  tenantId         String?
   versions         KnowledgeSourceVersion[]
 
   @@index([status, visibility])
@@ -2503,6 +2510,8 @@ model ComposioToolkitPolicy {
 model VenueSession {
   id            String    @id @default(cuid())
   userId        String
+  tenantId      String?
+  agentId       String?
   /// daytona (más providers después)
   kind          String    @default("daytona")
   /// sandbox id del provider
@@ -2526,6 +2535,8 @@ model VenueSession {
 model BrowserProfile {
   id              String    @id @default(cuid())
   userId          String
+  tenantId        String?
+  agentId         String?
   /// etiqueta humana: "Plataforma GPS", "WhatsApp"
   name            String
   /// host al que aplica el perfil
@@ -2546,6 +2557,8 @@ model BrowserProfile {
 model AgentEpisode {
   id             String   @id @default(cuid())
   userId         String
+  tenantId       String?
+  agentId        String?
   conversationId String?
   /// "Pidió ventas en efectivo de hoy → 9 EFECTIVO + 15 EFECTIVO EN BODEGA"
   summary        String
@@ -2566,6 +2579,8 @@ model AgentEpisode {
 model AgentFact {
   id              String    @id @default(cuid())
   userId          String
+  tenantId        String?
+  agentId         String?
   /// "efectivo", "Roberto", "corte de caja"
   entity          String
   /// "incluye", "es", "horario"
@@ -2593,6 +2608,8 @@ model AgentFact {
 model AgentPlaybook {
   id           String   @id @default(cuid())
   userId       String
+  tenantId     String?
+  agentId      String?
   /// intención disparadora: "ventas en efectivo", "pendientes de entrega"
   trigger      String
   toolName     String
@@ -2612,26 +2629,30 @@ model AgentPlaybook {
 /// Objetivo persistente: el agente lo persigue hasta completarlo, con
 /// presupuesto, journal y reanudación entre turnos/sesiones.
 model Mission {
-  id             String         @id @default(cuid())
-  userId         String
-  conversationId String?
-  goal           String
+  id              String         @id @default(cuid())
+  userId          String
+  tenantId        String?
+  agentId         String?
+  /// misión delegada por el agente principal a un especialista
+  parentMissionId String?
+  conversationId  String?
+  goal            String
   /// planning | awaiting_approval | active | blocked | done | failed | cancelled
-  status         String         @default("planning")
+  status          String         @default("planning")
   /// pasos: [{title, status, toolHint?, result?}]
-  plan           Json?
+  plan            Json?
   /// tope de gasto vía UsageMeter
-  budgetUsd      Decimal?       @db.Decimal(10, 2)
-  spentUsd       Decimal        @default(0) @db.Decimal(10, 4)
+  budgetUsd       Decimal?       @db.Decimal(10, 2)
+  spentUsd        Decimal        @default(0) @db.Decimal(10, 4)
   /// cron expression para rutinas (Vigía): "0 20 * * *" = corte a las 8pm
-  schedule       String?
+  schedule        String?
   /// próxima corrida programada
-  nextRunAt      DateTime?
-  venueSessionId String?
-  createdAt      DateTime       @default(now())
-  updatedAt      DateTime       @updatedAt
-  completedAt    DateTime?
-  events         MissionEvent[]
+  nextRunAt       DateTime?
+  venueSessionId  String?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  completedAt     DateTime?
+  events          MissionEvent[]
 
   @@index([userId, status])
   @@index([status, nextRunAt])
@@ -2656,6 +2677,8 @@ model MissionEvent {
 model VenuePlaybook {
   id           String    @id @default(cuid())
   userId       String
+  tenantId     String?
+  agentId      String?
   /// "Revisión diaria GPS", "Descargar reporte Zoho"
   name         String
   /// [{action, args, expect?}] — browser.open/click/type/extract/exec…
@@ -2672,4 +2695,277 @@ model VenuePlaybook {
   updatedAt    DateTime  @updatedAt
 
   @@index([userId, status])
+}
+
+// =====================================================
+// UNIVERSO — runtime multiagente (aditivo; default = tenant 'unik')
+// =====================================================
+
+/// Empresa/organización. Todo lo del agente cuelga de aquí cuando UNIVERSO
+/// es multiempresa; hoy todas las filas viven en el tenant semilla 'unik'.
+model Tenant {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  status    String   @default("active")
+  createdAt DateTime @default(now())
+
+  @@index([status])
+}
+
+model TenantMembership {
+  id        String   @id @default(cuid())
+  tenantId  String
+  userId    String
+  /// owner | admin | member
+  role      String   @default("member")
+  createdAt DateTime @default(now())
+
+  @@unique([tenantId, userId])
+  @@index([userId])
+}
+
+/// Agente persistente del usuario: principal (fijado arriba, uno por usuario)
+/// o especialista (Cobranza, Investigador…). 'transient' = subagente de una
+/// sola tarea; conserva el AgentRun pero no una identidad en el sidebar.
+model Agent {
+  id               String   @id @default(cuid())
+  tenantId         String   @default("unik")
+  /// dueño humano — el agente nunca supera los permisos de este usuario
+  ownerUserId      String
+  /// principal | specialist | transient
+  kind             String   @default("specialist")
+  name             String
+  /// misión/rol en una línea (visible en el sidebar)
+  purpose          String?
+  /// system prompt propio del agente
+  persona          String?
+  /// avatar: icono lucide + color de la paleta de agentes
+  icon             String?
+  color            String?
+  currentVersionId String?
+  /// active | paused | archived
+  status           String   @default("active")
+  /// auto | notify | approval — autonomía por clase de efecto
+  autonomy         String   @default("approval")
+  /// shared | dedicated | ephemeral — computadora del agente
+  venuePolicy      String   @default("shared")
+  /// null = dejar al model-router decidir
+  modelDefault     String?
+  /// vacío = el mismo menú de tools que su dueño; solo puede reducir
+  toolAllowlist    String[] @default([])
+  budgetUsd        Decimal? @db.Decimal(10, 2)
+  /// day | week | month
+  budgetPeriod     String   @default("month")
+  /// profundidad de delegación: 0 = no puede crear subagentes
+  maxSpawnDepth    Int      @default(0)
+  /// principal = 0 (fijado arriba en el sidebar)
+  sortOrder        Int      @default(100)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([tenantId, ownerUserId, status, sortOrder])
+  @@index([ownerUserId, kind])
+}
+
+/// Versión inmutable de instrucciones + políticas. Cada corrida registra qué
+/// versión usó — responde "¿por qué hizo eso ayer?".
+model AgentVersion {
+  id              String   @id @default(cuid())
+  agentId         String
+  instructions    String
+  modelPolicy     Json?
+  toolPolicy      Json?
+  memoryPolicy    Json?
+  workspacePolicy Json?
+  approvalPolicy  Json?
+  maxDelegations  Int      @default(4)
+  createdAt       DateTime @default(now())
+
+  @@index([agentId, createdAt])
+}
+
+/// Capacidad concedida a un agente: 'tool:<name>' | 'effect:<effect>' |
+/// 'host:<dominio>'. Solo puede reducir lo que el dueño ya puede.
+model AgentGrant {
+  id         String   @id @default(cuid())
+  agentId    String
+  capability String
+  /// allow | deny | require_approval
+  decision   String   @default("allow")
+  /// {"perDay": 20, "maxAmount": 500}
+  limits     Json?
+  createdAt  DateTime @default(now())
+
+  @@unique([agentId, capability])
+}
+
+/// Una ejecución del runtime (turno de chat, paso de misión, task delegada,
+/// corrida de trigger). Es la unidad de trazabilidad, costo y cancelación.
+model AgentRun {
+  id              String    @id @default(cuid())
+  tenantId        String    @default("unik")
+  agentId         String
+  agentVersionId  String?
+  /// usuario que inició (o dueño del agente en runs disparados por trigger)
+  userId          String
+  conversationId  String?
+  /// jerarquía de delegación
+  parentRunId     String?
+  rootRunId       String
+  taskId          String?
+  missionId       String?
+  /// running | awaiting_approval | done | failed | cancelled | blocked
+  status          String    @default("running")
+  /// fast | standard | deep
+  route           String?
+  modelId         String?
+  reasoningEffort String?
+  tokensIn        Int       @default(0)
+  tokensOut       Int       @default(0)
+  modelCostUsd    Decimal   @default(0) @db.Decimal(10, 4)
+  toolsCostUsd    Decimal   @default(0) @db.Decimal(10, 4)
+  venueCostUsd    Decimal   @default(0) @db.Decimal(10, 4)
+  deadlineAt      DateTime?
+  traceId         String
+  /// LEGACY (orquestador actual) | V2 (agent-runtime)
+  runtime         String    @default("LEGACY")
+  error           String?
+  startedAt       DateTime  @default(now())
+  completedAt     DateTime?
+
+  @@index([tenantId, agentId, startedAt])
+  @@index([rootRunId])
+  @@index([status, startedAt])
+  @@index([conversationId])
+}
+
+/// Unidad delegable de trabajo. El planner del agente principal crea tasks;
+/// el graph-runner las ejecuta respetando dependsOn (DAG).
+model AgentTask {
+  id              String    @id @default(cuid())
+  tenantId        String    @default("unik")
+  rootRunId       String
+  parentRunId     String
+  /// null = subagente transitorio
+  assignedAgentId String?
+  objective       String
+  /// cápsula de delegación (≤ ~6k tokens): objective, why, constraints,
+  /// knownFacts, expectedOutput — nunca el historial completo
+  capsule         Json
+  expectedOutput  Json?
+  allowedTools    String[]  @default([])
+  forbiddenTools  String[]  @default([])
+  /// taskIds de los que depende (DAG)
+  dependsOn       String[]  @default([])
+  budgetUsd       Decimal?  @db.Decimal(10, 2)
+  deadlineAt      DateTime?
+  /// pending | ready | running | done | failed | cancelled | awaiting_approval
+  status          String    @default("pending")
+  result          Json?
+  /// evidencias: fuentes, artifacts, refs de tool calls
+  evidence        Json?
+  error           String?
+  createdAt       DateTime  @default(now())
+  completedAt     DateTime?
+
+  @@index([rootRunId, status])
+  @@index([status])
+  @@index([assignedAgentId])
+}
+
+/// Timeline append-only por run: run.created, model.started/completed,
+/// tool.started/completed, task.*, approval.*, workspace.*, run.completed.
+model AgentEvent {
+  id        String   @id @default(cuid())
+  runId     String
+  type      String
+  /// para anidar spans dentro del run
+  spanId    String?
+  payload   Json?
+  createdAt DateTime @default(now())
+
+  @@index([runId, createdAt])
+  @@index([type, createdAt])
+}
+
+/// Bus inter-agente: reportes de subagentes al principal (y al usuario).
+/// "Mensajes de Account Manager y Chief" en el chat del principal.
+model AgentMessage {
+  id             String    @id @default(cuid())
+  tenantId       String    @default("unik")
+  fromAgentId    String
+  /// null → llega al usuario a través del principal
+  toAgentId      String?
+  /// report | request | finding | handoff
+  kind           String    @default("report")
+  /// 1-2 líneas para el feed
+  summary        String
+  payload        Json?
+  /// conversación donde se muestra (la del principal por default)
+  conversationId String?
+  readAt         DateTime?
+  createdAt      DateTime  @default(now())
+
+  @@index([tenantId, toAgentId, readAt])
+  @@index([conversationId, createdAt])
+}
+
+/// Computadora lógica de un agente o workspace compartido. Debajo puede ser
+/// Daytona dedicada, la venue central del usuario o una ephemeral por run.
+model Workspace {
+  id             String   @id @default(cuid())
+  tenantId       String   @default("unik")
+  /// null = compartido del usuario (venue central)
+  agentId        String?
+  userId         String
+  /// shared | dedicated | ephemeral
+  kind           String   @default("shared")
+  venueSessionId String?
+  /// active | idle | released
+  status         String   @default("active")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([tenantId, agentId])
+  @@index([userId, kind, status])
+}
+
+/// Liga una ejecución con su workspace — el sandbox pertenece al run,
+/// no "al usuario" a secas.
+model WorkspaceLease {
+  id             String    @id @default(cuid())
+  workspaceId    String
+  agentRunId     String
+  venueSessionId String?
+  acquiredAt     DateTime  @default(now())
+  releasedAt     DateTime?
+
+  @@index([agentRunId])
+  @@index([workspaceId, releasedAt])
+}
+
+/// Disparador always-on: arranca AgentRuns/misiones por tiempo, evento,
+/// condición, webhook o mensaje — la IA entra solo cuando agrega valor.
+model Trigger {
+  id          String    @id @default(cuid())
+  tenantId    String    @default("unik")
+  agentId     String
+  /// time | event | condition | webhook | message | entity_change | manual
+  type        String
+  /// time: {cron, tz} · event/entity_change: {entity, filter} ·
+  /// condition: {source, query, threshold} · webhook: {secret}
+  spec        Json
+  /// {kind: 'run'|'mission', goal, capsule?}
+  action      Json
+  enabled     Boolean   @default(true)
+  nextRunAt   DateTime?
+  lastFiredAt DateTime?
+  /// idempotencia entre ticks/redeploys
+  dedupeKey   String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([enabled, nextRunAt])
+  @@index([tenantId, agentId])
 }

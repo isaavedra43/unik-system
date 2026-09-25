@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import { motion } from 'framer-motion';
 import {
   Check,
+  CheckCircle2,
   ChevronDown,
   ChevronRight,
   FileText,
@@ -16,8 +17,10 @@ import {
   Sparkles,
   Trash2,
   X,
+  XCircle,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { listItem } from '@/lib/motion';
 import type { CopilotProposal } from './copilot-types';
 
 /**
@@ -74,16 +77,41 @@ const TOOL_TITLE: Record<string, string> = {
   cleanupArtifacts: 'Limpiar archivos generados',
 };
 
-const spring = { type: 'spring', stiffness: 420, damping: 32, mass: 0.6 } as const;
+const DECIDED_LABEL: Record<string, string> = {
+  executed: 'Ejecutada',
+  rejected: 'Rechazada',
+  expired: 'Expirada',
+  invalidated: 'Ya no es válida',
+  failed: 'Falló',
+};
 
-function extractPreview(args: unknown): { body: string | null; recipients: string[]; attachments: number } {
-  const a = (args && typeof args === 'object' ? (args as Record<string, unknown>) : {}) as Record<string, unknown>;
-  const body = typeof a.body === 'string' ? a.body : typeof a.content === 'string' ? a.content : typeof a.message === 'string' ? a.message : typeof a.brief === 'string' ? a.brief : null;
+function extractPreview(args: unknown): {
+  body: string | null;
+  recipients: string[];
+  attachments: number;
+} {
+  const a = (args && typeof args === 'object' ? (args as Record<string, unknown>) : {}) as Record<
+    string,
+    unknown
+  >;
+  const body =
+    typeof a.body === 'string'
+      ? a.body
+      : typeof a.content === 'string'
+        ? a.content
+        : typeof a.message === 'string'
+          ? a.message
+          : typeof a.brief === 'string'
+            ? a.brief
+            : null;
   const recipients: string[] = [];
   if (typeof a.contact === 'string') recipients.push(a.contact);
   if (typeof a.toNumber === 'string') recipients.push(a.toNumber);
-  if (Array.isArray(a.recipients)) for (const r of a.recipients as Array<{ contact?: string }>) if (r?.contact) recipients.push(r.contact);
-  const att = a.attachments as { artifactIds?: unknown[]; knowledgeSourceIds?: unknown[] } | undefined;
+  if (Array.isArray(a.recipients))
+    for (const r of a.recipients as Array<{ contact?: string }>)
+      if (r?.contact) recipients.push(r.contact);
+  const att = a.attachments as
+    { artifactIds?: unknown[]; knowledgeSourceIds?: unknown[] } | undefined;
   const attachments = (att?.artifactIds?.length ?? 0) + (att?.knowledgeSourceIds?.length ?? 0);
   return { body, recipients, attachments };
 }
@@ -95,10 +123,20 @@ export function ProposalCard({ proposal, decide, onDecided, onHandoff }: Proposa
 
   const meta = EFFECT_META[proposal.effect] ?? EFFECT_META.internal_task;
   const preview = extractPreview(proposal.args);
-  const title = TOOL_TITLE[proposal.toolName] ?? proposal.toolName.replace(/([a-z])([A-Z])/g, '$1 $2');
+  const title =
+    TOOL_TITLE[proposal.toolName] ?? proposal.toolName.replace(/([a-z])([A-Z])/g, '$1 $2');
   const expires = new Date(proposal.expiresAt);
   const minutesLeft = Math.max(0, Math.round((expires.getTime() - Date.now()) / 60_000));
-  const expiresLabel = minutesLeft >= 1440 ? `${Math.round(minutesLeft / 1440)} d` : minutesLeft >= 60 ? `${Math.round(minutesLeft / 60)} h` : `${minutesLeft} min`;
+  const expiresLabel =
+    minutesLeft >= 1440
+      ? `${Math.round(minutesLeft / 1440)} d`
+      : minutesLeft >= 60
+        ? `${Math.round(minutesLeft / 60)} h`
+        : `${minutesLeft} min`;
+  const decided =
+    proposal.status && proposal.status !== 'pending'
+      ? (DECIDED_LABEL[proposal.status] ?? proposal.status)
+      : null;
 
   const run = async (decision: 'approve' | 'reject') => {
     setBusy(decision);
@@ -115,78 +153,118 @@ export function ProposalCard({ proposal, decide, onDecided, onHandoff }: Proposa
 
   return (
     <motion.div
-      className={cn('proposal-card', `tone-${meta.tone}`)}
+      className={cn('approval-card', `tone-${meta.tone}`, decided && 'is-done')}
       role="group"
       aria-label="Acción pendiente de aprobación"
-      initial={{ opacity: 0, y: 8, scale: 0.985 }}
-      animate={{ opacity: 1, y: 0, scale: 1 }}
-      transition={spring}
+      variants={listItem}
+      initial="initial"
+      animate="animate"
     >
-      <div className="proposal-head">
-        <span className="proposal-icon">{TOOL_ICON[proposal.toolName] ?? <ShieldAlert size={16} />}</span>
-        <div className="proposal-title">
-          <strong>{title}</strong>
-          <span className="proposal-subtitle">Necesita tu aprobación · caduca en {expiresLabel}</span>
+      <div className="approval-head">
+        <span className="approval-icon">
+          {decided ? (
+            decided === 'Rechazada' ? (
+              <XCircle size={16} />
+            ) : (
+              <CheckCircle2 size={16} />
+            )
+          ) : (
+            (TOOL_ICON[proposal.toolName] ?? <ShieldAlert size={16} />)
+          )}
+        </span>
+        <div className="approval-title">
+          <strong>{decided ?? 'Aprobación requerida'}</strong>
+          <span className="approval-subtitle">
+            {title}
+            {!decided && ` · caduca en ${expiresLabel}`}
+          </span>
         </div>
-        <span className={cn('proposal-effect', `is-${meta.tone}`)}>
+        <span className={cn('approval-effect', `is-${meta.tone}`)}>
           {meta.icon}
           {meta.label}
         </span>
       </div>
 
       {preview.recipients.length > 0 && (
-        <div className="proposal-row">
-          <span className="proposal-label">Para</span>
-          <span className="proposal-value">
+        <div className="approval-row">
+          <span className="approval-label">Para</span>
+          <span className="approval-value">
             {preview.recipients.slice(0, 4).join(', ')}
             {preview.recipients.length > 4 ? ` y ${preview.recipients.length - 4} más` : ''}
           </span>
         </div>
       )}
       {proposal.recipient && preview.recipients.length === 0 && (
-        <div className="proposal-row">
-          <span className="proposal-label">Destino</span>
-          <span className="proposal-value">{proposal.recipient}</span>
+        <div className="approval-row">
+          <span className="approval-label">Destino</span>
+          <span className="approval-value">{proposal.recipient}</span>
         </div>
       )}
       {preview.body ? (
-        <div className="proposal-message">{preview.body}</div>
+        <div className="approval-message">{preview.body}</div>
       ) : (
-        <div className="proposal-summary">{proposal.summary}</div>
+        <div className="approval-summary">{proposal.summary}</div>
       )}
       {preview.attachments > 0 && (
-        <div className="proposal-row">
-          <span className="proposal-label">Adjuntos</span>
-          <span className="proposal-value">{preview.attachments} archivo(s)</span>
+        <div className="approval-row">
+          <span className="approval-label">Adjuntos</span>
+          <span className="approval-value">{preview.attachments} archivo(s)</span>
         </div>
       )}
 
-      {proposal.args !== undefined && (
-        <button type="button" className="proposal-detail-toggle" onClick={() => setOpen((v) => !v)}>
+      {proposal.args !== undefined && !decided && (
+        <button type="button" className="approval-detail-toggle" onClick={() => setOpen((v) => !v)}>
           {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />} Ver detalle exacto
         </button>
       )}
-      {open && <pre className="proposal-pre">{JSON.stringify(proposal.args, null, 2)}</pre>}
+      {open && <pre className="approval-pre">{JSON.stringify(proposal.args, null, 2)}</pre>}
 
       {error && (
-        <div className="proposal-error" role="alert">
+        <div className="approval-error" role="alert">
           {error}
         </div>
       )}
 
-      <div className="proposal-actions">
-        {onHandoff && (
-          <button type="button" className="proposal-btn proposal-btn-ghost" disabled={busy !== null} onClick={onHandoff} title="Pasar el mensaje y los archivos al redactor para enviarlo tú">
-            <Import size={14} /> Al redactor
+      {!decided && (
+        <div className="approval-actions">
+          {onHandoff && (
+            <button
+              type="button"
+              className="proposal-btn proposal-btn-ghost"
+              disabled={busy !== null}
+              onClick={onHandoff}
+              title="Pasar el mensaje y los archivos al redactor para enviarlo tú"
+            >
+              <Import size={14} /> Al redactor
+            </button>
+          )}
+          <button
+            type="button"
+            className="proposal-btn proposal-btn-ghost"
+            disabled={busy !== null}
+            onClick={() => run('reject')}
+          >
+            {busy === 'reject' ? <Loader2 size={14} className="copilot-spin" /> : <X size={14} />}{' '}
+            Rechazar
           </button>
-        )}
-        <button type="button" className="proposal-btn proposal-btn-ghost" disabled={busy !== null} onClick={() => run('reject')}>
-          {busy === 'reject' ? <Loader2 size={14} className="copilot-spin" /> : <X size={14} />} Rechazar
-        </button>
-        <button type="button" className={cn('proposal-btn proposal-btn-primary', meta.tone === 'danger' && 'is-danger')} disabled={busy !== null} onClick={() => run('approve')}>
-          {busy === 'approve' ? <Loader2 size={14} className="copilot-spin" /> : <Check size={14} />} Aprobar y ejecutar
-        </button>
-      </div>
+          <button
+            type="button"
+            className={cn(
+              'proposal-btn proposal-btn-primary',
+              meta.tone === 'danger' && 'is-danger'
+            )}
+            disabled={busy !== null}
+            onClick={() => run('approve')}
+          >
+            {busy === 'approve' ? (
+              <Loader2 size={14} className="copilot-spin" />
+            ) : (
+              <Check size={14} />
+            )}{' '}
+            Aprobar y ejecutar
+          </button>
+        </div>
+      )}
     </motion.div>
   );
 }

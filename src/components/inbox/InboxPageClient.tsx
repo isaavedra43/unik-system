@@ -5,8 +5,6 @@ import { toast } from 'sonner';
 import { useSearchParams } from 'next/navigation';
 import { ConversationList } from './ConversationList';
 import { ConversationView } from './ConversationView';
-import { CopilotPanel } from './copilot/CopilotPanel';
-import type { ComposerAttachment } from './MessageComposer';
 import { NewConversationDialog } from './NewConversationDialog';
 import { useInboxRealtime } from './useInboxRealtime';
 import { useIsMobile } from './useIsMobile';
@@ -21,13 +19,13 @@ import {
 } from './inbox-types';
 
 /**
- * Omnichannel inbox: conversations (left), thread + composer (center) and the
- * AI copilot (right). On mobile one column is visible at a time.
+ * Omnichannel inbox: conversations (left), thread + composer (center).
+ * On mobile one column is visible at a time.
  * Realtime updates come from the generic SSE stream (team + user channels);
  * payloads only carry ids, so the client re-fetches what it shows.
  */
 
-type MobileView = 'list' | 'conversation' | 'ai';
+type MobileView = 'list' | 'conversation';
 
 const DEFAULT_FILTERS: InboxFilters = {
   accountId: '',
@@ -50,9 +48,7 @@ export function InboxPageClient({ user }: { user: InboxUserInfo }) {
   const [mobileView, setMobileView] = useState<MobileView>(() =>
     searchParams.get('conversation') ? 'conversation' : 'list'
   );
-  const [aiOpen, setAiOpen] = useState(true);
   const [draft, setDraft] = useState('');
-  const [attachSeed, setAttachSeed] = useState<ComposerAttachment | null>(null);
   const [threadVersion, setThreadVersion] = useState(0);
   const [newOpen, setNewOpen] = useState(false);
   const filtersRef = useRef(filters);
@@ -190,7 +186,6 @@ export function InboxPageClient({ user }: { user: InboxUserInfo }) {
 
   const showList = !isMobile || mobileView === 'list';
   const showConversation = !isMobile || mobileView === 'conversation';
-  const showAi = selected && (isMobile ? mobileView === 'ai' : aiOpen);
 
   return (
     <div className="chat-page" style={{ height: 'calc(100vh - var(--unik-topbar-height, 60px))' }}>
@@ -230,10 +225,6 @@ export function InboxPageClient({ user }: { user: InboxUserInfo }) {
                 threadVersion={threadVersion}
                 onConversationChanged={onConversationChanged}
                 onBack={isMobile ? () => setMobileView('list') : undefined}
-                onToggleAi={() => (isMobile ? setMobileView('ai') : setAiOpen((v) => !v))}
-                aiOpen={Boolean(showAi)}
-                insertAttachment={attachSeed}
-                onInsertAttachmentConsumed={() => setAttachSeed(null)}
               />
             ) : (
               <div
@@ -247,37 +238,6 @@ export function InboxPageClient({ user }: { user: InboxUserInfo }) {
               </div>
             )}
           </div>
-        )}
-        {showAi && selected && (
-          <aside
-            aria-label="Copiloto de IA"
-            style={{
-              width: isMobile ? '100%' : 'clamp(340px, 26vw, 400px)',
-              flexShrink: 0,
-              display: 'flex',
-              flexDirection: 'column',
-              minHeight: 0,
-              borderLeft: isMobile ? 'none' : '1px solid var(--unik-border)',
-              background: 'var(--unik-surface)',
-              overflow: 'hidden',
-            }}
-          >
-            <CopilotPanel
-              key={selected.id}
-              conversation={selected}
-              user={user}
-              onInsertDraft={(text) => {
-                setDraft(text);
-                if (isMobile) setMobileView('conversation');
-              }}
-              onInsertAttachment={(att) => {
-                setAttachSeed({ ...att, key: `${att.objectId}-${Date.now()}` });
-                if (isMobile) setMobileView('conversation');
-              }}
-              onRefreshConversation={() => refreshConversation(selected.id)}
-              onBack={isMobile ? () => setMobileView('conversation') : undefined}
-            />
-          </aside>
         )}
       </div>
       <NewConversationDialog
