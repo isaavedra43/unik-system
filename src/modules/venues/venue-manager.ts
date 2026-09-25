@@ -34,7 +34,10 @@ async function daytonaConfig(): Promise<DaytonaVenueConfig | null> {
   return {
     apiKey,
     apiUrl: process.env.DAYTONA_API_URL?.trim() || undefined,
-    image: settings.venueImage || 'unik-browser-1',
+    // No default snapshot: a named snapshot that doesn't exist in this Daytona
+    // account wastes a whole create attempt before the fallback. The browser
+    // stack is provisioned inside whatever image Daytona gives us.
+    image: settings.venueImage?.trim() || undefined,
     target: process.env.DAYTONA_TARGET?.trim() || undefined,
     autoStopMinutes: settings.venueIdleTimeoutMinutes || 15,
     domainAllowList: (settings.webDomainAllowlist ?? []).map((h) => h.trim().toLowerCase()).filter(Boolean),

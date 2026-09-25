@@ -64,14 +64,17 @@ export function workspaceEventsForTool(
   const res = result.success ? obj(result.result) : {};
   const summary = summarize(tool, args);
 
+  const softError = str(res.error);
   events.push({
     type: 'tool',
     payload: {
       tool,
-      ok: result.success,
+      // success:true also covers tools that returned {error} gracefully —
+      // show the red mark for those too, or every failure looks green.
+      ok: result.success && !softError && res.ok !== false,
       needsApproval: result.needsApproval === true,
       summary,
-      error: result.success ? undefined : str(result.error),
+      error: result.success ? softError : str(result.error),
     },
   });
 

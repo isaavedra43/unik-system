@@ -82,7 +82,7 @@ async function extractReadable(page) {
   });
 }
 
-async function act(body) {
+async function performAct(body) {
   const { action } = body;
   const timeoutMs = Math.min(Math.max(body.timeoutMs ?? 15_000, 1_000), 60_000);
 
@@ -212,6 +212,36 @@ async function act(body) {
     default:
       return { ok: false, error: `Acción desconocida: ${action}` };
   }
+}
+
+// Actions whose result must NOT get a screenshot appended (binary payloads of
+// their own, or pure state plumbing that shouldn't touch the page).
+const NO_FRAME_ACTIONS = new Set([
+  'screenshot', 'pdf', 'captureState', 'applyState', 'tabs', 'closeTab',
+  // Never frame right after a secret was typed — a card-number field renders
+  // its digits as plain text and the frame is persisted into event rows.
+  'useCredential',
+]);
+
+/**
+ * Every successful navigation/interaction returns the current frame so the
+ * user's "Pantalla" panel updates on each action — not only on explicit
+ * screenshots. Failures return the frame too when a page exists: seeing WHERE
+ * it failed is the point of a live view.
+ */
+async function act(body) {
+  const result = await performAct(body);
+  if (NO_FRAME_ACTIONS.has(body.action) || result.screenshotBase64) return result;
+  const page = activePage();
+  if (!page) return result;
+  try {
+    const buf = await page.screenshot({ type: 'jpeg', quality: 55 });
+    result.screenshotBase64 = buf.toString('base64');
+    result.url = result.url ?? page.url();
+  } catch {
+    // Frame capture is best-effort — never fail the action over a screenshot.
+  }
+  return result;
 }
 
 const server = http.createServer(async (req, res) => {

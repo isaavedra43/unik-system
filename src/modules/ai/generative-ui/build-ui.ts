@@ -107,7 +107,7 @@ const ARRAY_PRIORITY = [
   'list',
 ];
 const SKIP_FIELD =
-  /(^|_)(id|ids|etag|kind|node_id|sha|token|hash|key)$|^(id|etag|kind|labelIds|_omitted)$|url$|_url$|Url$/;
+  /(^|_)(id|ids|etag|kind|node_id|sha|token|hash|key)$|^(id|etag|kind|ok|success|labelIds|_omitted)$|url$|_url$|Url$|Base64$/;
 const NAME_LIKE = [
   'login',
   'name',
@@ -606,6 +606,33 @@ export function buildUiComponents(input: UiToolResultInput): UiComponent[] {
         ...extractUiFromData(result.structuredContent, humanize(toolName.split('__')[0] ?? ''))
       );
     }
+    return out.slice(0, MAX_UI_COMPONENTS_PER_TOOL);
+  }
+
+  // Web tools → record cards (title + snippet + link). This is what turns a
+  // "list of links" answer into browsable cards.
+  if (toolName === 'web_search' || toolName === 'web_research' || toolName === 'web_crawl') {
+    const heading = toolName === 'web_search' ? 'Resultados de internet'
+      : toolName === 'web_research' ? 'Fuentes consultadas'
+      : 'Páginas rastreadas';
+    const cards = extractUiFromData(result, 'Internet');
+    for (const c of cards) if ('heading' in c && !c.heading) c.heading = heading;
+    if (cards.length) return cards.slice(0, MAX_UI_COMPONENTS_PER_TOOL);
+    return out;
+  }
+  if (toolName === 'fetch_url') {
+    const cards = extractUiFromData(result, 'Internet');
+    for (const c of cards) if ('heading' in c && !c.heading) c.heading = 'Página leída';
+    if (cards.length) return cards.slice(0, MAX_UI_COMPONENTS_PER_TOOL);
+    return out;
+  }
+
+  // Generic fallback: any other tool result with record/table-shaped data gets
+  // cards too (ERP lookups, lists, KPIs). Defensive — non-shaped results just
+  // render nothing. Browser/venue tools are excluded: their live surface is
+  // the workspace panel, not chat cards.
+  if (!toolName.startsWith('browser') && !toolName.startsWith('venue')) {
+    out.push(...extractUiFromData(result, humanize(toolName)));
   }
   return out.slice(0, MAX_UI_COMPONENTS_PER_TOOL);
 }

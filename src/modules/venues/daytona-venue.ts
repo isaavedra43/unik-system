@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import type {
   Venue, VenueExecResult, VenueFileEntry, VenueScreenshot,
@@ -34,23 +34,35 @@ export interface DaytonaVenueConfig {
   domainAllowList?: string[];
 }
 
+/**
+ * Asset resolution — `__dirname` inside a bundled server chunk points at
+ * `.next/server/chunks/` where our .mjs/.sh files do NOT exist (nft only
+ * references the originals). Under `next start` the repo root is the cwd and
+ * `src/` stays on disk, so we try every candidate before giving up.
+ */
+function readAsset(name: string): string {
+  const candidates = [
+    path.join(__dirname, 'assets', name),
+    path.join(process.cwd(), 'src', 'modules', 'venues', 'assets', name),
+    path.join(process.cwd(), 'modules', 'venues', 'assets', name),
+  ];
+  for (const p of candidates) {
+    if (existsSync(p)) return readFileSync(p, 'utf8');
+  }
+  throw new Error(`Asset del venue no encontrado: ${name} (buscado en ${candidates.join(', ')})`);
+}
+
 let controllerScriptCache: string | null = null;
 function controllerScript(): string {
   if (controllerScriptCache) return controllerScriptCache;
-  controllerScriptCache = readFileSync(
-    path.join(__dirname, 'assets', 'browser-controller.mjs'),
-    'utf8'
-  );
+  controllerScriptCache = readAsset('browser-controller.mjs');
   return controllerScriptCache;
 }
 
 let provisionScriptCache: string | null = null;
 function provisionScript(): string {
   if (provisionScriptCache) return provisionScriptCache;
-  provisionScriptCache = readFileSync(
-    path.join(__dirname, 'assets', 'provision.sh'),
-    'utf8'
-  );
+  provisionScriptCache = readAsset('provision.sh');
   return provisionScriptCache;
 }
 
@@ -128,21 +140,39 @@ export class DaytonaVenue implements Venue {
       await sandbox.start(60);
     }
     const venue = new DaytonaVenue(sessionId, sandbox, client, controllerToken, null);
-    // Controller may not be running (sandbox was stopped) — ensure it is.
+    // Fast path: the controller may still be alive — re-running the full
+    // provision+respawn on every /venue/state poll is expensive churn, and a
+    // second `node browser-controller.mjs` clobbers controller.log via EADDRINUSE.
+    if (await venue.controllerHealthy()) return venue;
     await venue.startController().catch(() => null);
     return venue;
   }
 
+  /** Cheap probe — is the in-sandbox controller already serving /health? */
+  private async controllerHealthy(): Promise<boolean> {
+    try {
+      const base = await this.controllerUrl();
+      const res = await this.controllerFetch(`${base}/health`, { signal: AbortSignal.timeout(8_000) });
+      return res.ok;
+    } catch {
+      return false;
+    }
+  }
+
   private chromePath = '/usr/bin/chromium';
+  /** Last provisioning/health diagnostics — surfaced in browserAct errors so
+   *  the model can report WHY instead of a generic "VM error". */
+  private lastDiag = '';
 
   private async startController(): Promise<void> {
     await this.sandbox.fs.createFolder(CONTROLLER_REMOTE_DIR, '755').catch(() => undefined);
     await this.sandbox.fs.uploadFile(Buffer.from(provisionScript(), 'utf8'), PROVISION_REMOTE_PATH);
     await this.sandbox.fs.uploadFile(Buffer.from(controllerScript(), 'utf8'), CONTROLLER_REMOTE_PATH);
 
-    // Provision the browser stack (playwright-core + chromium). Stock sandbox
-    // images don't ship them; without this the controller can't even import.
-    // Bounded and best-effort — non-browser tools (exec/files) don't need it.
+    // Provision the browser stack (node, playwright-core + chromium). Stock
+    // sandbox images may lack them; without this the controller can't even
+    // import. Bounded and best-effort — non-browser tools don't need it.
+    let provTail = '';
     try {
       const prov = await this.sandbox.process.executeCommand(
         `bash ${PROVISION_REMOTE_PATH}`,
@@ -150,11 +180,13 @@ export class DaytonaVenue implements Venue {
         {},
         280
       );
+      provTail = (prov.result ?? '').slice(-800);
       const m = /UNIK_CHROME_PATH=(\S+)/.exec(prov.result ?? '');
       if (m?.[1]) this.chromePath = m[1];
-    } catch {
-      // Provision timed out or failed — health check below reports the rest.
+    } catch (e) {
+      provTail = `provision lanzó excepción: ${e instanceof Error ? e.message : e}`;
     }
+    this.lastDiag = provTail;
 
     // Start detached so executeCommand returns immediately.
     await this.sandbox.process.executeCommand(
@@ -175,14 +207,16 @@ export class DaytonaVenue implements Venue {
       }
       await new Promise((r) => setTimeout(r, 700));
     }
-    // Not fatal — browser acts will retry the URL lazily. Surface why, though:
-    // the caller/user needs the real reason (missing chromium, OOM, etc).
+    // Not fatal — browser acts will retry lazily (attach re-runs this). But
+    // capture WHY now: controller.log tail + provision output tell the real
+    // story (missing node, apt denied, allowlist blocking npm, etc).
     try {
       const diag = await this.exec(
-        `tail -20 ${CONTROLLER_REMOTE_DIR}/controller.log; node --version 2>&1; command -v chromium; ls ${CONTROLLER_REMOTE_DIR}/node_modules 2>/dev/null | head`,
+        `tail -20 ${CONTROLLER_REMOTE_DIR}/controller.log 2>/dev/null; echo "---"; node --version 2>&1; command -v chromium || echo no-chromium`,
         { timeoutSec: 15 }
       );
-      console.error('[venue] browser controller did not reach health:', diag.stdout.slice(0, 800));
+      this.lastDiag = `${diag.stdout.slice(0, 500)} | prov: ${provTail.slice(-300)}`;
+      console.error('[venue] browser controller did not reach health:', this.lastDiag);
     } catch { /* diagnostics are best-effort */ }
   }
 
@@ -200,7 +234,7 @@ export class DaytonaVenue implements Venue {
         'x-unik-token': this.controllerToken,
         ...(init?.headers ?? {}),
       },
-      signal: AbortSignal.timeout(ACT_TIMEOUT_MS),
+      signal: init?.signal ?? AbortSignal.timeout(ACT_TIMEOUT_MS),
     });
   }
 
@@ -237,6 +271,17 @@ export class DaytonaVenue implements Venue {
   }
 
   async screenshot(): Promise<VenueScreenshot> {
+    // The meaningful "screen" is the browser page — the desktop screenshot only
+    // works on desktop-enabled images; stock sandboxes are headless and return
+    // a black/empty frame. Browser first, desktop as fallback.
+    try {
+      const pageShot = await this.browserAct({ action: 'screenshot' });
+      if (pageShot.ok && pageShot.screenshotBase64) {
+        return { imageBase64: pageShot.screenshotBase64, mimeType: 'image/jpeg' };
+      }
+    } catch {
+      // controller down — fall through to the desktop frame
+    }
     const shot = await this.sandbox.computerUse.screenshot.takeCompressed({
       showCursor: true,
       format: 'jpeg',
@@ -247,11 +292,22 @@ export class DaytonaVenue implements Venue {
   }
 
   async browserAct(input: BrowserActInput): Promise<BrowserActResult> {
-    const base = await this.controllerUrl();
-    const res = await this.controllerFetch(`${base}/act`, {
-      method: 'POST',
-      body: JSON.stringify(input),
-    });
+    let res: Response;
+    try {
+      const base = await this.controllerUrl();
+      res = await this.controllerFetch(`${base}/act`, {
+        method: 'POST',
+        body: JSON.stringify(input),
+      });
+    } catch {
+      // Controller unreachable — still provisioning or it died. Include the
+      // last diagnostic so the model can tell the user the real cause.
+      const why = this.lastDiag ? ` Detalle: ${this.lastDiag.slice(0, 300)}` : '';
+      return {
+        ok: false,
+        error: `El navegador de la VM aún no responde (aprovisionando o el controlador falló al arrancar). Reintenta en unos segundos; si persiste, la sesión se recreará.${why}`,
+      };
+    }
     const data = (await res.json().catch(() => null)) as BrowserActResult | null;
     if (!data) return { ok: false, error: `Controller respondió ${res.status}` };
     if (data.screenshotBase64 && data.screenshotBase64.length > 8_000_000) {
