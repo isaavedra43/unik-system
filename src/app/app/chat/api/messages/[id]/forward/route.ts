@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { getCurrentSession, hasPermission } from '@/modules/auth/authorization';
 import { forwardMessage } from '@/modules/chat/chat-service';
+import { apiErrorResponse } from '@/lib/api-error';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -31,9 +32,6 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const messages = await forwardMessage(session.user, id, parsed.data.targetChannelIds);
     return NextResponse.json({ data: messages });
   } catch (err) {
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Error' },
-      { status: 400 }
-    );
+    return apiErrorResponse(err, { status: 400, safeNames: ['ChatError'], context: 'chat' });
   }
 }

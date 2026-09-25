@@ -38,7 +38,8 @@ export type ToolCategory =
   | 'knowledge'
   | 'communication'
   | 'web'
-  | 'venue';
+  | 'venue'
+  | 'media';
 
 /** Effect categories defined by UNIK after review (never by the tool itself). */
 export type ToolEffect =

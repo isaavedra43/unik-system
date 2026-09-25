@@ -15,7 +15,7 @@ import { prisma } from '@/lib/prisma';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-/** GET → { configured, policies, roles, catalog? }. `?search=` also queries the Composio catalog. */
+/** GET → { configured, policies, roles, catalog? }. `?search=` filters the full Composio catalog server-side. */
 export async function GET(request: NextRequest) {
   const auth = await requireExtensionsViewer();
   if ('response' in auth) return auth.response;
@@ -26,7 +26,8 @@ export async function GET(request: NextRequest) {
       listPolicies(),
       prisma.role.findMany({ select: { key: true, name: true }, orderBy: { name: 'asc' } }),
     ]);
-    const catalog = configured ? await listCatalogToolkits(search ?? undefined, 60) : [];
+    // Full catalog — the extensions grid renders every toolkit Composio offers.
+    const catalog = configured ? await listCatalogToolkits(search ?? undefined) : [];
     return NextResponse.json({ configured, policies, roles, catalog });
   } catch (err) {
     return composioErrorResponse(err);

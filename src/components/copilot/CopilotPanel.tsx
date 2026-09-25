@@ -741,7 +741,7 @@ export function CopilotPanel({ surface, user, onInsertDraft, onInsertAttachment,
           meta: m.meta ?? null,
           feedback: m.feedback ?? null,
           confidence: m.meta?.confidence ?? parsedText.level ?? null,
-          confidenceNote: m.meta?.confidenceNote ?? parsedText.note ?? null,
+          confidenceNote: m.meta?.sourcesLabel ?? m.meta?.confidenceNote ?? parsedText.note ?? null,
         };
       })
       .filter((x): x is NonNullable<typeof x> => x !== null);

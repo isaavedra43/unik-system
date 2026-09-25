@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useState, useCallback } from 'react';
-import { Save, AlertCircle, CheckCircle2, Key, Cloud, Cpu, Check, Globe } from 'lucide-react';
+import { Save, AlertCircle, CheckCircle2, Key, Cloud, Cpu, Check, Globe, Activity, XCircle } from 'lucide-react';
 import { updateAiConfigAction, toggleAiEnabledAction } from '@/app/app/admin/assistant/actions';
 import { CANOPY_PLAN_MODELS, CanopyWaveSetup } from './CanopyWaveSetup';
 import { ModelPolicyConfig } from './ModelPolicyConfig';
@@ -11,6 +11,12 @@ interface AiConfigData {
   key: string;
   isEnabled: boolean;
   settings: Record<string, unknown>;
+  capabilities?: Array<{
+    id: string;
+    label: string;
+    ok: boolean;
+    checks: Array<{ label: string; ok: boolean }>;
+  }>;
   createdAt: string;
   updatedAt: string;
 }
@@ -52,7 +58,7 @@ const SETTING_FIELDS: Array<{ key: string; label: string; type: 'number' | 'stri
   { key: 'maxConversationMessages', label: 'Mensajes en contexto', type: 'number' },
   { key: 'maxToolIterations', label: 'Iteraciones de tools', type: 'number' },
   { key: 'systemPromptOverride', label: 'System prompt override', type: 'textarea', hint: 'Vacío = usar prompt default' },
-  { key: 'enabledTools', label: 'Tools habilitados (uno por línea)', type: 'list', hint: 'Para internet/venue agrega: web_search, fetch_url, web_crawl, browser, browserProfile, venueExec, venueReadFile, venueListFiles, venueWriteFile, venueScreenshot' },
+  { key: 'enabledTools', label: 'Tools habilitados (uno por línea)', type: 'list', hint: 'Para internet/venue agrega: web_search, web_research, fetch_url, web_crawl, browser, browserProfile, venueExec, venueReadFile, venueListFiles, venueWriteFile, venueScreenshot. Para media: analyzeImage, generateImage, generateVideo.' },
   { key: 'maxAttachmentSizeMb', label: 'Tamaño máx adjunto (MB)', type: 'number' },
   { key: 'allowedMimeTypes', label: 'MIME types permitidos (uno por línea)', type: 'list' },
   { key: 'artifactTtlHours', label: 'TTL artefactos (horas)', type: 'number' },
@@ -270,6 +276,35 @@ export function AssistantAdminConfig({ canManage }: { canManage: boolean }) {
           </button>
         )}
       </div>
+
+      {/* ===== Salud de capacidades — por qué el agente puede o no hacer X ===== */}
+      {(config.capabilities?.length ?? 0) > 0 && (
+        <div className="assistant-admin-config-section">
+          <h3 className="assistant-admin-section-title">
+            <Activity size={18} /> Salud de capacidades
+          </h3>
+          <p className="assistant-admin-config-hint" style={{ marginBottom: 12 }}>
+            Si el agente dice que no puede hacer algo, aquí ves qué eslabón falta. En rojo = el usuario lo pedirá y fallará.
+          </p>
+          <div className="capability-health-grid">
+            {config.capabilities!.map((cap) => (
+              <div key={cap.id} className={`capability-health-card ${cap.ok ? 'is-ok' : 'is-off'}`}>
+                <div className="capability-health-head">
+                  {cap.ok ? <CheckCircle2 size={15} /> : <XCircle size={15} />}
+                  <span>{cap.label}</span>
+                </div>
+                <ul className="capability-health-checks">
+                  {cap.checks.map((c, i) => (
+                    <li key={i} className={c.ok ? 'is-ok' : 'is-off'}>
+                      {c.ok ? <Check size={11} /> : <XCircle size={11} />} {c.label}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* ===== Sección: Multi-provider ===== */}
       <div className="assistant-admin-config-section">

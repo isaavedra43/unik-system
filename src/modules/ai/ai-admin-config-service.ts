@@ -349,6 +349,22 @@ export const DEFAULT_AI_SETTINGS: AiSettings = {
     'composioSearchTools',
     'composioConnect',
     'composioExecute',
+    // Memoria persistente del agente (episodios, hechos confirmados, playbooks)
+    'recallMemory',
+    'saveFact',
+    // Misiones y rutinas (objetivos persistentes, schedules daily:/every:)
+    'proposeMission',
+    'listMissions',
+    'missionStatus',
+    'controlMission',
+    // Playbooks grabables del venue (aprende un flujo web una vez, lo repite)
+    'saveVenuePlaybook',
+    'listVenuePlaybooks',
+    'runVenuePlaybook',
+    // Media: análisis de imágenes (visión) y generación vía extensiones
+    'analyzeImage',
+    'generateImage',
+    'generateVideo',
   ],
   maxAttachmentSizeMb: 25,
   allowedMimeTypes: [

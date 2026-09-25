@@ -85,12 +85,15 @@ export async function GET() {
   const config = await listAiConfig();
   const settings = (config.settings as Record<string, unknown>) ?? {};
   const safeSettings = sanitizeSettings(settings);
+  const { getCapabilityHealth } = await import('@/modules/ai/capability-health');
+  const capabilities = await getCapabilityHealth().catch(() => []);
 
   return NextResponse.json({
     id: config.id,
     key: config.key,
     isEnabled: config.isEnabled,
     settings: safeSettings,
+    capabilities,
     createdAt: config.createdAt.toISOString(),
     updatedAt: config.updatedAt.toISOString(),
   });

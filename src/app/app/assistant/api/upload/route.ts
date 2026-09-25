@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentSession, hasPermission } from '@/modules/auth/authorization';
 import { validateAttachment, uploadAttachmentBuffer } from '@/modules/ai/ai-attachments-service';
 import { prisma } from '@/lib/prisma';
-import { StorageError } from '@/modules/storage/storage-service';
+import { apiErrorResponse } from '@/lib/api-error';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -81,9 +81,6 @@ export async function POST(request: NextRequest) {
       status: result.status,
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Error desconocido';
-    const status = err instanceof StorageError ? err.status : 500;
-    if (status >= 500) console.error('[upload] Error:', message);
-    return NextResponse.json({ error: message }, { status });
+    return apiErrorResponse(err, { context: 'assistant-upload' });
   }
 }

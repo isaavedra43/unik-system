@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getCurrentSession, hasPermission } from '@/modules/auth/authorization';
 import { getPersonalStats } from '@/modules/chat/chat-stats-service';
+import { apiErrorResponse } from '@/lib/api-error';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -15,9 +16,6 @@ export async function GET() {
     const stats = await getPersonalStats(session.user.id);
     return NextResponse.json({ data: stats });
   } catch (err) {
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Error desconocido' },
-      { status: 400 }
-    );
+    return apiErrorResponse(err, { status: 400, safeNames: ['ChatError'], context: 'chat' });
   }
 }

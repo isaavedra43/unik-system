@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { getCurrentSession, hasPermission } from '@/modules/auth/authorization';
 import { listMessages, sendMessage } from '@/modules/chat/chat-service';
+import { apiErrorResponse } from '@/lib/api-error';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -21,10 +22,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     const result = await listMessages(id, session.user.id, { cursor, limit });
     return NextResponse.json(result);
   } catch (err) {
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Error' },
-      { status: 403 }
-    );
+    return apiErrorResponse(err, { status: 403, safeNames: ['ChatError'], context: 'chat' });
   }
 }
 
@@ -97,9 +95,6 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     });
     return NextResponse.json(message);
   } catch (err) {
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Error' },
-      { status: 400 }
-    );
+    return apiErrorResponse(err, { status: 400, safeNames: ['ChatError'], context: 'chat' });
   }
 }

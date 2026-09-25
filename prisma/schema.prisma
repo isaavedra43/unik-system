@@ -153,7 +153,6 @@ model SalesOrder {
   createdAt              DateTime         @default(now())
   updatedAt              DateTime         @updatedAt
   items                  SalesOrderItem[]
-  visualProjects         VisualProject[]
 
   @@index([salesOrderNumber])
   @@index([status])
@@ -206,11 +205,6 @@ model User {
   chatNotifPrefs       InternalChatNotificationPreference[]
   chatCallParticipants InternalChatCallParticipant[]
   chatCallsInitiated   InternalChatCall[]
-  visualProjects       VisualProject[]
-  visualAssets         VisualAsset[]
-  visualSurfaces       VisualSurface[]
-  visualProposals      VisualProposal[]
-  productMedia         ProductMedia[]
 
   @@index([isActive])
 }
@@ -375,8 +369,6 @@ model Contact {
   createdAt                 DateTime @default(now())
   updatedAt                 DateTime @updatedAt
 
-  visualProjects VisualProject[]
-
   @@index([contactType])
   @@index([contactName])
   @@index([companyName])
@@ -430,9 +422,6 @@ model Product {
   normalizedAt             DateTime  @default(now())
   createdAt                DateTime  @default(now())
   updatedAt                DateTime  @updatedAt
-
-  media           ProductMedia[]
-  visualProposals VisualProposal[]
 
   @@index([name])
   @@index([sku])
@@ -623,8 +612,8 @@ model AiUserDigest {
 /// first, stores the Zoho response as an IntegrationSnapshot and runs the same
 /// normalizer, so Zoho is always the source of truth (folios, totals, taxes).
 model Quote {
-  id                     String          @id @default(cuid())
-  zohoEstimateId         String          @unique
+  id                     String      @id @default(cuid())
+  zohoEstimateId         String      @unique
   estimateNumber         String?
   referenceNumber        String?
   status                 String?
@@ -634,18 +623,18 @@ model Quote {
   customerName           String?
   currencyId             String?
   currencyCode           String?
-  exchangeRate           Decimal?        @db.Decimal(18, 6)
-  subTotal               Decimal?        @db.Decimal(18, 4)
-  taxTotal               Decimal?        @db.Decimal(18, 4)
-  discountTotal          Decimal?        @db.Decimal(18, 4)
-  discount               Decimal?        @db.Decimal(18, 4)
+  exchangeRate           Decimal?    @db.Decimal(18, 6)
+  subTotal               Decimal?    @db.Decimal(18, 4)
+  taxTotal               Decimal?    @db.Decimal(18, 4)
+  discountTotal          Decimal?    @db.Decimal(18, 4)
+  discount               Decimal?    @db.Decimal(18, 4)
   discountType           String?
   isDiscountBeforeTax    Boolean?
   isInclusiveTax         Boolean?
-  shippingCharge         Decimal?        @db.Decimal(18, 4)
-  adjustment             Decimal?        @db.Decimal(18, 4)
+  shippingCharge         Decimal?    @db.Decimal(18, 4)
+  adjustment             Decimal?    @db.Decimal(18, 4)
   adjustmentDescription  String?
-  total                  Decimal?        @db.Decimal(18, 4)
+  total                  Decimal?    @db.Decimal(18, 4)
   salespersonId          String?
   salespersonName        String?
   templateId             String?
@@ -673,18 +662,17 @@ model Quote {
   zohoCreatedTime        DateTime?
   zohoLastModifiedTime   DateTime?
   // UNIK authorship (null when the quote was created directly in Zoho)
-  createdInUnik          Boolean         @default(false)
+  createdInUnik          Boolean     @default(false)
   createdByUserId        String?
   lastEditedByUserId     String?
   lastEditedInUnikAt     DateTime?
   // Sync tracking
   sourceRemoteModifiedAt DateTime
   sourceSnapshotId       String
-  normalizedAt           DateTime        @default(now())
-  createdAt              DateTime        @default(now())
-  updatedAt              DateTime        @updatedAt
+  normalizedAt           DateTime    @default(now())
+  createdAt              DateTime    @default(now())
+  updatedAt              DateTime    @updatedAt
   items                  QuoteItem[]
-  visualProjects         VisualProject[]
 
   @@index([status])
   @@index([zohoCustomerId])
@@ -1674,10 +1662,6 @@ model StorageObject {
   aiAttachments   AiAttachment[]
   aiArtifacts     AiArtifact[]
   chatAttachments InternalChatAttachment[]
-  visualAssets    VisualAsset[]
-  visualMasks     VisualSurface[]
-  visualResults   VisualProposal[]
-  productMedia    ProductMedia[]
 
   @@unique([bucketAlias, objectKey])
   @@index([status])
@@ -2487,152 +2471,6 @@ model VoiceSupervision {
 
   @@index([callId])
   @@index([supervisorUserId])
-}
-
-// ---------------------------------------------------------------------------
-// Visual Studio — propuestas visuales de acabados sobre fotografías reales.
-// Las imágenes viven en StorageObject; estas tablas guardan el proyecto, las
-// máscaras de superficie (SAM 2) y las propuestas generadas (Higgsfield u otro
-// proveedor detrás del puerto de generación).
-// ---------------------------------------------------------------------------
-
-/// Un expediente visual: la fotografía de un espacio del cliente más sus
-/// superficies, propuestas y vínculos comerciales (contacto, cotización, orden).
-model VisualProject {
-  id           String           @id @default(cuid())
-  name         String
-  /// draft | active | presented | closed | archived
-  status       String           @default("draft")
-  notes        String?
-  contactId    String?
-  contact      Contact?         @relation(fields: [contactId], references: [id], onDelete: SetNull)
-  quoteId      String?
-  quote        Quote?           @relation(fields: [quoteId], references: [id], onDelete: SetNull)
-  salesOrderId String?
-  salesOrder   SalesOrder?      @relation(fields: [salesOrderId], references: [id], onDelete: SetNull)
-  createdById  String
-  createdBy    User             @relation(fields: [createdById], references: [id])
-  assets       VisualAsset[]
-  surfaces     VisualSurface[]
-  proposals    VisualProposal[]
-  createdAt    DateTime         @default(now())
-  updatedAt    DateTime         @updatedAt
-
-  @@index([status])
-  @@index([contactId])
-  @@index([quoteId])
-  @@index([createdById])
-}
-
-/// Una imagen del proyecto: la fotografía original del cliente, máscaras
-/// producidas por SAM 2, resultados de generación o referencias subidas.
-model VisualAsset {
-  id          String          @id @default(cuid())
-  projectId   String
-  project     VisualProject   @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  /// source | mask | result | reference
-  kind        String
-  objectId    String
-  object      StorageObject   @relation(fields: [objectId], references: [id])
-  width       Int?
-  height      Int?
-  label       String?
-  createdById String
-  createdBy   User            @relation(fields: [createdById], references: [id])
-  createdAt   DateTime        @default(now())
-  surfaces    VisualSurface[]
-
-  @@index([projectId, kind])
-  @@index([objectId])
-}
-
-/// Una superficie segmentada (cubierta, salpicadero, piso...). `promptSpec`
-/// guarda los clics/caja que originaron la máscara para poder refinarla;
-/// `maskHistory` acumula los objectIds anteriores para deshacer.
-model VisualSurface {
-  id           String           @id @default(cuid())
-  projectId    String
-  project      VisualProject    @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  assetId      String
-  asset        VisualAsset      @relation(fields: [assetId], references: [id], onDelete: Cascade)
-  label        String
-  /// Estado actual de la máscara (PNG en blanco/negro, tamaño de la fuente).
-  maskObjectId String
-  maskObject   StorageObject    @relation(fields: [maskObjectId], references: [id])
-  /// { points: [{x,y,positive}], box?: {x,y,w,h} } en coordenadas de imagen.
-  promptSpec   Json
-  /// objectIds de máscaras anteriores (más reciente al final) para undo.
-  maskHistory  Json             @default("[]")
-  status       String           @default("active")
-  createdById  String
-  createdBy    User             @relation(fields: [createdById], references: [id])
-  createdAt    DateTime         @default(now())
-  updatedAt    DateTime         @updatedAt
-  proposals    VisualProposal[]
-
-  @@index([projectId])
-  @@index([assetId])
-}
-
-/// Una propuesta generada: qué superficie, con qué material, en qué modo, qué
-/// proveedor/modelo corrió y dónde quedó el resultado. `version` crece por
-/// proyecto para el historial de propuestas.
-model VisualProposal {
-  id               String         @id @default(cuid())
-  projectId        String
-  project          VisualProject  @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  surfaceId        String?
-  surface          VisualSurface? @relation(fields: [surfaceId], references: [id], onDelete: SetNull)
-  productId        String?
-  product          Product?       @relation(fields: [productId], references: [id], onDelete: SetNull)
-  /// faithful (Modo A) | creative (Modo B)
-  mode             String
-  prompt           String
-  /// Proveedor de generación: "higgsfield" u otro registrado detrás del puerto.
-  provider         String
-  /// Modelo concreto del proveedor (p. ej. nano_banana_2).
-  model            String?
-  providerJobId    String?
-  costCredits      Decimal?       @db.Decimal(12, 4)
-  /// pending | processing | completed | failed | cancelled | awaiting_approval
-  status           String         @default("pending")
-  resultObjectId   String?
-  resultObject     StorageObject? @relation(fields: [resultObjectId], references: [id])
-  error            String?
-  version          Int
-  /// Parámetros exactos enviados al proveedor (sin secretos).
-  generationParams Json?
-  /// Elección del cliente: cuándo la propuesta fue seleccionada para venta.
-  selectedAt       DateTime?
-  selectedById     String?
-  createdById      String
-  createdBy        User           @relation(fields: [createdById], references: [id])
-  createdAt        DateTime       @default(now())
-  updatedAt        DateTime       @updatedAt
-
-  @@index([projectId, version])
-  @@index([status])
-  @@index([providerJobId])
-  @@index([productId])
-}
-
-/// Imágenes de referencia de un producto del catálogo (Zoho no trae fotos
-/// aptas para render): las sube un empleado autorizado.
-model ProductMedia {
-  id          String        @id @default(cuid())
-  productId   String
-  product     Product       @relation(fields: [productId], references: [id], onDelete: Cascade)
-  objectId    String
-  object      StorageObject @relation(fields: [objectId], references: [id])
-  /// swatch | reference | texture | room
-  kind        String        @default("reference")
-  label       String?
-  createdById String
-  createdBy   User          @relation(fields: [createdById], references: [id])
-  createdAt   DateTime      @default(now())
-
-  @@index([productId])
-  @@index([objectId])
 }
 
 /// Política de UNIK para un toolkit de Composio (Gmail, Slack, GitHub…): qué

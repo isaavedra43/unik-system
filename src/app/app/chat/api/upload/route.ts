@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentSession, hasPermission } from '@/modules/auth/authorization';
 import { validateAttachment, saveAttachment } from '@/modules/chat/chat-attachments-service';
 import { assertChannelMember } from '@/modules/chat/chat-service';
-import { StorageError } from '@/modules/storage/storage-service';
+import { apiErrorResponse } from '@/lib/api-error';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -76,9 +76,6 @@ export async function POST(request: NextRequest) {
       storageObjectId: attachment.storageObjectId,
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Error desconocido';
-    const status = err instanceof StorageError ? err.status : 500;
-    if (status >= 500) console.error('[chat-upload] Error:', message);
-    return NextResponse.json({ error: message }, { status });
+    return apiErrorResponse(err, { context: 'chat-upload' });
   }
 }

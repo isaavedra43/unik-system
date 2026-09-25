@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentSession, hasPermission } from '@/modules/auth/authorization';
 import { getAiSettings } from '@/modules/ai/ai-admin-config-service';
 import { openaiProvider } from '@/modules/ai/providers';
+import { apiErrorResponse } from '@/lib/api-error';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -57,8 +58,6 @@ export async function POST(request: NextRequest) {
       },
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Error desconocido';
-    console.error('[voice/speak] Error:', message);
-    return NextResponse.json({ error: message }, { status: 500 });
+    return apiErrorResponse(err, { context: 'voice-speak' });
   }
 }

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { getCurrentSession, hasPermission } from '@/modules/auth/authorization';
 import { addReaction, removeReaction } from '@/modules/chat/chat-service';
+import { apiErrorResponse } from '@/lib/api-error';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -31,10 +32,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const result = await addReaction(session.user, id, parsed.data.emoji);
     return NextResponse.json(result);
   } catch (err) {
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Error' },
-      { status: 400 }
-    );
+    return apiErrorResponse(err, { status: 400, safeNames: ['ChatError'], context: 'chat' });
   }
 }
 
@@ -64,10 +62,7 @@ export async function DELETE(
       const result = await removeReaction(session.user, id, parsed.data.emoji);
       return NextResponse.json(result);
     } catch (err) {
-      return NextResponse.json(
-        { error: err instanceof Error ? err.message : 'Error' },
-        { status: 400 }
-      );
+      return apiErrorResponse(err, { status: 400, safeNames: ['ChatError'], context: 'chat' });
     }
   }
 
@@ -75,9 +70,6 @@ export async function DELETE(
     const result = await removeReaction(session.user, id, emoji);
     return NextResponse.json(result);
   } catch (err) {
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Error' },
-      { status: 400 }
-    );
+    return apiErrorResponse(err, { status: 400, safeNames: ['ChatError'], context: 'chat' });
   }
 }

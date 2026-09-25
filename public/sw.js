@@ -2,21 +2,24 @@
  * UNIK Service Worker — PWA offline support
  *
  * Strategy:
- * - App shell (HTML, CSS, JS): stale-while-revalidate (instant from cache, update in background)
  * - Static assets (images, fonts, icons): cache-first (rarely change)
- * - API routes: network-only (always fresh data)
- * - Navigation requests: network-first, fallback to cached app shell
+ * - API routes, auth and every authenticated page: network-only
+ * - HTML navigations are NEVER cached: /app pages contain private data and a
+ *   cached copy would outlive logout on a shared device. Offline navigations
+ *   get a generic offline screen instead of stale private HTML.
+ * - RSC/data fetches under /app: network-only for the same reason.
  * - Web Push: shows the OS notification and opens/focuses the app on tap
  */
 
-const CACHE_VERSION = 'unik-v2';
+const CACHE_VERSION = 'unik-v3';
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
 const RUNTIME_CACHE = `${CACHE_VERSION}-runtime`;
 
-// Assets to pre-cache on install (app shell essentials)
+// Authenticated surface — never written to any cache.
+const PRIVATE_PREFIX = '/app';
+
+// Assets to pre-cache on install (public statics only — no HTML).
 const PRECACHE_URLS = [
-  '/',
-  '/app',
   '/icon-192.png',
   '/icon-256.png',
   '/icon-512.png',
@@ -25,6 +28,8 @@ const PRECACHE_URLS = [
   '/favicon-32.png',
   '/manifest.webmanifest',
 ];
+
+const OFFLINE_HTML = `<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Sin conexión — UNIK</title><style>body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;font-family:system-ui,-apple-system,sans-serif;background:#f6f7f9;color:#111318}div{text-align:center;max-width:320px;padding:2rem}h1{font-size:1.25rem;margin:0 0 .5rem}p{color:#4b5563;font-size:.9375rem;margin:0}</style></head><body><div><h1>Sin conexión</h1><p>UNIK necesita internet. Revisa tu conexión y vuelve a intentar.</p></div></body></html>`;
 
 // Routes that should always hit the network (API calls, auth, etc.)
 const NETWORK_ONLY_PATTERNS = [
@@ -79,18 +84,17 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Navigation requests (HTML pages): network-first, fallback to cache
+  // Navigation requests (HTML pages): network-only — authenticated HTML must
+  // never sit in a cache where it outlives the session. Offline → generic page.
   if (request.mode === 'navigate') {
     event.respondWith(
-      fetch(request)
-        .then((response) => {
-          const clone = response.clone();
-          caches.open(RUNTIME_CACHE).then((cache) => cache.put(request, clone));
-          return response;
-        })
-        .catch(() =>
-          caches.match(request).then((cached) => cached || caches.match('/app'))
-        )
+      fetch(request).catch(
+        () =>
+          new Response(OFFLINE_HTML, {
+            status: 503,
+            headers: { 'Content-Type': 'text/html; charset=utf-8' },
+          })
+      )
     );
     return;
   }
@@ -107,6 +111,12 @@ self.addEventListener('fetch', (event) => {
         });
       })
     );
+    return;
+  }
+
+  // Authenticated RSC/data fetches (client-side navigations hit page paths
+  // with ?_rsc=): never cached, same rule as navigations.
+  if (url.pathname.startsWith(PRIVATE_PREFIX)) {
     return;
   }
 

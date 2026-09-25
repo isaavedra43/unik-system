@@ -2,10 +2,11 @@
 
 import React, { useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { Menu, X } from 'lucide-react';
+import { Menu, Monitor, X } from 'lucide-react';
 import type { CurrentUser } from '@/modules/auth/authorization';
 import { AssistantChat } from './AssistantChat';
 import { AssistantSidebar } from './AssistantSidebar';
+import { AssistantWorkspace } from './AssistantWorkspace';
 
 export interface AssistantPageClientProps {
   user: CurrentUser;
@@ -16,6 +17,9 @@ export function AssistantPageClient({ user }: AssistantPageClientProps) {
   const requestedId = searchParams.get('c');
   const [activeId, setActiveId] = useState<string | null>(requestedId);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  // Agent workspace — third column. Open by default; on narrow screens it
+  // becomes a right overlay panel (CSS) so the chat keeps full width.
+  const [workspaceOpen, setWorkspaceOpen] = useState(true);
 
   // Deep link from a notification ("the assistant finished"): open that thread.
   useEffect(() => {
@@ -74,6 +78,27 @@ export function AssistantPageClient({ user }: AssistantPageClientProps) {
           onConversationCreated={setActiveId}
         />
       </div>
+
+      {/* Agent workspace — live feed of pages, virtual-computer screen, files. */}
+      {!workspaceOpen && (
+        <button
+          type="button"
+          className="assistant-workspace-toggle"
+          onClick={() => setWorkspaceOpen(true)}
+          aria-label="Abrir espacio de trabajo del agente"
+          title="Espacio de trabajo"
+        >
+          <Monitor size={18} />
+        </button>
+      )}
+      {workspaceOpen && (
+        <div className="assistant-workspace-col">
+          <AssistantWorkspace
+            conversationId={activeId}
+            onClose={() => setWorkspaceOpen(false)}
+          />
+        </div>
+      )}
     </div>
   );
 }

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { getCurrentSession, hasPermission } from '@/modules/auth/authorization';
 import { broadcastMessage } from '@/modules/chat/chat-service';
+import { apiErrorResponse } from '@/lib/api-error';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -37,9 +38,6 @@ export async function POST(request: NextRequest) {
     const messages = await broadcastMessage(session.user, parsed.data);
     return NextResponse.json({ data: messages });
   } catch (err) {
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Error desconocido' },
-      { status: 400 }
-    );
+    return apiErrorResponse(err, { status: 400, safeNames: ['ChatError'], context: 'chat' });
   }
 }

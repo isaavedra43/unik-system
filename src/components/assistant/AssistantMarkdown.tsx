@@ -2,37 +2,14 @@
 
 import React from 'react';
 import { colorForStatusLabel } from '@/modules/ai/generators/status-tone';
+import { renderInline } from './markdown-inline';
 
 /**
  * Minimal markdown renderer for the AI assistant.
  * Supports: headings, bold, italic, inline code, code blocks, lists, tables, links, blockquotes.
  * This avoids adding a heavy dependency like react-markdown.
+ * Inline formatting + link sanitizing live in ./markdown-inline (pure, testable).
  */
-
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, '&')
-    .replace(/</g, '<')
-    .replace(/>/g, '>')
-    .replace(/"/g, '"')
-    .replace(/'/g, '&#39;');
-}
-
-function renderInline(text: string): string {
-  let html = escapeHtml(text);
-  // Inline code
-  html = html.replace(/`([^`]+)`/g, '<code class="assistant-md-code">$1</code>');
-  // Bold
-  html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-  // Italic
-  html = html.replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, '<em>$1</em>');
-  // Links [text](url)
-  html = html.replace(
-    /\[([^\]]+)\]\(([^)]+)\)/g,
-    '<a href="$2" target="_blank" rel="noopener noreferrer" class="assistant-md-link">$1</a>'
-  );
-  return html;
-}
 
 const BULLET_RE = /^(\s*)[-*•]\s+/;
 const ORDERED_RE = /^(\s*)\d+[.)]\s+/;

@@ -23,12 +23,27 @@ import { isCacheableTool } from './tools/tool-cache';
  * the cache key is args-exact, so a mismatched call simply misses.
  */
 
-const CANONICAL: Record<Exclude<PrefetchChoice, 'none'>, (period: PrefetchPeriod | null) => { name: string; args: Record<string, unknown> }> = {
+/** "hola, busca en internet arena de gato en amazon" → "arena de gato en amazon". */
+function cleanWebQuery(message: string): string {
+  const q = message
+    .replace(/^\s*(hola|buenas?|hey|hi|oye|oiga)[,!.]*/i, '')
+    .replace(/\b(busca(r|me|nos)?|encuentra|investiga|mira|revisa(r|me)?|dime|quiero|necesito|hazme|por favor|porfa|porfis)\b/gi, ' ')
+    .replace(/\b(en|por)\s+(internet|la web|google|la red|l[íi]nea|amazon|mercado\s?libre)\b/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return q.length >= 3 ? q : message.trim();
+}
+
+const CANONICAL: Record<Exclude<PrefetchChoice, 'none'>, (period: PrefetchPeriod | null, message: string) => { name: string; args: Record<string, unknown> }> = {
   sales_period: (p) => ({ name: 'querySalesOrders', args: { dateRange: p && p !== 'none' ? p : 'today' } }),
   business_summary: (p) => ({ name: 'getDashboardSummary', args: { dateRange: p && p !== 'none' ? p : 'today' } }),
   accounts_receivable: () => ({ name: 'getAccountsReceivable', args: {} }),
   low_stock: (p) => ({ name: 'getLowStockAlerts', args: { dateRange: p && p !== 'none' ? p : 'this_month' } }),
   top_products: (p) => ({ name: 'getTopProducts', args: { dateRange: p && p !== 'none' ? p : 'this_month' } }),
+  // Web search is canonicalized from the message itself — the model's own
+  // web_search call only hits cache when it uses the same query string, which
+  // is exactly what this stripper approximates.
+  web_query: (_p, message) => ({ name: 'web_search', args: { query: cleanWebQuery(message) } }),
 };
 
 export interface PrefetchResult {
@@ -62,7 +77,7 @@ export async function prefetchLikelyRead(
   const pick = answerChoice(result, 'read', PREFETCH_CHOICES) as PrefetchChoice | null;
   if (!pick || pick === 'none') return null;
   const period = answerChoice(result, 'period', PREFETCH_PERIODS) as PrefetchPeriod | null;
-  const call = CANONICAL[pick]?.(period);
+  const call = CANONICAL[pick]?.(period, message);
   if (!call || !candidates.has(call.name)) return null;
 
   const { executeTool } = await import('./tools/registry');

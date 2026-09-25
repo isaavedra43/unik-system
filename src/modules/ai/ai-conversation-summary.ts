@@ -97,7 +97,7 @@ export async function maybeSummarizeConversation(conversationId: string, userId:
         {
           role: 'system',
           content:
-            'Resume en español, en máximo 4 líneas y 600 caracteres, esta conversación entre un usuario de UNIK y su asistente de IA. Incluye: tema principal, datos concretos mencionados (folios, clientes, montos, fechas), decisiones tomadas y pendientes abiertos. Sin saludos ni introducción. Si hay un resumen previo, intégralo con lo nuevo.',
+            'Resume en español, en máximo 4 líneas y 600 caracteres, esta conversación entre un usuario de UNIK y su asistente de IA. Incluye: tema principal, datos concretos mencionados (folios, clientes, montos, fechas), fuentes consultadas (URLs/dominios), archivos generados, decisiones tomadas y pendientes abiertos. Sin saludos ni introducción. Si hay un resumen previo, intégralo con lo nuevo.',
         },
         {
           role: 'user',

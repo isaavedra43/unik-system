@@ -146,10 +146,122 @@ export function numericClaimsNotInResults(answer: string, counts: Set<number>, m
   return issues;
 }
 
+// ─── Source & action claims ──────────────────────────────────────────────────
+//
+// The checks above verify DATA claims (folios, counts, sums). This block verifies
+// SOURCE claims — the failure seen in production was the model writing "busqué
+// en internet" while only an internal DB tool ran. An answer may only claim a
+// source if the matching tool executed this turn.
+
+/** The sentence admits the capability is missing — never flag honesty. */
+const ADMISSION = /no (puedo|tengo|cuento|pude|logr[ée])|sin acceso|no está (disponible|habilitad|configurad)|est[áa] deshabilitad|no me es posible|aún no (puedo|tengo|está)|imposible|no tengo forma|no fue posible|no pude/i;
+
+/** References an earlier turn ("la semana pasada vimos…") — memory is a real source. */
+const PAST_OR_OTHER_TURN = /\b(antes|anterior|la semana pasada|ayer|esa vez|anteriormente|hace \d|el (lunes|martes|mi[ée]rcoles|jueves|viernes|s[áa]bado|domingo)|conversaci[óo]n anterior|te hab[íi]a|ya vimos|como te dije)\b/i;
+
+/** Offer or future tense ("puedo buscar", "voy a revisar") — not a claim of having done it. */
+const OFFER_OR_FUTURE = /\b(puedo|podr[íi]a|podr[íi]as|quieres que|voy a|buscar[ée]|revisar[ée]|consultar[ée]|si quieres|puedes pedirme|har[ée]|har[íi]a|te puedo|puedo intentar)\b/i;
+
+interface SourceRule {
+  id: string;
+  /** Human label of the claimed capability (for the issue text). */
+  label: string;
+  /** The source/context noun the sentence must mention. */
+  source: RegExp;
+  /** A verb/phrase proving the claim is that the action WAS performed. */
+  action: RegExp;
+  /** Tool names that satisfy the claim. */
+  tools: RegExp;
+}
+
+const SOURCE_RULES: readonly SourceRule[] = [
+  {
+    id: 'web',
+    label: 'internet/páginas web',
+    source: /\b(internet|la web|google|amazon|mercado\s?libre|linkedin|facebook|instagram|tiktok|youtube|twitter|x\.com|en l[íi]nea|online|sitios? web|p[áa]ginas? web|el sitio (web )?de|la red)\b/i,
+    action:
+      /\b(busqu|encontr|revis|consult|investig|explor|naveg|abr[íi]|entr|visit|le[íi]|analiz|descargu|verifiqu|comprob|mir|a trav[ée]s de|seg[úu]n)/i,
+    tools: /^(web_search|web_research|web_crawl|fetch_url|browser|browserProfile|venueScreenshot)$/,
+  },
+  {
+    id: 'erp',
+    label: 'la base de datos/el sistema UNIK',
+    source: /\b(la base de datos|el sistema|el erp|el cat[áa]logo|la plataforma|en unik|el inventario|los registros)\b/i,
+    action: /\b(busqu|encontr|revis|consult|verifiqu|comprob|mir|hay|tiene|existen|registr|cuenta con)/i,
+    tools:
+      /^(query|get|list|find|search|lookup|compare|audit|count|extract|read)\w*$|^universalSearch$|^getDatabaseOverview$|__/,
+  },
+  {
+    id: 'send',
+    label: 'envío de mensajes/notificaciones',
+    source: /\b(mensaje|correo|email|whatsapp|aviso|notificaci[óo]n|propuesta|campaña)\b/i,
+    action: /\b(envi[ée]|mand[ée]|notifiqu[ée]|program[ée]|agend[ée]|publiqu[ée]|compart[íi]|le escrib[íi])/i,
+    tools: /^(send\w+|notify\w+|shareArtifact|pinChatMessage)$/,
+  },
+  {
+    id: 'docs',
+    label: 'generación de documentos/reportes',
+    source: /\b(documento|reporte|pdf|excel|word|archivo|csv|presentaci[óo]n|gr[áa]fica|imagen|video)\b/i,
+    action: /\b(gener[ée]|cre[ée]|prepar[ée]|arm[ée]|hice|dej[ée]|adjunt[ée]|descargu[ée])/i,
+    tools: /^(composeDocument|generate\w+|renderView|previewQuote|getQuotePdf|shareArtifact)$/,
+  },
+  {
+    id: 'venue',
+    label: 'la computadora virtual',
+    source: /\b(computadora virtual|m[áa]quina virtual|sandbox|la terminal|el navegador remoto)\b/i,
+    action: /\b(ejecut[ée]|corr[íi]|corr[ée]i|abr[íi]|us[ée]|trabaj[ée])/i,
+    tools: /^(venue\w+|browser|browserProfile)$/,
+  },
+];
+
+/**
+ * Sentences that claim a source/action whose tools never ran this turn.
+ * One issue per capability (deduped); the fragment is quoted back to the model.
+ */
+export function sourceClaimsNotInTools(answer: string, toolsUsed: ReadonlyArray<string | { name: string }>): string[] {
+  const names = toolsUsed.map((t) => (typeof t === 'string' ? t : t.name));
+  const sentences = answer.split(/(?<=[.!?])\s+|\n+/);
+  const flagged = new Set<string>();
+  const issues: string[] = [];
+  for (const raw of sentences) {
+    const s = raw.trim();
+    if (!s || s.length < 12) continue;
+    if (ADMISSION.test(s) || PAST_OR_OTHER_TURN.test(s) || OFFER_OR_FUTURE.test(s)) continue;
+    for (const rule of SOURCE_RULES) {
+      if (flagged.has(rule.id)) continue;
+      if (!rule.source.test(s) || !rule.action.test(s)) continue;
+      if (names.some((n) => rule.tools.test(n))) continue;
+      flagged.add(rule.id);
+      issues.push(
+        `Afirmaste "${s.slice(0, 140)}" — implica que usaste ${rule.label}, pero ninguna tool de esa capacidad corrió este turno ` +
+          `(tools ejecutadas: ${names.length ? names.join(', ') : 'ninguna'}). ` +
+          'Reescribe: admite la limitación ("no tengo acceso a internet ahora") o ejecuta la tool correcta primero.'
+      );
+    }
+  }
+  return issues;
+}
+
+/**
+ * "Voy a buscar…" + zero tools executed = the model narrated an action it never
+ * performed. Returns the issue text, or null when the turn acted (or never promised).
+ */
+export function promisedButNeverActed(answer: string, toolsUsed: ReadonlyArray<string | { name: string }>): string | null {
+  const acted = toolsUsed.length > 0;
+  if (acted) return null;
+  const promise = /\b(voy a|d[ée]jame|perm[íi]teme|ahora (te |lo |la )?(busco|reviso|consulto|verifico|genero|preparo)|en un momento (te |lo )|dame un (momento|segundo)|en breve te|procedo a|paso a)\b/i.exec(answer);
+  if (!promise) return null;
+  return (
+    `Dijiste "${promise[0]}…" pero no ejecutaste ninguna tool — el usuario quedó esperando una acción que no ocurrió. ` +
+    'Si la acción necesita una tool disponible, ejecútala ahora; si la capacidad está deshabilitada o falta información indispensable, dilo claramente en tu respuesta final en vez de prometer.'
+  );
+}
+
 export function checkAnswer(
   answer: string,
   knownFolios: Set<string>,
-  knownTotals?: { counts: Set<number>; money: Set<number> }
+  knownTotals?: { counts: Set<number>; money: Set<number> },
+  toolsUsed?: ReadonlyArray<string | { name: string }>
 ): AnswerCheckResult {
   const issues: string[] = [];
   const ghosts = citedFoliosNotInResults(answer, knownFolios);
@@ -164,6 +276,11 @@ export function checkAnswer(
   issues.push(...findMarkdownCountMismatches(answer).map((i) => `${i}: corrige el conteo o completa la tabla.`));
   if (knownTotals) {
     issues.push(...numericClaimsNotInResults(answer, knownTotals.counts, knownTotals.money));
+  }
+  if (toolsUsed) {
+    issues.push(...sourceClaimsNotInTools(answer, toolsUsed));
+    const empty = promisedButNeverActed(answer, toolsUsed);
+    if (empty) issues.push(empty);
   }
   return { issues };
 }

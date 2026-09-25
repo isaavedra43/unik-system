@@ -15,6 +15,8 @@ export interface TurnMeta {
   routing?: { tier?: string; reason?: string; routed?: boolean };
   confidence?: 'verified' | 'estimate' | 'assumption' | null;
   confidenceNote?: string | null;
+  /** Server-derived list of the sources that REALLY ran ("búsqueda web · base de datos UNIK"). */
+  sourcesLabel?: string | null;
   tools?: { calls?: number; cachedHits?: number; parallelBatches?: number; offered?: number; loadedMore?: number };
   judge?: { score?: number; issues?: string[]; summary?: string };
   planFirst?: boolean;

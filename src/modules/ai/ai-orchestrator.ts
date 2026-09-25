@@ -49,6 +49,15 @@ import { isReasoningModel } from './providers/openai';
 import { buildTurnDirectives, looksUnfinished, stripMarkdownImages, wantsDocument } from './turn-directives';
 import { reviewComplexAnswer } from './ai-answer-review';
 import { checkAnswer, collectFolios, collectResultNumbers } from './answer-checks';
+import { emitWorkspaceEvents, workspaceEventsForTool } from './workspace-events';
+import {
+  capabilitiesFromTools,
+  capabilityPromptBlock,
+  describeSourcesUsed,
+  detectRequiredCapabilities,
+  forcedToolNames,
+  missingCapabilityNote,
+} from './capabilities';
 import { parseFollowUps } from './followups';
 import { captureLearnings } from './ai-learning';
 import { buildRevisionDirective, isRevisionRequest, mergeRevisionArgs, type RevisionContext } from './revisions';
@@ -295,10 +304,43 @@ export async function* runAssistant(
     settings.maxConversationMessages
   );
 
-  // 6. Build system prompt (+ the live inbox context when running as copilot)
+  // 5.5. Resolve the tools the actor can actually use BEFORE the prompt — the
+  // capability list the model sees must be truthful (what is enabled, not what
+  // exists in code). `isAutoTrigger` is derived early: filters depend on it.
   const inboxConversationId = input.context?.inboxConversationId;
   const chatChannelId = input.context?.chatChannelId;
+  const isAutoTrigger = input.message.startsWith('⟦auto:');
+  const actorPreferences = await getPreferences(input.actor.id).catch(() => null);
+  const lastAssistantContent = [...history].reverse().find((m) => m.role === 'assistant' && typeof m.content === 'string' && m.content.trim().length > 0)?.content ?? null;
+  const documentRequested = wantsDocument(input.message, lastAssistantContent);
+  await refreshExternalTools();
+  const loadedTools = await loadAvailableTools(input.actor, settings.enabledTools, {
+    page: input.context?.page,
+  });
+  // Paused mode: the assistant keeps answering and drafting, but tools with side
+  // effects are not even offered to the model.
+  const availableTools = (
+    actorPreferences?.mode === 'paused'
+      ? loadedTools.filter((t) => !PAUSED_MODE_HIDDEN_EFFECTS.has(t.effect ?? 'read'))
+      : loadedTools
+  )
+    // An elaborate document is only offered when the user asked for one (or accepted an offer):
+    // otherwise the model spends minutes writing a 15-page file nobody requested.
+    .filter((t) => documentRequested || isAutoTrigger || t.name !== 'composeDocument')
+    .filter((t) => inboxConversationId || chatChannelId || !SURFACE_ONLY_TOOLS.has(t.name))
+    .filter((t) => inboxConversationId || !INBOX_ONLY_TOOLS.has(t.name))
+    .filter((t) => !inboxConversationId || !INBOX_HIDDEN_TOOLS.has(t.name))
+    .filter((t) => chatChannelId || !CHAT_ONLY_TOOLS.has(t.name));
+
+  // 6. Build system prompt (+ the live inbox context when running as copilot)
   let systemPrompt = await buildSystemPrompt(input.actor, { ...input.context, conversationId: input.conversationId });
+  // Capability contract: the prompt states what is REALLY on/off this turn so a
+  // missing capability becomes an honest admission instead of an improvised lie.
+  const capabilityStatus = capabilitiesFromTools(availableTools);
+  systemPrompt += `\n\n${capabilityPromptBlock(capabilityStatus)}`;
+  const requiredCaps = detectRequiredCapabilities(input.message);
+  const missingCaps = requiredCaps.filter((r) => !capabilityStatus.find((c) => c.id === r.cap)?.available);
+  if (missingCaps.length > 0) systemPrompt += `\n\n${missingCapabilityNote(missingCaps, capabilityStatus)}`;
   try {
     const { buildComposioPrompt } = await import('@/modules/composio/composio-prompt');
     const composioBlock = await buildComposioPrompt(input.actor);
@@ -316,8 +358,7 @@ export async function* runAssistant(
 
   // 6.5. Agent memory recall: episodes, confirmed facts and playbooks relevant to THIS
   // message. Injected before classification so it informs tool choice and routing.
-  // Skipped when the user disabled memory in preferences.
-  const actorPreferences = await getPreferences(input.actor.id).catch(() => null);
+  // Skipped when the user disabled memory in preferences (loaded above).
   if (actorPreferences?.memoryEnabled !== false) {
     const { buildRecallBlock } = await import('@/modules/memory/memory-service');
     const recallBlock = await buildRecallBlock(input.actor.id, input.message).catch(() => '');
@@ -367,7 +408,6 @@ export async function* runAssistant(
         .flatMap((m) => (m.toolCalls as Array<{ name?: string }>).map((tc) => tc.name).filter((n): n is string => typeof n === 'string'))
     ),
   ];
-  const isAutoTrigger = input.message.startsWith('⟦auto:');
   let priorAttachments: AttachmentResult[] = [];
   if (!isAutoTrigger && !input.context?.voice) {
     try {
@@ -478,30 +518,8 @@ export async function* runAssistant(
     }
   }
 
-  // 8. Get available tools: built-ins enabled by the admin + external capabilities
-  // (approved, enabled, role-allowed) loaded for this page context so prompts stay small.
-  await refreshExternalTools();
-  const loadedTools = await loadAvailableTools(input.actor, settings.enabledTools, {
-    page: input.context?.page,
-  });
-  // Paused mode: the assistant keeps answering and drafting, but tools with side
-  // effects are not even offered to the model. (Preferences already loaded above
-  // for memory recall — same read reused.)
-  const preferences = actorPreferences;
-  const lastAssistantContent = [...history].reverse().find((m) => m.role === 'assistant' && typeof m.content === 'string' && m.content.trim().length > 0)?.content ?? null;
-  const documentRequested = wantsDocument(input.message, lastAssistantContent);
-  const availableTools = (
-    preferences?.mode === 'paused'
-      ? loadedTools.filter((t) => !PAUSED_MODE_HIDDEN_EFFECTS.has(t.effect ?? 'read'))
-      : loadedTools
-  )
-    // An elaborate document is only offered when the user asked for one (or accepted an offer):
-    // otherwise the model spends minutes writing a 15-page file nobody requested.
-    .filter((t) => documentRequested || isAutoTrigger || t.name !== 'composeDocument')
-    .filter((t) => inboxConversationId || chatChannelId || !SURFACE_ONLY_TOOLS.has(t.name))
-    .filter((t) => inboxConversationId || !INBOX_ONLY_TOOLS.has(t.name))
-    .filter((t) => !inboxConversationId || !INBOX_HIDDEN_TOOLS.has(t.name))
-    .filter((t) => chatChannelId || !CHAT_ONLY_TOOLS.has(t.name));
+  // 8. Tools were already loaded and capability-filtered above (the prompt needs
+  // them first). `availableTools` is the actor's real menu for this turn.
 
   // 8.4. Jev decisions (one cheap call each, run in parallel): which domains this
   // message touches beyond the regex pass, and which model tier the turn needs.
@@ -543,9 +561,15 @@ export async function* runAssistant(
   // recent tool context) gets the cheap model AND a minimal prompt: three tool
   // specs instead of ~30. `loadMoreTools` is the escape valve — if the classifier
   // misread the intent, the model pulls real tools in one extra step.
+  // A capability the user explicitly asked for can NEVER be starved this way:
+  // `forced` tools enter the menu even on the simple tier or a dropped domain.
+  const forced = forcedToolNames(
+    requiredCaps.filter((r) => !missingCaps.some((m) => m.cap === r.cap)),
+    availableTools
+  );
   const SIMPLE_TIER_TOOLS = new Set(['loadMoreTools', 'getSystemTime', 'recallMemory']);
   const selection =
-    classification.tier === 'simple' && pinnedTools.length === 0
+    classification.tier === 'simple' && pinnedTools.length === 0 && forced.size === 0
       ? {
           offered: availableTools.filter((t) => SIMPLE_TIER_TOOLS.has(t.name)),
           dropped: [] as ToolDefinition[],
@@ -562,7 +586,11 @@ export async function* runAssistant(
         });
   // Same set ⇒ same order: the serialized tools are the first part of every request and a
   // stable prefix is what lets the provider cache the prompt between passes and turns.
-  let offeredTools: ToolDefinition[] = [...selection.offered].sort((a, b) => a.name.localeCompare(b.name));
+  const mergedOffered = [...selection.offered];
+  for (const t of availableTools) {
+    if (forced.has(t.name) && !mergedOffered.some((o) => o.name === t.name)) mergedOffered.push(t);
+  }
+  let offeredTools: ToolDefinition[] = mergedOffered.sort((a, b) => a.name.localeCompare(b.name));
   let toolSpecs: ToolSpec[] = toOpenAiTools(offeredTools);
   const availableByName = new Map(availableTools.map((t) => [t.name, t] as const));
   if (selection.dropped.length > 0) {
@@ -717,6 +745,9 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
   const knownTotals = { counts: new Set<number>(), money: new Set<number>() };
   const turnStats = { calls: 0, cachedHits: 0, parallelBatches: 0, dataToolsSucceeded: 0, failed: 0, loadedMore: 0 };
   const toolsUsedThisTurn: Array<{ name: string; success: boolean; cached?: boolean }> = [];
+  // Provenance collected from real tool results — feeds the episode memory.
+  const turnSources: string[] = [];
+  const turnArtifacts: string[] = [];
 
   // Track the last DATA tool result so we can auto-inject it into artifact tools.
   // Seeded from the conversation history ("generame un excel con la info que te pedí"), skipping
@@ -1214,6 +1245,24 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
     if (!result.success && !result.needsApproval) turnStats.failed += 1;
     toolsUsedThisTurn.push({ name: tc.name, success: result.success, cached: result.cached });
 
+    // Agent Workspace feed — the third column mirrors what the agent does.
+    // Fire-and-forget: the feed never delays or breaks the answer.
+    const wsEvents = workspaceEventsForTool(tc.name, parsedArgs, result);
+    emitWorkspaceEvents(input.conversationId, wsEvents);
+    for (const ev of wsEvents) {
+      if (ev.type === 'pages') {
+        for (const p of (ev.payload.pages as Array<{ url?: string }> | undefined) ?? []) {
+          if (p.url) turnSources.push(p.url);
+        }
+      } else if (ev.type === 'browser' || ev.type === 'screen') {
+        const u = ev.payload.url as string | undefined;
+        if (u) turnSources.push(u);
+      } else if (ev.type === 'artifact') {
+        const t = (ev.payload.title ?? ev.payload.fileName) as string | undefined;
+        if (t) turnArtifacts.push(t);
+      }
+    }
+
     // Side-effecting action: a proposal was created and the user must approve it.
     // The model receives an explicit tool result so it asks for confirmation instead
     // of claiming the action happened.
@@ -1535,10 +1584,12 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
         continue;
       }
 
-      // Deterministic verification (every model): folios that no tool returned, group
-      // headings whose count does not match their table. One corrective pass, max.
-      if (nudges < 2 && iteration < settings.maxToolIterations && classification.tier !== 'simple') {
-        const check = checkAnswer(iterationContent, knownFolios, knownTotals);
+      // Deterministic verification (every model, every tier): folios that no tool
+      // returned, count-vs-table mismatches, numeric claims with no total behind
+      // them, source claims whose tools never ran, and "voy a…" promises with zero
+      // actions. One corrective pass, max two.
+      if (nudges < 2 && iteration < settings.maxToolIterations) {
+        const check = checkAnswer(iterationContent, knownFolios, knownTotals, toolsUsedThisTurn);
         if (check.issues.length > 0) {
           nudges += 1;
           if (classification.tier === 'standard') escalateModel();
@@ -1680,6 +1731,9 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
         routing: { tier: routing.tier, reason: routing.reason, routed: routing.routed },
         confidence,
         confidenceNote: parsedConfidence.note,
+        // The badge's source list is derived HERE from tools that actually ran —
+        // the model's self-reported note can claim sources that never executed.
+        sourcesLabel: describeSourcesUsed(toolsUsedThisTurn.map((t) => t.name)),
         confidenceLabeled: parsedConfidence.level !== null,
         tools: { ...turnStats, offered: offeredTools.length, used: toolsUsedThisTurn.map((t) => t.name) },
         planFirst: Boolean(input.planFirst),
@@ -1709,6 +1763,8 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
               userMessage: input.message,
               answer: iterationContent,
               toolsUsed: toolsUsedThisTurn.map((t) => t.name),
+              sourceUrls: [...new Set(turnSources)].slice(0, 15),
+              artifacts: turnArtifacts.slice(0, 10),
             })
           )
           .catch((err) => console.warn('[ai-orchestrator] memory extract failed:', err instanceof Error ? err.message : err));
@@ -1751,6 +1807,7 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
           tier: routing.tier,
           confidence,
           confidenceNote: parsedConfidence.note,
+          sourcesLabel: describeSourcesUsed(toolsUsedThisTurn.map((t) => t.name)),
           tools: { calls: turnStats.calls, cachedHits: turnStats.cachedHits, parallelBatches: turnStats.parallelBatches },
         },
       };

@@ -8,4 +8,3 @@ import '@/modules/storage/storage-access';
 import '@/modules/copilot/knowledge-service';
 import '@/modules/voice/voice-access';
 import '@/modules/comms/comms-storage';
-import '@/modules/visual-studio/visual-access';

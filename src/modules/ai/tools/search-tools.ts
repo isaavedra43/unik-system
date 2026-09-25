@@ -81,6 +81,24 @@ function buildFuzzyFilter<T extends string>(
   return conditions;
 }
 
+/**
+ * Piso de relevancia: una fila solo sobrevive si su texto contiene la frase
+ * completa O una palabra del query de ≥4 letras (los prefijos de 2-3 letras del
+ * fuzzy OR pegan en cualquier lado — "arena de gato" pegaba en "DELFINO" por
+ * "de"). Lo que solo matcheó un prefijo diminuto es ruido, no resultado.
+ */
+function matchesStrongly(text: string, terms: { full: string; words: string[] }): boolean {
+  const t = normalizeText(text);
+  if (!t) return false;
+  if (terms.full && t.includes(terms.full)) return true;
+  return terms.words.some((w) => w.length >= 4 && t.includes(w));
+}
+
+function filterRelevant<T>(rows: T[], textOf: (row: T) => string, terms: { full: string; words: string[] }): { kept: T[]; dropped: number } {
+  const kept = rows.filter((r) => matchesStrongly(textOf(r), terms));
+  return { kept, dropped: rows.length - kept.length };
+}
+
 registerTool({
   name: 'universalSearch',
   description:
@@ -174,6 +192,7 @@ registerTool({
         select: {
           id: true,
           salesOrderNumber: true,
+          referenceNumber: true,
           customerName: true,
           customerEmail: true,
           customerPhone: true,
@@ -401,6 +420,7 @@ registerTool({
           brand: true,
           manufacturer: true,
           vendorName: true,
+          description: true,
         },
         orderBy: { name: 'asc' },
         take: limit,
@@ -424,6 +444,35 @@ registerTool({
       }),
     ]);
 
+    // Relevance floor: the fuzzy OR matches on 2-3 letter prefixes which hit
+    // unrelated rows ("arena de gato" matched bills via "de"). Keep only rows
+    // whose text contains the full phrase or a word of ≥4 letters.
+    let weakDropped = 0;
+    const keep = <T>(rows: T[], fields: (r: T) => Array<string | null | undefined>): T[] => {
+      const { kept, dropped } = filterRelevant(
+        rows,
+        (r) => fields(r).filter((v): v is string => Boolean(v)).join(' '),
+        terms
+      );
+      weakDropped += dropped;
+      return kept;
+    };
+
+    const ordersR = keep(orders, (o) => [o.salesOrderNumber, o.referenceNumber, o.customerName, o.customerEmail, o.customerPhone, o.salespersonName, o.paymentMethod, o.deliveryMethod, o.locationName, o.branchName, o.shippingCity, o.shippingState, o.notes]);
+    const productsR = keep(products, (p) => [p.name, p.sku, p.description]);
+    const customersR = keep(customers, (o) => [o.customerName, o.customerEmail, o.customerPhone]);
+    const salespeopleR = keep(salespeople, (o) => [o.salespersonName]);
+    const deliveryMethodsR = keep(deliveryMethods, (o) => [o.deliveryMethod]);
+    const paymentMethodsR = keep(paymentMethods, (o) => [o.paymentMethod]);
+    const invoicesR = keep(invoices, (i) => [i.invoiceNumber, i.customerName, i.referenceNumber, i.cfdiUuid]);
+    const packagesR = keep(packages, (p) => [p.packageNumber, p.customerName, p.trackingNumber, p.carrier, p.salesorderNumber]);
+    const billsR = keep(bills, (b) => [b.billNumber, b.vendorName]);
+    const customerPaymentsR = keep(customerPayments, (p) => [p.paymentNumber, p.customerName, p.referenceNumber]);
+    const purchaseOrdersR = keep(purchaseOrders, (p) => [p.purchaseOrderNumber, p.vendorName, p.referenceNumber]);
+    const vendorCreditsR = keep(vendorCredits, (v) => [v.vendorCreditNumber, v.vendorName]);
+    const productCatalogR = keep(productCatalog, (p) => [p.name, p.sku, p.brand, p.manufacturer, p.categoryName, p.description]);
+    const contactsR = keep(contacts, (c) => [c.contactName, c.companyName, c.primaryEmail, c.primaryPhone]);
+
     // Group customers (distinct by name)
     const customerMap = new Map<string, {
       name: string;
@@ -436,7 +485,7 @@ registerTool({
       salesperson: string | null;
       location: string | null;
     }>();
-    for (const o of customers) {
+    for (const o of customersR) {
       const name = o.customerName ?? 'Sin nombre';
       const existing = customerMap.get(name);
       if (existing) {
@@ -469,7 +518,7 @@ registerTool({
       confirmedCount: number;
       lastOrder: string | null;
     }>();
-    for (const o of salespeople) {
+    for (const o of salespeopleR) {
       const name = o.salespersonName ?? 'Sin vendedor';
       const existing = salespersonMap.get(name);
       if (existing) {
@@ -499,7 +548,7 @@ registerTool({
       total: number;
       balance: number;
     }>();
-    for (const o of deliveryMethods) {
+    for (const o of deliveryMethodsR) {
       const method = o.deliveryMethod ?? 'Sin método';
       const existing = deliveryMap.get(method);
       if (existing) {
@@ -523,7 +572,7 @@ registerTool({
       total: number;
       balance: number;
     }>();
-    for (const o of paymentMethods) {
+    for (const o of paymentMethodsR) {
       const method = o.paymentMethod ?? 'Sin método';
       const existing = paymentMap.get(method);
       if (existing) {
@@ -540,13 +589,21 @@ registerTool({
       }
     }
 
-    const totalResults = orders.length + products.length + customerMap.size + salespersonMap.size + deliveryMap.size + paymentMap.size
-      + invoices.length + packages.length + bills.length + customerPayments.length + purchaseOrders.length + vendorCredits.length + productCatalog.length + contacts.length;
+    const totalResults = ordersR.length + productsR.length + customerMap.size + salespersonMap.size + deliveryMap.size + paymentMap.size
+      + invoicesR.length + packagesR.length + billsR.length + customerPaymentsR.length + purchaseOrdersR.length + vendorCreditsR.length + productCatalogR.length + contactsR.length;
 
     return {
       query: args.query,
       totalResults,
-      orders: orders.map((o) => ({
+      // Verdad explícita: esto es la base interna de UNIK, NO internet. Si el
+      // usuario pidió web, dilo. Las filas débiles (prefijos) se filtraron.
+      searchScope: 'unik_internal_database_only',
+      weakMatchesFiltered: weakDropped,
+      note: 'Búsqueda SOLO en la base de datos interna de UNIK — no es internet ni una fuente externa.' +
+        (totalResults === 0
+          ? ` Nada contiene las palabras de "${args.query}" de forma relevante: no presentes resultados como "relacionados" si no lo son, y si el usuario pedía otra fuente (internet, Zoho, una página) dilo.`
+          : ''),
+      orders: ordersR.map((o) => ({
         type: 'order',
         number: o.salesOrderNumber,
         customer: o.customerName,
@@ -572,7 +629,7 @@ registerTool({
         ].filter((p) => p !== null && p !== undefined && String(p).trim() !== '').join(', ') || null,
         notes: o.notes,
       })),
-      products: products.map((p) => ({
+      products: productsR.map((p) => ({
         type: 'product',
         name: p.name,
         sku: p.sku,
@@ -636,7 +693,7 @@ registerTool({
           total: p.total.toFixed(2),
           balance: p.balance.toFixed(2),
         })),
-      invoices: invoices.map((inv) => ({
+      invoices: invoicesR.map((inv) => ({
         type: 'invoice',
         number: inv.invoiceNumber,
         customer: inv.customerName,
@@ -648,7 +705,7 @@ registerTool({
         referenceNumber: inv.referenceNumber,
         cfdiUuid: inv.cfdiUuid,
       })),
-      packages: packages.map((pkg) => ({
+      packages: packagesR.map((pkg) => ({
         type: 'package',
         number: pkg.packageNumber,
         customer: pkg.customerName,
@@ -660,7 +717,7 @@ registerTool({
         shipmentStatus: pkg.shipmentStatus,
         salesorderNumber: pkg.salesorderNumber,
       })),
-      bills: bills.map((b) => ({
+      bills: billsR.map((b) => ({
         type: 'bill',
         number: b.billNumber,
         vendor: b.vendorName,
@@ -670,7 +727,7 @@ registerTool({
         balance: decimalToString(b.balance),
         currency: b.currencyCode,
       })),
-      customerPayments: customerPayments.map((p) => ({
+      customerPayments: customerPaymentsR.map((p) => ({
         type: 'customerPayment',
         number: p.paymentNumber,
         customer: p.customerName,
@@ -681,7 +738,7 @@ registerTool({
         currency: p.currencyCode,
         referenceNumber: p.referenceNumber,
       })),
-      purchaseOrders: purchaseOrders.map((po) => ({
+      purchaseOrders: purchaseOrdersR.map((po) => ({
         type: 'purchaseOrder',
         number: po.purchaseOrderNumber,
         vendor: po.vendorName,
@@ -692,7 +749,7 @@ registerTool({
         currency: po.currencyCode,
         referenceNumber: po.referenceNumber,
       })),
-      vendorCredits: vendorCredits.map((vc) => ({
+      vendorCredits: vendorCreditsR.map((vc) => ({
         type: 'vendorCredit',
         number: vc.vendorCreditNumber,
         vendor: vc.vendorName,
@@ -702,7 +759,7 @@ registerTool({
         balance: decimalToString(vc.balance),
         currency: vc.currencyCode,
       })),
-      productCatalog: productCatalog.map((p) => ({
+      productCatalog: productCatalogR.map((p) => ({
         type: 'productCatalog',
         name: p.name,
         sku: p.sku,
@@ -716,7 +773,7 @@ registerTool({
         manufacturer: p.manufacturer,
         vendor: p.vendorName,
       })),
-      contacts: contacts.map((c) => ({
+      contacts: contactsR.map((c) => ({
         type: 'contact',
         name: c.contactName,
         company: c.companyName,

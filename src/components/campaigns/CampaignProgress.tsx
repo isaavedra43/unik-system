@@ -1,8 +1,9 @@
 'use client';
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { Eye, Pause, Play, XCircle } from 'lucide-react';
+import { Eye, Pause, Play, RefreshCw, XCircle } from 'lucide-react';
 import { Modal } from '@/components/ui/composite';
+import { MessageBubble } from './MessageBubble';
 import {
   api,
   CAMPAIGN_STATUS_LABEL,
@@ -32,19 +33,29 @@ interface RecipientsPage {
 }
 
 const ORDER: RecipientStatus[] = [
-  'sent',
   'delivered',
-  'failed',
-  'opted_out',
-  'skipped',
+  'sent',
   'queued',
   'pending',
+  'failed',
+  'skipped',
+  'opted_out',
 ];
 
+const SEG_CLASS: Record<RecipientStatus, string> = {
+  delivered: 'ok2',
+  sent: 'ok',
+  queued: 'info',
+  pending: 'weak',
+  failed: 'danger',
+  skipped: 'weak',
+  opted_out: 'warn',
+};
+
 /**
- * Live progress over SSE (`campaign:{id}`), per-status bars, budget, pause /
- * resume / cancel and the paginated recipient list with the exact message
- * each one receives.
+ * Live progress over SSE (`campaign:{id}`), stacked per-status bar, budget
+ * meter, pause / resume / cancel and the paginated recipient list with the
+ * exact message each one receives.
  */
 export function CampaignProgress({
   campaign,
@@ -179,36 +190,57 @@ export function CampaignProgress({
 
   const info = CAMPAIGN_STATUS_LABEL[live.status] ?? { label: live.status, badge: 'badge-weak' };
   const total = Math.max(live.total, 1);
+  const done =
+    live.counts.sent +
+    live.counts.delivered +
+    live.counts.failed +
+    live.counts.skipped +
+    live.counts.opted_out;
+  const pct = Math.min(100, Math.round((done / total) * 100));
+  const pending = live.counts.pending + live.counts.queued;
+  const etaMinutes =
+    live.status === 'running' && campaign.ratePerMinute > 0
+      ? pending / campaign.ratePerMinute
+      : null;
+  const budgetLimit = campaign.budgetLimit !== null ? Number(campaign.budgetLimit) : null;
+  const budgetPct =
+    budgetLimit && budgetLimit > 0
+      ? Math.min(100, Math.round((Number(live.budgetSpent) / budgetLimit) * 100))
+      : null;
   const pages = recipients ? Math.max(1, Math.ceil(recipients.total / recipients.pageSize)) : 1;
 
   return (
-    <div style={{ display: 'grid', gap: '0.75rem' }}>
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          gap: '0.5rem',
-          flexWrap: 'wrap',
-          alignItems: 'center',
-        }}
-      >
+    <div style={{ display: 'grid', gap: '0.9rem' }}>
+      <div className="camp-wiz-head">
         <div>
           <h2 style={{ margin: 0 }}>{campaign.name}</h2>
-          <div className="assistant-admin-muted">
+          <span className="assistant-admin-muted" style={{ fontSize: '0.85em' }}>
             {CHANNEL_LABEL[campaign.channel]} · {campaign.accountLabel ?? campaign.accountId} ·
             lotes de {campaign.batchSize} a {campaign.ratePerMinute}/min
-          </div>
+          </span>
         </div>
         <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
           <span className={`badge ${info.badge}`}>{info.label}</span>
           <span
-            className={`badge ${connected ? 'badge-success' : 'badge-weak'}`}
+            className={`camp-live${connected ? ' on' : ''}`}
             aria-live="polite"
+            title={connected ? 'Actualizando en tiempo real' : 'Sin conexión en vivo'}
           >
-            {connected ? 'En vivo' : 'Sin conexión en vivo'}
+            <span className="camp-live-dot" aria-hidden="true" />
+            {connected ? 'En vivo' : 'Sin conexión'}
           </span>
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            aria-label="Actualizar ahora"
+            onClick={() => void refresh()}
+            disabled={busy}
+          >
+            <RefreshCw size={15} />
+          </button>
         </div>
       </div>
+
       {error ? (
         <div className="alert alert-error" role="alert">
           {error}
@@ -220,81 +252,96 @@ export function CampaignProgress({
           presupuesto y reanuda.
         </div>
       ) : null}
+      {campaign.status === 'scheduled' && campaign.scheduledAt ? (
+        <div className="alert alert-info" role="status">
+          Programada para iniciar el{' '}
+          <strong>{new Date(campaign.scheduledAt).toLocaleString('es-MX')}</strong>. El scheduler la
+          arranca automáticamente.
+        </div>
+      ) : null}
 
       <div className="assistant-admin-stat-grid">
         <div className="assistant-admin-stat-card">
-          <div className="assistant-admin-stat-label">Destinatarios</div>
-          <div className="assistant-admin-stat-value">{live.total}</div>
+          <div className="assistant-admin-stat-label">Avance</div>
+          <div className="assistant-admin-stat-value">{pct}%</div>
+          <div className="assistant-admin-muted" style={{ fontSize: '0.78em' }}>
+            {done.toLocaleString('es-MX')} de {live.total.toLocaleString('es-MX')}
+          </div>
         </div>
         <div className="assistant-admin-stat-card">
-          <div className="assistant-admin-stat-label">Enviados</div>
+          <div className="assistant-admin-stat-label">Entregados / enviados</div>
           <div className="assistant-admin-stat-value">
-            {live.counts.sent + live.counts.delivered}
+            {(live.counts.delivered + live.counts.sent).toLocaleString('es-MX')}
+          </div>
+          <div className="assistant-admin-muted" style={{ fontSize: '0.78em' }}>
+            {live.counts.failed.toLocaleString('es-MX')} fallidos · {live.counts.opted_out} bajas
           </div>
         </div>
         <div className="assistant-admin-stat-card">
-          <div className="assistant-admin-stat-label">Gastado / presupuesto</div>
-          <div className="assistant-admin-stat-value">
-            {money(live.budgetSpent)} /{' '}
-            {campaign.budgetLimit === null ? '∞' : money(campaign.budgetLimit)}
+          <div className="assistant-admin-stat-label">Restantes</div>
+          <div className="assistant-admin-stat-value">{pending.toLocaleString('es-MX')}</div>
+          <div className="assistant-admin-muted" style={{ fontSize: '0.78em' }}>
+            {etaMinutes ? `~${Math.ceil(etaMinutes)} min restantes` : '—'}
           </div>
         </div>
         <div className="assistant-admin-stat-card">
-          <div className="assistant-admin-stat-label">Programada</div>
-          <div className="assistant-admin-stat-value" style={{ fontSize: '0.95em' }}>
-            {campaign.scheduledAt ? new Date(campaign.scheduledAt).toLocaleString('es-MX') : '—'}
+          <div className="assistant-admin-stat-label">Presupuesto</div>
+          <div className="assistant-admin-stat-value" style={{ fontSize: '1rem' }}>
+            {money(live.budgetSpent)}
+            {budgetLimit !== null ? ` / ${money(campaign.budgetLimit)}` : ''}
           </div>
+          {budgetPct !== null ? (
+            <div
+              className="camp-budget"
+              role="progressbar"
+              aria-valuenow={budgetPct}
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-label="Presupuesto usado"
+            >
+              <div style={{ width: `${budgetPct}%` }} data-hot={budgetPct > 85} />
+            </div>
+          ) : (
+            <div className="assistant-admin-muted" style={{ fontSize: '0.78em' }}>
+              sin límite
+            </div>
+          )}
         </div>
       </div>
 
-      <div
-        className="assistant-admin-chart"
-        aria-label="Avance por estado"
-        style={{ display: 'grid', gap: '0.35rem' }}
-      >
-        {ORDER.map((status) => {
-          const n = live.counts[status] ?? 0;
-          const pct = Math.round((n / total) * 100);
-          return (
-            <div
-              key={status}
-              className="assistant-admin-chart-bar"
-              style={{
-                display: 'grid',
-                gridTemplateColumns: '8rem 1fr 4rem',
-                alignItems: 'center',
-                gap: '0.5rem',
-              }}
-            >
-              <span className={`badge ${RECIPIENT_STATUS_LABEL[status].badge}`}>
-                {RECIPIENT_STATUS_LABEL[status].label}
+      <div aria-label="Distribución por estado">
+        <div
+          className="camp-segbar"
+          role="img"
+          aria-label={ORDER.map(
+            (s) => `${RECIPIENT_STATUS_LABEL[s].label}: ${live.counts[s] ?? 0}`
+          ).join(', ')}
+        >
+          {ORDER.map((status) => {
+            const n = live.counts[status] ?? 0;
+            if (!n) return null;
+            return (
+              <span
+                key={status}
+                className={`camp-seg ${SEG_CLASS[status]}`}
+                style={{ flexGrow: n }}
+                title={`${RECIPIENT_STATUS_LABEL[status].label}: ${n}`}
+              />
+            );
+          })}
+          {live.total === 0 ? <span className="camp-seg weak" style={{ flexGrow: 1 }} /> : null}
+        </div>
+        <div className="camp-legend">
+          {ORDER.map((status) => {
+            const n = live.counts[status] ?? 0;
+            return (
+              <span key={status} className="camp-legend-item">
+                <span className={`camp-seg-dot ${SEG_CLASS[status]}`} aria-hidden="true" />
+                {RECIPIENT_STATUS_LABEL[status].label} <strong>{n.toLocaleString('es-MX')}</strong>
               </span>
-              <div
-                role="progressbar"
-                aria-valuenow={pct}
-                aria-valuemin={0}
-                aria-valuemax={100}
-                aria-label={RECIPIENT_STATUS_LABEL[status].label}
-                style={{
-                  background: 'var(--muted, #e5e7eb)',
-                  borderRadius: '0.25rem',
-                  height: '0.6rem',
-                  overflow: 'hidden',
-                }}
-              >
-                <div
-                  className="assistant-admin-chart-bar-fill"
-                  style={{
-                    width: `${pct}%`,
-                    height: '100%',
-                    background: 'var(--primary, #2563eb)',
-                  }}
-                />
-              </div>
-              <span style={{ textAlign: 'right' }}>{n}</span>
-            </div>
-          );
-        })}
+            );
+          })}
+        </div>
       </div>
 
       {canManage ? (
@@ -361,7 +408,7 @@ export function CampaignProgress({
             Actualizar lista
           </button>
           <span className="assistant-admin-muted">
-            {recipients ? `${recipients.total} destinatarios` : 'Cargando…'}
+            {recipients ? `${recipients.total.toLocaleString('es-MX')} destinatarios` : 'Cargando…'}
           </span>
         </div>
         {recipients && recipients.items.length === 0 ? (
@@ -448,13 +495,13 @@ export function CampaignProgress({
         title="Mensaje exacto para el destinatario"
       >
         {preview ? (
-          <div style={{ display: 'grid', gap: '0.5rem' }}>
+          <div style={{ display: 'grid', gap: '0.6rem' }}>
             <div className="assistant-admin-muted">
               Destino: <span style={{ fontFamily: 'monospace' }}>{preview.to}</span> · estado{' '}
               {preview.status ?? '—'}
             </div>
-            <div className="card" style={{ whiteSpace: 'pre-wrap' }}>
-              {preview.body}
+            <div className={`camp-phone camp-phone-${campaign.channel}`}>
+              <MessageBubble body={preview.body} channel={campaign.channel} mode="highlight" />
             </div>
             {preview.missing.length ? (
               <div className="alert alert-warning">

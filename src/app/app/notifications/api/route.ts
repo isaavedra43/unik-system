@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentSession } from '@/modules/auth/authorization';
-import { getNotifications } from '@/modules/notifications/notification-service';
+import {
+  deleteNotification,
+  getNotifications,
+} from '@/modules/notifications/notification-service';
 
 export const runtime = 'nodejs';
 
@@ -18,4 +21,16 @@ export async function GET(req: NextRequest) {
 
   const result = await getNotifications(session.user.id, { page, pageSize, unreadOnly, category });
   return NextResponse.json(result);
+}
+
+/** DELETE ?id=<notificationId> — dismiss a single notification from the list. */
+export async function DELETE(req: NextRequest) {
+  const session = await getCurrentSession();
+  if (!session) {
+    return NextResponse.json({ error: 'No autenticado' }, { status: 401 });
+  }
+  const id = new URL(req.url).searchParams.get('id');
+  if (!id) return NextResponse.json({ error: 'Falta id' }, { status: 400 });
+  await deleteNotification(session.user.id, id);
+  return NextResponse.json({ ok: true });
 }

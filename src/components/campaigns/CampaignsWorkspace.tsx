@@ -1,7 +1,19 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Megaphone, Plus, RefreshCw } from 'lucide-react';
+import {
+  CheckCircle2,
+  Clock3,
+  Megaphone,
+  MessageSquare,
+  PauseCircle,
+  Phone,
+  Plus,
+  RefreshCw,
+  Search,
+  Send,
+  Snowflake,
+} from 'lucide-react';
 import { CampaignWizard } from './CampaignWizard';
 import { CampaignProgress } from './CampaignProgress';
 import {
@@ -19,6 +31,35 @@ interface ListResponse {
   canApprove: boolean;
 }
 
+const CHANNEL_ICON: Record<
+  string,
+  React.ComponentType<{ size?: number | string; className?: string }>
+> = {
+  whatsapp: MessageSquare,
+  sms: Phone,
+  telegram: Send,
+};
+
+const STATUS_FILTERS = [
+  { id: '', label: 'Todas' },
+  { id: 'active', label: 'Activas' },
+  { id: 'draft', label: 'Borradores' },
+  { id: 'pending_approval', label: 'Por aprobar' },
+  { id: 'completed', label: 'Completadas' },
+];
+
+function progressPct(c: CampaignDTO): number {
+  const total = c.audience?.count ?? c.stats.total;
+  if (!total) return 0;
+  const done =
+    c.stats.counts.sent +
+    c.stats.counts.delivered +
+    c.stats.counts.failed +
+    c.stats.counts.skipped +
+    c.stats.counts.opted_out;
+  return Math.min(100, Math.round((done / total) * 100));
+}
+
 export function CampaignsWorkspace({
   canManage,
   canApprove,
@@ -30,6 +71,7 @@ export function CampaignsWorkspace({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState('');
+  const [query, setQuery] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
 
@@ -42,15 +84,14 @@ export function CampaignsWorkspace({
     setLoading(true);
     setError(null);
     try {
-      const params = statusFilter ? `?status=${encodeURIComponent(statusFilter)}` : '';
-      const data = await api<ListResponse>(`/app/campaigns/api/campaigns${params}`);
+      const data = await api<ListResponse>('/app/campaigns/api/campaigns');
       setCampaigns(data.campaigns);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudieron cargar las campañas');
     } finally {
       setLoading(false);
     }
-  }, [statusFilter]);
+  }, []);
 
   useEffect(() => {
     void load();
@@ -66,19 +107,36 @@ export function CampaignsWorkspace({
     setCreating(false);
   };
 
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return campaigns.filter((c) => {
+      if (statusFilter === 'active' && !['scheduled', 'running', 'paused'].includes(c.status))
+        return false;
+      if (statusFilter && statusFilter !== 'active' && c.status !== statusFilter) return false;
+      if (
+        q &&
+        !`${c.name} ${c.accountLabel ?? ''} ${CHANNEL_LABEL[c.channel] ?? ''}`
+          .toLowerCase()
+          .includes(q)
+      )
+        return false;
+      return true;
+    });
+  }, [campaigns, statusFilter, query]);
+
+  const kpis = useMemo(() => {
+    const running = campaigns.filter((c) => c.status === 'running').length;
+    const pending = campaigns.filter((c) => c.status === 'pending_approval').length;
+    const recipients = campaigns.reduce((acc, c) => acc + (c.audience?.count ?? 0), 0);
+    const sent = campaigns.reduce(
+      (acc, c) => acc + c.stats.counts.sent + c.stats.counts.delivered,
+      0
+    );
+    return { total: campaigns.length, running, pending, recipients, sent };
+  }, [campaigns]);
+
   const info = (status: string) =>
     CAMPAIGN_STATUS_LABEL[status] ?? { label: status, badge: 'badge-weak' };
-  const progressPct = (c: CampaignDTO) => {
-    const total = c.audience?.count ?? c.stats.total;
-    if (!total) return 0;
-    const done =
-      c.stats.counts.sent +
-      c.stats.counts.delivered +
-      c.stats.counts.failed +
-      c.stats.counts.skipped +
-      c.stats.counts.opted_out;
-    return Math.round((done / total) * 100);
-  };
 
   return (
     <div className="assistant-admin-panel" style={{ display: 'grid', gap: '1rem' }}>
@@ -87,33 +145,51 @@ export function CampaignsWorkspace({
           {error}
         </div>
       ) : null}
-      <div
-        className="campaigns-layout"
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'minmax(16rem, 1fr) minmax(0, 2.4fr)',
-          gap: '1rem',
-          alignItems: 'start',
-        }}
-      >
-        <section className="card" aria-label="Lista de campañas">
-          <div
-            className="assistant-admin-filters"
-            style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}
-          >
-            <select
-              className="assistant-admin-select"
-              value={statusFilter}
-              aria-label="Filtrar por estado"
-              onChange={(e) => setStatusFilter(e.target.value)}
-            >
-              <option value="">Todos los estados</option>
-              {Object.entries(CAMPAIGN_STATUS_LABEL).map(([k, v]) => (
-                <option key={k} value={k}>
-                  {v.label}
-                </option>
-              ))}
-            </select>
+
+      <div className="assistant-admin-stat-grid camp-kpis">
+        <div className="assistant-admin-stat-card">
+          <div className="assistant-admin-stat-label">Campañas</div>
+          <div className="assistant-admin-stat-value">{kpis.total}</div>
+        </div>
+        <div className="assistant-admin-stat-card">
+          <div className="assistant-admin-stat-label">
+            <Send size={13} style={{ marginRight: '0.3rem', verticalAlign: '-2px' }} />
+            En envío ahora
+          </div>
+          <div className="assistant-admin-stat-value">{kpis.running}</div>
+        </div>
+        <div className="assistant-admin-stat-card">
+          <div className="assistant-admin-stat-label">
+            <Clock3 size={13} style={{ marginRight: '0.3rem', verticalAlign: '-2px' }} />
+            Por aprobar
+          </div>
+          <div className="assistant-admin-stat-value">{kpis.pending}</div>
+        </div>
+        <div className="assistant-admin-stat-card">
+          <div className="assistant-admin-stat-label">Mensajes enviados</div>
+          <div className="assistant-admin-stat-value">{kpis.sent.toLocaleString('es-MX')}</div>
+        </div>
+        <div className="assistant-admin-stat-card">
+          <div className="assistant-admin-stat-label">Alcance congelado</div>
+          <div className="assistant-admin-stat-value">
+            {kpis.recipients.toLocaleString('es-MX')}
+          </div>
+        </div>
+      </div>
+
+      <div className="campaigns-layout">
+        <section className="card camp-list" aria-label="Lista de campañas">
+          <div className="camp-list-toolbar">
+            <div className="camp-search">
+              <Search size={15} aria-hidden="true" />
+              <input
+                type="search"
+                placeholder="Buscar campaña…"
+                aria-label="Buscar campaña"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+              />
+            </div>
             <button
               type="button"
               className="btn btn-ghost btn-sm"
@@ -121,7 +197,7 @@ export function CampaignsWorkspace({
               onClick={() => void load()}
               disabled={loading}
             >
-              <RefreshCw size={16} />
+              <RefreshCw size={16} className={loading ? 'camp-spin' : undefined} />
             </button>
             {canManage ? (
               <button
@@ -132,65 +208,122 @@ export function CampaignsWorkspace({
                   setSelectedId(null);
                 }}
               >
-                <Plus size={16} /> Nueva campaña
+                <Plus size={16} /> Nueva
               </button>
             ) : null}
           </div>
-          {loading ? <div className="assistant-admin-loading">Cargando…</div> : null}
-          {!loading && campaigns.length === 0 ? (
+          <div className="camp-chips" role="tablist" aria-label="Filtro por estado">
+            {STATUS_FILTERS.map((f) => (
+              <button
+                key={f.id}
+                type="button"
+                role="tab"
+                aria-selected={statusFilter === f.id}
+                className={`camp-chip${statusFilter === f.id ? ' active' : ''}`}
+                onClick={() => setStatusFilter(f.id)}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
+
+          {loading && campaigns.length === 0 ? (
+            <div className="assistant-admin-loading">Cargando…</div>
+          ) : null}
+          {!loading && filtered.length === 0 ? (
             <div className="empty-state">
               <Megaphone size={32} aria-hidden="true" />
-              <h3 className="empty-state-title">Sin campañas</h3>
+              <h3 className="empty-state-title">
+                {campaigns.length === 0 ? 'Sin campañas' : 'Sin resultados'}
+              </h3>
               <p>
-                {canManage
-                  ? 'Crea la primera con “Nueva campaña”.'
-                  : 'Aún no hay campañas para mostrar.'}
+                {campaigns.length === 0
+                  ? canManage
+                    ? 'Crea la primera con “Nueva”.'
+                    : 'Aún no hay campañas para mostrar.'
+                  : 'Ajusta la búsqueda o el filtro de estado.'}
               </p>
             </div>
           ) : null}
-          {campaigns.length > 0 ? (
-            <div className="table-wrap">
-              <table className="assistant-admin-table">
-                <thead>
-                  <tr>
-                    <th>Campaña</th>
-                    <th>Estado</th>
-                    <th style={{ textAlign: 'right' }}>Avance</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {campaigns.map((c) => (
-                    <tr
-                      key={c.id}
-                      className="assistant-admin-row-clickable"
-                      onClick={() => {
-                        setSelectedId(c.id);
-                        setCreating(false);
-                      }}
-                      aria-selected={c.id === selectedId}
-                      style={c.id === selectedId ? { fontWeight: 600 } : undefined}
+
+          <div className="camp-cards" role="listbox" aria-label="Campañas">
+            {filtered.map((c) => {
+              const pct = progressPct(c);
+              const st = info(c.status);
+              const Icon = CHANNEL_ICON[c.channel] ?? Megaphone;
+              const isSel = c.id === selectedId;
+              return (
+                <button
+                  key={c.id}
+                  type="button"
+                  role="option"
+                  aria-selected={isSel}
+                  className={`camp-card${isSel ? ' selected' : ''}`}
+                  onClick={() => {
+                    setSelectedId(c.id);
+                    setCreating(false);
+                  }}
+                >
+                  <div className="camp-card-head">
+                    <span className={`camp-chan camp-chan-${c.channel}`} aria-hidden="true">
+                      <Icon size={14} />
+                    </span>
+                    <span className="camp-card-name">{c.name}</span>
+                    <span className={`badge ${st.badge}`}>{st.label}</span>
+                  </div>
+                  <div className="camp-card-meta">
+                    {CHANNEL_LABEL[c.channel] ?? c.channel} · {c.accountLabel ?? '—'}
+                  </div>
+                  <div className="camp-card-stats">
+                    <span>
+                      {c.audience?.count != null
+                        ? `${c.audience.count.toLocaleString('es-MX')} dest.`
+                        : 'Sin audiencia'}
+                    </span>
+                    <span>{money(c.budgetSpent)} gastados</span>
+                    {c.scheduledAt && c.status === 'scheduled' ? (
+                      <span>
+                        <Clock3 size={11} style={{ verticalAlign: '-1px' }} />{' '}
+                        {new Date(c.scheduledAt).toLocaleString('es-MX', {
+                          day: 'numeric',
+                          month: 'short',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}
+                      </span>
+                    ) : null}
+                  </div>
+                  {ACTIVE_STATUSES.has(c.status) && c.audience?.count ? (
+                    <div
+                      className="camp-card-progress"
+                      role="progressbar"
+                      aria-valuenow={pct}
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                      aria-label={`Avance ${pct}%`}
                     >
-                      <td>
-                        {c.name}
-                        <div className="assistant-admin-muted" style={{ fontSize: '0.8em' }}>
-                          {CHANNEL_LABEL[c.channel] ?? c.channel} · {c.accountLabel ?? '—'} ·{' '}
-                          {c.audience?.count ?? '—'} dest. · {money(c.budgetSpent)}
-                        </div>
-                      </td>
-                      <td>
-                        <span className={`badge ${info(c.status).badge}`}>
-                          {info(c.status).label}
-                        </span>
-                      </td>
-                      <td style={{ textAlign: 'right' }}>
-                        {ACTIVE_STATUSES.has(c.status) ? `${progressPct(c)} %` : '—'}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : null}
+                      <div style={{ width: `${pct}%` }} />
+                    </div>
+                  ) : null}
+                  {c.status === 'paused' && c.stats.pauseReason === 'budget_exceeded' ? (
+                    <span className="camp-card-flag">
+                      <PauseCircle size={12} /> Pausada por presupuesto
+                    </span>
+                  ) : null}
+                  {c.frozen && !ACTIVE_STATUSES.has(c.status) ? (
+                    <span className="camp-card-flag info">
+                      <Snowflake size={12} /> Audiencia congelada
+                    </span>
+                  ) : null}
+                  {c.status === 'completed' ? (
+                    <span className="camp-card-flag ok">
+                      <CheckCircle2 size={12} /> Envío finalizado
+                    </span>
+                  ) : null}
+                </button>
+              );
+            })}
+          </div>
         </section>
 
         <section className="card" aria-label="Detalle de campaña">
@@ -215,6 +348,7 @@ export function CampaignsWorkspace({
             <CampaignProgress campaign={selected} canManage={canManage} onChange={upsert} />
           ) : (
             <CampaignWizard
+              key={selected.id}
               campaign={selected}
               canManage={canManage}
               canApprove={canApprove}
@@ -224,7 +358,6 @@ export function CampaignsWorkspace({
           )}
         </section>
       </div>
-      <style>{`@media (max-width: 900px) { .campaigns-layout { grid-template-columns: 1fr !important; } }`}</style>
     </div>
   );
 }

@@ -263,6 +263,7 @@ export const PREFETCH_CHOICES = [
   'accounts_receivable',
   'low_stock',
   'top_products',
+  'web_query',
 ] as const;
 export type PrefetchChoice = (typeof PREFETCH_CHOICES)[number];
 
@@ -294,6 +295,7 @@ export function prefetchPickDecision(message: string) {
           accounts_receivable: 'Pregunta por cuentas por cobrar, saldos pendientes, quién debe.',
           low_stock: 'Pregunta por inventario bajo, faltantes o productos sin movimiento.',
           top_products: 'Pregunta por los productos más vendidos o el ranking de productos.',
+          web_query: 'Pide buscar algo en internet (una web, un sitio, la competencia en línea, "busca en internet…"). La consulta canónica usa el mensaje como query.',
         },
       } satisfies JevQuestion,
       period: {

@@ -51,6 +51,22 @@ async function authorizeChannel(user: CurrentUser, channel: string): Promise<boo
       return hasPermission(user, 'calls.use') || hasPermission(user, 'calls.supervise');
     case 'campaign':
       return hasPermission(user, 'campaigns.view');
+    case 'assistant': {
+      // Agent workspace feed — only the conversation owner watches it.
+      const conv = await prisma.aiConversation.findUnique({
+        where: { id },
+        select: { userId: true },
+      });
+      return conv?.userId === user.id;
+    }
+    case 'venue': {
+      // Virtual-computer streams belong to the session owner.
+      const venue = await prisma.venueSession.findUnique({
+        where: { id },
+        select: { userId: true },
+      });
+      return venue?.userId === user.id;
+    }
     default:
       return false;
   }

@@ -46,6 +46,10 @@ export interface TurnMemoryInput {
   userMessage: string;
   answer: string;
   toolsUsed: string[];
+  /** URLs realmente consultadas este turno (web/fetch/browser) — trazabilidad. */
+  sourceUrls?: string[];
+  /** Archivos/artefactos realmente generados este turno. */
+  artifacts?: string[];
 }
 
 export async function extractAndStoreMemory(settings: AiSettings, input: TurnMemoryInput): Promise<void> {
@@ -73,8 +77,10 @@ export async function extractAndStoreMemory(settings: AiSettings, input: TurnMem
         role: 'user',
         content:
           `MENSAJE DEL USUARIO:\n${input.userMessage.slice(0, 1500)}\n\n` +
-          `TOOLS USADAS: ${input.toolsUsed.join(', ') || 'ninguna'}\n\n` +
-          `RESPUESTA DEL ASISTENTE (recorte):\n${input.answer.slice(0, 2500)}`,
+          `TOOLS USADAS: ${input.toolsUsed.join(', ') || 'ninguna'}\n` +
+          (input.sourceUrls?.length ? `FUENTES CONSULTADAS: ${input.sourceUrls.slice(0, 15).join(', ')}\n` : '') +
+          (input.artifacts?.length ? `ARCHIVOS GENERADOS: ${input.artifacts.slice(0, 10).join(', ')}\n` : '') +
+          `\nRESPUESTA DEL ASISTENTE (recorte):\n${input.answer.slice(0, 2500)}`,
       },
     ],
   });
@@ -86,7 +92,19 @@ export async function extractAndStoreMemory(settings: AiSettings, input: TurnMem
       recordEpisode(input.userId, {
         conversationId: input.conversationId,
         summary: parsed.episode.summary,
-        entities: parsed.episode.entities,
+        // Source domains + artifact names join entities so "lo que vimos de
+        // amazon.com" or "ese reporte PDF" recall the episode by keyword.
+        entities: [
+          ...(parsed.episode.entities ?? []),
+          ...(input.sourceUrls ?? []).slice(0, 8).map((u) => {
+            try {
+              return new URL(u).hostname.replace(/^www\./, '');
+            } catch {
+              return u.slice(0, 60);
+            }
+          }),
+          ...(input.artifacts ?? []).slice(0, 5),
+        ],
         toolNames: input.toolsUsed,
         importance: parsed.episode.importance,
       })

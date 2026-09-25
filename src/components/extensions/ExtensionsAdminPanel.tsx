@@ -3,7 +3,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { AlertCircle, CheckCircle2, Plug, RefreshCw, ShieldOff, Upload } from 'lucide-react';
 import { AssistantAdminStatCard } from '@/components/assistant/admin/AssistantAdminStatCard';
-import { CatalogGrid } from './CatalogGrid';
+import { CatalogGrid, type ComposioAppItem } from './CatalogGrid';
 import { MonitoringTab } from './MonitoringTab';
 import { ComposioAdminTab } from './ComposioAdminTab';
 import type { CuratedEntry } from '@/modules/extensions/curated-catalog';
@@ -119,7 +119,16 @@ interface SkillRow {
 }
 
 type TabId =
-  | 'catalog' | 'composio' | 'monitoring' | 'connections' | 'mcp' | 'apis' | 'skills' | 'plugins' | 'executions' | 'usage';
+  | 'catalog'
+  | 'composio'
+  | 'monitoring'
+  | 'connections'
+  | 'mcp'
+  | 'apis'
+  | 'skills'
+  | 'plugins'
+  | 'executions'
+  | 'usage';
 
 const TABS: Array<{ id: TabId; label: string }> = [
   { id: 'catalog', label: 'Catálogo' },
@@ -229,6 +238,13 @@ export function ExtensionsAdminPanel({
     result?: unknown;
   }>({ capabilityId: '', args: '{}', fixture: '', confirmWrite: false });
 
+  // Real Composio catalog for the "Catálogo" tab
+  const [composioApps, setComposioApps] = useState<ComposioAppItem[] | null>(null);
+  const [composioConfigured, setComposioConfigured] = useState<boolean | null>(null);
+  const [composioLoading, setComposioLoading] = useState(false);
+  const [composioError, setComposioError] = useState<string | null>(null);
+  const [addingToolkit, setAddingToolkit] = useState<string | null>(null);
+
   const run = useCallback(async (fn: () => Promise<void>, ok?: string) => {
     setBusy(true);
     setError(null);
@@ -273,7 +289,34 @@ export function ExtensionsAdminPanel({
     else setDetail(null);
   }, [selectedId, loadDetail]);
 
+  const loadComposioCatalog = useCallback(async () => {
+    setComposioLoading(true);
+    setComposioError(null);
+    try {
+      const data = await api<{
+        configured: boolean;
+        catalog: ComposioAppItem[];
+        policies: Array<{ toolkitSlug: string; enabled: boolean }>;
+      }>('/app/admin/extensions/api/composio');
+      setComposioConfigured(data.configured);
+      const statusBySlug = new Map(
+        data.policies.map((p) => [
+          p.toolkitSlug,
+          p.enabled ? ('enabled' as const) : ('configured' as const),
+        ])
+      );
+      setComposioApps(
+        data.catalog.map((t) => ({ ...t, status: statusBySlug.get(t.slug) ?? null }))
+      );
+    } catch (e) {
+      setComposioError(e instanceof Error ? e.message : 'No se pudo cargar Composio');
+    } finally {
+      setComposioLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
+    if (tab === 'catalog' && composioApps === null && !composioLoading) void loadComposioCatalog();
     if (tab === 'executions')
       api<{ executions: ExecutionRow[] }>('/app/admin/extensions/api/executions')
         .then((d) => setExecutions(d.executions))
@@ -286,7 +329,7 @@ export function ExtensionsAdminPanel({
       api<{ skills: SkillRow[] }>('/app/admin/extensions/api/skills')
         .then((d) => setSkills(d.skills))
         .catch(() => undefined);
-  }, [tab]);
+  }, [tab, composioApps, composioLoading, loadComposioCatalog]);
 
   const kindFilter: Record<TabId, string | null> = {
     catalog: null,
@@ -315,6 +358,30 @@ export function ExtensionsAdminPanel({
       apiKeyHeader: entry.authType === 'api_key' ? 'X-API-Key' : 'Authorization',
     });
     setTab(entry.kind === 'mcp' ? 'mcp' : entry.kind === 'api' ? 'apis' : 'plugins');
+  }
+
+  /**
+   * "Agregar" on a Composio app card: creates its governance policy (disabled
+   * until the admin enables it and assigns roles in the Composio tab). No fake
+   * URL/API-key form — the app itself does the auth.
+   */
+  async function handleAddComposio(slug: string) {
+    setAddingToolkit(slug);
+    setError(null);
+    try {
+      await api('/app/admin/extensions/api/composio', {
+        method: 'PUT',
+        body: JSON.stringify({ toolkit: slug }),
+      });
+      setComposioApps((prev) =>
+        (prev ?? []).map((a) => (a.slug === slug ? { ...a, status: 'configured' } : a))
+      );
+      setNotice('App agregada — habilítala y asigna roles en la pestaña Composio.');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'No se pudo agregar la app');
+    } finally {
+      setAddingToolkit(null);
+    }
   }
 
   async function createExtension(kind: string) {
@@ -557,8 +624,13 @@ export function ExtensionsAdminPanel({
 
         {tab === 'catalog' && (
           <div className="assistant-admin-muted" role="note">
-            Las guías de «servidores MCP locales» quedaron obsoletas y se retiraron de este catálogo. Para apps como Gmail, Calendar, Slack, GitHub o Notion usa la pestaña{' '}
-            <button type="button" className="gui-btn" onClick={() => setTab('composio')}>Composio</button>; los MCP remotos por HTTPS siguen en la pestaña MCP.
+            Las <strong>Apps</strong> son integraciones reales de Composio: «Agregar» crea su policy
+            y se habilitan/asignan roles en la pestaña{' '}
+            <button type="button" className="gui-btn" onClick={() => setTab('composio')}>
+              Composio
+            </button>
+            — cada usuario conecta su propia cuenta. Plugins y Skills son templates que pre-rellenan
+            el formulario de creación; los MCP remotos por HTTPS van en la pestaña MCP.
           </div>
         )}
 
@@ -566,6 +638,13 @@ export function ExtensionsAdminPanel({
           <CatalogGrid
             onConnect={handleCatalogConnect}
             connectedNamespaces={extensions.map((e) => e.namespace)}
+            composioApps={composioApps ?? undefined}
+            composioConfigured={composioConfigured ?? undefined}
+            composioLoading={composioLoading}
+            composioError={composioError}
+            onAddComposio={(slug) => void handleAddComposio(slug)}
+            onManageComposio={() => setTab('composio')}
+            addingToolkit={addingToolkit}
           />
         )}
 
@@ -718,10 +797,7 @@ export function ExtensionsAdminPanel({
           </div>
         )}
 
-        {(tab === 'connections' ||
-          tab === 'mcp' ||
-          tab === 'apis' ||
-          tab === 'plugins') && (
+        {(tab === 'connections' || tab === 'mcp' || tab === 'apis' || tab === 'plugins') && (
           <>
             {showCreate && (
               <div className="assistant-admin-section">

@@ -35,7 +35,18 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       if (legacyPath) stream = await openLegacyFileStream(legacyPath);
     }
     if (!stream) return NextResponse.json({ error: 'Archivo no disponible' }, { status: 404 });
-    return streamResponse(stream, { fileName, mimeType, disposition: 'inline', cacheControl: 'private, max-age=600' });
+    // downloadOnly objects (SVG/HTML/macros) must never render in our origin —
+    // the flag is set at upload time; the mime check is defense-in-depth.
+    const meta = (object.metadata as Record<string, unknown> | null) ?? {};
+    const downloadOnly =
+      Boolean(meta.downloadOnly) || mimeType === 'image/svg+xml' || mimeType === 'text/html';
+    return streamResponse(stream, {
+      fileName,
+      mimeType,
+      disposition: downloadOnly ? 'attachment' : 'inline',
+      downloadOnly,
+      cacheControl: 'private, max-age=600',
+    });
   } catch (err) {
     if (err instanceof StorageError) return NextResponse.json({ error: err.message }, { status: err.status });
     console.error('[files/media]', err instanceof Error ? err.message : err);

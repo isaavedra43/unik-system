@@ -319,7 +319,7 @@ export function ComposioAdminTab({ canManage }: { canManage: boolean }) {
           <div className="assistant-admin-table-wrap">
             <table className="assistant-admin-table">
               <tbody>
-                {state.catalog.map((c) => {
+                {state.catalog.slice(0, 40).map((c) => {
                   const configured = policyBySlug.get(c.slug);
                   return (
                     <tr key={c.slug}>
@@ -352,6 +352,12 @@ export function ComposioAdminTab({ canManage }: { canManage: boolean }) {
                 })}
               </tbody>
             </table>
+            {state.catalog.length > 40 && (
+              <p className="assistant-admin-muted" role="note">
+                Mostrando 40 de {state.catalog.length} apps — usa la búsqueda para filtrar, o
+                agrégalas desde la pestaña Catálogo.
+              </p>
+            )}
           </div>
         </>
       )}

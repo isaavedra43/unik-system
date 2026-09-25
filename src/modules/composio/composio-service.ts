@@ -18,6 +18,10 @@ import {
   type ComposioPolicy,
 } from './composio-policy-service';
 import { shrinkJson } from './shrink-json';
+import { safeFetch } from '@/modules/extensions/safe-fetch';
+import { mergeCatalogItems, type CatalogToolkit, type RawToolkitItem } from './composio-catalog';
+
+export type { CatalogToolkit, RawToolkitItem } from './composio-catalog';
 
 /**
  * Composio integration: every toolkit/tool the assistant can reach goes through
@@ -225,31 +229,55 @@ export async function disconnectToolkit(
 
 /** Every toolkit Composio offers (for the admin panel). The API has no text search: fetched once by usage and filtered here. */
 let catalogCache: { at: number; items: CatalogToolkit[] } | null = null;
-export interface CatalogToolkit {
-  slug: string;
-  name: string;
-  description: string;
-  logo: string | null;
-  categories: string[];
-  noAuth: boolean;
+
+/**
+ * The SDK's toolkits.get() flattens away `next_cursor`, so the full catalog is
+ * fetched straight from the REST endpoint — every page, no silent truncation.
+ * Goes through safeFetch like any other outbound call (host allowlist + DNS
+ * check); the API key stays server-side.
+ */
+const CATALOG_PAGE_SIZE = 200;
+const CATALOG_MAX_PAGES = 30; // hard bound: 6 000 toolkits is far past the real catalog
+
+async function fetchCatalogPage(baseUrl: string, apiKey: string, cursor?: string) {
+  const url = new URL('/api/v3.1/toolkits', baseUrl);
+  url.searchParams.set('limit', String(CATALOG_PAGE_SIZE));
+  url.searchParams.set('sort_by', 'usage');
+  if (cursor) url.searchParams.set('cursor', cursor);
+  const res = await safeFetch(
+    url.toString(),
+    { headers: { 'x-api-key': apiKey, Accept: 'application/json' } },
+    {
+      allowedHosts: [url.hostname],
+      allowedContentTypes: ['application/json'],
+      maxResponseBytes: 8 * 1024 * 1024,
+      timeoutMs: 20_000,
+    }
+  );
+  if (res.status !== 200) {
+    throw new Error(`Composio catalog respondió ${res.status}`);
+  }
+  return JSON.parse(res.body.toString('utf8')) as {
+    items?: RawToolkitItem[];
+    next_cursor?: string | null;
+  };
 }
 
-export async function listCatalogToolkits(search?: string, limit = 60): Promise<CatalogToolkit[]> {
+export async function listCatalogToolkits(search?: string, limit = 0): Promise<CatalogToolkit[]> {
   assertConfigured();
   try {
     if (!catalogCache || Date.now() - catalogCache.at > 10 * 60_000) {
-      const res = await getComposio().toolkits.get({ limit: 300, sortBy: 'usage' });
-      catalogCache = {
-        at: Date.now(),
-        items: res.map((t) => ({
-          slug: t.slug.toLowerCase(),
-          name: t.name,
-          description: t.meta?.description?.slice(0, 200) ?? '',
-          logo: t.meta?.logo ?? null,
-          categories: (t.meta?.categories ?? []).map((c) => c.name).filter(Boolean),
-          noAuth: Boolean(t.noAuth),
-        })),
-      };
+      const baseUrl = process.env.COMPOSIO_BASE_URL?.trim() || 'https://backend.composio.dev';
+      const apiKey = process.env.COMPOSIO_API_KEY!.trim();
+      const rawItems: RawToolkitItem[] = [];
+      let cursor: string | undefined;
+      for (let page = 0; page < CATALOG_MAX_PAGES; page++) {
+        const res = await fetchCatalogPage(baseUrl, apiKey, cursor);
+        rawItems.push(...(res.items ?? []));
+        if (!res.next_cursor || !res.items?.length) break;
+        cursor = res.next_cursor;
+      }
+      catalogCache = { at: Date.now(), items: mergeCatalogItems(rawItems) };
     }
     const term = search?.trim().toLowerCase();
     const items = term
@@ -257,7 +285,7 @@ export async function listCatalogToolkits(search?: string, limit = 60): Promise<
           `${t.slug} ${t.name} ${t.categories.join(' ')}`.toLowerCase().includes(term)
         )
       : catalogCache.items;
-    return items.slice(0, limit);
+    return limit > 0 ? items.slice(0, limit) : items;
   } catch (err) {
     throw upstream(err, 'No se pudo consultar el catálogo de Composio');
   }

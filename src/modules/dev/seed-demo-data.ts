@@ -10,8 +10,8 @@ import { prisma } from '@/lib/prisma';
  * that calls it.
  */
 export async function assertDemoSeedAllowed() {
-  if (process.env.NEXT_PUBLIC_ALLOW_DEMO_SEED !== 'true') {
-    throw new Error('Demo data seeding is disabled (set NEXT_PUBLIC_ALLOW_DEMO_SEED=true locally to enable it)');
+  if (process.env.ALLOW_DEMO_SEED !== 'true') {
+    throw new Error('Demo data seeding is disabled (set ALLOW_DEMO_SEED=true locally to enable it)');
   }
 }
 

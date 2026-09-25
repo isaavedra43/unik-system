@@ -14045,8 +14045,18 @@ export const CURATED_CATALOG: CuratedEntry[] = [
   },
 ];
 
-/** Entries shown in the catalog UI (obsolete ones excluded). */
-export const ACTIVE_CATALOG: CuratedEntry[] = CURATED_CATALOG.filter((e) => !e.deprecated);
+/**
+ * Entries shown in the catalog UI.
+ * Only kinds that produce a real, working UNIK extension stay visible:
+ * `skill` and `plugin` are local templates that create functioning artifacts.
+ * The curated `mcp`/`api` entries were decorative guides (they never created a
+ * live connection) and are superseded by the real Composio app catalog, so
+ * they are filtered out of the grid — the raw list stays for reference.
+ */
+const REAL_TEMPLATE_KINDS: ReadonlySet<CatalogKind> = new Set(['skill', 'plugin']);
+export const ACTIVE_CATALOG: CuratedEntry[] = CURATED_CATALOG.filter(
+  (e) => !e.deprecated && REAL_TEMPLATE_KINDS.has(e.kind)
+);
 
 /** Group entries by category for display. */
 export function groupByCategory(entries: CuratedEntry[] = ACTIVE_CATALOG): Record<string, CuratedEntry[]> {

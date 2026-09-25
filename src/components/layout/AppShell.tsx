@@ -35,7 +35,6 @@ import {
   BookOpen,
   Radio,
   SlidersHorizontal,
-  Palette,
 } from 'lucide-react';
 import { AssistantWidget } from '@/components/assistant/AssistantWidget';
 import { CallDockProvider } from '@/components/calls/CallDockProvider';
@@ -47,6 +46,7 @@ import { SeedDemoDataButton } from '@/components/dev/SeedDemoDataButton';
 interface AppShellProps {
   user: CurrentUser;
   children: ReactNode;
+  demoSeedEnabled?: boolean;
 }
 
 interface NavItem {
@@ -269,7 +269,15 @@ function AccountMenu({ user }: { user: CurrentUser }) {
   );
 }
 
-function Topbar({ user, onToggleSidebar }: { user: CurrentUser; onToggleSidebar: () => void }) {
+function Topbar({
+  user,
+  demoSeedEnabled,
+  onToggleSidebar,
+}: {
+  user: CurrentUser;
+  demoSeedEnabled: boolean;
+  onToggleSidebar: () => void;
+}) {
   const pathname = usePathname();
   const crumbs = buildBreadcrumbs(pathname);
   const { unread, setUnread } = useNotificationStream(user.id);
@@ -327,9 +335,7 @@ function Topbar({ user, onToggleSidebar }: { user: CurrentUser; onToggleSidebar:
         <Breadcrumbs items={crumbs} />
       </div>
       <div className="topbar-right">
-        {process.env.NEXT_PUBLIC_ALLOW_DEMO_SEED === 'true' && user.isSuperAdmin ? (
-          <SeedDemoDataButton />
-        ) : null}
+        {demoSeedEnabled && user.isSuperAdmin ? <SeedDemoDataButton /> : null}
         <ThemeToggle />
         <div style={{ position: 'relative' }}>
           <button
@@ -592,7 +598,7 @@ function buildBreadcrumbs(pathname: string): { label: string; href?: string }[] 
   return [];
 }
 
-export default function AppShell({ user, children }: AppShellProps) {
+export default function AppShell({ user, children, demoSeedEnabled = false }: AppShellProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
@@ -634,12 +640,6 @@ export default function AppShell({ user, children }: AppShellProps) {
           label: 'Asistente IA',
           icon: <Bot size={18} />,
           visible: user.permissionKeys.includes('assistant.use') || user.isSuperAdmin,
-        },
-        {
-          href: '/app/visual-studio',
-          label: 'Visual Studio',
-          icon: <Palette size={18} />,
-          visible: user.permissionKeys.includes('visual_studio.view') || user.isSuperAdmin,
         },
       ],
     },
@@ -882,7 +882,7 @@ export default function AppShell({ user, children }: AppShellProps) {
       <div className={`app-shell ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
         <Sidebar entries={sections} open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
         <div className="app-main">
-          <Topbar user={user} onToggleSidebar={toggleSidebar} />
+          <Topbar user={user} demoSeedEnabled={demoSeedEnabled} onToggleSidebar={toggleSidebar} />
           <main className={isFlush ? 'app-content app-content-flush' : 'app-content'}>
             {children}
           </main>

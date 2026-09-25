@@ -20,5 +20,9 @@ export default async function AppLayout({
     redirect('/change-password');
   }
 
-  return <AppShell user={user}>{children}</AppShell>;
+  return (
+    <AppShell user={user} demoSeedEnabled={process.env.ALLOW_DEMO_SEED === 'true'}>
+      {children}
+    </AppShell>
+  );
 }

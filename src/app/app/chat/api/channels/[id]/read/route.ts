@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentSession, hasPermission } from '@/modules/auth/authorization';
 import { markAsRead } from '@/modules/chat/chat-service';
+import { apiErrorResponse } from '@/lib/api-error';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -16,9 +17,6 @@ export async function POST(_request: NextRequest, { params }: { params: Promise<
     const lastReadAt = await markAsRead(session.user, id);
     return NextResponse.json({ lastReadAt });
   } catch (err) {
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Error' },
-      { status: 403 }
-    );
+    return apiErrorResponse(err, { status: 403, safeNames: ['ChatError'], context: 'chat' });
   }
 }

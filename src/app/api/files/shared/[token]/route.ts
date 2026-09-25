@@ -30,9 +30,11 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
   try {
     let stream = null;
+    let storageMeta: Record<string, unknown> | null = null;
     if (artifact.storageObjectId) {
       const object = await getStorageObject(artifact.storageObjectId);
       if (!object || object.status !== 'ready') return NextResponse.json({ error: 'Documento no disponible' }, { status: 404 });
+      storageMeta = object.metadata as Record<string, unknown> | null;
       const totalSize = Number(object.sizeBytes);
       const range = parseRangeHeader(request.headers.get('range'), totalSize);
       if (range === 'unsatisfiable') {
@@ -43,10 +45,17 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       stream = await openLegacyFileStream(artifact.storagePath);
     }
     if (!stream) return NextResponse.json({ error: 'Documento no disponible' }, { status: 404 });
+    // SVG/HTML/macros are download-only: ?inline=1 must never override that —
+    // an inline SVG in our origin would run its scripts as the viewer.
+    const downloadOnly =
+      Boolean(storageMeta?.downloadOnly) ||
+      mimeType === 'image/svg+xml' ||
+      mimeType === 'text/html';
     return streamResponse(stream, {
       fileName: filename,
       mimeType,
-      disposition: inline ? 'inline' : 'attachment',
+      disposition: inline && !downloadOnly ? 'inline' : 'attachment',
+      downloadOnly,
       cacheControl: 'private, max-age=300',
     });
   } catch (err) {

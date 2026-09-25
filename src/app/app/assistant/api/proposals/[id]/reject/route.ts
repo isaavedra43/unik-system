@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { getCurrentSession, hasPermission } from '@/modules/auth/authorization';
 import { rejectProposal, ProposalError } from '@/modules/extensions/proposals-service';
+import { apiErrorResponse } from '@/lib/api-error';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -37,9 +38,6 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   } catch (err) {
     if (err instanceof ProposalError)
       return NextResponse.json({ error: err.message }, { status: err.status });
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Error' },
-      { status: 500 }
-    );
+    return apiErrorResponse(err, { context: 'reject' });
   }
 }

@@ -93,6 +93,9 @@ export const CACHEABLE_CATEGORIES: ReadonlySet<string> = new Set([
   'packages',
   'products',
   'contacts',
+  // Web reads cache with the live TTL — same query twice in a minute = same
+  // answer, and it is what makes Jev prefetch possible for internet requests.
+  'web',
 ]);
 
 /** Pure data tools: same permissions ⇒ same answer, so entries are shared between users. */

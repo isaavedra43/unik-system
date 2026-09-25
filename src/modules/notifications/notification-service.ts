@@ -354,6 +354,15 @@ export async function markNotificationRead(userId: string, notificationId: strin
   if (res.count > 0) await publishReadState(userId, [notificationId]);
 }
 
+/** "Mark as unread" — puts the row back in the badge count and republishes. */
+export async function markNotificationUnread(userId: string, notificationId: string): Promise<void> {
+  const res = await prisma.notification.updateMany({
+    where: { id: notificationId, userId, readAt: { not: null } },
+    data: { readAt: null },
+  });
+  if (res.count > 0) await publishReadState(userId, [notificationId]);
+}
+
 export async function markAllNotificationsRead(userId: string): Promise<void> {
   const res = await prisma.notification.updateMany({
     where: { userId, readAt: null },

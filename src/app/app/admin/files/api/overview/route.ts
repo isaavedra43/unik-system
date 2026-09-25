@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { requireFilesAdmin } from '../_auth';
 import { getStorageOverview } from '@/modules/storage/storage-admin-service';
+import { apiErrorResponse } from '@/lib/api-error';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -11,9 +12,6 @@ export async function GET() {
   try {
     return NextResponse.json(await getStorageOverview());
   } catch (err) {
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Error' },
-      { status: 500 }
-    );
+    return apiErrorResponse(err, { context: 'overview' });
   }
 }

@@ -185,7 +185,8 @@ export function AssistantMessage({ message, onSendText, isLatest = false }: Assi
   const content = followParsed ? followParsed.content : parsed ? parsed.content : message.content;
   const followUps = !isUser ? (message.meta?.followUps && message.meta.followUps.length > 0 ? message.meta.followUps : followParsed?.followUps ?? []) : [];
   const confidence = message.meta?.confidence ?? parsed?.level ?? null;
-  const confidenceNote = message.meta?.confidenceNote ?? parsed?.note ?? null;
+  // Fuentes reales primero (server-derived); la nota del modelo solo si no hay.
+  const confidenceNote = message.meta?.sourcesLabel ?? message.meta?.confidenceNote ?? parsed?.note ?? null;
 
   return (
     <div className={`assistant-msg-row ${isUser ? 'assistant-msg-row-user' : 'assistant-msg-row-assistant'}`}>
