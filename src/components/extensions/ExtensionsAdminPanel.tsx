@@ -285,8 +285,9 @@ export function ExtensionsAdminPanel({
   }
 
   /**
-   * "Agregar" on a Composio app card: creates its governance policy (disabled
-   * until the admin enables it and assigns roles in the Composio tab).
+   * "Agregar" on a Composio app card: creates its governance policy already
+   * enabled (roles empty = solo super_admin hasta que se asignen en la
+   * pestaña Composio), para que "Mi cuenta" → Conectar funcione de inmediato.
    */
   async function handleAddComposio(slug: string) {
     setAddingToolkit(slug);
@@ -294,12 +295,12 @@ export function ExtensionsAdminPanel({
     try {
       await api('/app/admin/extensions/api/composio', {
         method: 'PUT',
-        body: JSON.stringify({ toolkit: slug }),
+        body: JSON.stringify({ toolkit: slug, enabled: true }),
       });
       setComposioApps((prev) =>
-        (prev ?? []).map((a) => (a.slug === slug ? { ...a, status: 'configured' } : a))
+        (prev ?? []).map((a) => (a.slug === slug ? { ...a, status: 'enabled' } : a))
       );
-      setNotice('App agregada — habilítala y asigna roles en la pestaña Composio.');
+      setNotice('App agregada y habilitada — conéctala en la pestaña Composio o desde «Mis apps».');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'No se pudo agregar la app');
     } finally {
@@ -398,13 +399,14 @@ export function ExtensionsAdminPanel({
         {tab === 'catalog' && (
           <>
             <div className="assistant-admin-muted" role="note">
-              Las <strong>Apps</strong> son integraciones reales de Composio: «Agregar» crea su
-              policy y se habilitan/asignan roles en la pestaña{' '}
+              Las <strong>Apps</strong> son integraciones reales de Composio: «Agregar» la habilita
+              (solo para super admin hasta que le asignes roles en la pestaña{' '}
               <button type="button" className="gui-btn" onClick={() => setTab('composio')}>
                 Composio
               </button>
-              — cada usuario conecta su propia cuenta. Plugins y Skills son templates que abren el
-              formulario de creación; los MCP remotos por HTTPS van en «Extensiones → Nueva».
+              ) — cada usuario conecta su propia cuenta desde ahí o desde «Mis apps». Plugins y
+              Skills son templates que abren el formulario de creación; los MCP remotos por HTTPS
+              van en «Extensiones → Nueva».
             </div>
             <CatalogGrid
               onConnect={handleCatalogConnect}
