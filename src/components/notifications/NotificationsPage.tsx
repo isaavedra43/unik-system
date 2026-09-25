@@ -5,7 +5,6 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { AnimatePresence, motion, useReducedMotion, type Variants } from 'motion/react';
 import {
-  AtSign,
   Bell,
   BellRing,
   Bot,
@@ -13,13 +12,12 @@ import {
   CheckCheck,
   ChevronRight,
   Eye,
-  Inbox,
   MessageCircle,
   Phone,
-  PhoneCall,
-  PhoneMissed,
+  RotateCcw,
   Settings,
   Smartphone,
+  Trash2,
   type LucideIcon,
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -30,6 +28,7 @@ import { duration, ease } from '@/lib/motion/presets';
 import type { NotificationRow } from '@/modules/notifications/notification-service';
 import { NOTIFICATION_CATALOG } from '@/modules/notifications/catalog';
 import { useNotificationStream } from './useNotificationStream';
+import { notificationMeta, relativeTime } from './notification-meta';
 import { usePushSubscription } from './usePushSubscription';
 
 interface NotificationsPageProps {
@@ -47,21 +46,6 @@ const GROUP_ICONS: Record<string, LucideIcon> = {
   Sistema: Bell,
 };
 
-const CATEGORY_META: Record<string, { icon: LucideIcon; tile: string }> = {
-  call_incoming: { icon: Phone, tile: 'bg-success/10 text-success' },
-  call_missed: { icon: PhoneMissed, tile: 'bg-destructive/10 text-destructive' },
-  call_summary: { icon: PhoneCall, tile: 'bg-info/10 text-info' },
-  chat_message: { icon: MessageCircle, tile: 'bg-info/10 text-info' },
-  chat_mention: { icon: AtSign, tile: 'bg-info/10 text-info' },
-  inbox_message: { icon: Inbox, tile: 'bg-info/10 text-info' },
-  inbox_assigned: { icon: Inbox, tile: 'bg-info/10 text-info' },
-  ai_task_done: { icon: Bot, tile: 'bg-primary/10 text-primary' },
-  ai_user_message: { icon: Bot, tile: 'bg-primary/10 text-primary' },
-  entity_change: { icon: Eye, tile: 'bg-warning/10 text-warning' },
-  system: { icon: Bell, tile: 'bg-muted text-muted-foreground' },
-};
-const FALLBACK_META = { icon: Bell, tile: 'bg-muted text-muted-foreground' };
-
 const GROUPS = [...new Set(NOTIFICATION_CATALOG.map((c) => c.group))];
 
 const itemVariants: Variants = {
@@ -73,23 +57,6 @@ const itemVariants: Variants = {
   }),
   exit: { opacity: 0, transition: { duration: duration.fast } },
 };
-
-function relativeTime(value: string): string {
-  const date = new Date(value);
-  const diff = Date.now() - date.getTime();
-  const min = Math.round(diff / 60_000);
-  if (min < 1) return 'ahora';
-  if (min < 60) return `hace ${min} min`;
-  const hours = Math.round(min / 60);
-  if (hours < 24) return `hace ${hours} h`;
-  const days = Math.round(hours / 24);
-  if (days < 7) return `hace ${days} d`;
-  try {
-    return date.toLocaleString('es-MX', { dateStyle: 'short', timeStyle: 'short' });
-  } catch {
-    return value;
-  }
-}
 
 function dayLabel(value: string): string {
   const date = new Date(value);
@@ -113,9 +80,11 @@ export function NotificationsPage({ userId, initialData }: NotificationsPageProp
   const router = useRouter();
   const reduceMotion = useReducedMotion();
   const [notifications, setNotifications] = useState(initialData.data);
+  const [total, setTotal] = useState(initialData.total);
   const [filter, setFilter] = useState<Filter>('all');
   const [group, setGroup] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const { unread, setUnread, latest } = useNotificationStream(userId, { toasts: false });
   const push = usePushSubscription();
 
@@ -128,18 +97,44 @@ export function NotificationsPage({ userId, initialData }: NotificationsPageProp
   const reload = useCallback(async () => {
     setLoading(true);
     try {
-      const params = new URLSearchParams({ page_size: '100' });
+      const params = new URLSearchParams({ page_size: '50' });
       if (filter === 'unread') params.set('unread', 'true');
       const res = await fetch(`/app/notifications/api?${params.toString()}`, { cache: 'no-store' });
       if (res.ok) {
-        const json = (await res.json()) as { data: NotificationRow[]; unread: number };
+        const json = (await res.json()) as {
+          data: NotificationRow[];
+          unread: number;
+          total: number;
+        };
         setNotifications(json.data);
+        setTotal(json.total);
         setUnread(json.unread);
       }
     } finally {
       setLoading(false);
     }
   }, [filter, setUnread]);
+
+  const loadMore = useCallback(async () => {
+    setLoadingMore(true);
+    try {
+      const nextPage = Math.floor(notifications.length / 50) + 1;
+      const params = new URLSearchParams({ page_size: '50', page: String(nextPage) });
+      if (filter === 'unread') params.set('unread', 'true');
+      const res = await fetch(`/app/notifications/api?${params.toString()}`, {
+        cache: 'no-store',
+      });
+      if (res.ok) {
+        const json = (await res.json()) as { data: NotificationRow[] };
+        setNotifications((prev) => {
+          const seen = new Set(prev.map((n) => n.id));
+          return [...prev, ...json.data.filter((n) => !seen.has(n.id))];
+        });
+      }
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [filter, notifications.length]);
 
   useEffect(() => {
     void reload();
@@ -186,6 +181,33 @@ export function NotificationsPage({ userId, initialData }: NotificationsPageProp
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id }),
       }).catch(() => undefined);
+    },
+    [setUnread]
+  );
+
+  const markUnread = useCallback(
+    async (id: string) => {
+      setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, readAt: null } : n)));
+      setUnread((u) => u + 1);
+      await fetch('/app/notifications/api/read', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, unread: true }),
+      }).catch(() => undefined);
+    },
+    [setUnread]
+  );
+
+  const remove = useCallback(
+    async (n: NotificationRow) => {
+      const wasUnread = !n.readAt;
+      setNotifications((prev) => prev.filter((r) => r.id !== n.id));
+      setTotal((t) => Math.max(0, t - 1));
+      if (wasUnread) setUnread((u) => Math.max(0, u - 1));
+      const res = await fetch(`/app/notifications/api?id=${encodeURIComponent(n.id)}`, {
+        method: 'DELETE',
+      }).catch(() => null);
+      if (!res?.ok) toast.error('No se pudo eliminar');
     },
     [setUnread]
   );
@@ -428,6 +450,8 @@ export function NotificationsPage({ userId, initialData }: NotificationsPageProp
                       index={i}
                       onOpen={open}
                       onMarkRead={markRead}
+                      onMarkUnread={markUnread}
+                      onDelete={remove}
                     />
                   ))}
                 </AnimatePresence>
@@ -435,6 +459,19 @@ export function NotificationsPage({ userId, initialData }: NotificationsPageProp
             </section>
           ))
         )}
+        {visible.length > 0 && notifications.length < total && filter === 'all' ? (
+          <div className="flex justify-center pt-1">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={loadMore}
+              disabled={loadingMore}
+              type="button"
+            >
+              {loadingMore ? 'Cargando…' : `Cargar más (${notifications.length} de ${total})`}
+            </Button>
+          </div>
+        ) : null}
       </div>
     </div>
   );
@@ -471,13 +508,17 @@ function NotificationItem({
   index,
   onOpen,
   onMarkRead,
+  onMarkUnread,
+  onDelete,
 }: {
   n: NotificationRow;
   index: number;
   onOpen: (n: NotificationRow) => void;
   onMarkRead: (id: string) => void;
+  onMarkUnread: (id: string) => void;
+  onDelete: (n: NotificationRow) => void;
 }) {
-  const meta = CATEGORY_META[n.category] ?? FALLBACK_META;
+  const meta = notificationMeta(n.category);
   const Icon = meta.icon;
   const isUnread = n.readAt === null;
 
@@ -545,21 +586,53 @@ function NotificationItem({
           ) : null}
         </div>
       </div>
-      {isUnread ? (
+      <div className="flex shrink-0 items-center gap-0.5 sm:opacity-0 sm:transition-opacity sm:group-hover:opacity-100 sm:focus-within:opacity-100">
+        {isUnread ? (
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            type="button"
+            aria-label="Marcar como leída"
+            title="Marcar como leída"
+            className="text-muted-foreground"
+            onClick={(e) => {
+              e.stopPropagation();
+              void onMarkRead(n.id);
+            }}
+          >
+            <Check />
+          </Button>
+        ) : (
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            type="button"
+            aria-label="Marcar como no leída"
+            title="Marcar como no leída"
+            className="text-muted-foreground"
+            onClick={(e) => {
+              e.stopPropagation();
+              void onMarkUnread(n.id);
+            }}
+          >
+            <RotateCcw />
+          </Button>
+        )}
         <Button
           variant="ghost"
           size="icon-sm"
           type="button"
-          aria-label="Marcar como leída"
-          className="shrink-0 text-muted-foreground sm:opacity-0 sm:transition-opacity sm:group-hover:opacity-100 sm:focus-visible:opacity-100"
+          aria-label="Eliminar notificación"
+          title="Eliminar"
+          className="text-muted-foreground hover:text-destructive"
           onClick={(e) => {
             e.stopPropagation();
-            void onMarkRead(n.id);
+            onDelete(n);
           }}
         >
-          <Check />
+          <Trash2 />
         </Button>
-      ) : null}
+      </div>
     </motion.div>
   );
 }

@@ -39,7 +39,7 @@ import {
 import { AssistantWidget } from '@/components/assistant/AssistantWidget';
 import { CallDockProvider } from '@/components/calls/CallDockProvider';
 import { ThemeToggle } from '@/components/layout/ThemeToggle';
-import { useNotificationStream } from '@/components/notifications/useNotificationStream';
+import { NotificationBell } from '@/components/notifications/NotificationBell';
 import { PushEnablePrompt } from '@/components/notifications/PushEnablePrompt';
 import { SeedDemoDataButton } from '@/components/dev/SeedDemoDataButton';
 
@@ -280,46 +280,6 @@ function Topbar({
 }) {
   const pathname = usePathname();
   const crumbs = buildBreadcrumbs(pathname);
-  const { unread, setUnread } = useNotificationStream(user.id);
-  const [bellOpen, setBellOpen] = useState(false);
-  const [recent, setRecent] = useState<
-    {
-      id: string;
-      title: string;
-      body: string | null;
-      url: string | null;
-      readAt: string | null;
-      createdAt: string;
-    }[]
-  >([]);
-
-  function openNotification(n: { id: string; readAt: string | null }) {
-    setBellOpen(false);
-    if (n.readAt) return;
-    setUnread((u) => Math.max(0, u - 1));
-    void fetch('/app/notifications/api/read', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: n.id }),
-    }).catch(() => undefined);
-  }
-
-  async function openBell() {
-    if (bellOpen) {
-      setBellOpen(false);
-      return;
-    }
-    try {
-      const res = await fetch('/app/notifications/api?page_size=10');
-      if (res.ok) {
-        const json = await res.json();
-        setRecent(json.data);
-      }
-    } catch {
-      // silent
-    }
-    setBellOpen(true);
-  }
 
   return (
     <header className="app-topbar">
@@ -337,69 +297,7 @@ function Topbar({
       <div className="topbar-right">
         {demoSeedEnabled && user.isSuperAdmin ? <SeedDemoDataButton /> : null}
         <ThemeToggle />
-        <div style={{ position: 'relative' }}>
-          <button
-            className="so-notification-bell"
-            onClick={openBell}
-            aria-label={`Notificaciones${unread > 0 ? ` (${unread} sin leer)` : ''}`}
-          >
-            <Bell size={18} />
-            {unread > 0 ? (
-              <span className="so-notification-badge">{unread > 99 ? '99+' : unread}</span>
-            ) : null}
-          </button>
-          {bellOpen ? (
-            <>
-              <div
-                className="overlay"
-                style={{ zIndex: 49 }}
-                onClick={() => setBellOpen(false)}
-                aria-hidden="true"
-              />
-              <div className="so-notification-popover">
-                {recent.length === 0 ? (
-                  <div
-                    style={{
-                      padding: '1.5rem',
-                      textAlign: 'center',
-                      color: 'var(--unik-text-muted)',
-                    }}
-                  >
-                    Sin notificaciones
-                  </div>
-                ) : (
-                  recent.map((n) => (
-                    <Link
-                      key={n.id}
-                      href={n.url ?? '/app/notifications'}
-                      className={`so-notification-item ${n.readAt === null ? 'unread' : ''}`}
-                      onClick={() => openNotification(n)}
-                      style={{ textDecoration: 'none', color: 'inherit' }}
-                    >
-                      <div className="so-notification-title">{n.title}</div>
-                      {n.body ? <div className="so-notification-body">{n.body}</div> : null}
-                      <div className="so-notification-time">
-                        {new Date(n.createdAt).toLocaleString('es-MX', {
-                          dateStyle: 'short',
-                          timeStyle: 'short',
-                        })}
-                      </div>
-                    </Link>
-                  ))
-                )}
-                <div className="so-notification-footer">
-                  <Link
-                    href="/app/notifications"
-                    onClick={() => setBellOpen(false)}
-                    style={{ fontSize: '0.875rem' }}
-                  >
-                    Ver todas
-                  </Link>
-                </div>
-              </div>
-            </>
-          ) : null}
-        </div>
+        <NotificationBell userId={user.id} />
         <AccountMenu user={user} />
       </div>
     </header>
@@ -538,13 +436,25 @@ function buildBreadcrumbs(pathname: string): { label: string; href?: string }[] 
     return [{ label: 'Ventas' }, { label: 'Cotizaciones' }];
   }
   if (pathname === '/app/quotes/new') {
-    return [{ label: 'Ventas' }, { label: 'Cotizaciones', href: '/app/quotes' }, { label: 'Nueva' }];
+    return [
+      { label: 'Ventas' },
+      { label: 'Cotizaciones', href: '/app/quotes' },
+      { label: 'Nueva' },
+    ];
   }
   if (pathname.startsWith('/app/quotes/') && pathname.endsWith('/edit')) {
-    return [{ label: 'Ventas' }, { label: 'Cotizaciones', href: '/app/quotes' }, { label: 'Editar' }];
+    return [
+      { label: 'Ventas' },
+      { label: 'Cotizaciones', href: '/app/quotes' },
+      { label: 'Editar' },
+    ];
   }
   if (pathname.startsWith('/app/quotes/')) {
-    return [{ label: 'Ventas' }, { label: 'Cotizaciones', href: '/app/quotes' }, { label: 'Detalle' }];
+    return [
+      { label: 'Ventas' },
+      { label: 'Cotizaciones', href: '/app/quotes' },
+      { label: 'Detalle' },
+    ];
   }
   if (pathname === '/app/invoices') {
     return [{ label: 'Ventas' }, { label: 'Facturas' }];

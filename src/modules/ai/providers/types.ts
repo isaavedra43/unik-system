@@ -83,6 +83,8 @@ export interface ChatCompletionResult {
 
 export interface StreamChunk {
   delta?: string;
+  /** Thinking text from reasoning models (OpenRouter `delta.reasoning`, `<think>` bodies). Never part of the answer. */
+  reasoning?: string;
   toolCalls?: Array<{ id: string; name: string; arguments: string }>;
   finishReason?: string;
   usage?: { promptTokens: number; completionTokens: number; totalTokens: number };

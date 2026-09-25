@@ -365,6 +365,8 @@ export const DEFAULT_AI_SETTINGS: AiSettings = {
     'analyzeImage',
     'generateImage',
     'generateVideo',
+    // Interfaz interactiva generada al vuelo (iframe sandboxed en el chat)
+    'renderInteractiveUi',
   ],
   maxAttachmentSizeMb: 25,
   allowedMimeTypes: [

@@ -1,10 +1,10 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Bot, Check, ChevronDown, ChevronRight, Clock, Database, FileText, Image as ImageIcon, ShieldCheck, ShieldX, Sparkles, User as UserIcon, X } from 'lucide-react';
+import { Bot, Brain, Check, ChevronDown, ChevronRight, Clock, Database, FileText, Image as ImageIcon, ShieldCheck, ShieldX, Sparkles, User as UserIcon, X } from 'lucide-react';
 import { AssistantMarkdown } from './AssistantMarkdown';
 import { ArtifactRenderer, type ArtifactData } from './ArtifactRenderer';
-import { AUTO_EVENT_LABELS, autoKind, extractFailureReason, extractResultAction, parseMission, parsePlan, performUiAction, toolLabel, type MessageFeedbackData, type TurnMeta } from '@/components/copilot/copilot-types';
+import { AUTO_EVENT_LABELS, autoKind, extractFailureReason, extractResultAction, parseMission, parsePlan, performUiAction, toolLabel, toolStepLabel, type MessageFeedbackData, type TurnMeta } from '@/components/copilot/copilot-types';
 import { ExternalLink, Phone } from 'lucide-react';
 import { ConfidenceBadge } from '@/components/copilot/ConfidenceBadge';
 import { parseFollowUps } from '@/modules/ai/followups';
@@ -59,6 +59,30 @@ function wasCached(result: unknown): boolean {
   return Boolean(result && typeof result === 'object' && (result as { cached?: unknown }).cached === true);
 }
 
+/**
+ * The model's thinking, shown like ChatGPT's reasoning rail: live = auto-open
+ * while it streams; persisted = collapsed "Pensamiento" you can expand.
+ */
+export function ThinkingBlock({ text, live = false }: { text: string; live?: boolean }) {
+  const [open, setOpen] = useState(live);
+  if (!text.trim()) return null;
+  return (
+    <div className={`assistant-thinking ${live ? 'is-live' : ''}`}>
+      <button
+        type="button"
+        className="assistant-thinking-toggle"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+      >
+        <Brain size={12} />
+        {live ? 'Pensando…' : 'Pensamiento'}
+        {open ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+      </button>
+      {open && <div className="assistant-thinking-body">{text}</div>}
+    </div>
+  );
+}
+
 /** Compact, human step chips with an optional exact detail (args/result). */
 function ToolSteps({ records }: { records: ToolCallRecordDisplay[] }) {
   const [open, setOpen] = useState<string | null>(null);
@@ -79,7 +103,7 @@ function ToolSteps({ records }: { records: ToolCallRecordDisplay[] }) {
               title={`${r.toolName} · ${r.durationMs} ms${cached ? ' · desde caché' : ''}`}
             >
               {status === 'done' ? cached ? <Database size={11} /> : <Check size={11} /> : status === 'pending' ? <Clock size={11} /> : <X size={11} />}
-              {pending ? `${toolLabel(r.toolName, 'done')} · esperando aprobación` : toolLabel(r.toolName, 'done')}
+              {pending ? `${toolLabel(r.toolName, 'done')} · esperando aprobación` : toolStepLabel(r.toolName, r.args, 'done')}
               {open === r.id ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
             </button>
           );
@@ -205,6 +229,7 @@ export function AssistantMessage({ message, onSendText, isLatest = false }: Assi
             ))}
           </div>
         )}
+        {!isUser && message.meta?.reasoning ? <ThinkingBlock text={message.meta.reasoning} /> : null}
         {!isUser && <ToolSteps records={records.filter((r) => r.toolName !== 'proposePlan' && r.toolName !== 'proposeMission')} />}
         {uiComponents.length > 0 && <GenerativeUi components={uiComponents} onSendText={onSendText} interactive={isLatest} />}
         {content && (

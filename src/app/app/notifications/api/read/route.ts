@@ -28,8 +28,7 @@ export async function POST(request: NextRequest) {
   const parsed = schema.safeParse(body);
   if (!parsed.success) return NextResponse.json({ error: 'Datos inválidos' }, { status: 400 });
   if ('all' in parsed.data) await markAllNotificationsRead(session.user.id);
-  else if (parsed.data.unread)
-    await markNotificationUnread(session.user.id, parsed.data.id);
+  else if (parsed.data.unread) await markNotificationUnread(session.user.id, parsed.data.id);
   else await markNotificationRead(session.user.id, parsed.data.id);
   return NextResponse.json({ ok: true });
 }

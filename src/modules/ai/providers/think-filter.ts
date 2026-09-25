@@ -22,7 +22,11 @@ export interface ThinkFilter {
   flush(): string;
 }
 
-export function createThinkFilter(): ThinkFilter {
+/**
+ * `onReasoning` (optional) receives each <think> body chunk as it streams, so the
+ * caller can show the model's working instead of dropping it silently.
+ */
+export function createThinkFilter(onReasoning?: (text: string) => void): ThinkFilter {
   let buffer = '';
   let inThink = false;
   let emitted = false;
@@ -42,9 +46,12 @@ export function createThinkFilter(): ThinkFilter {
         if (inThink) {
           const end = buffer.indexOf(CLOSE);
           if (end === -1) {
-            buffer = buffer.slice(buffer.length - partialTagSuffix(buffer, CLOSE));
+            const keep = partialTagSuffix(buffer, CLOSE);
+            if (buffer.length - keep > 0) onReasoning?.(buffer.slice(0, buffer.length - keep));
+            buffer = buffer.slice(buffer.length - keep);
             break;
           }
+          if (end > 0) onReasoning?.(buffer.slice(0, end));
           buffer = buffer.slice(end + CLOSE.length);
           inThink = false;
           continue;

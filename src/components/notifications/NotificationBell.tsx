@@ -103,9 +103,7 @@ export function NotificationBell({ userId }: { userId: string }) {
   );
 
   const markAll = useCallback(() => {
-    setRows((prev) =>
-      prev.map((r) => ({ ...r, readAt: r.readAt ?? new Date().toISOString() }))
-    );
+    setRows((prev) => prev.map((r) => ({ ...r, readAt: r.readAt ?? new Date().toISOString() })));
     setUnread(0);
     void fetch('/app/notifications/api/read', {
       method: 'POST',

@@ -224,6 +224,14 @@ export const openaiProvider: AiProvider = {
 
       for await (const chunk of stream) {
         const choice = chunk.choices?.[0];
+        // Reasoning channels (present when OpenAI-compatible gateways proxy the
+        // request); OpenAI Chat Completions itself keeps reasoning internal.
+        const reasoningDelta =
+          (choice?.delta as unknown as { reasoning?: unknown; reasoning_content?: unknown })?.reasoning ??
+          (choice?.delta as unknown as { reasoning_content?: unknown })?.reasoning_content;
+        if (typeof reasoningDelta === 'string' && reasoningDelta) {
+          yield { reasoning: reasoningDelta };
+        }
         if (choice?.delta?.content) {
           yield { delta: choice.delta.content };
         }

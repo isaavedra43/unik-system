@@ -235,15 +235,26 @@ export function createOpenAiCompatibleProvider(options: OpenAiCompatibleOptions)
           stream_options: { include_usage: true },
         });
 
-        const think = createThinkFilter();
+        // Think bodies become reasoning chunks: the user can watch the model work
+        // instead of the thinking being silently stripped.
+        const reasoningQueue: string[] = [];
+        const think = createThinkFilter((t) => reasoningQueue.push(t));
         const accumulated = new Map<number, { id: string; name: string; arguments: string }>();
         let finishReason: string | undefined;
         let usage: { promptTokens: number; completionTokens: number; totalTokens: number } | undefined;
 
         for await (const chunk of stream) {
           const delta = chunk.choices?.[0]?.delta;
+          // OpenRouter/DeepSeek-style reasoning channels (not part of the answer).
+          const reasoningDelta =
+            (delta as unknown as { reasoning?: unknown; reasoning_content?: unknown })?.reasoning ??
+            (delta as unknown as { reasoning_content?: unknown })?.reasoning_content;
+          if (typeof reasoningDelta === 'string' && reasoningDelta) {
+            yield { reasoning: reasoningDelta };
+          }
           if (delta?.content) {
             const visible = think.push(delta.content);
+            for (const r of reasoningQueue.splice(0)) yield { reasoning: r };
             if (visible) yield { delta: visible };
           }
           if (delta?.tool_calls) {

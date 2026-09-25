@@ -86,7 +86,17 @@ export type UiComponent =
   | { type: 'kpi'; title?: string; items: UiKpiItem[] }
   | { type: 'progress'; title: string; steps: UiProgressStep[] }
   | { type: 'timeline'; title?: string; events: UiTimelineEvent[] }
-  | { type: 'mcp_ui'; resource: UiMcpResource; title?: string };
+  | { type: 'mcp_ui'; resource: UiMcpResource; title?: string }
+  | {
+      /** Agent-authored interface (renderInteractiveUi) — self-contained
+       *  HTML/CSS/JS rendered in a sandboxed iframe, never in the page DOM. */
+      type: 'interactive';
+      title?: string;
+      html: string;
+      css?: string;
+      js?: string;
+      height?: number | null;
+    };
 
 export interface UiToolResultInput {
   toolName: string;

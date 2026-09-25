@@ -1,9 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentSession } from '@/modules/auth/authorization';
-import {
-  deleteNotification,
-  getNotifications,
-} from '@/modules/notifications/notification-service';
+import { deleteNotification, getNotifications } from '@/modules/notifications/notification-service';
 
 export const runtime = 'nodejs';
 

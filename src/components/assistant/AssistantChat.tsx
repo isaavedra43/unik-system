@@ -4,11 +4,11 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { AlertCircle, Bot, Loader2, Check, X, ListChecks } from 'lucide-react';
 import { AnimatePresence } from 'framer-motion';
 import type { CurrentUser } from '@/modules/auth/authorization';
-import { AssistantMessage, type AssistantMessageData } from './AssistantMessage';
+import { AssistantMessage, type AssistantMessageData, ThinkingBlock } from './AssistantMessage';
 import { AssistantInput, type AttachmentDraft } from './AssistantInput';
 import { ModelSelector } from './ModelSelector';
 import { ArtifactRenderer, type ArtifactData } from './ArtifactRenderer';
-import { actionFailedMessage, performUiAction, toolLabel, uiActionFromResult, type UiAction } from '@/components/copilot/copilot-types';
+import { actionFailedMessage, performUiAction, toolStepLabel, uiActionFromResult, type UiAction } from '@/components/copilot/copilot-types';
 import {
   AssistantSuggestions,
   getSuggestionsForPage,
@@ -28,6 +28,7 @@ export interface AssistantChatProps {
 
 interface ActiveToolCall {
   name: string;
+  args?: unknown;
   success?: boolean;
   durationMs?: number;
 }
@@ -42,6 +43,7 @@ export function AssistantChat({
   const [messages, setMessages] = useState<AssistantMessageData[]>([]);
   const [streaming, setStreaming] = useState(false);
   const [streamingContent, setStreamingContent] = useState('');
+  const [streamingReasoning, setStreamingReasoning] = useState('');
   const [activeToolCalls, setActiveToolCalls] = useState<ActiveToolCall[]>([]);
   const [artifacts, setArtifacts] = useState<ArtifactData[]>([]);
   const [proposals, setProposals] = useState<ProposalData[]>([]);
@@ -166,6 +168,7 @@ export function AssistantChat({
 
     setStreaming(true);
     setStreamingContent('');
+    setStreamingReasoning('');
     setActiveToolCalls([]);
     setArtifacts([]);
     setLiveUi([]);
@@ -201,6 +204,7 @@ export function AssistantChat({
       const decoder = new TextDecoder();
       let buffer = '';
       let assistantContent = '';
+      let reasoningContent = '';
       const toolCalls: ActiveToolCall[] = [];
 
       while (true) {
@@ -216,8 +220,11 @@ export function AssistantChat({
             if (event.type === 'token' && event.data?.delta) {
               assistantContent += event.data.delta;
               setStreamingContent(assistantContent);
+            } else if (event.type === 'reasoning' && event.data?.delta) {
+              reasoningContent += event.data.delta;
+              setStreamingReasoning(reasoningContent);
             } else if (event.type === 'tool_call_start') {
-              toolCalls.push({ name: event.data.name });
+              toolCalls.push({ name: event.data.name, args: event.data.args });
               setActiveToolCalls([...toolCalls]);
             } else if (event.type === 'tool_call_end') {
               const idx = toolCalls.findIndex(
@@ -226,6 +233,7 @@ export function AssistantChat({
               if (idx >= 0) {
                 toolCalls[idx] = {
                   name: event.data.name,
+                  args: toolCalls[idx].args,
                   success: event.data.success,
                   durationMs: event.data.durationMs,
                 };
@@ -241,6 +249,7 @@ export function AssistantChat({
               performUiAction(event.data as UiAction);
             } else if (event.type === 'done') {
               setStreamingContent('');
+              setStreamingReasoning('');
               setActiveToolCalls([]);
               // Persisted artifacts and tool cards now render inside their message.
               setArtifacts([]);
@@ -249,6 +258,7 @@ export function AssistantChat({
             } else if (event.type === 'error') {
               setError(event.data?.message ?? 'Error desconocido');
               setStreamingContent('');
+              setStreamingReasoning('');
               setActiveToolCalls([]);
             }
           } catch {
@@ -276,6 +286,7 @@ export function AssistantChat({
     } finally {
       setStreaming(false);
       setStreamingContent('');
+      setStreamingReasoning('');
       setActiveToolCalls([]);
       abortRef.current = null;
     }
@@ -326,12 +337,13 @@ export function AssistantChat({
         {messages.map((m, i) => (
           <AssistantMessage key={m.id} message={m} onSendText={(text) => void handleSend(text)} isLatest={i > lastUserIndex && !streaming} />
         ))}
-        {(streaming || streamingContent || activeToolCalls.length > 0) && (
+        {(streaming || streamingContent || streamingReasoning || activeToolCalls.length > 0) && (
           <div className="assistant-msg-row assistant-msg-row-assistant">
             <div className="assistant-msg-avatar">
               <Bot size={18} />
             </div>
             <div className="assistant-msg assistant-msg-assistant">
+              {streamingReasoning && <ThinkingBlock text={streamingReasoning} live />}
               {streamingContent && (
                 <div className="assistant-md">
                   <p className="assistant-md-p">{streamingContent}</p>
@@ -342,13 +354,13 @@ export function AssistantChat({
                   {activeToolCalls.map((tc, idx) => (
                     <span key={idx} className={`assistant-step ${tc.success === undefined ? 'is-running' : tc.success ? 'is-done' : 'is-failed'}`}>
                       {tc.success === undefined ? <Loader2 size={11} className="copilot-spin" /> : tc.success ? <Check size={11} /> : <X size={11} />}
-                      {toolLabel(tc.name, tc.success === undefined ? 'running' : 'done')}
+                      {toolStepLabel(tc.name, tc.args, tc.success === undefined ? 'running' : 'done')}
                     </span>
                   ))}
                 </div>
               )}
               {liveUi.length > 0 && <GenerativeUi components={liveUi} onSendText={(text) => void handleSend(text)} />}
-              {streaming && !streamingContent && activeToolCalls.length === 0 && liveUi.length === 0 && (
+              {streaming && !streamingContent && !streamingReasoning && activeToolCalls.length === 0 && liveUi.length === 0 && (
                 <div className="assistant-typing">
                   <span className="assistant-typing-dot" />
                   <span className="assistant-typing-dot" />

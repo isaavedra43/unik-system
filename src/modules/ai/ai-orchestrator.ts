@@ -94,7 +94,7 @@ interface OrchestratorInput {
 }
 
 interface OrchestratorEvent {
-  type: 'token' | 'tool_call_start' | 'tool_call_end' | 'artifact' | 'proposal' | 'action' | 'ui' | 'done' | 'error';
+  type: 'token' | 'reasoning' | 'tool_call_start' | 'tool_call_end' | 'artifact' | 'proposal' | 'action' | 'ui' | 'done' | 'error';
   data?: unknown;
 }
 
@@ -1497,6 +1497,7 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
     iteration++;
 
     let iterationContent = '';
+    let iterationReasoning = '';
     let iterationToolCalls: Array<{ id: string; name: string; arguments: string }> | undefined;
     let finishReason: string | undefined;
 
@@ -1531,6 +1532,10 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
         conversationId: input.conversationId,
         model: modelToUse,
       })) {
+        if (chunk.reasoning) {
+          iterationReasoning += chunk.reasoning;
+          yield { type: 'reasoning', data: { delta: chunk.reasoning } };
+        }
         if (chunk.delta) {
           iterationContent += chunk.delta;
           if (!bufferAnswer) yield { type: 'token', data: { delta: chunk.delta } };
@@ -1734,6 +1739,8 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
         // The badge's source list is derived HERE from tools that actually ran —
         // the model's self-reported note can claim sources that never executed.
         sourcesLabel: describeSourcesUsed(toolsUsedThisTurn.map((t) => t.name)),
+        // Model's thinking (GPT-5/Kimi), kept short: enough to audit the turn later.
+        reasoning: iterationReasoning.slice(0, 8000) || undefined,
         confidenceLabeled: parsedConfidence.level !== null,
         tools: { ...turnStats, offered: offeredTools.length, used: toolsUsedThisTurn.map((t) => t.name) },
         planFirst: Boolean(input.planFirst),

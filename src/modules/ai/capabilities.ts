@@ -26,7 +26,8 @@ export type CapabilityId =
   | 'extensions'
   | 'memory'
   | 'missions'
-  | 'media';
+  | 'media'
+  | 'ui';
 
 export interface CapabilityDef {
   id: CapabilityId;
@@ -92,6 +93,11 @@ export const CAPABILITY_DEFS: readonly CapabilityDef[] = [
     label: 'generación y análisis de imágenes y video',
     tools: /^(generateImage|generateVideo|generateReportImage|analyzeImage)$/,
     enableHint: 'Instala/aprueba una extensión de generación de media (p. ej. Higgsfield MCP) en Admin → Extensiones.',
+  },
+  {
+    id: 'ui',
+    label: 'interfaces interactivas dentro del chat (calculadoras, comparadores, filtros, simulaciones)',
+    tools: /^(renderInteractiveUi|renderView|generateChart|generateTable)$/,
   },
 ];
 
@@ -164,6 +170,11 @@ const INTENT_RULES: readonly IntentRule[] = [
     phrase: 'generar un documento o reporte',
     re: /\b(reporte|documento|pdf|excel|word|presentaci[óo]n|csv|infograf[íi]a|documento formal)\b/i,
   },
+  {
+    cap: 'ui',
+    phrase: 'una interfaz interactiva en el chat',
+    re: /\b(calculadora|comparador|comparativa|compa\w+ (estos|estas|los|las|de)|interactiv[oa]|simulaci[óo]n|simula(r|dor)|dashboard|panel|visualiza(r|ción)|gr[áa]fic[ao] interactiv[ao]|filtros? interactivos?)\b/i,
+  },
 ];
 
 /** Capacidades que el mensaje del usuario pide explícitamente. */
@@ -232,6 +243,7 @@ const SOURCE_LABELS: readonly SourceLabelRule[] = [
   { label: 'propuesta para tu aprobación', tools: /^(propose\w+|draft\w+|create\w+|update\w+|schedule\w+|save\w+)$/ },
   { label: 'documento generado', tools: /^(composeDocument|generatePdfReport|generateExcelReport|generateWordReport|generateCsvExport|getQuotePdf|previewQuote)$/ },
   { label: 'visual generado', tools: /^(generateChart|generateTable|renderView|generateReportImage|generateImage|generateVideo)$/ },
+  { label: 'interfaz interactiva', tools: /^renderInteractiveUi$/ },
   { label: 'extensión externa', tools: /(__|composioExecute)/ },
   { label: 'biblioteca de conocimiento', tools: /^searchKnowledgeLibrary$/ },
   { label: 'llamada', tools: /^(callContact|startInternalCall|startOutboundCall|pauseCallAi)$/ },

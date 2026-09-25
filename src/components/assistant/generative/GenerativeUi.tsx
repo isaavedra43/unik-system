@@ -25,6 +25,12 @@ const ViewChart = dynamic(() => import('./ViewChart'), {
   loading: () => <div className="gui-card gui-skeleton" aria-busy="true" />,
 });
 
+// Sandbox bridge (postMessage + confirm bar) — only mounts when the agent draws one.
+const InteractiveUiFrame = dynamic(
+  () => import('./InteractiveUiFrame').then((m) => m.InteractiveUiFrame),
+  { ssr: false, loading: () => <div className="gui-card gui-skeleton" aria-busy="true" /> }
+);
+
 const dateFmt = new Intl.DateTimeFormat('es-MX', { dateStyle: 'medium', timeStyle: 'short' });
 const dayFmt = new Intl.DateTimeFormat('es-MX', { dateStyle: 'medium' });
 
@@ -420,6 +426,18 @@ export function GenerativeUi({
           case 'mcp_ui':
             return (
               <McpUiFrame key={i} resource={c.resource} title={c.title} onSendText={onSendText} />
+            );
+          case 'interactive':
+            return (
+              <InteractiveUiFrame
+                key={i}
+                title={c.title}
+                html={c.html}
+                css={c.css}
+                js={c.js}
+                height={c.height}
+                onSendText={onSendText}
+              />
             );
           default:
             return null;

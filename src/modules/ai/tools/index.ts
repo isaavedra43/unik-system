@@ -114,6 +114,7 @@ import './research-tools';
 
 // Media tools (analyzeImage, generateImage, generateVideo)
 import './media-tools';
+import './interactive-ui-tools';
 
 // Venue tools (computadora virtual Daytona: browser, exec, archivos, screenshot)
 import './venue-tools';

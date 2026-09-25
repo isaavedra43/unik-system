@@ -22,6 +22,8 @@ export interface TurnMeta {
   planFirst?: boolean;
   /** One-click follow-ups the assistant proposed at the end of the answer. */
   followUps?: string[];
+  /** The model's thinking for this turn (truncated) — shown collapsed under "Pensamiento". */
+  reasoning?: string;
 }
 
 export interface MessageFeedbackData {
@@ -270,7 +272,48 @@ const TOOL_LABELS: Record<string, { running: string; done: string }> = {
   sendQuoteToContact: { running: 'Preparando envío de cotización', done: 'Envío de cotización propuesto' },
   getPickupLocation: { running: 'Buscando ubicación de bodega', done: 'Ubicación lista' },
   getWorkDigest: { running: 'Calculando tu digest', done: 'Digest listo' },
+  web_search: { running: 'Buscando en internet', done: 'Busqué en internet' },
+  fetch_url: { running: 'Leyendo la página', done: 'Leí la página' },
+  web_crawl: { running: 'Recorriendo el sitio', done: 'Sitio recorrido' },
+  web_research: { running: 'Investigando en internet', done: 'Investigación web lista' },
+  analyzeImage: { running: 'Analizando la imagen', done: 'Imagen analizada' },
+  generateImage: { running: 'Generando la imagen', done: 'Imagen generada' },
+  generateVideo: { running: 'Generando el video', done: 'Video generado' },
+  renderInteractiveUi: { running: 'Construyendo interfaz', done: 'Interfaz interactiva lista' },
+  browser: { running: 'Usando el navegador', done: 'Navegación lista' },
+  venueExec: { running: 'Ejecutando en la computadora', done: 'Comando ejecutado' },
+  venueScreenshot: { running: 'Tomando captura', done: 'Captura lista' },
+  callMcpTool: { running: 'Usando herramienta MCP', done: 'Herramienta MCP lista' },
+  executeApiOperation: { running: 'Consultando la API', done: 'API consultada' },
 };
+
+/**
+ * Step line with the meaningful argument when there is one — "Buscando en
+ * internet: arena de gato", "Leyendo https://x.com/…" — like ChatGPT's rail.
+ */
+export function toolStepLabel(name: string, args: unknown, status: 'running' | 'done' = 'done'): string {
+  const base = toolLabel(name, status);
+  const obj = asObject(args);
+  if (!obj) return base;
+  const detail =
+    (typeof obj.query === 'string' && obj.query.trim()) ||
+    (typeof obj.url === 'string' && safeHostOrUrl(obj.url)) ||
+    (typeof obj.topic === 'string' && obj.topic.trim()) ||
+    (typeof obj.prompt === 'string' && obj.prompt.trim().slice(0, 60)) ||
+    (Array.isArray(obj.queries) && typeof obj.queries[0] === 'string' && obj.queries[0].trim()) ||
+    (typeof obj.fileName === 'string' && obj.fileName.trim()) ||
+    '';
+  return detail ? `${base}: ${String(detail).slice(0, 90)}` : base;
+}
+
+/** Show the host for a URL, the raw text otherwise. Never throws on junk input. */
+function safeHostOrUrl(raw: string): string {
+  try {
+    return new URL(raw).hostname || raw.slice(0, 60);
+  } catch {
+    return raw.slice(0, 60);
+  }
+}
 
 export interface PlanStep {
   n: number;

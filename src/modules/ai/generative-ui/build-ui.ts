@@ -562,6 +562,20 @@ export function buildUiComponents(input: UiToolResultInput): UiComponent[] {
     ];
   }
 
+  // renderInteractiveUi: agent-authored interface — payload revalidated here so a
+  // tampered record can never reach the iframe.
+  if (toolName === 'renderInteractiveUi' && result.rendered === true && typeof result.html === 'string') {
+    out.push({
+      type: 'interactive',
+      title: typeof result.title === 'string' ? cut(result.title, 120) : undefined,
+      html: cut(result.html, 95_000),
+      css: typeof result.css === 'string' ? cut(result.css, 45_000) : undefined,
+      js: typeof result.js === 'string' ? cut(result.js, 55_000) : undefined,
+      height: typeof result.height === 'number' ? Math.min(1200, Math.max(120, result.height)) : null,
+    });
+    return out;
+  }
+
   // renderView: the model drew a chart/kpi/progress/timeline — spec revalidated.
   if (toolName === 'renderView' && isObj(result.view)) {
     const spec = sanitizeViewSpec(result.view);
