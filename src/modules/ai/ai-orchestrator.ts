@@ -254,7 +254,14 @@ export function stripScreenData<T>(value: T, depth = 0): T {
   }
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-    if (SCREEN_FIELD_RE.test(k) && typeof v === 'string' && v.length > 512) {
+    // A long http(s) value under a media-named key is a LINK (generated media,
+    // preview URLs), not embedded screen data — only inline payloads get cut.
+    if (
+      SCREEN_FIELD_RE.test(k) &&
+      typeof v === 'string' &&
+      v.length > 512 &&
+      !/^https?:\/\//i.test(v)
+    ) {
       out[k] = { omitted: 'screen_capture', bytes: v.length };
       continue;
     }

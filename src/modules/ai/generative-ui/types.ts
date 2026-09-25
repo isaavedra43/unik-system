@@ -61,8 +61,29 @@ export interface UiTimelineEvent {
   tone?: UiTone;
 }
 
+export interface UiMediaItem {
+  kind: 'image' | 'video' | 'audio';
+  /** Only http(s) URLs ever reach this field. */
+  url: string;
+  title?: string;
+}
+
+export interface UiCardAction {
+  label: string;
+  /** Text sent on the user's behalf when the chip is clicked. */
+  sendText: string;
+}
+
 export type UiComponent =
   | { type: 'connect'; toolkit: string; name: string; connected: boolean }
+  | {
+      type: 'media';
+      source?: string;
+      title?: string;
+      items: UiMediaItem[];
+      /** Interactive follow-ups: variations, format changes, image→video. */
+      actions?: UiCardAction[];
+    }
   | { type: 'records'; heading?: string; source?: string; items: UiRecord[]; total: number }
   | { type: 'record'; source?: string; record: UiRecord }
   | {

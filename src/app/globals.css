@@ -23344,6 +23344,148 @@ textarea.vs-input {
   overflow-wrap: anywhere;
 }
 
+/* Generated media (image / video / audio) — generative UI `media` card. */
+.gui-media-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px;
+  margin-top: 6px;
+}
+.gui-media.is-single .gui-media-grid {
+  grid-template-columns: 1fr;
+}
+.gui-media-item {
+  margin: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.gui-media-img,
+.gui-media-video {
+  display: block;
+  width: 100%;
+  max-height: 360px;
+  object-fit: contain;
+  border-radius: var(--unik-radius-md);
+  border: 1px solid var(--unik-border);
+  background: var(--unik-surface-hover);
+}
+.gui-media-video {
+  max-height: 320px;
+  background: #000;
+}
+.gui-media-audio {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--unik-text-muted);
+  padding: 8px;
+  border: 1px solid var(--unik-border);
+  border-radius: var(--unik-radius-md);
+}
+.gui-media-audio audio {
+  flex: 1;
+  min-width: 0;
+  height: 32px;
+}
+.gui-media-cap {
+  font-size: var(--unik-text-xs);
+  color: var(--unik-text-muted);
+  overflow-wrap: anywhere;
+}
+.gui-media-fallback {
+  font-size: var(--unik-text-xs);
+  padding: 8px 10px;
+  border: 1px solid var(--unik-border);
+  border-radius: var(--unik-radius-md);
+  overflow-wrap: anywhere;
+}
+.gui-media-zoom {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: zoom-in;
+  text-align: left;
+}
+.gui-media-zoom:focus-visible {
+  outline: 2px solid var(--unik-brand);
+  outline-offset: 2px;
+  border-radius: var(--unik-radius-md);
+}
+.gui-media-img {
+  opacity: 0;
+  transition: opacity 0.24s ease;
+}
+.gui-media-img.is-loaded {
+  opacity: 1;
+}
+.gui-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--unik-border);
+}
+@keyframes gui-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.gui-media-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 210;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(10, 12, 18, 0.72);
+  backdrop-filter: blur(6px);
+  animation: gui-fade-in 0.18s ease;
+}
+.gui-media-lightbox-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: min(920px, 92vw);
+  max-height: 90dvh;
+}
+.gui-media-lightbox-media {
+  max-width: 100%;
+  max-height: calc(90dvh - 56px);
+  object-fit: contain;
+  border-radius: var(--unik-radius-lg);
+  box-shadow: var(--unik-shadow-lg, 0 24px 80px rgba(0, 0, 0, 0.45));
+}
+.gui-media-lightbox-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #fff;
+}
+.gui-media-lightbox-cap {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--unik-text-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@media (prefers-reduced-motion: reduce) {
+  .gui-media-lightbox,
+  .gui-media-img {
+    animation: none;
+    transition: none;
+    opacity: 1;
+  }
+}
+
 /* ------------------------------------------------------------------ */
 /* Agent Workspace — third column (live feed of agent activity)       */
 /* ------------------------------------------------------------------ */

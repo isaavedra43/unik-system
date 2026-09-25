@@ -8,6 +8,7 @@ const SUGGESTIONS_BY_PAGE: Record<string, string[]> = {
     '¿Cuántas ventas hubo hoy?',
     '¿Cuál es el total de ventas en efectivo del día?',
     'Muéstrame los productos más vendidos',
+    'Genera una imagen promocional del producto más vendido',
   ],
   '/app/sales/orders': [
     '¿Cuáles son las ventas en efectivo del día?',
@@ -23,7 +24,8 @@ const DEFAULT_SUGGESTIONS = [
   '¿Cuáles son las ventas en efectivo del día?',
   'Dame un resumen de ventas de hoy',
   'Muéstrame los productos más vendidos',
-  'Ventas por vendedor este mes',
+  'Genera una imagen promocional de mi producto estrella',
+  'Hazme un video corto estilo cinematográfico de una bodega de distribución',
 ];
 
 export function getSuggestionsForPage(page: string | undefined): string[] {

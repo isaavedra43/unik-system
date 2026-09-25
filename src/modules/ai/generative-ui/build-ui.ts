@@ -1,9 +1,11 @@
 import {
   MAX_UI_COMPONENTS_PER_TOOL,
   MAX_UI_ITEMS,
+  type UiCardAction,
   type UiComponent,
   type UiField,
   type UiMcpResource,
+  type UiMediaItem,
   type UiRecord,
   type UiToolResultInput,
   type UiTone,
@@ -365,6 +367,149 @@ export function extractUiFromData(data: unknown, source?: string): UiComponent[]
   return [];
 }
 
+// ── generated media (image/video/audio URLs) ───────────────────────────────
+
+const MEDIA_KIND_BY_EXT: Record<string, UiMediaItem['kind']> = {
+  png: 'image',
+  jpg: 'image',
+  jpeg: 'image',
+  webp: 'image',
+  gif: 'image',
+  avif: 'image',
+  bmp: 'image',
+  mp4: 'video',
+  webm: 'video',
+  mov: 'video',
+  m4v: 'video',
+  mp3: 'audio',
+  wav: 'audio',
+  ogg: 'audio',
+  m4a: 'audio',
+  opus: 'audio',
+};
+const URL_IN_TEXT = /https?:\/\/[^\s<>"'`)\]]+/g;
+const MEDIA_FIELD =
+  /(image|img|photo|thumbnail|poster|video|clip|movie|media|file|output|download|asset|result)(_?url|_?uri|_?link)?$/i;
+const MAX_MEDIA_ITEMS = 6;
+
+function kindFromExt(url: string): UiMediaItem['kind'] | null {
+  const ext = /\.([a-z0-9]{2,5})(?:$|[?#])/i.exec(url)?.[1]?.toLowerCase();
+  return (ext && MEDIA_KIND_BY_EXT[ext]) || null;
+}
+
+function kindFromKey(key: string): UiMediaItem['kind'] | null {
+  const k = key.toLowerCase();
+  if (/(video|clip|movie|reel)/.test(k)) return 'video';
+  if (/(audio|voice|sound|music)/.test(k)) return 'audio';
+  if (/(image|img|photo|thumbnail|poster|picture)/.test(k)) return 'image';
+  return null;
+}
+
+function pushMedia(
+  out: UiMediaItem[],
+  seen: Set<string>,
+  url: string | undefined,
+  kind: UiMediaItem['kind'] | null,
+  title?: string
+): void {
+  if (!url || out.length >= MAX_MEDIA_ITEMS) return;
+  const k = kind ?? kindFromExt(url);
+  if (!k || seen.has(url)) return;
+  seen.add(url);
+  out.push({ kind: k, url, ...(title ? { title } : {}) });
+}
+
+/**
+ * Pulls generated-media URLs out of an arbitrary tool result. Covers the
+ * shapes media providers actually return: `{url, video_url, imageUrl}`,
+ * `content[]` text blocks containing bare links, arrays of assets, and
+ * `media/mimeType` hints next to a URL. http(s) only — never data: or ui://.
+ */
+export function extractMediaItems(data: unknown, depth = 0): UiMediaItem[] {
+  const out: UiMediaItem[] = [];
+  const seen = new Set<string>();
+  const walk = (value: unknown, keyHint: string | null, d: number): void => {
+    if (out.length >= MAX_MEDIA_ITEMS || d > 4 || value === null || value === undefined) return;
+    if (typeof value === 'string') {
+      const direct = safeHttpUrl(value);
+      if (direct) {
+        pushMedia(out, seen, direct, keyHint ? kindFromKey(keyHint) : kindFromExt(direct));
+        return;
+      }
+      if (value.includes('http')) {
+        for (const m of value.match(URL_IN_TEXT) ?? []) {
+          const u = safeHttpUrl(m.replace(/[.,;:!?]+$/, ''));
+          if (u && kindFromExt(u)) pushMedia(out, seen, u, kindFromExt(u));
+        }
+      }
+      return;
+    }
+    if (Array.isArray(value)) {
+      for (const item of value) walk(item, keyHint, d + 1);
+      return;
+    }
+    if (!isObj(value)) return;
+    // A node shaped like a media asset: a URL field + optional mime/title siblings.
+    const mime =
+      typeof value.mimeType === 'string'
+        ? value.mimeType
+        : typeof value.mediaType === 'string'
+          ? value.mediaType
+          : '';
+    const nodeKind =
+      (['image', 'video', 'audio'] as const).find((k) => mime.startsWith(`${k}/`)) ?? null;
+    let nodeTitle: string | undefined;
+    for (const [k, v] of Object.entries(value)) {
+      if (typeof v !== 'string') continue;
+      const u = safeHttpUrl(v);
+      if (!u) continue;
+      if (!MEDIA_FIELD.test(k) && !kindFromExt(u)) continue;
+      if (!nodeTitle && typeof value.title === 'string') nodeTitle = cut(value.title, 100);
+      if (!nodeTitle && typeof value.name === 'string') nodeTitle = cut(value.name, 100);
+      pushMedia(out, seen, u, nodeKind ?? kindFromKey(k), nodeTitle);
+    }
+    for (const [k, v] of Object.entries(value)) walk(v, k, d + 1);
+  };
+  void depth;
+  walk(data, null, 0);
+  return out;
+}
+
+/** Follow-up chips a media card can offer: variations and cross-medium hops. */
+function mediaActions(
+  kind: UiMediaItem['kind'] | undefined,
+  prompt: string | undefined,
+  firstImageUrl?: string
+): UiCardAction[] | undefined {
+  if (!prompt || !kind) return undefined;
+  const base = cut(prompt.replace(/\s+/g, ' ').trim(), 200);
+  const actions: UiCardAction[] = [
+    {
+      label: 'Otra variación',
+      sendText:
+        kind === 'video'
+          ? `Genera otro video del mismo tema pero con una toma diferente: ${base}`
+          : `Genera otra versión de esta imagen con una variación interesante: ${base}`,
+    },
+    kind === 'image'
+      ? {
+          label: 'Estilo cinematográfico',
+          sendText: `Genera la misma imagen pero con estilo cinematográfico: ${base}`,
+        }
+      : {
+          label: 'Formato vertical',
+          sendText: `Genera el mismo video en formato vertical 9:16: ${base}`,
+        },
+  ];
+  if (kind === 'image' && firstImageUrl) {
+    actions.push({
+      label: 'Convertir en video',
+      sendText: `Genera un video corto animando esta imagen: ${firstImageUrl}`,
+    });
+  }
+  return actions.slice(0, 3);
+}
+
 // ── MCP-UI resources ───────────────────────────────────────────────────────
 
 const MCP_UI_MAX_HTML = 120_000;
@@ -414,7 +559,9 @@ export function sanitizeViewSpec(view: unknown): UiComponent | null {
   if (!isObj(view)) return null;
   switch (view.type) {
     case 'chart': {
-      const labels = Array.isArray(view.labels) ? view.labels.slice(0, 24).map((l) => str(l, 40)) : [];
+      const labels = Array.isArray(view.labels)
+        ? view.labels.slice(0, 24).map((l) => str(l, 40))
+        : [];
       const series = (Array.isArray(view.series) ? view.series : [])
         .slice(0, 4)
         .map((s): { name?: string; data: number[] } | null =>
@@ -448,7 +595,9 @@ export function sanitizeViewSpec(view: unknown): UiComponent | null {
           tone: viewTone(i.tone),
         }))
         .filter((i) => i.label && i.value);
-      return items.length ? { type: 'kpi', items, ...(view.title ? { title: str(view.title, 100) } : {}) } : null;
+      return items.length
+        ? { type: 'kpi', items, ...(view.title ? { title: str(view.title, 100) } : {}) }
+        : null;
     }
     case 'progress': {
       const steps = (Array.isArray(view.steps) ? view.steps : [])
@@ -462,7 +611,9 @@ export function sanitizeViewSpec(view: unknown): UiComponent | null {
           ...(s.detail ? { detail: str(s.detail, 120) } : {}),
         }))
         .filter((s) => s.title);
-      return steps.length ? { type: 'progress', title: str(view.title, 100) || 'Progreso', steps } : null;
+      return steps.length
+        ? { type: 'progress', title: str(view.title, 100) || 'Progreso', steps }
+        : null;
     }
     case 'timeline': {
       const events = (Array.isArray(view.events) ? view.events : [])
@@ -475,7 +626,9 @@ export function sanitizeViewSpec(view: unknown): UiComponent | null {
           tone: viewTone(e.tone),
         }))
         .filter((e) => e.label);
-      return events.length ? { type: 'timeline', events, ...(view.title ? { title: str(view.title, 100) } : {}) } : null;
+      return events.length
+        ? { type: 'timeline', events, ...(view.title ? { title: str(view.title, 100) } : {}) }
+        : null;
     }
     default:
       return null;
@@ -544,6 +697,47 @@ export function buildUiComponents(input: UiToolResultInput): UiComponent[] {
     return out;
   }
 
+  // generateImage / generateVideo — the dispatcher wraps the provider result;
+  // any media URL it returns becomes a real media card (img / video player),
+  // not a raw link in prose.
+  if (toolName === 'generateImage' || toolName === 'generateVideo') {
+    const medium = toolName === 'generateImage' ? 'imagen' : 'video';
+    const prompt =
+      isObj(input.args) && typeof input.args.prompt === 'string'
+        ? cut(input.args.prompt, 140)
+        : undefined;
+    if (typeof result.error === 'string') {
+      return [
+        {
+          type: 'notice',
+          tone: 'danger',
+          title: `No se pudo generar el ${medium}`,
+          detail: cut(result.error, 300),
+        },
+      ];
+    }
+    const items = extractMediaItems(result.result ?? result);
+    if (items.length > 0) {
+      const firstImage = items.find((i) => i.kind === 'image')?.url;
+      out.push({
+        type: 'media',
+        source: typeof result.providerTool === 'string' ? humanize(result.providerTool) : undefined,
+        title: prompt,
+        items,
+        actions: mediaActions(items[0]?.kind, prompt, firstImage),
+      });
+    } else {
+      out.push({
+        type: 'notice',
+        tone: 'info',
+        title: `Generación de ${medium} enviada`,
+        detail:
+          'El proveedor aceptó la solicitud; si devuelve un archivo o URL aparecerá aquí como tarjeta.',
+      });
+    }
+    return out;
+  }
+
   if (toolName === 'composioExecute') {
     const tool = typeof result.tool === 'string' ? result.tool : 'Composio';
     const toolkit = typeof result.toolkit === 'string' ? result.toolkit : '';
@@ -564,8 +758,13 @@ export function buildUiComponents(input: UiToolResultInput): UiComponent[] {
       ];
     }
     const source = toolkit ? slugLabel(toolkit) : 'Composio';
+    if (/(image|img|imagen|photo|video|media|higgs|generat|render)/i.test(tool)) {
+      const items = extractMediaItems(result.data);
+      if (items.length > 0) out.push({ type: 'media', source, items });
+    }
     const parts = extractUiFromData(result.data, source);
-    if (parts.length > 0) return parts.slice(0, MAX_UI_COMPONENTS_PER_TOOL);
+    if (parts.length > 0) return [...out, ...parts].slice(0, MAX_UI_COMPONENTS_PER_TOOL);
+    if (out.length > 0) return out;
     return [
       {
         type: 'notice',
@@ -578,14 +777,19 @@ export function buildUiComponents(input: UiToolResultInput): UiComponent[] {
 
   // renderInteractiveUi: agent-authored interface — payload revalidated here so a
   // tampered record can never reach the iframe.
-  if (toolName === 'renderInteractiveUi' && result.rendered === true && typeof result.html === 'string') {
+  if (
+    toolName === 'renderInteractiveUi' &&
+    result.rendered === true &&
+    typeof result.html === 'string'
+  ) {
     out.push({
       type: 'interactive',
       title: typeof result.title === 'string' ? cut(result.title, 120) : undefined,
       html: cut(result.html, 95_000),
       css: typeof result.css === 'string' ? cut(result.css, 45_000) : undefined,
       js: typeof result.js === 'string' ? cut(result.js, 55_000) : undefined,
-      height: typeof result.height === 'number' ? Math.min(1200, Math.max(120, result.height)) : null,
+      height:
+        typeof result.height === 'number' ? Math.min(1200, Math.max(120, result.height)) : null,
     });
     return out;
   }
@@ -597,8 +801,28 @@ export function buildUiComponents(input: UiToolResultInput): UiComponent[] {
     return out;
   }
 
-  // MCP extension tools ("<namespace>__<tool>") and their UI resources.
+  // MCP extension tools ("<namespace>__<tool>") and their UI resources. Media
+  // generators (Higgsfield & co.) get a real media card first — the provider's
+  // own ui:// component and the raw data cards come after.
   if (toolName.includes('__')) {
+    const media = extractMediaItems(result);
+    if (media.length > 0) {
+      const argPrompt =
+        isObj(input.args) && typeof input.args.prompt === 'string'
+          ? cut(input.args.prompt, 140)
+          : undefined;
+      out.push({
+        type: 'media',
+        source: humanize(toolName.split('__')[0] ?? ''),
+        title: argPrompt,
+        items: media,
+        actions: mediaActions(
+          media[0]?.kind,
+          argPrompt,
+          media.find((i) => i.kind === 'image')?.url
+        ),
+      });
+    }
     for (const resource of extractMcpUiResources(result))
       out.push({ type: 'mcp_ui', resource, title: humanize(toolName.split('__')[1] ?? toolName) });
     if (out.length === 0 && result.structuredContent) {
@@ -612,9 +836,12 @@ export function buildUiComponents(input: UiToolResultInput): UiComponent[] {
   // Web tools → record cards (title + snippet + link). This is what turns a
   // "list of links" answer into browsable cards.
   if (toolName === 'web_search' || toolName === 'web_research' || toolName === 'web_crawl') {
-    const heading = toolName === 'web_search' ? 'Resultados de internet'
-      : toolName === 'web_research' ? 'Fuentes consultadas'
-      : 'Páginas rastreadas';
+    const heading =
+      toolName === 'web_search'
+        ? 'Resultados de internet'
+        : toolName === 'web_research'
+          ? 'Fuentes consultadas'
+          : 'Páginas rastreadas';
     const cards = extractUiFromData(result, 'Internet');
     for (const c of cards) if ('heading' in c && !c.heading) c.heading = heading;
     if (cards.length) return cards.slice(0, MAX_UI_COMPONENTS_PER_TOOL);

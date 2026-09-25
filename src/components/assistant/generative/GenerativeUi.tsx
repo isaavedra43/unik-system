@@ -8,10 +8,17 @@ import {
   ExternalLink,
   Info,
   Loader2,
+  Music,
   Plug,
   XCircle,
 } from 'lucide-react';
-import type { UiComponent, UiRecord, UiTone } from '@/modules/ai/generative-ui/types';
+import type {
+  UiCardAction,
+  UiComponent,
+  UiMediaItem,
+  UiRecord,
+  UiTone,
+} from '@/modules/ai/generative-ui/types';
 
 // The MCP-UI renderer is only loaded when a server actually sends a component.
 const McpUiFrame = dynamic(() => import('./McpUiFrame'), {
@@ -255,6 +262,178 @@ function ConnectCard({
   );
 }
 
+/** Full-screen viewer for a generated asset — ESC / backdrop / X close it. */
+function MediaLightbox({ item, onClose }: { item: UiMediaItem; onClose: () => void }) {
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') onClose();
+    }
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
+  return (
+    <div
+      className="gui-media-lightbox"
+      role="dialog"
+      aria-modal="true"
+      aria-label={item.title ?? 'Vista ampliada'}
+      onClick={onClose}
+    >
+      <div className="gui-media-lightbox-body" onClick={(e) => e.stopPropagation()}>
+        {item.kind === 'video' ? (
+          // eslint-disable-next-line jsx-a11y/media-has-caption
+          <video
+            src={item.url}
+            controls
+            autoPlay
+            playsInline
+            className="gui-media-lightbox-media"
+          />
+        ) : (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={item.url}
+            alt={item.title ?? 'Imagen generada'}
+            referrerPolicy="no-referrer"
+            className="gui-media-lightbox-media"
+          />
+        )}
+        <div className="gui-media-lightbox-bar">
+          {item.title && <span className="gui-media-lightbox-cap">{item.title}</span>}
+          <a
+            href={item.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="gui-btn gui-btn-secondary"
+          >
+            <ExternalLink size={13} /> Abrir original
+          </a>
+          <button
+            type="button"
+            className="gui-btn gui-btn-secondary"
+            onClick={onClose}
+            aria-label="Cerrar vista ampliada"
+          >
+            <XCircle size={13} /> Cerrar
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** One generated asset: inline image, video player or audio — link fallback if the URL dies. */
+function MediaItemView({ item }: { item: UiMediaItem }) {
+  const [broken, setBroken] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  const [zoom, setZoom] = useState(false);
+  if (broken) {
+    return (
+      <a
+        href={item.url}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="gui-media-item gui-media-fallback gui-link"
+      >
+        {item.title ?? item.url} <ExternalLink size={11} aria-hidden="true" />
+      </a>
+    );
+  }
+  const caption = item.title ? (
+    <figcaption className="gui-media-cap">{item.title}</figcaption>
+  ) : null;
+  return (
+    <figure className="gui-media-item">
+      {item.kind === 'image' && (
+        <button
+          type="button"
+          className="gui-media-zoom"
+          onClick={() => setZoom(true)}
+          aria-label="Ampliar imagen"
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element -- external provider CDN */}
+          <img
+            src={item.url}
+            alt={item.title ?? 'Imagen generada'}
+            loading="lazy"
+            referrerPolicy="no-referrer"
+            className={`gui-media-img${loaded ? ' is-loaded' : ''}`}
+            onLoad={() => setLoaded(true)}
+            onError={() => setBroken(true)}
+          />
+        </button>
+      )}
+      {item.kind === 'video' && (
+        // eslint-disable-next-line jsx-a11y/media-has-caption -- generated media has no caption track
+        <video
+          src={item.url}
+          controls
+          preload="metadata"
+          playsInline
+          className="gui-media-video"
+          onError={() => setBroken(true)}
+        />
+      )}
+      {item.kind === 'audio' && (
+        <span className="gui-media-audio">
+          <Music size={16} aria-hidden="true" />
+          {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+          <audio src={item.url} controls preload="metadata" onError={() => setBroken(true)} />
+        </span>
+      )}
+      {caption}
+      {zoom && <MediaLightbox item={item} onClose={() => setZoom(false)} />}
+    </figure>
+  );
+}
+
+function MediaCard({
+  title,
+  source,
+  items,
+  actions,
+  onSendText,
+  interactive,
+}: {
+  title?: string;
+  source?: string;
+  items: UiMediaItem[];
+  actions?: UiCardAction[];
+  onSendText?: (t: string) => void;
+  interactive: boolean;
+}) {
+  return (
+    <section
+      className={`gui-card gui-media ${items.length === 1 ? 'is-single' : ''}`}
+      aria-label={title ?? 'Media generada'}
+    >
+      <div className="gui-head">
+        <span className="gui-title">{title ?? 'Generado'}</span>
+        <Source source={source} />
+      </div>
+      <div className="gui-media-grid">
+        {items.map((item, i) => (
+          <MediaItemView key={`${item.url}-${i}`} item={item} />
+        ))}
+      </div>
+      {interactive && onSendText && actions && actions.length > 0 && (
+        <div className="gui-actions" aria-label="Acciones sobre el medio">
+          {actions.map((a) => (
+            <button
+              key={a.label}
+              type="button"
+              className="assistant-followup-chip"
+              onClick={() => onSendText(a.sendText)}
+            >
+              {a.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
 export function GenerativeUi({
   components,
   onSendText,
@@ -440,6 +619,18 @@ export function GenerativeUi({
                   ))}
                 </ul>
               </section>
+            );
+          case 'media':
+            return (
+              <MediaCard
+                key={i}
+                title={c.title}
+                source={c.source}
+                items={c.items}
+                actions={c.actions}
+                onSendText={onSendText}
+                interactive={interactive}
+              />
             );
           case 'mcp_ui':
             return (

@@ -5,7 +5,11 @@ import { getAttachmentForActor, readAttachmentBytes } from '../ai-attachments-se
 import { chatCompletion } from '../ai-client';
 import { getModelById } from '../model-catalog';
 import { safeFetch } from '@/modules/extensions/safe-fetch';
-import { acquireVenue, isVenueEnabled, VenueUnavailableError } from '@/modules/venues/venue-manager';
+import {
+  acquireVenue,
+  isVenueEnabled,
+  VenueUnavailableError,
+} from '@/modules/venues/venue-manager';
 import { isUrlDenied } from '@/modules/web/fetch-service';
 
 /**
@@ -31,7 +35,11 @@ type Obj = Record<string, unknown>;
 
 /** Picks the first configured model that can actually see images. */
 function pickVisionModel(settings: Awaited<ReturnType<typeof getAiSettings>>): string | null {
-  for (const candidate of [settings.routingComplexModel, settings.routingStandardModel, settings.routingSimpleModel]) {
+  for (const candidate of [
+    settings.routingComplexModel,
+    settings.routingStandardModel,
+    settings.routingSimpleModel,
+  ]) {
     if (candidate && getModelById(candidate)?.capabilities.includes('vision')) return candidate;
   }
   return null;
@@ -50,7 +58,10 @@ async function imageDataUrl(
       return { error: `El adjunto "${att.fileName}" no es una imagen (${att.mimeType}).` };
     }
     const buffer = await readAttachmentBytes(att, MAX_IMAGE_BYTES);
-    return { dataUrl: `data:${att.mimeType};base64,${buffer.toString('base64')}`, source: `adjunto ${att.fileName}` };
+    return {
+      dataUrl: `data:${att.mimeType};base64,${buffer.toString('base64')}`,
+      source: `adjunto ${att.fileName}`,
+    };
   }
 
   if (args.imageUrl) {
@@ -67,7 +78,9 @@ async function imageDataUrl(
       {
         allowAnyHost: true,
         allowedHosts: [],
-        denyHosts: (settings.webDomainDenylist ?? []).map((h) => h.trim().toLowerCase()).filter(Boolean),
+        denyHosts: (settings.webDomainDenylist ?? [])
+          .map((h) => h.trim().toLowerCase())
+          .filter(Boolean),
         timeoutMs: 20_000,
         maxResponseBytes: MAX_IMAGE_BYTES,
         allowedContentTypes: IMAGE_CONTENT_TYPES,
@@ -82,7 +95,10 @@ async function imageDataUrl(
     try {
       const venue = await acquireVenue({ userId: actor.id, purpose: 'analyze-screenshot' });
       const shot = await venue.screenshot();
-      return { dataUrl: `data:${shot.mimeType};base64,${shot.imageBase64}`, source: 'pantalla de la computadora virtual' };
+      return {
+        dataUrl: `data:${shot.mimeType};base64,${shot.imageBase64}`,
+        source: 'pantalla de la computadora virtual',
+      };
     } catch (err) {
       if (err instanceof VenueUnavailableError) return { error: err.message };
       throw err;
@@ -104,14 +120,28 @@ registerTool({
   maxResultBytes: 16_000,
   contextTags: ['all'],
   parameters: z.object({
-    question: z.string().min(3).max(2000).describe('Qué quieres saber de la imagen, ej. "¿qué dice el documento?", "describe los defectos visibles".'),
+    question: z
+      .string()
+      .min(3)
+      .max(2000)
+      .describe(
+        'Qué quieres saber de la imagen, ej. "¿qué dice el documento?", "describe los defectos visibles".'
+      ),
     attachmentId: z.string().optional().describe('Id de un adjunto de la conversación.'),
     imageUrl: z.string().url().max(2000).optional().describe('URL https:// de una imagen pública.'),
-    venueScreenshot: z.boolean().optional().describe('true = analizar la pantalla actual de la computadora virtual.'),
+    venueScreenshot: z
+      .boolean()
+      .optional()
+      .describe('true = analizar la pantalla actual de la computadora virtual.'),
   }),
   summarize: (a) => `Analizar imagen: "${String((a as Obj).question ?? '').slice(0, 70)}"`,
   execute: async (actor, args, ctx) => {
-    const a = args as { question: string; attachmentId?: string; imageUrl?: string; venueScreenshot?: boolean };
+    const a = args as {
+      question: string;
+      attachmentId?: string;
+      imageUrl?: string;
+      venueScreenshot?: boolean;
+    };
     const img = await imageDataUrl(actor, a, ctx.conversationId);
     if ('error' in img) return { error: img.error };
 
@@ -171,7 +201,10 @@ async function findMediaCapability(
 
   if (explicitName) {
     const found = external.find((t) => t.name === explicitName);
-    if (!found) return { error: `La capacidad "${explicitName}" no está disponible para tu rol o está deshabilitada.` };
+    if (!found)
+      return {
+        error: `La capacidad "${explicitName}" no está disponible para tu rol o está deshabilitada.`,
+      };
     return { tool: found };
   }
 
@@ -207,25 +240,51 @@ function mediaTool(kind: 'image' | 'video') {
     maxResultBytes: 60_000,
     contextTags: ['all'],
     parameters: z.object({
-      prompt: z.string().min(3).max(4000).describe('Descripción detallada de lo que debe generarse.'),
-      extensionTool: z.string().max(200).optional().describe('Nombre exacto de la capacidad del proveedor si el usuario o tú ya la conoces; si se omite, se detecta automáticamente.'),
-      extraArgs: z.record(z.string(), z.unknown()).optional().describe('Argumentos extra que el proveedor acepte (tamaño, estilo, duración…).'),
+      prompt: z
+        .string()
+        .min(3)
+        .max(4000)
+        .describe('Descripción detallada de lo que debe generarse.'),
+      extensionTool: z
+        .string()
+        .max(200)
+        .optional()
+        .describe(
+          'Nombre exacto de la capacidad del proveedor si el usuario o tú ya la conoces; si se omite, se detecta automáticamente.'
+        ),
+      extraArgs: z
+        .record(z.string(), z.unknown())
+        .optional()
+        .describe('Argumentos extra que el proveedor acepte (tamaño, estilo, duración…).'),
     }),
-    summarize: (a) => `Generar ${isImage ? 'imagen' : 'video'}: "${String((a as Obj).prompt ?? '').slice(0, 70)}"`,
+    summarize: (a) =>
+      `Generar ${isImage ? 'imagen' : 'video'}: "${String((a as Obj).prompt ?? '').slice(0, 70)}"`,
     execute: async (actor, args, ctx) => {
-      const a = args as { prompt: string; extensionTool?: string; extraArgs?: Record<string, unknown> };
+      const a = args as {
+        prompt: string;
+        extensionTool?: string;
+        extraArgs?: Record<string, unknown>;
+      };
       const found = await findMediaCapability(actor, kind, a.extensionTool);
       if ('error' in found) return { error: found.error };
       const { tool } = found;
-      const result = await executeTool(tool.name, actor, { prompt: a.prompt, ...(a.extraArgs ?? {}) }, ctx);
+      const result = await executeTool(
+        tool.name,
+        actor,
+        { prompt: a.prompt, ...(a.extraArgs ?? {}) },
+        ctx
+      );
       if (!result.success) {
-        return { error: `El proveedor (${tool.name}) falló: ${result.error ?? 'error desconocido'}`, providerTool: tool.name };
+        return {
+          error: `El proveedor (${tool.name}) falló: ${result.error ?? 'error desconocido'}`,
+          providerTool: tool.name,
+        };
       }
       return {
         providerTool: tool.name,
         medium: kind,
         result: result.result,
-        note: `Generado con ${tool.name}. Si el resultado trae una URL o archivo, preséntalo tal cual — no afirmes más de lo que devolvió.`,
+        note: `Generado con ${tool.name}. El chat ya muestra una tarjeta con el medio si el resultado trae una URL — descríbelo brevemente y no afirmes más de lo que devolvió.`,
       };
     },
   });

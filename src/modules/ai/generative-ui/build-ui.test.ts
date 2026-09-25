@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildUiComponents,
+  extractMediaItems,
   extractMcpUiResources,
   extractUiFromData,
   safeHttpUrl,
@@ -185,11 +186,7 @@ describe('generative-ui builder', () => {
           title: 'Ventas por método',
           unit: 'MXN',
           labels: ['Efectivo', 'Crédito', '<script>x</script>'.repeat(10)],
-          series: [
-            { name: 'Hoy', data: [10, 5, 'NaN', 2] },
-            { name: 'Ayer', data: [] },
-            'garbage',
-          ],
+          series: [{ name: 'Hoy', data: [10, 5, 'NaN', 2] }, { name: 'Ayer', data: [] }, 'garbage'],
         },
       },
     });
@@ -250,5 +247,107 @@ describe('generative-ui builder', () => {
     expect(
       buildUiComponents({ toolName: 'renderView', success: true, result: { view: 'nope' } })
     ).toEqual([]);
+  });
+});
+
+describe('media cards', () => {
+  it('generateVideo result with a cdn URL becomes a media card with the prompt as title', () => {
+    const ui = buildUiComponents({
+      toolName: 'generateVideo',
+      success: true,
+      args: { prompt: 'un dron sobrevolando la bodega' },
+      result: {
+        providerTool: 'higgsfield__generate_video',
+        medium: 'video',
+        result: {
+          content: [{ type: 'text', text: 'Listo: https://cdn.higgsfield.ai/jobs/abc/output.mp4' }],
+          structuredContent: null,
+        },
+      },
+    });
+    expect(ui).toHaveLength(1);
+    const card = ui[0] as {
+      type: string;
+      title?: string;
+      source?: string;
+      items: Array<{ kind: string; url: string }>;
+      actions?: Array<{ label: string; sendText: string }>;
+    };
+    expect(card.type).toBe('media');
+    expect(card.title).toBe('un dron sobrevolando la bodega');
+    expect(card.items).toEqual([
+      { kind: 'video', url: 'https://cdn.higgsfield.ai/jobs/abc/output.mp4' },
+    ]);
+    const labels = card.actions?.map((a) => a.label) ?? [];
+    expect(labels).toContain('Otra variación');
+    expect(labels).toContain('Formato vertical');
+    expect(card.actions?.[0].sendText).toContain('un dron sobrevolando la bodega');
+  });
+
+  it('generateImage reads url-ish fields and dedupes', () => {
+    const ui = buildUiComponents({
+      toolName: 'generateImage',
+      success: true,
+      args: { prompt: 'logo minimalista' },
+      result: {
+        providerTool: 'img__make',
+        result: {
+          image_url: 'https://x.cdn/img.png',
+          thumbnail: 'https://x.cdn/img.png',
+          prompt: 'logo minimalista',
+        },
+      },
+    });
+    const card = ui[0] as {
+      type: string;
+      items: Array<{ kind: string; url: string }>;
+      actions?: Array<{ label: string; sendText: string }>;
+    };
+    expect(card.type).toBe('media');
+    expect(card.items).toHaveLength(1);
+    expect(card.items[0].kind).toBe('image');
+    // Imagen → ofrece el salto a video usando la URL generada.
+    const toVideo = card.actions?.find((a) => a.label === 'Convertir en video');
+    expect(toVideo?.sendText).toContain('https://x.cdn/img.png');
+  });
+
+  it('generation failures render a danger notice instead of a card', () => {
+    const ui = buildUiComponents({
+      toolName: 'generateVideo',
+      success: true,
+      result: { error: 'No hay ningún proveedor de generación de video conectado.' },
+    });
+    expect(ui[0].type).toBe('notice');
+    expect((ui[0] as { tone: string }).tone).toBe('danger');
+  });
+
+  it('MCP tools emit media before data cards (Higgsfield structuredContent)', () => {
+    const ui = buildUiComponents({
+      toolName: 'higgsfield__generate_image',
+      success: true,
+      args: { prompt: 'retrato corporativo' },
+      result: {
+        content: [{ type: 'text', text: 'done' }],
+        structuredContent: { url: 'https://cdn.higgsfield.ai/a/b.webp', job_id: 'j1' },
+      },
+    });
+    expect(ui[0].type).toBe('media');
+    const items = (ui[0] as { items: Array<{ kind: string; url: string }> }).items;
+    expect(items[0]).toEqual({ kind: 'image', url: 'https://cdn.higgsfield.ai/a/b.webp' });
+    // The args prompt feeds the same variation actions as generateImage.
+    const actions =
+      (ui[0] as { actions?: Array<{ label: string }> }).actions?.map((a) => a.label) ?? [];
+    expect(actions).toContain('Otra variación');
+  });
+
+  it('ignores non-media urls, ui:// resources and javascript: strings', () => {
+    const items = extractMediaItems({
+      url: 'https://example.com/page',
+      icon: 'javascript:alert(1)',
+      res: 'ui://component/1',
+      data: 'data:image/png;base64,AAAA',
+      nested: { link: 'ftp://x/file.png' },
+    });
+    expect(items).toEqual([]);
   });
 });
