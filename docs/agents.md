@@ -73,8 +73,17 @@ journal del run.
 | `GET /venue/files`, `/venue/file` | Explorar, descargar (adjunto, máx 25 MB) y subir (máx 10 MB, a `~/uploads`) archivos de la computadora                                                                                                                 |
 | `POST /venue/teach`               | «Enséñale»: `start` graba, `save` convierte la grabación en un playbook ACTIVO, `discard` la descarta                                                                                                                  |
 
-`POST /chat` acepta `agentId` opcional; `AiConversation.agentId` fija el agente
-del hilo.
+| Ruta                     | Contenido                                                                                                           |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------- |
+| `GET /home?agentId=`     | Inicio personalizado: spec json-render armada solo con registros del usuario (`{empty, spec, counts, generatedAt}`) |
+| `GET/POST /capabilities` | Catálogo de capacidades con estado real para el usuario / «Probar» un servidor MCP (latencia y error reales)        |
+| `GET /models`            | Modelos servibles + `health` (cortocircuito por modelo)                                                             |
+| `POST /voice/transcribe` | Audio (WAV 16 kHz, máx 10 MB) → texto. Permiso `assistant.voice` y voz activa en Admin                              |
+| `POST /voice/speak`      | Texto (máx 4000) → MP3. Mismo permiso y ajuste                                                                      |
+
+`POST /chat` acepta `agentId`, `effort` (`instant|light|medium|high|ultra`),
+`capabilities` (ids del catálogo; el servidor los traduce a tools) y
+`context.voice`; `AiConversation.agentId` fija el agente del hilo.
 
 ## Front (`src/components/universo/`) — reconstruido desde cero
 
@@ -86,12 +95,13 @@ administración, `copilot-types.ts` y `AssistantPreferencesPanel`). Tres
 columnas redimensionables (layout en `localStorage`); en tablet/móvil el equipo
 es un cajón y el espacio de trabajo una hoja completa.
 
-| Carpeta      | Qué contiene                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `shell/`     | `Sidebar` (equipo con estado en vivo, «En curso», misiones y rutinas, conversaciones agrupadas con buscar ⌘K / favorita / renombrar / borrar), `UserMenu` (preferencias y memoria, apps y extensiones, tema, densidad, animaciones, modo Misión por defecto, instalar la app), `NewAgentDialog` (34 especialistas por área o 7 equipos completos; rutinas como `Trigger` real; el director arranca el equipo con su _kickoff_), `AppsList` (Composio)                                                                                                                                                                            |
-| `chat/`      | `useChatStream` (SSE: tokens, razonamiento, tools, tarjetas, archivos, aprobaciones, acciones; reconexión que espera la respuesta persistida; reintentar/detener), `Chat`, `Message`, `WorkLog` (razonamiento + pasos en una línea de tiempo plegable, en vivo mientras responde), `Markdown` (+ resaltado de código), `Composer` (adjuntos con progreso, arrastrar/pegar, dictado, modo voz, Misión/Directo, modelo), `PlusMenu` (adjuntar, «Pídele que…», Enséñale, apps, catálogo de tools), `ModelPicker` (por defecto **Automático**: el enrutador usa el modelo potente para código, análisis y la computadora), `Welcome` |
-| `cards/`     | `Cards` (KPIs, tablas ordenables con CSV, fuentes web, registros, notas, progreso, línea de tiempo, gráficas, media, conectar app, MCP UI e interfaces interactivas en iframe sandbox), `Agentic` (aprobación, plan, misión en vivo, reporte del equipo, rutina, trabajo del equipo), `ArtifactCard` (PDF/Excel/Word/CSV/tabla/gráfica con vista previa)                                                                                                                                                                                                                                                                         |
-| `workspace/` | `Workspace` (pestañas Navegador · Computadora · Equipo · Archivos; historia desde los tool records del hilo + eventos `workspace.*` en vivo), `useVenue` (una sola fuente de verdad del navegador y el escritorio, sondeo adaptativo), `LiveScreen` (clic/escritura/teclas/scroll mapeados a coordenadas reales), `BrowserView`, `ComputerView` (escritorio, terminal, archivos, apps corriendo), `TeamView`, `FilesView`                                                                                                                                                                                                        |
+| Carpeta      | Qué contiene                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `shell/`     | `Sidebar` (equipo con estado en vivo, «En curso», misiones y rutinas, conversaciones agrupadas con buscar ⌘K / favorita / renombrar / borrar), `UserMenu` (preferencias y memoria, apps y extensiones, tema, densidad, animaciones, modo Misión por defecto, instalar la app), `NewAgentDialog` (34 especialistas por área o 7 equipos completos; rutinas como `Trigger` real; el director arranca el equipo con su _kickoff_), `AppsList` (Composio)                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `chat/`      | `useChatStream` (SSE: tokens, razonamiento, tools, tarjetas, archivos, aprobaciones, acciones, modelo y respaldo; reconexión que espera la respuesta persistida; reintentar/detener), `Chat`, `Message` (modelo, esfuerzo, tiempo y costo de cada respuesta), `WorkLog` (razonamiento + pasos en una línea de tiempo plegable, en vivo mientras responde), `Markdown` (+ resaltado de código), `Composer` (bandeja de adjuntos: subidas en paralelo con progreso, reintento, cancelación, miniaturas y envío en espera; arrastrar, pegar o soltar en toda la conversación; dictado; modo voz; Misión/Directo), `PlusMenu` + `CapabilityMenu` (todas las capacidades reales con su estado: internet, navegador, computadora, documentos, equipo, rutinas, MCP, APIs, plugins, habilidades y apps), `EffortPicker` (Ultra-rápido · Ligero · Medio · Alto · Ultra), `Welcome` (saludo + inicio personalizado) |
+| `cards/`     | `Cards` (KPIs, tablas ordenables con CSV, fuentes web, registros, notas, progreso, línea de tiempo, gráficas, media, conectar app, MCP UI e interfaces interactivas en iframe sandbox), `GenUi` (tarjetas **json-render** con el catálogo UNIK: se validan en servidor y navegador), `Agentic` (aprobación, plan, misión en vivo, reporte del equipo, rutina, trabajo del equipo), `ArtifactCard` (PDF/Excel/Word/CSV/tabla/gráfica con vista previa)                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `voice/`     | `useVoiceSession` (micrófono con cancelación de eco → detector de voz → WAV 16 kHz → `/voice/transcribe` → el MISMO turno del chat → respuesta leída frase por frase con `/voice/speak`; interrupción al hablar encima), `VoicePanel` (anclado en lugar del composer: la conversación, tarjetas y aprobaciones siguen visibles), `speakable.ts` y `audio.ts` (funciones puras con pruebas)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `workspace/` | `Workspace` (pestañas Navegador · Computadora · Equipo · Archivos; historia desde los tool records del hilo + eventos `workspace.*` en vivo), `useVenue` (una sola fuente de verdad del navegador y el escritorio, sondeo adaptativo), `LiveScreen` (clic/escritura/teclas/scroll mapeados a coordenadas reales), `BrowserView`, `ComputerView` (escritorio, terminal, archivos, apps corriendo), `TeamView`, `FilesView`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 
 - Las aprobaciones aparecen **debajo de la respuesta que las pidió** (por el
   record `needs_approval` de la misma tool); las del turno en vivo, al final.
@@ -100,8 +110,10 @@ es un cajón y el espacio de trabajo una hoja completa.
   y `workspace.*` en `assistant:{conversationId}` (sobres
   `{channel,type,payload}` — se lee `payload`).
 - Storybook: `Universo/App` (conversación, oscuro, bienvenida, trabajando,
-  navegador arrancando, escritorio) y `Universo/Tarjetas`, con API simulada
-  (`stories/fixtures.ts`, solo historias).
+  navegador arrancando, escritorio, voz simulada, voz desactivada),
+  `Universo/Tarjetas`, `Universo/Tarjetas generativas` y `Universo/Voz`, con
+  API simulada (`stories/fixtures.ts`, solo historias; la voz simulada
+  responde un tono en lugar de una voz real).
 
 ## Icono flotante y app de escritorio
 
@@ -146,6 +158,89 @@ vía OpenRouter** ($0.30/$2.50 por 1M, visión+tools+1M ctx) cuando hay llave de
 OpenRouter → si no, el modelo de rutina. Elección explícita del usuario siempre
 gana. Las decisiones JEV (envelope) se conservan para routing/fanout.
 
+## Esfuerzo en lugar de «Automático» (`effort-levels.ts`, `effort-policy.ts`)
+
+El usuario elige cuánto pensar, no qué motor. Cada nivel es una política real:
+
+| Nivel        | Modelo                           | Razonamiento | Pasos | Verificación                                                       |
+| ------------ | -------------------------------- | ------------ | ----- | ------------------------------------------------------------------ |
+| Ultra-rápido | el más veloz capaz               | mínimo       | ≤4    | ninguna                                                            |
+| Ligero       | el del día a día                 | bajo         | ≤8    | 1 pasada determinista                                              |
+| Medio        | según el tier (JEV o heurística) | por tier     | admin | checks + escalado por confianza + revisión de respuestas complejas |
+| Alto         | modelo potente que razona        | alto         | ≥16   | checks + revisión                                                  |
+| Ultra        | el más potente disponible        | alto         | ≥24   | checks + revisión independiente                                    |
+
+- El modelo sale del catálogo por capacidades entre los proveedores con llave;
+  nunca se enruta a un proveedor sin credenciales. La elección explícita de un
+  modelo sigue ganando.
+- Cadena de respaldo: si el modelo falla (llave, modelo no habilitado,
+  proveedor caído, respuesta vacía) el turno sigue con el siguiente candidato;
+  `model-health.ts` deja el modelo fallido al final por un tiempo.
+- El interruptor de Admin «Revisión interna de respuestas» manda sobre todos
+  los niveles, Ultra incluido (política de costos).
+- JEV decide la ruta una vez por turno (`routeTurn`) y el modelo la recibe como
+  guía (`describeRouteForPrompt`). Cada respuesta muestra modelo, esfuerzo,
+  tiempo, costo estimado y los respaldos usados.
+
+## Capacidades (`capability-catalog.ts`)
+
+El «+» del composer lista todo lo que el agente puede usar, con el estado real
+para ese usuario (listo, degradado, falta conectar, caído, desactivado). El
+composer envía **ids**; `resolvePickedCapabilities` los traduce a tools en el
+servidor, así el cliente nunca inyecta nombres de tools. Lo elegido se fuerza
+en el menú del turno.
+
+## MCP confiable (`src/modules/extensions/`)
+
+Sesiones Streamable HTTP reutilizables, presupuesto de tiempo propio para
+`tools/call`, un reintento si la sesión expiró (404) y salud por servidor
+(`mcp-health.ts`): dos fallas de transporte seguidas sacan sus tools del menú
+del modelo por un tiempo, luego pasa una llamada de prueba. Las tools de un
+servidor sin la conexión del usuario tampoco se ofrecen. «Probar» en el
+selector hace un diagnóstico real.
+
+## Tarjetas generativas (json-render) e inicio personalizado
+
+- `@json-render/core` + `@json-render/react` 0.21 con catálogo propio
+  (`src/modules/ai/genui/catalog.ts`: 26 componentes y 8 acciones — preguntar,
+  prellenar, abrir el espacio de trabajo, abrir enlace, abrir conversación,
+  descargar, decidir una aprobación, copiar).
+- Tool `renderUi`: el agente compone la tarjeta; `sanitizeGenUiSpec` la valida
+  en el servidor y otra vez en el navegador (solo componentes y props del
+  catálogo, expresiones permitidas — nunca `$computed` —, enlaces https o de la
+  app, árbol acíclico y tamaños acotados). No se ejecuta código del modelo.
+- Las aprobaciones desde una tarjeta usan las mismas rutas
+  `/proposals/{id}/approve|reject` (permisos y auditoría del servidor).
+- Inicio (`genui/home-data.ts` + `genui/home.ts`): decisiones pendientes, lo
+  que quedó a medias, seguimientos, rutinas, lo que el usuario pide seguido,
+  archivos recientes, avisos y capacidades disponibles que aún no usa. Cada
+  consulta está acotada al usuario; si una sección falla, se omite.
+
+## Voz (`src/components/universo/voice/`)
+
+- Es la voz de los agentes: cada frase entra al mismo hilo con
+  `context.voice = true` (mismo agente, tools, aprobaciones y tarjetas); el
+  prompt agrega el bloque «MODO VOZ ACTIVO» (respuestas cortas, sin markdown,
+  los detalles en tarjetas).
+- Captura con AudioWorklet servido desde `/public` (la CSP no permite blobs),
+  detector de voz adaptativo con pre-roll, WAV 16 kHz y filtro de
+  alucinaciones de Whisper.
+- La respuesta se lee mientras se genera, frase por frase, con 3 frases
+  sintetizadas por adelantado. Hablar encima (o «Interrumpir») corta la voz;
+  el resto de la respuesta queda en el chat y la transcripción solo registra
+  lo que sí se dijo.
+- Si la voz del servidor no está disponible (sin llave, proveedor caído) usa
+  la del navegador, sin interrupción por voz (la voz del sistema no tiene
+  cancelación de eco). Si Admin la desactivó o el usuario no tiene permiso
+  (401/403) se detiene, libera el micrófono y lo dice: nunca la rodea.
+
+## Adjuntos
+
+La validación del archivo corre al momento (`runJobInline`: reclamo atómico
+del job) en vez de esperar un hueco en la cola que comparte con tareas largas;
+si la cola ya lo tomó, se espera como antes. El tipo MIME se infiere por
+extensión cuando el navegador no lo da.
+
 ## Seguridad de pantallas (memory-only)
 
 Las capturas de pantalla de la venue **nunca se persisten**: viajan solo por
@@ -158,13 +253,17 @@ request→controller→página sin tocar modelo ni DB.
 
 ## Verificación
 
-Typecheck 0 errores · lint 0 errores · 686 tests · `next build` completo ·
-Storybook build · capturas con Playwright (1440/1366/1024/768/390, claro y
-oscuro) · migraciones pasan los checks de idempotencia
-(`prisma-migrations.test.ts`).
+Typecheck 0 errores · lint 0 errores · 745 tests · `next build` completo ·
+Storybook build · barrido con Playwright de las historias UNIVERSO
+(1440/1024/768/390, claro y oscuro; sin desborde horizontal ni errores de
+consola) · voz de punta a punta en Chromium con micrófono simulado (turno
+completo, interrupción repetida, voz desactivada por Admin) · migraciones pasan
+los checks de idempotencia (`prisma-migrations.test.ts`).
 
 **Pendiente de validación manual (producción):** aplicar
 `20261028000000_published_sites`; encender el navegador y el escritorio desde
 el panel (Daytona real); tomar el control y grabar un «Enséñale»; pedir al
 director un trabajo en equipo y ver la consolidación; publicar un sitio;
-conectar una app de Composio.
+conectar una app de Composio; subir adjuntos en Railway; cada nivel de
+esfuerzo y el respaldo de modelos con las llaves reales; servidores MCP
+reales; voz con micrófono y OpenAI reales; el inicio con datos reales.

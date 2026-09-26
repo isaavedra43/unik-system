@@ -130,5 +130,8 @@ import '@/modules/missions/mission-tools';
 // View tools (renderView — chart/kpi/progress/timeline inline en el chat)
 import './view-tools';
 
+// Generative cards (json-render catalog, validated server- and client-side)
+import './genui-tools';
+
 // Export the registry API for consumers
 export * from './registry';

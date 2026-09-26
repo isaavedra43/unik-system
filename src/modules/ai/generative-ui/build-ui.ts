@@ -1,3 +1,4 @@
+import { sanitizeGenUiSpec } from '../genui/validate';
 import {
   MAX_UI_COMPONENTS_PER_TOOL,
   MAX_UI_ITEMS,
@@ -791,6 +792,21 @@ export function buildUiComponents(input: UiToolResultInput): UiComponent[] {
       height:
         typeof result.height === 'number' ? Math.min(1200, Math.max(120, result.height)) : null,
     });
+    return out;
+  }
+
+  // renderUi: json-render card — the persisted spec is sanitized again.
+  if (toolName === 'renderUi' && result.rendered === true && isObj(result.spec)) {
+    const { spec } = sanitizeGenUiSpec(result.spec);
+    if (spec) {
+      out.push({
+        type: 'genui',
+        spec,
+        ...(typeof result.title === 'string' && result.title
+          ? { title: result.title.slice(0, 120) }
+          : {}),
+      });
+    }
     return out;
   }
 

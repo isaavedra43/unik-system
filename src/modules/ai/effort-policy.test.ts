@@ -77,6 +77,15 @@ describe('planEffort', () => {
     expect(getModelById(ultra.model)?.power).toBe(10);
   });
 
+  it('the admin switch turns answer review off at every level, Ultra included', () => {
+    const off = { ...settings, answerReviewEnabled: false };
+    const ultra = plan({ level: 'ultra', settings: off });
+    expect(ultra.review).toBe('never');
+    expect(ultra.reason).toContain('revisión desactivada por el administrador');
+    expect(plan({ level: 'high', settings: off }).review).toBe('never');
+    expect(plan({ level: 'ultra' }).review).toBe('always');
+  });
+
   it('medium follows the tier (Jev or heuristic)', () => {
     expect(plan({ classification: { ...standard, tier: 'simple' } }).model).toBe('gpt-4o-mini');
     expect(plan({ classification: { ...standard, tier: 'complex' } }).model).toBe('gpt-5');

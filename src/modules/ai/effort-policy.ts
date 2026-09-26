@@ -259,6 +259,13 @@ export function planEffort(input: EffortPlanInput): EffortPlan {
   chain.push(clean(settings.fallbackDeployment));
   for (const p of input.configured) chain.push(getDefaultModel(p).id);
 
+  // The admin's switch is company policy (cost): it wins over every level.
+  if (settings.answerReviewEnabled === false && review !== 'never') {
+    review = 'never';
+    if (level === 'ultra')
+      why = `${why.replace(' con revisión independiente', '')} (revisión desactivada por el administrador)`;
+  }
+
   const candidates = orderCandidates(chain, input);
   const model = candidates[0] ?? explicit ?? primary;
 
@@ -278,7 +285,7 @@ export function planEffort(input: EffortPlanInput): EffortPlan {
     maxTools,
     checks,
     confidenceEscalation,
-    review: settings.answerReviewEnabled === false && review !== 'always' ? 'never' : review,
+    review,
   };
 }
 

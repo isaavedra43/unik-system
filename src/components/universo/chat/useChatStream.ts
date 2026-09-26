@@ -66,6 +66,8 @@ export interface SendOptions {
   planFirst?: boolean;
   /** Hide the user bubble (auto events like "the approved action failed"). */
   silent?: boolean;
+  /** Spoken turn (voice mode): the agent answers for the ear. */
+  voice?: boolean;
 }
 
 export interface UseChatStreamInput {
@@ -323,7 +325,7 @@ export function useChatStream(input: UseChatStreamInput) {
           body: JSON.stringify({
             conversationId: convId,
             message,
-            context,
+            context: opts.voice ? { ...(context ?? {}), voice: true } : context,
             model: model && model !== 'auto' ? model : undefined,
             effort: effort ?? undefined,
             agentId: agentId && agentId !== 'principal' ? agentId : undefined,

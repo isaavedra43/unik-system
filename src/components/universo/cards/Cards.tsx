@@ -45,6 +45,10 @@ const McpUiFrame = dynamic(() => import('./McpUiFrame'), {
   ssr: false,
   loading: () => <div className="uv-skel" style={{ height: 160 }} />,
 });
+const GenUiView = dynamic(() => import('./GenUi').then((m) => m.GenUiView), {
+  ssr: false,
+  loading: () => <div className="uv-skel" style={{ height: 180 }} />,
+});
 const InteractiveUiFrame = dynamic(() => import('./InteractiveUiFrame'), {
   ssr: false,
   loading: () => <div className="uv-skel" style={{ height: 200 }} />,
@@ -869,6 +873,8 @@ export function Cards({
             return (
               <McpUiFrame key={key} resource={c.resource} title={c.title} onSendText={onSendText} />
             );
+          case 'genui':
+            return <GenUiView key={key} spec={c.spec} title={c.title} onSendText={onSendText} />;
           case 'interactive':
             return (
               <InteractiveUiFrame

@@ -44,7 +44,7 @@ export const EFFORT_LEVELS: EffortLevelInfo[] = [
     id: 'ultra',
     label: 'Ultra',
     description:
-      'El modelo más potente disponible, pensamiento máximo, más pasos y una revisión independiente.',
+      'El modelo más potente disponible, pensamiento máximo, más pasos y revisión independiente (si tu empresa la tiene activa).',
     expect: 'El más lento y costoso · máxima calidad',
   },
 ];

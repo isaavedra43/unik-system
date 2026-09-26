@@ -232,6 +232,24 @@ export function UniversoApp({ user }: { user: ChatUser }) {
     } else setPrefs({ workspaceOpen: !prefs.workspaceOpen });
   }, [isMobile, prefs.workspaceOpen, setPrefs]);
 
+  // Generative cards (and the home screen) ask the shell to open things.
+  useEffect(() => {
+    const onWorkspace = (e: Event) => {
+      const tab = (e as CustomEvent<{ tab?: WorkspaceTab }>).detail?.tab;
+      if (tab && ['browser', 'computer', 'files', 'team'].includes(tab)) showWorkspace(tab);
+    };
+    const onOpen = (e: Event) => {
+      const id = (e as CustomEvent<{ conversationId?: string }>).detail?.conversationId;
+      if (typeof id === 'string' && id) selectConversation(id);
+    };
+    window.addEventListener('uv:workspace', onWorkspace);
+    window.addEventListener('uv:open-conversation', onOpen);
+    return () => {
+      window.removeEventListener('uv:workspace', onWorkspace);
+      window.removeEventListener('uv:open-conversation', onOpen);
+    };
+  }, [showWorkspace, selectConversation]);
+
   // ⌘K search · ⌘J workspace · ⌘⇧O new conversation · Esc closes overlays.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

@@ -338,7 +338,18 @@ export const openaiProvider: AiProvider = {
   async transcribe(audio: Buffer, mimeType: string, model?: string): Promise<string> {
     const client = await getClient();
     const sttModel = model ?? 'whisper-1';
-    const ext = mimeType.includes('webm') ? 'webm' : mimeType.includes('mp3') ? 'mp3' : 'wav';
+    // The file name's extension tells the API the container: Safari records
+    // mp4/aac, Firefox ogg — naming everything ".wav" made those fail.
+    const mime = mimeType.toLowerCase();
+    const ext = mime.includes('webm')
+      ? 'webm'
+      : mime.includes('ogg')
+        ? 'ogg'
+        : mime.includes('mp4') || mime.includes('m4a') || mime.includes('aac')
+          ? 'm4a'
+          : mime.includes('mpeg') || mime.includes('mp3')
+            ? 'mp3'
+            : 'wav';
     try {
       const result = await client.audio.transcriptions.create({
         file: new File([new Uint8Array(audio)], `audio.${ext}`, { type: mimeType }),
@@ -367,6 +378,8 @@ export const openaiProvider: AiProvider = {
         model: 'gpt-4o-mini-tts',
         voice: ttsVoice,
         input: text,
+        instructions:
+          'Habla en español de México, con tono cálido, seguro y natural, ritmo ágil de conversación. Pronuncia cifras y montos como se dicen en voz alta.',
         response_format: 'mp3',
       });
       const arrayBuffer = await mp3.arrayBuffer();

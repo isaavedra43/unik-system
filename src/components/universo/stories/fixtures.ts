@@ -1,3 +1,6 @@
+import { buildHomeSpec, type HomeData } from '@/modules/ai/genui/home';
+import { encodeWav } from '@/components/universo/voice/audio';
+
 /**
  * Storybook-only fixtures + a network simulator for UNIVERSO. Mock data for
  * visual review — never imported by application code, never real data.
@@ -496,6 +499,16 @@ export interface MockOptions {
   venue?: 'off' | 'booting' | 'ready' | 'desktop';
   /** POST /chat streams a long live turn (never finishes) for "working" screenshots. */
   liveTurn?: boolean;
+  /**
+   * Voice mode against fixtures: /voice/transcribe returns `transcript`,
+   * /voice/speak a soft tone (no real voice) and /chat a short spoken answer
+   * that stays in the conversation.
+   */
+  voice?: {
+    transcript?: string;
+    /** Voice turned off by the admin: every voice call answers 403. */
+    blocked?: boolean;
+  };
 }
 
 function json(body: unknown, status = 200): Response {
@@ -607,12 +620,233 @@ function liveTurnStream(): ReadableStream<Uint8Array> {
   });
 }
 
+const VOICE_ANSWER = [
+  'Ayer vendiste 482 mil pesos en 31 pedidos. ',
+  'Norte lidera con 212 mil y Sur bajó 3 por ciento. ',
+  '¿Quieres que te lo mande en PDF?',
+];
+
+/** A short spoken turn: one tool, then the answer in pieces, then done. */
+function voiceTurnStream(onDone: (answer: string) => void): ReadableStream<Uint8Array> {
+  const enc = new TextEncoder();
+  const script: Array<[number, unknown]> = [
+    [150, { type: 'routing', data: { modelClass: 'fast' } }],
+    [
+      150,
+      {
+        type: 'tool_call_start',
+        data: { name: 'querySalesOrders', args: '{"from":"ayer","groupBy":"sucursal"}' },
+      },
+    ],
+    [
+      900,
+      { type: 'tool_call_end', data: { name: 'querySalesOrders', success: true, durationMs: 880 } },
+    ],
+    ...VOICE_ANSWER.map((delta): [number, unknown] => [250, { type: 'token', data: { delta } }]),
+  ];
+  return new ReadableStream({
+    async start(controller) {
+      for (const [delay, ev] of script) {
+        await new Promise((r) => setTimeout(r, delay));
+        controller.enqueue(enc.encode(`data: ${JSON.stringify(ev)}\n\n`));
+      }
+      onDone(VOICE_ANSWER.join(''));
+      controller.enqueue(enc.encode('data: {"type":"done","data":{"model":"gpt-5-mini"}}\n\n'));
+      controller.close();
+    },
+  });
+}
+
+/** Stand-in for synthesized speech: a soft tone as long as the sentence. */
+function toneWav(text: string): Uint8Array<ArrayBuffer> {
+  const rate = 16_000;
+  const seconds = Math.min(2.4, Math.max(0.4, text.length * 0.035));
+  const samples = new Float32Array(Math.floor(rate * seconds));
+  for (let i = 0; i < samples.length; i++) {
+    const t = i / rate;
+    const envelope = Math.min(1, t * 20, (seconds - t) * 20);
+    samples[i] = 0.08 * envelope * Math.sin(2 * Math.PI * 220 * t) * (0.6 + 0.4 * Math.sin(t * 9));
+  }
+  return encodeWav(samples, rate);
+}
+
+/** Home data for stories (fixtures only — never real data). */
+export const homeFixture: HomeData = {
+  firstName: 'Iván',
+  agent: { name: 'Director', kind: 'principal' },
+  proposals: [
+    {
+      id: 'p-1',
+      summary: 'Enviar la cotización COT-2291 a Constructora Monterrey por WhatsApp',
+      conversationId: 'c-demo',
+      expiresAt: iso(-3 * HOUR),
+    },
+  ],
+  stalled: [
+    {
+      kind: 'task',
+      title: 'Comparar precios de travertino con 5 proveedores',
+      status: 'failed',
+      conversationId: 'c-demo',
+      detail: 'El sitio de un proveedor no respondió',
+    },
+  ],
+  working: 2,
+  followUps: [
+    {
+      conversationId: 'c-demo',
+      conversationTitle: 'Precios',
+      text: 'Compara contra el mes pasado',
+    },
+    {
+      conversationId: 'c-demo',
+      conversationTitle: 'Precios',
+      text: 'Prepara el PDF para dirección',
+    },
+  ],
+  routines: [
+    { title: 'Resumen de ventas de ayer', nextRunAt: iso(-16 * HOUR), paused: false },
+    { title: 'Vigilar cotizaciones sin respuesta', nextRunAt: iso(-2 * HOUR), paused: false },
+  ],
+  frequent: [
+    { text: 'Ventas de ayer por sucursal', count: 7 },
+    { text: 'Cobranza vencida de más de 30 días', count: 4 },
+  ],
+  recent: [
+    { id: 'c-demo', title: 'Precios de la competencia', updatedAt: iso(2 * HOUR), snippet: null },
+  ],
+  files: [
+    {
+      artifactId: 'a-1',
+      name: 'Ventas septiembre.pdf',
+      mimeType: 'application/pdf',
+      createdAt: iso(20 * HOUR),
+    },
+  ],
+  notifications: [
+    {
+      title: 'Pedido SO-1182 entregado',
+      body: 'Entregado en obra',
+      url: null,
+      createdAt: iso(HOUR),
+    },
+  ],
+  discover: [
+    {
+      id: 'computer',
+      label: 'Su propia computadora',
+      description: 'Abre sitios, llena formularios y corre código.',
+      prompt: 'Abre el navegador y revisa mi sitio: ',
+      icon: 'monitor',
+    },
+    {
+      id: 'routine',
+      label: 'Rutinas automáticas',
+      description: 'Algo que corre solo cada día y te avisa.',
+      prompt: 'Cada mañana a las 8 mándame el resumen de ventas.',
+      icon: 'repeat',
+    },
+  ],
+};
+
+export const capabilitiesFixture = [
+  {
+    id: 'internet',
+    label: 'Internet',
+    items: [
+      {
+        id: 'builtin:web',
+        group: 'internet',
+        label: 'Búsqueda en internet',
+        description: 'Busca, lee y cruza fuentes con citas.',
+        state: 'ready',
+        icon: 'globe',
+        toolCount: 4,
+      },
+    ],
+  },
+  {
+    id: 'computer',
+    label: 'Computadora virtual',
+    items: [
+      {
+        id: 'builtin:browser',
+        group: 'computer',
+        label: 'Navegador',
+        description: 'Entra a sitios, hace clic y llena formularios.',
+        state: 'ready',
+        icon: 'mouse-pointer',
+        toolCount: 3,
+      },
+      {
+        id: 'builtin:computer',
+        group: 'computer',
+        label: 'Computadora virtual',
+        description: 'Terminal, archivos y código.',
+        state: 'ready',
+        icon: 'terminal',
+        toolCount: 5,
+      },
+    ],
+  },
+  {
+    id: 'mcp',
+    label: 'Servidores MCP',
+    items: [
+      {
+        id: 'ext:notion',
+        group: 'mcp',
+        label: 'Notion',
+        description: '12 herramientas',
+        state: 'needs_connection',
+        stateText: 'Conecta tu cuenta para usarlo.',
+        icon: 'server',
+        toolCount: 0,
+        extensionId: 'notion',
+        connect: { kind: 'oauth', target: 'notion' },
+      },
+      {
+        id: 'ext:higgsfield',
+        group: 'mcp',
+        label: 'Higgsfield',
+        description: 'Imágenes y video',
+        state: 'down',
+        stateText: 'No se pudo llegar al servidor. Se reintenta sola a las 12:04.',
+        icon: 'server',
+        toolCount: 0,
+        extensionId: 'higgsfield',
+      },
+    ],
+  },
+  {
+    id: 'skills',
+    label: 'Habilidades',
+    items: [
+      {
+        id: 'skill:cotizar',
+        group: 'skills',
+        label: 'Cotizar rápido',
+        description: 'Arma una cotización con la lista de precios vigente.',
+        state: 'ready',
+        icon: 'sparkles',
+        toolCount: 1,
+      },
+    ],
+  },
+];
+
 /** Installs a fetch + EventSource simulator for the UNIVERSO APIs. */
 export function installUniversoMocks(opts: MockOptions = {}): () => void {
-  const w = window as unknown as { __uvFetch?: typeof fetch; __uvES?: typeof EventSource };
+  const w = window as unknown as {
+    __uvFetch?: typeof fetch;
+    __uvES?: typeof EventSource;
+    __uvThreads?: Map<string, unknown[]>;
+  };
   // Always wrap the REAL fetch (stories re-install on every render).
   w.__uvFetch ??= window.fetch;
   w.__uvES ??= window.EventSource;
+  // Turns sent during the story (voice), per conversation.
+  const threads = (w.__uvThreads ??= new Map<string, unknown[]>());
   const originalFetch = w.__uvFetch;
   const OriginalES = w.__uvES;
 
@@ -638,7 +872,10 @@ export function installUniversoMocks(opts: MockOptions = {}): () => void {
         title: 'Nueva conversación',
         agentId: null,
       };
-      return json({ conversation: conv, messages: id === 'c-demo' ? demoMessages : [] });
+      return json({
+        conversation: conv,
+        messages: id === 'c-demo' ? demoMessages : (threads.get(id) ?? []),
+      });
     }
     if (r === 'proposals')
       return json({
@@ -654,6 +891,10 @@ export function installUniversoMocks(opts: MockOptions = {}): () => void {
     if (r === 'usage')
       return json({ llm: 12.84, venue: 3.2, venueMinutes: 142, runs: 318, spent: 16.04 });
     if (r === 'models') return json({ models: modelsFixture, defaultModel: 'gpt-5-mini' });
+    if (r === 'capabilities' && method === 'GET') return json({ groups: capabilitiesFixture });
+    if (r === 'capabilities' && method === 'POST')
+      return json({ ok: false, latencyMs: 2100, error: 'fetch failed' });
+    if (r.startsWith('home')) return json({ empty: false, spec: buildHomeSpec(homeFixture) });
     if (r === 'sites')
       return json({
         sites: [
@@ -696,6 +937,35 @@ export function installUniversoMocks(opts: MockOptions = {}): () => void {
       });
     if (r.startsWith('venue/state')) return json(venueState(opts.venue ?? 'ready'));
     if (r.startsWith('venue/')) return json({ ok: true, frame: null });
+    if (r.startsWith('voice/') && opts.voice?.blocked)
+      return json({ error: 'La voz está desactivada por el administrador.' }, 403);
+    if (r === 'voice/transcribe' && opts.voice)
+      return json({ text: opts.voice.transcript ?? '¿Cuánto vendimos ayer por sucursal?' });
+    if (r === 'voice/speak' && opts.voice) {
+      const { text } = JSON.parse(String(init?.body ?? '{}')) as { text?: string };
+      return new Response(toneWav(text ?? ''), { headers: { 'Content-Type': 'audio/wav' } });
+    }
+    if (r === 'chat' && method === 'POST' && opts.voice) {
+      const body = JSON.parse(String(init?.body ?? '{}')) as {
+        conversationId?: string;
+        message?: string;
+      };
+      const convId = body.conversationId ?? 'c-voice';
+      const thread = threads.get(convId) ?? [];
+      const at = new Date().toISOString();
+      thread.push({ id: `u-${thread.length}`, role: 'user', content: body.message, createdAt: at });
+      threads.set(convId, thread);
+      const stream = voiceTurnStream((answer) =>
+        thread.push({
+          id: `a-${thread.length}`,
+          role: 'assistant',
+          content: answer,
+          createdAt: new Date().toISOString(),
+          meta: { model: 'gpt-5-mini' },
+        })
+      );
+      return new Response(stream, { headers: { 'Content-Type': 'text/event-stream' } });
+    }
     if (r === 'chat' && method === 'POST') {
       if (opts.liveTurn)
         return new Response(liveTurnStream(), { headers: { 'Content-Type': 'text/event-stream' } });

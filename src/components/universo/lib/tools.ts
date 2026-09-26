@@ -76,7 +76,7 @@ export function toolCategory(name: string): ToolCategory {
     return 'memory';
   if (/^(generateImage|generateVideo|analyzeImage)$/.test(name)) return 'media';
   if (
-    /^(generate|compose|listArtifacts|shareArtifact|cleanupArtifacts|renderView|renderInteractiveUi|readAttachment)/.test(
+    /^(generate|compose|listArtifacts|shareArtifact|cleanupArtifacts|renderView|renderUi|renderInteractiveUi|readAttachment)/.test(
       name
     )
   )
@@ -96,7 +96,7 @@ export function toolCategory(name: string): ToolCategory {
 export function toolIcon(name: string): LucideIcon {
   if (name === 'draftAnswer' || name === 'reviewAnswer') return Sparkles;
   if (name === 'universalSearch') return Search;
-  if (name === 'renderInteractiveUi') return AppWindow;
+  if (name === 'renderInteractiveUi' || name === 'renderUi') return AppWindow;
   if (name === 'delegateTask') return Bot;
   return CATEGORY_ICON[toolCategory(name)];
 }

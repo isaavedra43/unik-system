@@ -25,7 +25,7 @@ import { WorkLog, stepsFromLive } from './WorkLog';
 import { Composer, type ComposerHandle, type ComposerMode } from './Composer';
 import { loadStoredEffort, type EffortValue } from './EffortPicker';
 import { WelcomeHero, WelcomeStarters } from './Welcome';
-import { VoiceMode } from './VoiceMode';
+import { VoicePanel } from '../voice/VoicePanel';
 import { Cards } from '../cards/Cards';
 import { ArtifactCard } from '../cards/ArtifactCard';
 import { ApprovalCard, TeamRunCard } from '../cards/Agentic';
@@ -144,6 +144,16 @@ export function Chat({
       if (mode === 'mission' && defaultMode !== 'mission') setMode(defaultMode);
     },
     [chat, mode, defaultMode]
+  );
+
+  // Voice turns are normal turns of this thread, flagged so the agent answers
+  // for the ear (short, no markdown) and points to what it left on screen.
+  const voiceSend = useCallback(
+    (text: string) => {
+      nearBottomRef.current = true;
+      return chat.send(text, { voice: true });
+    },
+    [chat]
   );
 
   // Quick actions from the workspace / sidebar land here.
@@ -588,8 +598,22 @@ export function Chat({
             <ArrowDown size={14} /> Ir al final
           </button>
         )}
-        {composer}
-        {isEmpty ? (
+        {/* Voice docks in place of the composer (which stays mounted, hidden):
+            the thread keeps showing cards, approvals and files as the agent talks. */}
+        <AnimatePresence>
+          {voice && (
+            <VoicePanel
+              agent={agent}
+              send={voiceSend}
+              streaming={streaming}
+              content={live.content}
+              activity={runningStep ? stepLabel(runningStep.name, runningStep.args, true) : null}
+              onClose={() => setVoice(false)}
+            />
+          )}
+        </AnimatePresence>
+        <div hidden={voice}>{composer}</div>
+        {isEmpty && !voice ? (
           <WelcomeStarters agent={agent} onSend={(t) => send(t)} onTeam={onNewTeam} />
         ) : (
           <p className="uv-composer-hint">
@@ -608,26 +632,6 @@ export function Chat({
           </div>
         </div>
       )}
-
-      <AnimatePresence>
-        {voice && (
-          <VoiceMode
-            conversationId={chat.conversationId}
-            context={context}
-            onClose={() => {
-              setVoice(false);
-              chat.reload();
-            }}
-            onConversationCreated={(id) => onConversationCreated?.(id)}
-            user={{
-              id: user.id,
-              name: user.name,
-              username: user.username,
-              isSuperAdmin: user.isSuperAdmin,
-            }}
-          />
-        )}
-      </AnimatePresence>
     </section>
   );
 }

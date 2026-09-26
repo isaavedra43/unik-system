@@ -58,6 +58,7 @@ export const CORE_TOOL_NAMES: readonly string[] = [
   'rememberForUser',
   'recallMemory',
   'renderView',
+  'renderUi',
   'generateTable',
   'generatePdfReport',
   'generateExcelReport',

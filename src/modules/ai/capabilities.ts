@@ -97,7 +97,7 @@ export const CAPABILITY_DEFS: readonly CapabilityDef[] = [
   {
     id: 'ui',
     label: 'interfaces interactivas dentro del chat (calculadoras, comparadores, filtros, simulaciones)',
-    tools: /^(renderInteractiveUi|renderView|generateChart|generateTable)$/,
+    tools: /^(renderInteractiveUi|renderUi|renderView|generateChart|generateTable)$/,
   },
 ];
 
@@ -243,7 +243,7 @@ const SOURCE_LABELS: readonly SourceLabelRule[] = [
   { label: 'propuesta para tu aprobación', tools: /^(propose\w+|draft\w+|create\w+|update\w+|schedule\w+|save\w+)$/ },
   { label: 'documento generado', tools: /^(composeDocument|generatePdfReport|generateExcelReport|generateWordReport|generateCsvExport|getQuotePdf|previewQuote)$/ },
   { label: 'visual generado', tools: /^(generateChart|generateTable|renderView|generateReportImage|generateImage|generateVideo)$/ },
-  { label: 'interfaz interactiva', tools: /^renderInteractiveUi$/ },
+  { label: 'interfaz interactiva', tools: /^(renderInteractiveUi|renderUi)$/ },
   { label: 'extensión externa', tools: /(__|composioExecute)/ },
   { label: 'biblioteca de conocimiento', tools: /^searchKnowledgeLibrary$/ },
   { label: 'llamada', tools: /^(callContact|startInternalCall|startOutboundCall|pauseCallAi)$/ },

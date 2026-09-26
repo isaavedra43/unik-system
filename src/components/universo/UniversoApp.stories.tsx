@@ -125,3 +125,23 @@ export const Escritorio: Story = {
     },
   },
 };
+
+/**
+ * Voice mode against fixtures: /voice/transcribe returns a fixed question and
+ * /voice/speak a soft tone instead of a real voice (no network, no real data).
+ * With Chromium's fake microphone it runs a whole spoken turn end to end.
+ */
+export const VozSimulada: Story = {
+  parameters: {
+    universo: { venue: 'off', voice: {} },
+    nextjs: { appDirectory: true, navigation: { pathname: '/app/assistant', query: {} } },
+  },
+};
+
+/** The admin turned voice off: the panel says so and frees the microphone (no browser fallback). */
+export const VozDesactivada: Story = {
+  parameters: {
+    universo: { venue: 'off', voice: { blocked: true } },
+    nextjs: { appDirectory: true, navigation: { pathname: '/app/assistant', query: {} } },
+  },
+};

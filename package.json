@@ -37,6 +37,8 @@
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
     "@hookform/resolvers": "^5.9.1",
+    "@json-render/core": "0.21.0",
+    "@json-render/react": "0.21.0",
     "@mcp-ui/client": "^6.1.0",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@mozilla/readability": "^0.6.0",

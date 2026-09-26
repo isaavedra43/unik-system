@@ -372,6 +372,8 @@ export const DEFAULT_AI_SETTINGS: AiSettings = {
     'generateVideo',
     // Interfaz interactiva generada al vuelo (iframe sandboxed en el chat)
     'renderInteractiveUi',
+    // Tarjetas generativas json-render (catálogo cerrado validado con Zod)
+    'renderUi',
     // Internet — la lista habilita; el candado real es el toggle admin
     // (webSearchEnabled/webFetchEnabled) + TAVILY_API_KEY + permiso por rol.
     // Antes faltaban aquí y el toggle solo no alcanzaba nunca al modelo.

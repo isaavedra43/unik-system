@@ -1,6 +1,7 @@
 'use client';
 
-import React from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
+import dynamic from 'next/dynamic';
 import { motion } from 'motion/react';
 import { ArrowUpRight, Code, FileSearch, Globe, HandCoins, Rocket, Sun, Users } from 'lucide-react';
 import { AGENT_TEAMS, type AgentTeamTemplate } from '@/modules/agents/agent-templates';
@@ -101,6 +102,52 @@ export function WelcomeHero({
   );
 }
 
+const GenUiView = dynamic(() => import('../cards/GenUi').then((m) => m.GenUiView), {
+  ssr: false,
+  loading: () => <HomeSkeleton />,
+});
+
+function HomeSkeleton() {
+  return (
+    <div className="uv-home-skel" aria-hidden="true">
+      {[0, 1, 2, 3].map((i) => (
+        <div key={i} className="uv-skel" />
+      ))}
+    </div>
+  );
+}
+
+interface HomePayload {
+  empty: boolean;
+  spec: unknown;
+}
+
+/** The user's own home: decisions, pending work, next steps, routines… (json-render). */
+function useHome(agentId: string) {
+  const [home, setHome] = useState<HomePayload | null>(null);
+  const [failed, setFailed] = useState(false);
+  const load = useCallback(async () => {
+    try {
+      const qs =
+        agentId && agentId !== 'principal' ? `?agentId=${encodeURIComponent(agentId)}` : '';
+      const res = await fetch(`/app/assistant/api/home${qs}`);
+      if (!res.ok) throw new Error(String(res.status));
+      setHome((await res.json()) as HomePayload);
+      setFailed(false);
+    } catch {
+      setFailed(true);
+    }
+  }, [agentId]);
+  useEffect(() => {
+    setHome(null);
+    void load();
+    const refresh = () => void load();
+    window.addEventListener('uv:home-refresh', refresh);
+    return () => window.removeEventListener('uv:home-refresh', refresh);
+  }, [load]);
+  return { home, failed };
+}
+
 export function WelcomeStarters({
   agent,
   onSend,
@@ -112,9 +159,18 @@ export function WelcomeStarters({
   onTeam?: (team: AgentTeamTemplate) => void;
 }) {
   const principal = agent.kind === 'principal';
+  const { home, failed } = useHome(agent.id);
+  const personal = home && !home.empty && home.spec ? home.spec : null;
+  const ideas = failed || (home !== null && !personal);
   return (
     <motion.div className="uv-welcome-below" variants={fadeUp} initial="initial" animate="animate">
-      {principal ? (
+      {!home && !failed && <HomeSkeleton />}
+      {personal && (
+        <div className="uv-home" aria-label="Tu inicio">
+          <GenUiView spec={personal} bare onSendText={onSend} />
+        </div>
+      )}
+      {ideas && principal ? (
         <div className="uv-cap-grid" aria-label="Ideas para empezar">
           {STARTERS.map((s) => (
             <button key={s.title} type="button" className="uv-cap" onClick={() => onSend(s.prompt)}>
@@ -127,7 +183,7 @@ export function WelcomeStarters({
             </button>
           ))}
         </div>
-      ) : (
+      ) : ideas ? (
         <div className="uv-followups" style={{ justifyContent: 'center' }}>
           {SPECIALIST_STARTERS.map((s) => (
             <button key={s} type="button" className="uv-chip" onClick={() => onSend(s)}>
@@ -135,8 +191,8 @@ export function WelcomeStarters({
             </button>
           ))}
         </div>
-      )}
-      {principal && onTeam && (
+      ) : null}
+      {principal && onTeam && ideas && (
         <div className="uv-welcome-teams">
           <div className="uv-welcome-teams-head">
             <span className="uv-inline-label">

@@ -11,6 +11,8 @@
  * Pure types + builders: safe to import from server and client.
  */
 
+import type { GenUiSpec } from '../genui/catalog';
+
 export type UiTone = 'neutral' | 'success' | 'warning' | 'danger' | 'info';
 
 export interface UiField {
@@ -108,6 +110,13 @@ export type UiComponent =
   | { type: 'progress'; title: string; steps: UiProgressStep[] }
   | { type: 'timeline'; title?: string; events: UiTimelineEvent[] }
   | { type: 'mcp_ui'; resource: UiMcpResource; title?: string }
+  | {
+      /** Agent-composed card from the UNIK json-render catalog (renderUi) —
+       *  a validated data spec drawn by UNIK's own components. */
+      type: 'genui';
+      title?: string;
+      spec: GenUiSpec;
+    }
   | {
       /** Agent-authored interface (renderInteractiveUi) — self-contained
        *  HTML/CSS/JS rendered in a sandboxed iframe, never in the page DOM. */
