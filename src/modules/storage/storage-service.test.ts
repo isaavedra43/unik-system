@@ -35,6 +35,7 @@ const settings = {
 };
 
 const enqueued: Array<{ type: string; payload: unknown }> = [];
+const inline = { claim: false };
 const published: Array<{ channel: string; type: string }> = [];
 
 vi.mock('@/modules/storage/storage-settings-service', () => ({
@@ -49,6 +50,9 @@ vi.mock('@/modules/jobs/job-queue', () => ({
     return { id: `job-${enqueued.length}`, status: 'pending', deduplicated: false };
   },
   waitForJob: async () => null,
+  // Default: a worker already claimed the job (the inline claim loses).
+  runJobInline: async (_id: string, fn: () => Promise<unknown>) =>
+    inline.claim ? { ran: true, result: await fn() } : { ran: false },
 }));
 vi.mock('@/modules/extensions/usage-meter', () => ({ recordUsage: async () => undefined }));
 vi.mock('@/modules/realtime/realtime-service', () => ({
@@ -115,6 +119,8 @@ beforeEach(async () => {
   setStorageRepositoryForTests(repo);
   enqueued.length = 0;
   published.length = 0;
+  inline.claim = false;
+  settings.inlineValidationWaitMs = 0;
 });
 
 afterEach(async () => {
@@ -173,6 +179,24 @@ describe('single-part upload', () => {
     const chunks: Buffer[] = [];
     for await (const c of stream!.stream as AsyncIterable<Buffer>) chunks.push(Buffer.from(c));
     expect(Buffer.concat(chunks).equals(data.subarray(0, 8))).toBe(true);
+  });
+
+  it('validates in the same request when no worker has the job (busy queue)', async () => {
+    inline.claim = true;
+    settings.inlineValidationWaitMs = 5000;
+    const data = png(1024);
+    const init = await initiateUpload({
+      actorId: 'u1',
+      fileName: 'now.png',
+      declaredMimeType: 'image/png',
+      declaredSize: data.length,
+      target: { type: 'chat_channel', id: 'c1' },
+      policy,
+    });
+    const etag = await putViaToken(init.parts![0].url, data);
+    const completed = await completeUpload('u1', init.uploadId, [{ partNumber: 1, etag }]);
+    expect(completed.status).toBe('ready');
+    expect((await repo.getObject(init.objectId))!.status).toBe('ready');
   });
 
   it('rejects a fake MIME after upload and cleans the quarantine', async () => {

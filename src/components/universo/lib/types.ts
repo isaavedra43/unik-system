@@ -22,6 +22,8 @@ export interface AttachmentInfo {
   fileName: string;
   mimeType: string;
   sizeBytes: number;
+  /** Local thumbnail (object URL) of an image this browser just uploaded. */
+  previewUrl?: string;
 }
 
 export interface ArtifactInfo {

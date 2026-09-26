@@ -12,6 +12,7 @@ import {
   Loader2,
   PencilLine,
   Phone,
+  RefreshCw,
   RotateCcw,
   ShieldCheck,
   ShieldX,
@@ -35,7 +36,8 @@ import { parseConfidence, CONFIDENCE_META } from '@/modules/ai/confidence';
 import { parseFollowUps } from '@/modules/ai/followups';
 import { buildUiComponents } from '@/modules/ai/generative-ui/build-ui';
 import type { AgentInfo, MessageData, WorkspaceTab } from '../lib/types';
-import { clockTime, formatBytes } from '../lib/format';
+import { clockTime, formatBytes, formatDuration } from '../lib/format';
+import { EFFORT_LEVELS } from '@/modules/ai/effort-levels';
 import { AgentAvatar } from '../ui';
 import { Markdown } from './Markdown';
 import { WorkLog, stepsFromRecords } from './WorkLog';
@@ -218,22 +220,85 @@ function Provenance({
       )}
       {!info && note && <span className="uv-foot-sources">{note}</span>}
       {meta?.model && (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <span className="uv-foot-model" tabIndex={0}>
-              <Cpu size={11} />
-              {meta.model}
-              {meta.routing?.routed ? ' · auto' : ''}
-            </span>
-          </TooltipTrigger>
-          <TooltipContent side="bottom" className="max-w-xs">
-            {meta.routing?.routed
-              ? `Elegido automáticamente: ${meta.routing.reason ?? meta.routing.tier ?? ''}`
-              : 'Modelo elegido por ti'}
-          </TooltipContent>
-        </Tooltip>
+        <ModelChip
+          label={meta.modelLabel ?? meta.model}
+          effort={meta.effort}
+          reason={meta.routing?.reason}
+          jev={meta.routing?.jev}
+          durationMs={meta.durationMs}
+          costUsd={meta.costUsd}
+          fallbacks={meta.fallbacks?.map((f) => ({
+            fromLabel: f.fromLabel ?? f.from,
+            toLabel: f.toLabel ?? f.to,
+            reason: f.reason,
+          }))}
+        />
       )}
     </>
+  );
+}
+
+const EFFORT_NAMES: Record<string, string> = Object.fromEntries(
+  EFFORT_LEVELS.map((l) => [l.id, l.label])
+);
+
+function formatCost(usd: number): string {
+  if (usd <= 0) return '$0';
+  if (usd < 0.01) return '<$0.01';
+  return `$${usd.toFixed(usd < 1 ? 3 : 2)}`;
+}
+
+/** "GPT-5 · Alto · 12 s · $0.02" — which model answered, at what effort, how long, how much. */
+export function ModelChip({
+  label,
+  effort,
+  reason,
+  jev,
+  durationMs,
+  costUsd,
+  fallbacks,
+  live = false,
+}: {
+  label: string;
+  effort?: string;
+  reason?: string;
+  jev?: boolean;
+  durationMs?: number;
+  costUsd?: number | null;
+  fallbacks?: Array<{ fromLabel: string; toLabel: string; reason: string }>;
+  live?: boolean;
+}) {
+  const effortName = effort ? EFFORT_NAMES[effort] : undefined;
+  const parts = [label, effortName, !live && durationMs ? formatDuration(durationMs) : null];
+  if (!live && typeof costUsd === 'number') parts.push(formatCost(costUsd));
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span
+          className={cn('uv-foot-model', fallbacks && fallbacks.length > 0 && 'has-fallback')}
+          tabIndex={0}
+        >
+          {fallbacks && fallbacks.length > 0 ? <RefreshCw size={11} /> : <Cpu size={11} />}
+          {parts.filter(Boolean).join(' · ')}
+        </span>
+      </TooltipTrigger>
+      <TooltipContent side="bottom" className="max-w-xs">
+        <span style={{ display: 'block' }}>{reason ?? 'Modelo de este turno'}</span>
+        {jev && (
+          <span style={{ display: 'block', opacity: 0.75 }}>JEV decidió la ruta del turno.</span>
+        )}
+        {fallbacks?.map((f, i) => (
+          <span key={i} style={{ display: 'block', opacity: 0.85 }}>
+            {f.fromLabel} {f.reason} → siguió {f.toLabel}
+          </span>
+        ))}
+        {!live && typeof costUsd === 'number' && (
+          <span style={{ display: 'block', opacity: 0.75 }}>
+            Costo estimado con los precios del catálogo.
+          </span>
+        )}
+      </TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -318,12 +383,19 @@ function SystemEvent({ content }: { content: string }) {
 function FileChip({
   att,
 }: {
-  att: { id: string; fileName: string; mimeType: string; sizeBytes: number };
+  att: { id: string; fileName: string; mimeType: string; sizeBytes: number; previewUrl?: string };
 }) {
   return (
     <span className="uv-file-chip" title={att.fileName}>
-      <span className="uv-file-chip-icon">
-        {att.mimeType.startsWith('image/') ? <ImageIcon size={14} /> : <FileText size={14} />}
+      <span className={cn('uv-file-chip-icon', att.previewUrl && 'has-thumb')}>
+        {att.previewUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element -- local object URL preview
+          <img src={att.previewUrl} alt="" />
+        ) : att.mimeType.startsWith('image/') ? (
+          <ImageIcon size={14} />
+        ) : (
+          <FileText size={14} />
+        )}
       </span>
       <span className="uv-file-chip-text">
         <span className="uv-file-chip-name">{att.fileName}</span>

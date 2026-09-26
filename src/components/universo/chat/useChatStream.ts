@@ -42,12 +42,27 @@ export interface LiveTurn {
   ui: UiComponent[];
   artifacts: ArtifactInfo[];
   startedAt: number;
-  /** Model the router picked (from the routing/done events) — informative. */
-  route?: { tier?: string; model?: string } | null;
+  /** Who is answering and why (model, effort, Jev route, failovers) — informative. */
+  route?: LiveRoute | null;
+}
+
+export interface LiveRoute {
+  tier?: string;
+  model?: string;
+  label?: string;
+  effort?: string;
+  effortLabel?: string;
+  reason?: string;
+  /** Jev's path for the turn (fast / standard / deep). */
+  path?: string;
+  jev?: boolean;
+  fallbacks?: Array<{ fromLabel: string; toLabel: string; reason: string }>;
 }
 
 export interface SendOptions {
   attachments?: AttachmentInfo[];
+  /** Capability ids picked in the composer ("builtin:web", "ext:…"). */
+  capabilities?: string[];
   planFirst?: boolean;
   /** Hide the user bubble (auto events like "the approved action failed"). */
   silent?: boolean;
@@ -58,7 +73,10 @@ export interface UseChatStreamInput {
   onConversationCreated?: (id: string) => void;
   /** Real agent id (the 'principal' sentinel is never sent). */
   agentId?: string | null;
+  /** A model the user fixed (null = chosen by the effort level). */
   model?: string | null;
+  /** Effort level (instant | light | medium | high | ultra). */
+  effort?: string | null;
   context?: { page?: string };
   onWorkspaceHint?: (tab: WorkspaceTab) => void;
 }
@@ -116,6 +134,10 @@ export function useChatStream(input: UseChatStreamInput) {
   const lastSendRef = useRef<{ text: string; opts: SendOptions } | null>(null);
   const streamingRef = useRef(false);
   const pendingReloadRef = useRef(false);
+  /** Thread this hook just created: empty on the server, nothing to load. */
+  const createdRef = useRef<string | null>(null);
+  /** One creation at a time (a drop and a send racing must not make two threads). */
+  const creatingRef = useRef<Promise<string | null> | null>(null);
   const inputRef = useRef(input);
   useEffect(() => {
     inputRef.current = input;
@@ -167,7 +189,12 @@ export function useChatStream(input: UseChatStreamInput) {
     setError(null);
     setConsolidating(false);
     if (conversationId) {
-      // A thread we just created is empty on the server: keep the optimistic bubble.
+      // A thread we just created is empty on the server: loading it would only
+      // flash a skeleton (and drop the optimistic bubble or in-flight files).
+      if (createdRef.current === conversationId) {
+        createdRef.current = null;
+        return;
+      }
       if (!streamingRef.current) void loadConversation(conversationId);
     } else {
       setMessages([]);
@@ -196,22 +223,30 @@ export function useChatStream(input: UseChatStreamInput) {
 
   const ensureConversation = useCallback(async (): Promise<string | null> => {
     if (conversationId) return conversationId;
-    try {
-      const res = await fetch('/app/assistant/api/conversations', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({}),
-      });
-      const d = (await res.json().catch(() => ({}))) as { id?: string; error?: string };
-      if (!res.ok || !d.id) throw new Error(d.error ?? 'fail');
-      const id = d.id;
-      setConversationId(id);
-      inputRef.current.onConversationCreated?.(id);
-      return id;
-    } catch {
-      setError({ text: 'No se pudo crear la conversación.', retry: false });
-      return null;
-    }
+    if (creatingRef.current) return creatingRef.current;
+    const creating = (async () => {
+      try {
+        const res = await fetch('/app/assistant/api/conversations', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({}),
+        });
+        const d = (await res.json().catch(() => ({}))) as { id?: string; error?: string };
+        if (!res.ok || !d.id) throw new Error(d.error ?? 'fail');
+        const id = d.id;
+        createdRef.current = id;
+        setConversationId(id);
+        inputRef.current.onConversationCreated?.(id);
+        return id;
+      } catch {
+        setError({ text: 'No se pudo crear la conversación.', retry: false });
+        return null;
+      } finally {
+        creatingRef.current = null;
+      }
+    })();
+    creatingRef.current = creating;
+    return creating;
   }, [conversationId]);
 
   /** Polls until an assistant answer newer than `sinceIso` exists (≤ 15 min). */
@@ -279,7 +314,7 @@ export function useChatStream(input: UseChatStreamInput) {
 
       const controller = new AbortController();
       abortRef.current = controller;
-      const { agentId, model, context, onWorkspaceHint } = inputRef.current;
+      const { agentId, model, effort, context, onWorkspaceHint } = inputRef.current;
 
       try {
         const res = await fetch('/app/assistant/api/chat', {
@@ -289,10 +324,12 @@ export function useChatStream(input: UseChatStreamInput) {
             conversationId: convId,
             message,
             context,
-            model: model ?? undefined,
+            model: model && model !== 'auto' ? model : undefined,
+            effort: effort ?? undefined,
             agentId: agentId && agentId !== 'principal' ? agentId : undefined,
             planFirst: opts.planFirst || undefined,
             attachments: opts.attachments?.length ? opts.attachments.map((a) => a.id) : undefined,
+            capabilities: opts.capabilities?.length ? opts.capabilities : undefined,
           }),
           signal: controller.signal,
         });
@@ -351,10 +388,54 @@ export function useChatStream(input: UseChatStreamInput) {
                 setLive((l) => ({
                   ...l,
                   route: {
-                    tier: typeof data.modelClass === 'string' ? data.modelClass : undefined,
+                    ...(l.route ?? {}),
+                    path: typeof data.path === 'string' ? data.path : undefined,
+                    jev: data.source === 'jev' || data.source === 'jev-cache',
                   },
                 }));
                 break;
+              case 'model':
+                setLive((l) => ({
+                  ...l,
+                  route: {
+                    ...(l.route ?? {}),
+                    model: typeof data.model === 'string' ? data.model : undefined,
+                    label: typeof data.label === 'string' ? data.label : undefined,
+                    effort: typeof data.effort === 'string' ? data.effort : undefined,
+                    effortLabel:
+                      typeof data.effortLabel === 'string' ? data.effortLabel : undefined,
+                    reason: typeof data.reason === 'string' ? data.reason : undefined,
+                    tier: typeof data.tier === 'string' ? data.tier : undefined,
+                  },
+                }));
+                break;
+              case 'model_fallback': {
+                // The failed attempt's partial output goes away; the next model redoes it.
+                const cut = typeof data.discardChars === 'number' ? data.discardChars : 0;
+                const cutR =
+                  typeof data.discardReasoningChars === 'number' ? data.discardReasoningChars : 0;
+                if (cut > 0) content = content.slice(0, Math.max(0, content.length - cut));
+                if (cutR > 0) reasoning = reasoning.slice(0, Math.max(0, reasoning.length - cutR));
+                setLive((l) => ({
+                  ...l,
+                  content,
+                  reasoning,
+                  route: {
+                    ...(l.route ?? {}),
+                    model: typeof data.to === 'string' ? data.to : l.route?.model,
+                    label: typeof data.toLabel === 'string' ? data.toLabel : l.route?.label,
+                    fallbacks: [
+                      ...(l.route?.fallbacks ?? []),
+                      {
+                        fromLabel: String(data.fromLabel ?? data.from ?? ''),
+                        toLabel: String(data.toLabel ?? data.to ?? ''),
+                        reason: String(data.reason ?? ''),
+                      },
+                    ],
+                  },
+                }));
+                break;
+              }
               case 'tool_call_start': {
                 const name = String(data.name ?? '');
                 tools.push({

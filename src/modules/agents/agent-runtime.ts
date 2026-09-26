@@ -1,6 +1,7 @@
 import type { CurrentUser } from '@/modules/auth/authorization';
 import { runAssistant } from '@/modules/ai/ai-orchestrator';
 import { routeTurn } from '@/modules/ai/decisions/routing-envelope';
+import type { EffortLevel } from '@/modules/ai/effort-policy';
 import { ensurePrincipal, getAgent, type AgentRecord } from './agent-service';
 import { DEFAULT_TENANT_ID } from './tenancy';
 
@@ -24,6 +25,10 @@ export interface AgentTurnInput {
   taskId?: string | null;
   missionId?: string | null;
   model?: string;
+  /** Effort picked in the composer; background work runs at the balanced level. */
+  effort?: EffortLevel;
+  /** Capability ids the user picked for this message. */
+  capabilities?: string[];
   planFirst?: boolean;
   notifyWhenDone?: boolean;
   attachmentIds?: string[];
@@ -68,6 +73,8 @@ export async function* executeAgentTurn(input: AgentTurnInput): AsyncGenerator<O
     actor: input.actor,
     context: input.context,
     model: input.model,
+    effort: input.effort,
+    capabilities: input.capabilities,
     planFirst: input.planFirst,
     notifyWhenDone: input.notifyWhenDone,
     attachmentIds: input.attachmentIds,

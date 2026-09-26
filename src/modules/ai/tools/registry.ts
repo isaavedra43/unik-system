@@ -93,8 +93,15 @@ export interface ToolDefinition {
    * as untrusted data so the model never treats them as instructions.
    */
   resultTrust?: 'trusted' | 'untrusted';
-  /** Dynamic availability (suspended extension, revoked connection...). */
-  isAvailable?: () => Promise<boolean> | boolean;
+  /**
+   * Dynamic availability (suspended extension, server down, missing
+   * connection for THIS actor...). `fresh` skips caches — used right before
+   * executing, so a suspension applies immediately.
+   */
+  isAvailable?: (
+    actor?: CurrentUser,
+    opts?: { fresh?: boolean }
+  ) => Promise<boolean> | boolean;
   /** Human summary used in approval cards. */
   summarize?: (args: unknown) => string;
   /**
@@ -274,7 +281,7 @@ export async function loadAvailableTools(
     // Gateway tools (Composio) hide themselves when their backend is not configured.
     if (tool.isAvailable) {
       try {
-        if (!(await tool.isAvailable())) continue;
+        if (!(await tool.isAvailable(actor))) continue;
       } catch {
         continue;
       }
@@ -287,7 +294,7 @@ export async function loadAvailableTools(
     if (!actorAllowedForExternal(actor, tool)) continue;
     if (!matchesContext(tool, options.page)) continue;
     try {
-      if (tool.isAvailable && !(await tool.isAvailable())) continue;
+      if (tool.isAvailable && !(await tool.isAvailable(actor))) continue;
     } catch {
       continue;
     }
@@ -396,7 +403,7 @@ export async function executeTool(
 
   // 1. Availability (suspended extension, superseded version, revoked connection...)
   try {
-    if (tool.isAvailable && !(await tool.isAvailable())) {
+    if (tool.isAvailable && !(await tool.isAvailable(actor, { fresh: true }))) {
       await recordDenied(tool, actor, ctx, 'unavailable');
       return {
         success: false,

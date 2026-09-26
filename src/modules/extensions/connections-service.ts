@@ -96,6 +96,10 @@ export async function createConnection(input: CreateConnectionInput) {
   if (input.scopeType === 'personal' && !input.ownerUserId) {
     throw new ConnectionError('Una conexión personal requiere propietario', 400);
   }
+  // The new connection makes this extension's tools available right away.
+  void import('./external-tools')
+    .then((m) => m.invalidateToolAvailability(input.extensionId))
+    .catch(() => undefined);
   return prisma.extensionConnection.create({
     data: {
       extensionId: input.extensionId,
@@ -209,6 +213,9 @@ export async function revokeConnection(
     where: { id },
     data: { status: 'revoked', revokedAt: new Date(), secretCiphertext: null },
   });
+  void import('./external-tools')
+    .then((m) => m.invalidateToolAvailability(c.extensionId))
+    .catch(() => undefined);
   await prisma.aiProposal.updateMany({
     where: { connectionId: id, status: 'pending' },
     data: { status: 'invalidated', error: 'La conexión fue revocada' },

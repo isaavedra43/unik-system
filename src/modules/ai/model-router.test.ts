@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { AUTO_MODEL_ID, classifyTask, pickModelForTier, resolveTurnModel } from './model-router';
+import {
+  AUTO_MODEL_ID,
+  classificationFromRoute,
+  classifyTask,
+  pickModelForTier,
+  resolveTurnModel,
+} from './model-router';
 
 const settings = {
   deployment: 'gpt-4o',
@@ -128,5 +134,37 @@ describe('routine tier', () => {
       resolveTurnModel(split, AUTO_MODEL_ID, classifyTask({ message: 'dime las ventas de hoy' }))
         .model
     ).toBe('moonshotai/kimi-k2.6');
+  });
+});
+
+describe('classificationFromRoute (Jev envelope → tier, no second Jev call)', () => {
+  it('uses the route path as the tier', () => {
+    const input = { message: '¿cuánto vendimos ayer por sucursal?' };
+    expect(classificationFromRoute({ path: 'fast' }, input).tier).toBe('simple');
+    expect(classificationFromRoute({ path: 'standard' }, input).tier).toBe('standard');
+    expect(classificationFromRoute({ path: 'deep' }, input).tier).toBe('complex');
+  });
+
+  it('keeps forced tiers from the heuristic', () => {
+    expect(
+      classificationFromRoute(
+        { path: 'fast' },
+        { message: 'lee esto', attachmentKinds: ['document'] }
+      ).tier
+    ).toBe('complex');
+    expect(
+      classificationFromRoute({ path: 'fast' }, { message: 'hola', planFirst: true }).tier
+    ).toBe('complex');
+    expect(
+      classificationFromRoute({ path: 'fast' }, { message: 'arregla este bug de typescript' }).tier
+    ).toBe('complex');
+  });
+
+  it('turns on the computer model when Jev says a UI must be operated', () => {
+    const c = classificationFromRoute(
+      { path: 'standard', needsComputer: true },
+      { message: 'entra al portal del SAT y descarga las facturas' }
+    );
+    expect(c.computer).toBe(true);
   });
 });

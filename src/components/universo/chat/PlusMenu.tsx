@@ -4,82 +4,25 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   ArrowLeft,
   ChevronRight,
-  Globe,
   GraduationCap,
-  Image as ImageIcon,
-  MousePointer2,
   Paperclip,
   Plug,
   Plus,
-  Rocket,
   Search,
-  Terminal,
-  Users,
   Wrench,
 } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/shadcn/popover';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/shadcn/tooltip';
+import { cn } from '@/lib/utils';
 import { AppsList } from '../shell/AppsList';
+import { CapabilityMenu, type PickedCapability } from './CapabilityMenu';
 
 /**
- * The composer's "+" — attach files, tell the agent HOW to work (research,
- * browser, computer/code, image, website, team), teach it a task once,
- * connect apps and browse every tool it has.
+ * The composer's "+" — attach files and pick WHAT the agent should use for
+ * the next message: internet, browser, computer, documents, team, routines,
+ * MCP servers, APIs, plugins, skills and connected apps (with their real
+ * state). Also: teach a task once, connect apps and browse every tool.
  */
-
-export interface Capability {
-  id: string;
-  icon: React.ReactNode;
-  title: string;
-  sub: string;
-  prefix: string;
-}
-
-export const CAPABILITIES: Capability[] = [
-  {
-    id: 'research',
-    icon: <Globe size={15} />,
-    title: 'Investigar a fondo',
-    sub: 'Busca, lee y cruza varias fuentes con citas',
-    prefix: 'Investiga a fondo en internet, cruza varias fuentes y cítalas: ',
-  },
-  {
-    id: 'browser',
-    icon: <MousePointer2 size={15} />,
-    title: 'Usar el navegador',
-    sub: 'Entra a sitios, llena formularios, prueba en producción',
-    prefix: 'Abre el navegador y ',
-  },
-  {
-    id: 'computer',
-    icon: <Terminal size={15} />,
-    title: 'Programar en la computadora',
-    sub: 'Escribe, corre y prueba código en su propia máquina',
-    prefix: 'En la computadora virtual, ',
-  },
-  {
-    id: 'image',
-    icon: <ImageIcon size={15} />,
-    title: 'Crear una imagen',
-    sub: 'Imágenes para marketing, productos o redes',
-    prefix: 'Genera una imagen de ',
-  },
-  {
-    id: 'site',
-    icon: <Rocket size={15} />,
-    title: 'Crear y publicar un sitio web',
-    sub: 'Lo construye, lo revisa y te da el enlace público',
-    prefix: 'Crea y publica un sitio web para ',
-  },
-  {
-    id: 'team',
-    icon: <Users size={15} />,
-    title: 'Trabajo en equipo',
-    sub: 'Reparte entre especialistas, revisa y consolida',
-    prefix:
-      'Reparte esto entre mi equipo en paralelo, revisa cada entrega y consolida el resultado: ',
-  },
-];
 
 interface ToolInfo {
   name: string;
@@ -166,12 +109,16 @@ export function PlusMenu({
   onAttach,
   onPrefill,
   onTeach,
+  picked,
+  onToggleCapability,
 }: {
   canUpload: boolean;
   disabled?: boolean;
   onAttach: () => void;
   onPrefill: (text: string) => void;
   onTeach?: () => void;
+  picked: PickedCapability[];
+  onToggleCapability: (item: PickedCapability) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [view, setView] = useState<'main' | 'apps' | 'tools'>('main');
@@ -192,22 +139,23 @@ export function PlusMenu({
           <PopoverTrigger asChild>
             <button
               type="button"
-              className="uv-icon-btn uv-plus"
+              className={cn('uv-icon-btn uv-plus', picked.length > 0 && 'has-picks')}
               disabled={disabled}
-              aria-label="Adjuntar y herramientas"
+              aria-label="Adjuntar y elegir capacidades"
             >
               <Plus size={18} />
+              {picked.length > 0 && <span className="uv-plus-count">{picked.length}</span>}
             </button>
           </PopoverTrigger>
         </TooltipTrigger>
-        <TooltipContent side="top">Adjuntar, capacidades y apps</TooltipContent>
+        <TooltipContent side="top">Adjuntar y elegir qué usa el agente</TooltipContent>
       </Tooltip>
       <PopoverContent
         align="start"
         side="top"
         sideOffset={8}
-        className="uv-pop uv-scope"
-        style={{ width: 330 }}
+        className="uv-pop uv-scope uv-plus-pop"
+        style={{ width: 360 }}
       >
         {view === 'main' && (
           <>
@@ -229,21 +177,20 @@ export function PlusMenu({
                 </span>
               </button>
             )}
-            <div className="uv-pop-title">Pídele que…</div>
-            {CAPABILITIES.map((c) => (
-              <button
-                key={c.id}
-                type="button"
-                className="uv-pop-item"
-                onClick={() => pick(c.prefix)}
-              >
-                <span className="uv-pop-item-icon">{c.icon}</span>
-                <span className="uv-pop-item-text">
-                  <span className="uv-pop-item-name">{c.title}</span>
-                  <span className="uv-pop-item-sub">{c.sub}</span>
-                </span>
-              </button>
-            ))}
+            <div className="uv-pop-title uv-capmenu-head">
+              <span>Usar en este mensaje</span>
+              {picked.length > 0 && (
+                <button type="button" className="uv-link-btn" onClick={() => setOpen(false)}>
+                  Listo ({picked.length})
+                </button>
+              )}
+            </div>
+            <CapabilityMenu
+              picked={picked}
+              onToggle={onToggleCapability}
+              onConnectApp={() => setView('apps')}
+            />
+            <div className="uv-pop-sep" />
             {onTeach && (
               <button
                 type="button"
@@ -264,13 +211,12 @@ export function PlusMenu({
                 </span>
               </button>
             )}
-            <div className="uv-pop-sep" />
             <button type="button" className="uv-pop-item" onClick={() => setView('apps')}>
               <span className="uv-pop-item-icon">
                 <Plug size={15} />
               </span>
               <span className="uv-pop-item-text">
-                <span className="uv-pop-item-name">Apps conectadas</span>
+                <span className="uv-pop-item-name">Conectar apps</span>
                 <span className="uv-pop-item-sub">Gmail, Calendar, Drive, Slack, CRM…</span>
               </span>
               <ChevronRight size={14} style={{ alignSelf: 'center' }} />
@@ -281,7 +227,9 @@ export function PlusMenu({
               </span>
               <span className="uv-pop-item-text">
                 <span className="uv-pop-item-name">Todas las herramientas</span>
-                <span className="uv-pop-item-sub">Lo que el agente puede consultar y hacer</span>
+                <span className="uv-pop-item-sub">
+                  Cada acción individual que el agente puede hacer
+                </span>
               </span>
               <ChevronRight size={14} style={{ alignSelf: 'center' }} />
             </button>

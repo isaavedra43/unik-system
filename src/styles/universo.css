@@ -1701,19 +1701,141 @@
   background: var(--uv-hover);
   color: var(--unik-danger);
 }
-.uv-upload-bar {
-  height: 3px;
-  width: 100%;
-  margin-top: 4px;
-  border-radius: 3px;
-  background: var(--uv-line-strong);
-  overflow: hidden;
+.uv-file-chip-icon {
+  position: relative;
 }
-.uv-upload-bar i {
-  display: block;
+.uv-file-chip-icon.has-thumb {
+  overflow: hidden;
+  background: var(--uv-press);
+}
+.uv-file-chip-icon.has-thumb img {
+  width: 100%;
   height: 100%;
-  background: var(--uv-accent);
-  transition: width 0.2s ease;
+  object-fit: cover;
+}
+.uv-file-chip.is-uploading .uv-file-chip-icon.has-thumb img,
+.uv-file-chip.is-queued .uv-file-chip-icon.has-thumb img {
+  opacity: 0.55;
+}
+.uv-file-chip.is-failed {
+  border-color: color-mix(in srgb, var(--unik-danger) 45%, var(--uv-line-strong));
+  background: color-mix(in srgb, var(--unik-danger) 6%, var(--unik-surface));
+}
+.uv-file-chip.is-failed .uv-file-chip-icon {
+  background: color-mix(in srgb, var(--unik-danger) 12%, transparent);
+  color: var(--unik-danger);
+}
+.uv-file-chip.is-failed .uv-file-chip-meta {
+  color: var(--unik-danger);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.uv-file-chip.is-ready {
+  animation: uv-chip-in 0.28s ease;
+}
+@keyframes uv-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes uv-chip-in {
+  from {
+    transform: scale(0.96);
+  }
+  to {
+    transform: none;
+  }
+}
+/* Progress ring around the chip icon (determinate while bytes travel). */
+.uv-ring {
+  position: absolute;
+  inset: -3px;
+  width: calc(100% + 6px);
+  height: calc(100% + 6px);
+  transform: rotate(-90deg);
+  pointer-events: none;
+}
+.uv-ring circle {
+  fill: none;
+  stroke: var(--uv-line-strong);
+  stroke-width: 2.5;
+}
+.uv-ring .uv-ring-fill {
+  stroke: var(--uv-accent);
+  stroke-linecap: round;
+  transition: stroke-dasharray 0.25s ease;
+}
+.uv-ring .uv-ring-fill.is-indeterminate {
+  stroke-dasharray: 28 100 !important;
+  animation: uv-ring-spin 1.1s linear infinite;
+  transform-origin: 50% 50%;
+}
+@keyframes uv-ring-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.uv-composer-queued {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 14px 0;
+  padding: 6px 10px;
+  border-radius: 10px;
+  background: var(--uv-accent-soft);
+  color: var(--uv-accent-text);
+  font-size: 12px;
+}
+.uv-composer-queued button {
+  margin-left: auto;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: var(--unik-weight-semibold);
+  text-decoration: underline;
+  cursor: pointer;
+}
+.uv-send.is-queued {
+  background: var(--uv-accent-soft);
+  color: var(--uv-accent-text);
+}
+/* Files dragged over the conversation. */
+.uv-dropzone {
+  position: absolute;
+  inset: 8px;
+  z-index: 30;
+  display: grid;
+  place-items: center;
+  border: 2px dashed color-mix(in srgb, var(--uv-accent) 55%, transparent);
+  border-radius: var(--uv-radius-xl);
+  background: color-mix(in srgb, var(--uv-chat-bg) 82%, transparent);
+  backdrop-filter: blur(3px);
+  pointer-events: none;
+  animation: uv-fade-in 0.16s ease;
+}
+.uv-dropzone-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 22px 28px;
+  border-radius: var(--uv-radius-lg);
+  background: var(--unik-surface);
+  box-shadow: var(--uv-float);
+  color: var(--unik-text);
+  text-align: center;
+}
+.uv-dropzone-card svg {
+  color: var(--uv-accent-text);
+}
+.uv-dropzone-card span {
+  color: var(--unik-text-muted);
+  font-size: 12px;
 }
 .uv-composer-note {
   display: flex;
@@ -2005,24 +2127,54 @@
 /* =====================================================================
    WELCOME (empty conversation)
    ===================================================================== */
-.uv-welcome {
+/* The empty thread is the same column as a conversation: the hero sits at a
+   fixed distance from the top (it is never re-centered, so typing or adding
+   files does not move anything above the composer), the composer — the very
+   element that docks at the bottom once the thread starts — right under it,
+   and the ideas below, scrolling on their own. */
+.uv-chat.is-empty .uv-scroll {
+  flex: 0 0 auto;
+  overflow: visible;
+}
+.uv-chat.is-empty .uv-composer-dock {
+  flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 22px;
-  min-height: 100%;
-  width: 100%;
-  max-width: var(--uv-thread-max);
-  margin: 0 auto;
-  padding: 40px 20px 24px;
+  padding-bottom: 0;
+  background: none;
 }
 .uv-welcome-hero {
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 10px;
+  width: 100%;
+  max-width: var(--uv-thread-max);
+  margin: 0 auto;
+  padding: clamp(28px, 13vh, 140px) 20px 22px;
   text-align: center;
+}
+.uv-welcome-below {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  max-width: calc(var(--uv-thread-max) + 8px);
+  margin: 0 auto;
+  padding: 18px 4px 24px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+@media (max-height: 640px) {
+  .uv-welcome-hero {
+    padding-top: 16px;
+    padding-bottom: 14px;
+  }
+  .uv-welcome-sub {
+    display: none;
+  }
 }
 .uv-welcome-title {
   margin: 4px 0 0;
@@ -2037,9 +2189,6 @@
   color: var(--unik-text-secondary);
   font-size: var(--unik-text-base);
   line-height: 1.55;
-}
-.uv-welcome .uv-composer {
-  box-shadow: var(--uv-float);
 }
 .uv-cap-grid {
   display: grid;
@@ -3926,6 +4075,117 @@ a.uv-record:hover {
   background: var(--uv-hover);
   outline: none;
 }
+.uv-foot-model.has-fallback {
+  color: var(--unik-warning);
+}
+.uv-msg-author .uv-foot-model {
+  margin-left: 2px;
+  padding: 1px 7px;
+  font-weight: var(--unik-weight-normal);
+  background: color-mix(in srgb, var(--unik-text) 4%, transparent);
+}
+.uv-fallback-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--unik-warning) 12%, transparent);
+  color: var(--unik-text-secondary);
+  font-size: 12px;
+  animation: uv-fade-in 0.2s ease;
+}
+
+/* effort picker */
+.uv-effort-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.uv-effort-icon {
+  transition:
+    background var(--unik-transition),
+    color var(--unik-transition);
+}
+.uv-effort-item.is-selected .uv-effort-icon,
+.uv-effort-item:hover .uv-effort-icon {
+  background: var(--uv-accent);
+  color: var(--unik-text-inverse);
+}
+.uv-effort-meter {
+  display: inline-flex;
+  gap: 2px;
+  margin-left: auto;
+}
+.uv-effort-meter i {
+  width: 4px;
+  height: 10px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--unik-text) 14%, transparent);
+}
+.uv-effort-meter i.is-on {
+  background: var(--uv-accent);
+}
+.uv-effort-expect {
+  color: var(--uv-accent-text);
+  font-size: 11px;
+  font-weight: var(--unik-weight-medium);
+}
+.uv-effort-advanced {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  margin-top: 4px;
+  padding: 8px 10px;
+  border: 0;
+  border-top: 1px solid var(--uv-line);
+  background: transparent;
+  color: var(--unik-text-secondary);
+  font-size: 12px;
+  font-weight: var(--unik-weight-medium);
+  text-align: left;
+  cursor: pointer;
+}
+.uv-effort-advanced:hover {
+  color: var(--unik-text);
+}
+.uv-effort-advanced:focus-visible {
+  outline: none;
+  box-shadow: var(--uv-focus);
+  border-radius: 8px;
+}
+.uv-effort-fixed {
+  margin-left: auto;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--uv-accent-soft);
+  color: var(--uv-accent-text);
+  font-size: 11px;
+}
+.uv-effort-models {
+  animation: uv-fade-in 0.16s ease;
+}
+.uv-effort-provider {
+  margin-left: auto;
+  color: var(--unik-text-muted);
+  font-size: 10.5px;
+  font-weight: var(--unik-weight-normal);
+}
+.uv-effort-failing {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--unik-danger);
+}
+.uv-effort-foot {
+  margin: 4px 0 0;
+  padding: 8px 10px 4px;
+  border-top: 1px solid var(--uv-line);
+  color: var(--unik-text-muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
 
 /* composer */
 .uv-plus {
@@ -3933,6 +4193,158 @@ a.uv-record:hover {
   height: 36px;
   border-radius: 999px;
   border: 1px solid var(--uv-line-strong);
+}
+.uv-plus {
+  position: relative;
+}
+.uv-plus.has-picks {
+  border-color: var(--uv-accent);
+  color: var(--uv-accent-text);
+}
+.uv-plus-count {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  display: grid;
+  place-items: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--uv-accent);
+  color: var(--unik-text-inverse);
+  font-size: 10px;
+  font-weight: var(--unik-weight-semibold);
+}
+.uv-capmenu-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.uv-link-btn {
+  border: 0;
+  background: transparent;
+  color: var(--uv-accent-text);
+  font: inherit;
+  font-weight: var(--unik-weight-semibold);
+  letter-spacing: 0;
+  text-transform: none;
+  cursor: pointer;
+}
+.uv-capmenu-list {
+  max-height: min(360px, 48vh);
+}
+.uv-cap-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-right: 6px;
+  border-radius: 10px;
+  transition: background var(--unik-transition);
+}
+.uv-cap-row:hover {
+  background: var(--uv-hover);
+}
+.uv-cap-row.is-selected {
+  background: var(--uv-accent-soft);
+}
+.uv-cap-row.is-selected .uv-pop-item-icon {
+  background: var(--uv-accent);
+  color: var(--unik-text-inverse);
+}
+.uv-cap-main {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+  padding: 8px 4px 8px 10px;
+  border: 0;
+  background: transparent;
+  color: var(--unik-text);
+  text-align: left;
+  cursor: pointer;
+}
+.uv-cap-main:disabled {
+  cursor: default;
+}
+.uv-cap-main:focus-visible {
+  outline: none;
+  box-shadow: var(--uv-focus);
+  border-radius: 10px;
+}
+.uv-cap-row.is-disabled .uv-pop-item-name,
+.uv-cap-row.is-down .uv-pop-item-name {
+  color: var(--unik-text-secondary);
+}
+.uv-cap-row.is-down .uv-pop-item-sub {
+  color: var(--unik-danger);
+}
+.uv-cap-note {
+  color: var(--unik-warning);
+  font-size: 11px;
+}
+.uv-cap-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  color: var(--unik-text-muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.uv-cap-state i {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--unik-text-muted);
+}
+.uv-cap-state.is-ready i {
+  background: var(--uv-live);
+}
+.uv-cap-state.is-degraded i {
+  background: var(--unik-warning);
+}
+.uv-cap-state.is-disabled {
+  opacity: 0.7;
+}
+.uv-composer-picks {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 14px 0;
+}
+.uv-composer-picks-label {
+  color: var(--unik-text-muted);
+  font-size: 11.5px;
+}
+.uv-pick-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 4px 0 9px;
+  border-radius: 999px;
+  background: var(--uv-accent-soft);
+  color: var(--uv-accent-text);
+  font-size: 12px;
+  font-weight: var(--unik-weight-medium);
+  animation: uv-chip-in 0.22s ease;
+}
+.uv-pick-chip button {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.uv-pick-chip button:hover {
+  background: color-mix(in srgb, var(--uv-accent) 18%, transparent);
 }
 .uv-plus[data-state='open'] {
   background: var(--uv-hover);
@@ -4365,7 +4777,7 @@ a.uv-fb-row:hover > svg:last-child {
 .agent-widget-body .uv-composer-dock {
   padding: 6px 10px 10px;
 }
-.agent-widget-body .uv-welcome {
+.agent-widget-body .uv-welcome-hero {
   padding: 24px 14px 16px;
 }
 .agent-widget-body .uv-cap-grid {
@@ -4447,9 +4859,12 @@ a.uv-fb-row:hover > svg:last-child {
   }
 }
 @media (max-width: 640px) {
-  .uv-welcome {
-    padding: 20px 14px 14px;
-    gap: 16px;
+  .uv-welcome-hero {
+    padding: clamp(16px, 7vh, 56px) 14px 14px;
+  }
+  .uv-welcome-below {
+    padding-top: 14px;
+    gap: 14px;
   }
   .uv-sources {
     grid-template-columns: 1fr;

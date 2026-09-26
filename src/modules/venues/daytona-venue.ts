@@ -75,6 +75,27 @@ export interface DaytonaVenueConfig {
   domainAllowList?: string[];
 }
 
+/** Label that marks sandboxes created by this deployment (never touch others). */
+export const VENUE_ENV_LABEL = 'unik-env';
+export function venueEnvName(): string {
+  return (
+    process.env.RAILWAY_ENVIRONMENT_NAME ||
+    process.env.UNIK_ENV ||
+    process.env.NODE_ENV ||
+    'default'
+  ).slice(0, 40);
+}
+
+/** One of OUR sandboxes as the provider reports it. */
+export interface OwnSandbox {
+  id: string;
+  state: string;
+  sessionId: string;
+  env: string | null;
+  /** Last update/creation (ms epoch) — used to age orphans. */
+  touchedAt: number;
+}
+
 export interface AttachOptions {
   /**
    * false → never block on (re)provisioning from this call path (the live
@@ -208,7 +229,15 @@ export class DaytonaVenue implements Venue {
   static async create(
     sessionId: string,
     cfg: DaytonaVenueConfig,
-    opts: { warm?: 'await' | 'background' } = {}
+    opts: {
+      warm?: 'await' | 'background';
+      /**
+       * Called as soon as the sandbox exists (before the browser stack is
+       * prepared) so the caller persists its id: a failure later never leaves
+       * an orphan sandbox eating the org's disk quota.
+       */
+      onCreated?: (externalId: string, controllerToken: string) => Promise<void>;
+    } = {}
   ): Promise<DaytonaVenue> {
     const client = await DaytonaVenue.clientFor(cfg);
     const controllerToken =
@@ -219,9 +248,13 @@ export class DaytonaVenue implements Venue {
         UNIK_BROWSER_TOKEN: controllerToken,
         // Keep secrets OUT of env — credentials go through act payloads only.
       },
-      labels: { 'unik-session': sessionId },
+      labels: { 'unik-session': sessionId, [VENUE_ENV_LABEL]: venueEnvName() },
       autoStopInterval: cfg.autoStopMinutes ?? 15,
-      autoDeleteInterval: 60 * 24, // hard ceiling: 24h
+      // A stopped sandbox still counts against the org's DISK quota (30 GiB on
+      // the base tier). Archiving moves its filesystem to object storage and
+      // frees that disk while keeping the user's files for the next session.
+      autoArchiveInterval: 30,
+      autoDeleteInterval: 60 * 24 * 3, // 3 days after stop
       public: false,
       // Network-layer egress control (unbypassable from inside): when the
       // admin configured a web allowlist, the sandbox can only reach those.
@@ -254,6 +287,12 @@ export class DaytonaVenue implements Venue {
       }
     }
 
+    if (opts.onCreated) {
+      await opts.onCreated(sandbox.id, controllerToken).catch((err) => {
+        console.error('[venue] could not persist the new sandbox id:', err);
+      });
+    }
+
     const venue = new DaytonaVenue(sessionId, sandbox, client, controllerToken);
     venue.startState.stage = 'uploading';
     if (opts.warm === 'background') {
@@ -262,6 +301,61 @@ export class DaytonaVenue implements Venue {
       await venue.ensureController();
     }
     return venue;
+  }
+
+  /**
+   * Our sandboxes in the provider (label `unik-session`). Sandboxes of other
+   * tools in the same Daytona org are never listed, so never touched.
+   */
+  static async listOwn(cfg: DaytonaVenueConfig, max = 400): Promise<OwnSandbox[]> {
+    const client = await DaytonaVenue.clientFor(cfg);
+    const out: OwnSandbox[] = [];
+    let seen = 0;
+    for await (const sb of client.list({ limit: 100 })) {
+      if (++seen > max) break;
+      const labels = (sb.labels ?? {}) as Record<string, string>;
+      const sessionId = labels['unik-session'];
+      if (!sessionId) continue;
+      out.push({
+        id: sb.id,
+        state: String(sb.state ?? ''),
+        sessionId,
+        env: labels[VENUE_ENV_LABEL] ?? null,
+        touchedAt: Date.parse(sb.updatedAt ?? sb.createdAt ?? '') || 0,
+      });
+    }
+    return out;
+  }
+
+  /**
+   * Frees the disk a sandbox holds: `archive` keeps its files (stop first),
+   * `delete` removes it. Best-effort — returns whether it worked.
+   */
+  static async dispose(
+    cfg: DaytonaVenueConfig,
+    id: string,
+    mode: 'archive' | 'delete'
+  ): Promise<boolean> {
+    const client = await DaytonaVenue.clientFor(cfg);
+    try {
+      const sb = await client.get(id);
+      previewUrlCache.delete(id);
+      startStates.delete(id);
+      if (mode === 'delete') {
+        await sb.delete(60);
+        return true;
+      }
+      if (sb.state === 'archived') return true;
+      if (sb.state === 'started') await sb.stop(90);
+      await sb.archive();
+      return true;
+    } catch (err) {
+      console.warn(
+        `[venue] could not ${mode} sandbox ${id}:`,
+        err instanceof Error ? err.message : err
+      );
+      return false;
+    }
   }
 
   /** Reattach to an existing sandbox (session resumed after restart/idle). */
@@ -282,7 +376,8 @@ export class DaytonaVenue implements Venue {
         venue.startState.stage = 'starting';
         return venue;
       }
-      await sandbox.start(60);
+      // An archived sandbox is restored from object storage first — slower.
+      await sandbox.start(sandbox.state === 'archived' ? 300 : 120);
       previewUrlCache.delete(externalId);
     }
     const venue = new DaytonaVenue(sessionId, sandbox, client, controllerToken);
@@ -515,8 +610,16 @@ export class DaytonaVenue implements Venue {
   // Files — signed URLs (native fetch) with base64-over-exec fallback.
   // -------------------------------------------------------------------------
 
-  private async execRaw(command: string, timeoutSec = 60): Promise<{ exitCode: number; out: string }> {
-    const res = await this.sandbox.process.executeCommand(command, undefined, undefined, timeoutSec);
+  private async execRaw(
+    command: string,
+    timeoutSec = 60
+  ): Promise<{ exitCode: number; out: string }> {
+    const res = await this.sandbox.process.executeCommand(
+      command,
+      undefined,
+      undefined,
+      timeoutSec
+    );
     return { exitCode: res.exitCode ?? 0, out: res.result ?? '' };
   }
 
@@ -532,7 +635,8 @@ export class DaytonaVenue implements Venue {
         body: form,
         signal: AbortSignal.timeout(90_000),
       });
-      if (!res.ok) throw new Error(`upload HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
+      if (!res.ok)
+        throw new Error(`upload HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
       return;
     } catch (err) {
       console.warn('[venue] signed upload failed, using exec fallback:', errText(err));
@@ -569,7 +673,10 @@ export class DaytonaVenue implements Venue {
     } catch (err) {
       console.warn('[venue] signed download failed, using exec fallback:', errText(err));
     }
-    const r = await this.execRaw(`head -c ${Math.floor(maxBytes)} ${shq(filePath)} | base64 -w0`, 90);
+    const r = await this.execRaw(
+      `head -c ${Math.floor(maxBytes)} ${shq(filePath)} | base64 -w0`,
+      90
+    );
     if (r.exitCode !== 0) throw new Error(`no se pudo leer ${filePath}: ${r.out.slice(0, 200)}`);
     return Buffer.from(r.out.trim(), 'base64');
   }
@@ -802,7 +909,9 @@ export class DaytonaVenue implements Venue {
     return d.inFlight;
   }
 
-  private async desktopFrame(quality = 60): Promise<{ b64: string; width?: number; height?: number }> {
+  private async desktopFrame(
+    quality = 60
+  ): Promise<{ b64: string; width?: number; height?: number }> {
     const cu = this.sandbox.computerUse;
     const shot = await cu.screenshot.takeCompressed({
       showCursor: true,
@@ -825,14 +934,18 @@ export class DaytonaVenue implements Venue {
   async desktopAct(input: DesktopActInput): Promise<DesktopActResult> {
     const status = await this.ensureDesktop();
     if (!status.running) {
-      return { ok: false, error: status.reason ?? 'El escritorio de la computadora virtual no está disponible.' };
+      return {
+        ok: false,
+        error: status.reason ?? 'El escritorio de la computadora virtual no está disponible.',
+      };
     }
     const cu = this.sandbox.computerUse;
     const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? Math.round(v) : NaN);
     const x = num(input.x);
     const y = num(input.y);
     const needXY = () => {
-      if (Number.isNaN(x) || Number.isNaN(y)) throw new Error('x e y requeridos (píxeles de la pantalla)');
+      if (Number.isNaN(x) || Number.isNaN(y))
+        throw new Error('x e y requeridos (píxeles de la pantalla)');
     };
     try {
       switch (input.action) {
@@ -885,10 +998,7 @@ export class DaytonaVenue implements Venue {
         case 'openApp': {
           const cmd = (input.command ?? '').trim();
           if (!cmd) throw new Error('command requerido (p. ej. "xfce4-terminal")');
-          await this.execRaw(
-            `DISPLAY=:0 nohup sh -c ${shq(cmd)} > /tmp/unik-app.log 2>&1 &`,
-            15
-          );
+          await this.execRaw(`DISPLAY=:0 nohup sh -c ${shq(cmd)} > /tmp/unik-app.log 2>&1 &`, 15);
           await new Promise((r) => setTimeout(r, 1_800));
           break;
         }
@@ -930,13 +1040,17 @@ export class DaytonaVenue implements Venue {
           await cu.accessibility.setNodeValue(input.nodeId, input.value ?? '');
           break;
         case 'wait':
-          await new Promise((r) => setTimeout(r, Math.min(Math.max(input.seconds ?? 1, 0.2), 10) * 1000));
+          await new Promise((r) =>
+            setTimeout(r, Math.min(Math.max(input.seconds ?? 1, 0.2), 10) * 1000)
+          );
           break;
         default:
           return { ok: false, error: `Acción de escritorio desconocida: ${String(input.action)}` };
       }
       if (input.action !== 'screenshot') await new Promise((r) => setTimeout(r, 350));
-      const frame = await this.desktopFrame(input.quality ?? (input.action === 'screenshot' ? 70 : 55));
+      const frame = await this.desktopFrame(
+        input.quality ?? (input.action === 'screenshot' ? 70 : 55)
+      );
       return { ok: true, screenshotBase64: frame.b64, width: frame.width, height: frame.height };
     } catch (err) {
       return { ok: false, error: errText(err).slice(0, 400) };

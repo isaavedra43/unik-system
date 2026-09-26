@@ -23,7 +23,7 @@ import {
 } from './storage-keys';
 import { HEAD_BYTES, normalizeMime, validateFileContent } from './file-validation';
 import type { ZipRandomAccess } from './zip-reader';
-import { enqueueJob, JOB_PRIORITY, waitForJob } from '@/modules/jobs/job-queue';
+import { enqueueJob, JOB_PRIORITY, runJobInline, waitForJob } from '@/modules/jobs/job-queue';
 import { publishRealtime, REALTIME_CHANNELS } from '@/modules/realtime/realtime-service';
 import type { UploadPartClaims } from './upload-tokens';
 import { recordUsage } from '@/modules/extensions/usage-meter';
@@ -434,6 +434,42 @@ async function enqueueValidation(objectId: string, actorId: string) {
   });
 }
 
+/**
+ * Validates an uploaded object now, in this process, instead of waiting for a
+ * worker slot: the worker's few slots are shared with long agent runs, which
+ * left files "validating" for minutes. Atomic with the worker — whoever claims
+ * the job first runs it; if a worker already has it, this waits up to
+ * `waitMs` for that run. Never throws: a failure stays on the job and the
+ * worker retries it.
+ */
+async function validateNow(jobId: string, objectId: string, waitMs: number): Promise<void> {
+  try {
+    const run = await runJobInline(jobId, () => validateAndPromote(objectId));
+    if (!run.ran && waitMs > 0) await waitForJob(jobId, waitMs);
+  } catch (err) {
+    console.error(
+      JSON.stringify({
+        component: 'storage',
+        event: 'inline_validation_failed',
+        objectId,
+        error: err instanceof Error ? err.message : String(err),
+      })
+    );
+  }
+}
+
+/** Resolves when `work` settles or after `ms`, whichever is first; the work keeps going. */
+function settleWithin(work: Promise<unknown>, ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, ms);
+    const done = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+    work.then(done, done);
+  });
+}
+
 export async function completeUpload(
   actorId: string,
   uploadId: string,
@@ -532,9 +568,13 @@ export async function completeUpload(
 
   const job = await enqueueValidation(session.objectId, actorId);
 
+  // Validation starts right away; small files come back ready in this same
+  // response. A large one keeps validating after we answer 'validating' and
+  // the client follows the object until it is ready.
   const settings = await getStorageSettings();
+  const validation = validateNow(job.id, session.objectId, settings.inlineValidationWaitMs);
   if (options.wait !== false && settings.inlineValidationWaitMs > 0) {
-    await waitForJob(job.id, settings.inlineValidationWaitMs);
+    await settleWithin(validation, settings.inlineValidationWaitMs);
   }
   const current = await repo.getObject(session.objectId);
   return {
@@ -850,14 +890,8 @@ export async function uploadBufferThroughPipeline(
     await repo.updateSession(session.id, { status: 'completed', completedAt: new Date() });
     await repo.updateObject(session.objectId, { status: 'validating' });
     const job = await enqueueValidation(session.objectId, input.actorId);
-    const finished = await waitForJob(job.id, settings.inlineValidationWaitMs);
-    if (!finished) {
-      // Worker busy or disabled in this process: validate inline so the caller gets an answer.
-      const current = await repo.getObject(session.objectId);
-      if (current?.status === 'validating') {
-        await validateAndPromote(session.objectId);
-      }
-    }
+    // The caller needs the final object: validate here (race-free with the worker).
+    await validateNow(job.id, session.objectId, settings.inlineValidationWaitMs);
     const object = await repo.getObject(session.objectId);
     if (!object) throw new StorageError('Objeto inexistente', 'state', 500);
     return {

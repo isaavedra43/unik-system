@@ -10,6 +10,7 @@ import {
 } from '@/modules/ai/model-catalog';
 import { PROVIDER_IDS, PROVIDER_LABELS } from '@/modules/ai/providers';
 import { getAiSettings } from '@/modules/ai/ai-admin-config-service';
+import { modelHealthSnapshot } from '@/modules/ai/model-health';
 import type { ProviderId } from '@/modules/ai/providers/types';
 
 export const runtime = 'nodejs';
@@ -74,6 +75,10 @@ export async function GET() {
     configured: configuredProviders.includes(id),
   }));
 
+  // Models failing right now (bad key, not enabled, provider down): the picker
+  // shows it and the effort router skips them until they recover.
+  const health = new Map(modelHealthSnapshot().map((h) => [h.model, h]));
+
   return NextResponse.json({
     models: finalModels.map((m) => ({
       id: m.id,
@@ -89,6 +94,7 @@ export async function GET() {
       capabilities: m.capabilities,
       description: m.description,
       available: m.available,
+      health: health.get(m.id)?.healthy === false ? health.get(m.id) : undefined,
     })),
     defaultModel: defaultModelId,
     routingEnabled: settings.routingEnabled,

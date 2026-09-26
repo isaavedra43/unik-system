@@ -6,6 +6,8 @@ import {
   type ToolEffect,
 } from '@/modules/ai/tools/registry';
 import { jsonSchemaToZod, type JsonSchema } from './json-schema-to-zod';
+import type { CurrentUser } from '@/modules/auth/authorization';
+import { isMcpServerHealthy } from './mcp-health';
 
 /**
  * Loads enabled, approved external capabilities from the database into the
@@ -55,6 +57,40 @@ async function isCapabilityStillAvailable(
   return true;
 }
 
+// Availability is asked for every external tool on every turn: a short cache
+// keeps that to one query per capability every few seconds. Execution always
+// re-checks fresh, so a suspension still applies immediately.
+const AVAILABILITY_TTL_MS = 15_000;
+const availability = new Map<string, { ok: boolean; at: number }>();
+
+async function cachedCheck(
+  key: string,
+  fresh: boolean,
+  check: () => Promise<boolean>
+): Promise<boolean> {
+  const hit = availability.get(key);
+  if (!fresh && hit && Date.now() - hit.at < AVAILABILITY_TTL_MS) return hit.ok;
+  const ok = await check();
+  if (availability.size > 2000) availability.clear();
+  availability.set(key, { ok, at: Date.now() });
+  return ok;
+}
+
+/** The actor has the credentials this capability needs (personal or team connection). */
+async function hasConnectionFor(
+  extensionId: string,
+  scope: 'none' | 'team' | 'personal',
+  actor: CurrentUser
+): Promise<boolean> {
+  if (scope === 'none') return true;
+  const { resolveConnectionForActor } = await import('./connections-service');
+  try {
+    return Boolean(await resolveConnectionForActor(extensionId, scope, actor));
+  } catch {
+    return false;
+  }
+}
+
 function toDefinition(row: CapabilityRow): ToolDefinition {
   const extension = row.extension;
   const operation = row.operation as Record<string, unknown> | null;
@@ -80,7 +116,23 @@ function toDefinition(row: CapabilityRow): ToolDefinition {
     connectionScope: row.connectionScope as 'none' | 'team' | 'personal',
     allowedRoleKeys: extension.allowedRoleKeys,
     contextTags: manifestTags,
-    isAvailable: () => isCapabilityStillAvailable(row.id, extension.id),
+    // Never offer what cannot run: suspended/changed capability, an MCP server
+    // whose circuit is open, or a connection this user has not made.
+    isAvailable: async (actor, opts) => {
+      const fresh = Boolean(opts?.fresh);
+      if (extension.kind === 'mcp' && !fresh && !isMcpServerHealthy(extension.id)) return false;
+      const live = await cachedCheck(`cap:${row.id}`, fresh, () =>
+        isCapabilityStillAvailable(row.id, extension.id)
+      );
+      if (!live) return false;
+      const scope = row.connectionScope as 'none' | 'team' | 'personal';
+      if (!actor || scope === 'none') return true;
+      return cachedCheck(
+        `conn:${extension.id}:${scope}:${scope === 'personal' ? actor.id : 'team'}`,
+        fresh,
+        () => hasConnectionFor(extension.id, scope, actor)
+      );
+    },
     summarize: (args) =>
       `${extension.name} → ${row.localName}: ${JSON.stringify(args ?? {}).slice(0, 300)}`,
     execute: async (actor, args) => {
@@ -140,4 +192,15 @@ export async function refreshExternalTools(force = false): Promise<void> {
 /** Test helper. */
 export function resetExternalToolsCache(): void {
   lastRefresh = 0;
+  availability.clear();
+}
+
+/** Drops cached availability (a connection was added or revoked). */
+export function invalidateToolAvailability(extensionId?: string): void {
+  if (!extensionId) {
+    availability.clear();
+    return;
+  }
+  for (const key of availability.keys())
+    if (key.includes(`:${extensionId}:`)) availability.delete(key);
 }

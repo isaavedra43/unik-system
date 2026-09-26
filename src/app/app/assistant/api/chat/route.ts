@@ -4,6 +4,7 @@ import { getCurrentSession, hasPermission } from '@/modules/auth/authorization';
 import { runAssistant } from '@/modules/ai/ai-orchestrator';
 import { executeAgentTurn } from '@/modules/agents/agent-runtime';
 import { assignConversationAgent } from '@/modules/agents/agent-service';
+import { parseEffort } from '@/modules/ai/effort-policy';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -18,6 +19,10 @@ const chatRequestSchema = z.object({
     })
     .optional(),
   model: z.string().optional(),
+  /** Effort level from the composer (instant | light | medium | high | ultra). */
+  effort: z.string().max(20).optional(),
+  /** Capability ids picked in the composer (mapped to tools server-side). */
+  capabilities: z.array(z.string().max(120)).max(12).optional(),
   /** Plan-then-execute for this message: the assistant proposes steps and waits for confirmation. */
   planFirst: z.boolean().optional(),
   /** Notify (bell + push) when the answer is ready even if the turn is short. */
@@ -103,6 +108,7 @@ export async function POST(request: NextRequest) {
         if (parsed.data.agentId) {
           await assignConversationAgent(parsed.data.conversationId, session.user.id, parsed.data.agentId);
         }
+        const effort = parseEffort(parsed.data.effort) ?? undefined;
         const events = runtimeV2
           ? executeAgentTurn({
               conversationId: parsed.data.conversationId,
@@ -111,6 +117,8 @@ export async function POST(request: NextRequest) {
               agentId: parsed.data.agentId,
               context: parsed.data.context,
               model: parsed.data.model,
+              effort,
+              capabilities: parsed.data.capabilities,
               planFirst: parsed.data.planFirst,
               notifyWhenDone: parsed.data.notifyWhenDone,
               attachmentIds: parsed.data.attachments,
@@ -121,6 +129,8 @@ export async function POST(request: NextRequest) {
               actor: session.user,
               context: parsed.data.context,
               model: parsed.data.model,
+              effort,
+              capabilities: parsed.data.capabilities,
               planFirst: parsed.data.planFirst,
               notifyWhenDone: parsed.data.notifyWhenDone,
               attachmentIds: parsed.data.attachments,

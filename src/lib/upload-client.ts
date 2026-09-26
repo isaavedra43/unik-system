@@ -90,6 +90,59 @@ export class UploadError extends Error {
 
 const PART_BATCH = 4;
 
+/**
+ * Browsers report many files with an empty or legacy type (`.md` → "",
+ * Windows `.csv` → "application/vnd.ms-excel", `.m4a` → "audio/x-m4a"),
+ * which the server whitelist then refuses. The extension decides in those
+ * cases; the server still checks the real bytes before accepting anything.
+ */
+const MIME_BY_EXTENSION: Record<string, string> = {
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  webp: 'image/webp',
+  gif: 'image/gif',
+  pdf: 'application/pdf',
+  txt: 'text/plain',
+  log: 'text/plain',
+  csv: 'text/csv',
+  md: 'text/markdown',
+  markdown: 'text/markdown',
+  json: 'application/json',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  mp3: 'audio/mpeg',
+  wav: 'audio/wav',
+  m4a: 'audio/mp4',
+  ogg: 'audio/ogg',
+  oga: 'audio/ogg',
+  weba: 'audio/webm',
+  mp4: 'video/mp4',
+  webm: 'video/webm',
+  mov: 'video/quicktime',
+  zip: 'application/zip',
+};
+
+/** Types browsers use for files whose extension says otherwise. */
+const UNRELIABLE_TYPES = new Set([
+  '',
+  'application/octet-stream',
+  'application/vnd.ms-excel', // Windows labels every .csv as Excel
+  'text/x-markdown',
+  'application/x-zip-compressed',
+]);
+
+export function inferMimeType(fileName: string, reported: string | undefined | null): string {
+  const type = (reported ?? '').trim().toLowerCase();
+  const ext = fileName.includes('.') ? fileName.split('.').pop()!.toLowerCase() : '';
+  const byExt = MIME_BY_EXTENSION[ext];
+  if (byExt && UNRELIABLE_TYPES.has(type)) return byExt;
+  if (type === 'audio/x-m4a') return 'audio/mp4';
+  if (type === 'audio/x-wav' || type === 'audio/wave') return 'audio/wav';
+  return type || byExt || 'application/octet-stream';
+}
+
 async function jsonOrThrow<T>(res: Response, fallback: string): Promise<T> {
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
@@ -153,7 +206,7 @@ async function sleep(ms: number, signal?: AbortSignal): Promise<void> {
 
 export async function uploadFile(file: Blob, options: UploadOptions): Promise<UploadResult> {
   const fileName = options.fileName ?? (file instanceof File ? file.name : 'archivo');
-  const mimeType = options.mimeType ?? file.type ?? 'application/octet-stream';
+  const mimeType = options.mimeType || inferMimeType(fileName, file.type);
   const totalBytes = file.size;
   const report = (phase: UploadProgress['phase'], loadedBytes: number) =>
     options.onProgress?.({
@@ -257,24 +310,38 @@ export async function uploadFile(file: Blob, options: UploadOptions): Promise<Up
     }
 
     report('completing', totalBytes);
-    const complete = await jsonOrThrow<{
-      objectId: string;
-      status: string;
-      rejectionReason: string | null;
-    }>(
-      await fetch(`/app/files/api/uploads/${encodeURIComponent(init.uploadId)}/complete`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ parts: completed }),
-        signal: options.signal,
-      }),
-      'No se pudo completar la subida'
-    );
+    // Completing is idempotent on the server: a dropped connection is retried
+    // instead of throwing away a file that already arrived.
+    type CompleteResponse = { objectId: string; status: string; rejectionReason: string | null };
+    let complete: CompleteResponse | null = null;
+    for (let attempt = 1; !complete; attempt++) {
+      try {
+        complete = await jsonOrThrow<CompleteResponse>(
+          await fetch(`/app/files/api/uploads/${encodeURIComponent(init.uploadId)}/complete`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ parts: completed }),
+            signal: options.signal,
+          }),
+          'No se pudo completar la subida'
+        );
+      } catch (err) {
+        if (options.signal?.aborted) throw new UploadError('Subida cancelada', 'aborted');
+        const network = !(err instanceof UploadError);
+        if (!network || attempt >= 3) {
+          throw network ? new UploadError('Error de red al completar la subida', 'network') : err;
+        }
+        await sleep(800 * attempt, options.signal);
+      }
+    }
 
     let status = complete.status;
     let rejectionReason = complete.rejectionReason;
     const deadline = Date.now() + (options.validationTimeoutMs ?? 120_000);
     report('validating', totalBytes);
+    // Small files usually come back ready from `complete`; otherwise check
+    // often at first and back off (0.3s → 2s).
+    let pollMs = 300;
     while (
       status !== 'ready' &&
       status !== 'rejected' &&
@@ -283,14 +350,20 @@ export async function uploadFile(file: Blob, options: UploadOptions): Promise<Up
     ) {
       if (Date.now() > deadline)
         throw new UploadError('La validación del archivo tardó demasiado', 'timeout');
-      await sleep(1000, options.signal);
-      const res = await fetch(`/app/files/api/objects/${encodeURIComponent(init.objectId)}`, {
-        signal: options.signal,
-      });
-      if (res.ok) {
-        const data = (await res.json()) as { status: string; rejectionReason: string | null };
-        status = data.status;
-        rejectionReason = data.rejectionReason;
+      await sleep(pollMs, options.signal);
+      pollMs = Math.min(2000, Math.round(pollMs * 1.6));
+      try {
+        const res = await fetch(`/app/files/api/objects/${encodeURIComponent(init.objectId)}`, {
+          signal: options.signal,
+        });
+        if (res.ok) {
+          const data = (await res.json()) as { status: string; rejectionReason: string | null };
+          status = data.status;
+          rejectionReason = data.rejectionReason;
+        }
+      } catch {
+        // A blip while waiting is not a failed upload: keep checking until the deadline.
+        if (options.signal?.aborted) throw new UploadError('Subida cancelada', 'aborted');
       }
     }
 

@@ -13,6 +13,7 @@ import {
 } from './connections-service';
 import { getValidAccessToken } from './oauth-service';
 import { redactDeep } from './secrets';
+import { classifyMcpError, recordMcpFailure, recordMcpSuccess } from './mcp-health';
 
 /**
  * Remote MCP client (Streamable HTTP over HTTPS, official SDK).
@@ -24,6 +25,10 @@ import { redactDeep } from './secrets';
  * - Discovered tools are stored as a DRAFT version; UNIK classifies each one
  *   after review. When the remote catalog changes, changed/new tools are
  *   blocked until re-reviewed.
+ * - Tool calls reuse one live session per (server, credentials) for a few
+ *   minutes instead of paying the connect + initialize handshake every call;
+ *   an expired session reconnects once, transparently. Every outcome feeds
+ *   mcp-health, which hides a failing server's tools from the model.
  */
 
 export interface McpExtensionConfig {
@@ -73,14 +78,26 @@ export function createPolicedFetch(policy: {
   allowedHosts: string[];
   allowedPorts: number[];
   timeoutMs: number;
+  /**
+   * Budget for `tools/call` requests. A server that answers a tool call with
+   * plain JSON only sends headers when the tool finishes, so the connect
+   * budget (`timeoutMs`) would cut long tools short.
+   */
+  callTimeoutMs?: number;
 }): typeof fetch {
   return async (input, init) => {
     const url = new URL(
       typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url
     );
     await assertMcpUrl(url, policy.allowedHosts, policy.allowedPorts);
+    const isToolCall =
+      typeof init?.body === 'string' && init.body.includes('"method":"tools/call"');
+    const budget =
+      isToolCall && policy.callTimeoutMs
+        ? Math.max(policy.timeoutMs, policy.callTimeoutMs)
+        : policy.timeoutMs;
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), policy.timeoutMs);
+    const timer = setTimeout(() => controller.abort(), budget);
     const upstream = init?.signal;
     upstream?.addEventListener('abort', () => controller.abort(), { once: true });
     try {
@@ -135,7 +152,14 @@ type ExtensionRow = {
   config: unknown;
 };
 
-async function openClient(extension: ExtensionRow, authHeaders: Record<string, string>) {
+/** Longest tool timeout a pooled session may need (JSON servers answer at the end). */
+const MAX_CALL_TIMEOUT_MS = 5 * 60_000;
+
+async function openClient(
+  extension: ExtensionRow,
+  authHeaders: Record<string, string>,
+  callTimeoutMs?: number
+) {
   const cfg = (extension.config as { mcp?: McpExtensionConfig } | null)?.mcp;
   if (!cfg?.url) throw new McpError('La extensión no tiene URL de servidor MCP', 'config');
   const url = new URL(cfg.url);
@@ -149,6 +173,7 @@ async function openClient(extension: ExtensionRow, authHeaders: Record<string, s
       allowedHosts: extension.allowedHosts,
       allowedPorts: extension.allowedPorts,
       timeoutMs,
+      callTimeoutMs: callTimeoutMs ? Math.min(callTimeoutMs + 5_000, MAX_CALL_TIMEOUT_MS) : undefined,
     }),
     requestInit: { headers: { ...(cfg.headers ?? {}), ...authHeaders } },
   });
@@ -156,6 +181,110 @@ async function openClient(extension: ExtensionRow, authHeaders: Record<string, s
   const client = new Client({ name: 'unik-assistant', version: '1.0.0' }, { capabilities: {} });
   await client.connect(transport);
   return { client, transport, timeoutMs };
+}
+
+// ---------------------------------------------------------------------------
+// Session pool — one live session per (server, credentials), reused for calls.
+// ---------------------------------------------------------------------------
+
+type OpenedClient = Awaited<ReturnType<typeof openClient>>;
+
+interface PooledSession {
+  key: string;
+  extensionId: string;
+  opened: OpenedClient;
+  lastUsed: number;
+  inFlight: number;
+  dead: boolean;
+}
+
+const SESSION_IDLE_MS = 5 * 60_000;
+const sessions = new Map<string, Promise<PooledSession>>();
+const settled = new Map<string, PooledSession>();
+let sweeper: NodeJS.Timeout | null = null;
+
+function sessionKey(extensionId: string, headers: Record<string, string>): string {
+  return `${extensionId}:${createHash('sha256').update(canonicalJson(headers)).digest('hex').slice(0, 16)}`;
+}
+
+function dropSession(s: PooledSession): void {
+  s.dead = true;
+  if (sessions.get(s.key) && settled.get(s.key) === s) sessions.delete(s.key);
+  if (settled.get(s.key) === s) settled.delete(s.key);
+  void s.opened.transport.close().catch(() => undefined);
+}
+
+function ensureSweeper(): void {
+  if (sweeper) return;
+  sweeper = setInterval(() => {
+    const now = Date.now();
+    for (const s of settled.values()) {
+      if (s.inFlight === 0 && now - s.lastUsed > SESSION_IDLE_MS) dropSession(s);
+    }
+    if (settled.size === 0 && sweeper) {
+      clearInterval(sweeper);
+      sweeper = null;
+    }
+  }, 60_000);
+  sweeper.unref?.();
+}
+
+async function acquireSession(
+  extension: ExtensionRow,
+  headers: Record<string, string>
+): Promise<PooledSession> {
+  const key = sessionKey(extension.id, headers);
+  const existing = sessions.get(key);
+  if (existing) {
+    const s = await existing.catch(() => null);
+    if (s && !s.dead && Date.now() - s.lastUsed < SESSION_IDLE_MS) {
+      s.inFlight += 1;
+      s.lastUsed = Date.now();
+      return s;
+    }
+    if (s) dropSession(s);
+    sessions.delete(key);
+  }
+  const t0 = Date.now();
+  const pending = openClient(extension, headers, MAX_CALL_TIMEOUT_MS).then((opened) => {
+    const s: PooledSession = {
+      key,
+      extensionId: extension.id,
+      opened,
+      lastUsed: Date.now(),
+      inFlight: 0,
+      dead: false,
+    };
+    // The protocol layer owns transport.onclose; the client-level hook is ours.
+    opened.client.onclose = () => {
+      s.dead = true;
+    };
+    settled.set(key, s);
+    ensureSweeper();
+    recordMcpSuccess(extension.id, Date.now() - t0);
+    return s;
+  });
+  sessions.set(key, pending);
+  try {
+    const s = await pending;
+    s.inFlight += 1;
+    return s;
+  } catch (err) {
+    sessions.delete(key);
+    recordMcpFailure(extension.id, err);
+    throw err;
+  }
+}
+
+function releaseSession(s: PooledSession): void {
+  s.inFlight = Math.max(0, s.inFlight - 1);
+  s.lastUsed = Date.now();
+}
+
+/** Test hook: closes every pooled session. */
+export async function closeMcpSessions(): Promise<void> {
+  for (const s of settled.values()) dropSession(s);
+  sessions.clear();
 }
 
 async function authHeadersFor(
@@ -180,7 +309,15 @@ export async function discoverMcpTools(
   const scope = ((extension.config as { mcp?: { connectionScope?: string } } | null)?.mcp
     ?.connectionScope ?? 'none') as 'none' | 'team' | 'personal';
   const { headers } = await authHeadersFor(extension, actor, scope);
-  const { client, transport } = await openClient(extension, headers);
+  const t0 = Date.now();
+  let opened: OpenedClient;
+  try {
+    opened = await openClient(extension, headers);
+  } catch (err) {
+    recordMcpFailure(extension.id, err);
+    throw err;
+  }
+  const { client, transport } = opened;
   try {
     const tools: DiscoveredTool[] = [];
     let cursor: string | undefined;
@@ -203,9 +340,47 @@ export async function discoverMcpTools(
       cursor = page.nextCursor;
     } while (cursor);
     const serverInfo = (client.getServerVersion() as Record<string, unknown> | undefined) ?? null;
+    recordMcpSuccess(extension.id, Date.now() - t0, tools.length);
     return { tools, serverInfo };
+  } catch (err) {
+    recordMcpFailure(extension.id, err);
+    throw err;
   } finally {
     await transport.close().catch(() => undefined);
+  }
+}
+
+/**
+ * Checks a server end to end with the actor's credentials: connect (or reuse
+ * the live session) + ping. Feeds the health the picker shows.
+ */
+export async function probeMcpServer(
+  extension: ExtensionRow,
+  actor: CurrentUser,
+  connectionScope: 'none' | 'team' | 'personal' = 'none'
+): Promise<{ ok: boolean; latencyMs: number; error?: string }> {
+  const t0 = Date.now();
+  try {
+    const { headers } = await authHeadersFor(extension, actor, connectionScope);
+    const session = await acquireSession(extension, headers);
+    try {
+      await session.opened.client.ping({ timeout: session.opened.timeoutMs });
+    } catch (err) {
+      dropSession(session);
+      throw err;
+    } finally {
+      releaseSession(session);
+    }
+    const latencyMs = Date.now() - t0;
+    recordMcpSuccess(extension.id, latencyMs);
+    return { ok: true, latencyMs };
+  } catch (err) {
+    recordMcpFailure(extension.id, err);
+    return {
+      ok: false,
+      latencyMs: Date.now() - t0,
+      error: err instanceof Error ? err.message.slice(0, 300) : 'Error',
+    };
   }
 }
 
@@ -226,13 +401,36 @@ export async function callMcpTool(
     actor,
     capability.connectionScope as 'none' | 'team' | 'personal'
   );
-  const { client, transport } = await openClient(extension, headers);
-  try {
-    const result = await client.callTool(
+  const t0 = Date.now();
+  const invoke = async (session: PooledSession) =>
+    session.opened.client.callTool(
       { name: capability.localName, arguments: args },
       undefined,
       { timeout: capability.timeoutMs }
     );
+  let session: PooledSession;
+  try {
+    session = await acquireSession(extension, headers);
+  } catch (err) {
+    if (connectionId)
+      await touchConnection(connectionId, err instanceof Error ? err.message : 'error');
+    throw err;
+  }
+  try {
+    let result: Awaited<ReturnType<typeof invoke>>;
+    try {
+      result = await invoke(session);
+    } catch (err) {
+      // The server forgot the session (restart, expiry) and did NOT run the
+      // call: reconnect once and retry. Any other failure is not retried — the
+      // tool may have run, and repeating it could duplicate an action.
+      if (classifyMcpError(err) !== 'session') throw err;
+      dropSession(session);
+      releaseSession(session);
+      session = await acquireSession(extension, headers);
+      result = await invoke(session);
+    }
+    recordMcpSuccess(extension.id, Date.now() - t0);
     if (connectionId) await touchConnection(connectionId);
     const content = Array.isArray(result.content) ? result.content : [];
     const parts = content.map((c: Record<string, unknown>) => {
@@ -254,6 +452,7 @@ export async function callMcpTool(
     });
     const structured = (result as { structuredContent?: unknown }).structuredContent;
     if (result.isError) {
+      // The server works; the tool reported its own error.
       throw new McpError(
         parts
           .map((p) => ('text' in p ? p.text : ''))
@@ -264,11 +463,16 @@ export async function callMcpTool(
     }
     return { ...redactDeep({ content: parts, structuredContent: structured ?? null }), ...(uiResources.length ? { uiResources } : {}) };
   } catch (err) {
+    if (!(err instanceof McpError && err.code === 'tool_error')) {
+      recordMcpFailure(extension.id, err);
+      // A broken transport must not serve the next call.
+      dropSession(session);
+    }
     if (connectionId)
       await touchConnection(connectionId, err instanceof Error ? err.message : 'error');
     throw err;
   } finally {
-    await transport.close().catch(() => undefined);
+    releaseSession(session);
   }
 }
 

@@ -45,11 +45,31 @@ import {
   selectToolsForTurn,
 } from './tool-selector';
 import {
+  AUTO_MODEL_ID,
+  classificationFromRoute,
   classifyTask,
   classifyTaskWithJev,
   pickModelForTier,
-  resolveTurnModel,
 } from './model-router';
+import {
+  DEFAULT_EFFORT,
+  effortLabel,
+  estimateCostUsd,
+  modelLabel,
+  planEffort,
+  type EffortLevel,
+} from './effort-policy';
+import {
+  describeFailure,
+  isModelHealthy,
+  reportModelFailure,
+  reportModelSuccess,
+} from './model-health';
+import { getActiveProviderId, getConfiguredProviders, getDiscoveredModels } from './ai-config';
+import { resolveProviderForModel } from './provider-resolution';
+import type { ProviderId } from './providers/types';
+import { describeRouteForPrompt, type RoutingEnvelope } from './decisions/routing-envelope';
+import { resolvePickedCapabilities } from './capability-catalog';
 import { decide, answerBool, answerScore } from './decisions/decision-engine';
 import { draftConfidenceDecision, reviewNeededDecision } from './decisions/decision-points';
 import { detectDomainsWithJev } from './decisions/jev-domains';
@@ -108,6 +128,14 @@ interface OrchestratorInput {
   };
   /** Optional model override — user can pick a model in the chat UI ("auto" = routing). */
   model?: string;
+  /** Effort level picked in the composer (Ultra-rápido … Ultra). Default: medium. */
+  effort?: EffortLevel;
+  /**
+   * Capabilities the user picked for this message (ids from the capability
+   * catalog: "builtin:web", "ext:<id>", "skill:<key>", "app:<slug>"). Mapped
+   * server-side to tools the actor can run; forced into the menu.
+   */
+  capabilities?: string[];
   /** Plan-then-execute requested for this message: propose steps, wait for confirmation. */
   planFirst?: boolean;
   /** Always notify (in-app + push) when this turn finishes, even if it was quick. */
@@ -152,6 +180,8 @@ interface OrchestratorEvent {
   type:
     | 'token'
     | 'reasoning'
+    | 'model'
+    | 'model_fallback'
     | 'tool_call_start'
     | 'tool_call_end'
     | 'artifact'
@@ -682,30 +712,70 @@ async function* runAssistantInner(input: OrchestratorInput): AsyncGenerator<Orch
     const k = attachmentKind(a.mimeType);
     return k === 'text' ? 'other' : k;
   });
-  const [jevDomains, classification] = await Promise.all([
-    detectDomainsWithJev(input.message, {
-      userId: input.actor.id,
-      conversationId: input.conversationId,
-    }).catch(() => [] as string[]),
-    classifyTaskWithJev(
-      {
-        message: input.message,
-        attachmentKinds: attachmentKindList,
-        planFirst: input.planFirst,
-        autoTrigger: isAutoTrigger,
-        recentToolNames,
-      },
-      { userId: input.actor.id, conversationId: input.conversationId }
-    ).catch(() =>
-      classifyTask({
-        message: input.message,
-        attachmentKinds: attachmentKindList,
-        planFirst: input.planFirst,
-        autoTrigger: isAutoTrigger,
-        recentToolNames,
-      })
-    ),
-  ]);
+  const classifyInput = {
+    message: input.message,
+    attachmentKinds: attachmentKindList,
+    planFirst: input.planFirst,
+    autoTrigger: isAutoTrigger,
+    recentToolNames,
+  };
+  // The agent runtime already asked Jev for the whole route in one batch call:
+  // its path IS the tier (no second Jev call). Without a Jev envelope (legacy
+  // path, Jev off or unconfident) the tier decision runs as before.
+  const envelope = input.route as RoutingEnvelope | undefined;
+  const jevRouted = envelope?.source === 'jev' || envelope?.source === 'jev-cache';
+  const [jevDomains, classification, configuredProviders, discoveredModels, defaultProvider] =
+    await Promise.all([
+      detectDomainsWithJev(input.message, {
+        userId: input.actor.id,
+        conversationId: input.conversationId,
+      }).catch(() => [] as string[]),
+      jevRouted && envelope
+        ? Promise.resolve(classificationFromRoute(envelope, classifyInput))
+        : classifyTaskWithJev(classifyInput, {
+            userId: input.actor.id,
+            conversationId: input.conversationId,
+          }).catch(() => classifyTask(classifyInput)),
+      getConfiguredProviders().catch(() => [] as ProviderId[]),
+      getDiscoveredModels().catch(() => ({}) as Partial<Record<ProviderId, string[]>>),
+      getActiveProviderId().catch((): ProviderId => 'openai'),
+    ]);
+
+  // 8.45. Effort → the turn's policy: model (chosen by capabilities among the
+  // providers that are really configured, failing models last), fallback chain,
+  // reasoning budget, tool budget, steps and verification. See effort-policy.ts.
+  const effortLevel: EffortLevel = input.effort ?? DEFAULT_EFFORT;
+  const providerOf = (id: string) =>
+    resolveProviderForModel(id, {
+      catalogProvider: getModelById(id)?.provider,
+      discovered: discoveredModels,
+      configured: configuredProviders,
+      defaultProvider,
+    });
+  const servable = (id: string) =>
+    configuredProviders.length === 0 || configuredProviders.includes(providerOf(id));
+  const plan = planEffort({
+    level: effortLevel,
+    explicitModel: input.model && input.model !== AUTO_MODEL_ID ? input.model : null,
+    agentModel: input.agent?.modelDefault ?? null,
+    classification,
+    settings,
+    configured: configuredProviders,
+    providerOf,
+    healthy: (id) => isModelHealthy(id),
+  });
+  yield {
+    type: 'model',
+    data: {
+      effort: effortLevel,
+      effortLabel: effortLabel(effortLevel),
+      model: plan.model,
+      label: modelLabel(plan.model),
+      reason: plan.reason,
+      tier: classification.tier,
+      fallbacks: plan.candidates.slice(1, 4).map(modelLabel),
+    },
+  };
 
   // 8.5. Offer only the tools that matter this turn (OpenAI accepts ≤128; every tool costs tokens).
   // Core tools are always present; the rest is chosen by relevance and recent use.
@@ -720,6 +790,14 @@ async function* runAssistantInner(input: OrchestratorInput): AsyncGenerator<Orch
     requiredCaps.filter((r) => !missingCaps.some((m) => m.cap === r.cap)),
     availableTools
   );
+  // What the user explicitly picked in the composer always reaches the model.
+  const picked =
+    input.capabilities && input.capabilities.length > 0
+      ? await resolvePickedCapabilities(input.actor, input.capabilities, availableTools).catch(
+          () => null
+        )
+      : null;
+  if (picked) for (const name of picked.tools) forced.add(name);
   const SIMPLE_TIER_TOOLS = new Set(['loadMoreTools', 'getSystemTime', 'recallMemory']);
   const selection =
     classification.tier === 'simple' && forced.size === 0
@@ -735,7 +813,7 @@ async function* runAssistantInner(input: OrchestratorInput): AsyncGenerator<Orch
           extraDomains: jevDomains,
           // Attachment turns are long already: fewer tools = smaller prompt on every pass.
           maxTools: Math.min(
-            Math.max(8, Number(settings.maxToolsPerTurn) || 96),
+            plan.maxTools,
             PROVIDER_MAX_TOOLS,
             attachmentsForContext.length > 0 ? 48 : PROVIDER_MAX_TOOLS
           ),
@@ -760,34 +838,28 @@ async function* runAssistantInner(input: OrchestratorInput): AsyncGenerator<Orch
     );
   }
 
-  // 8.6. Model routing: explicit choice wins; "auto"/none → the classification above
-  // (Jev when enabled, heuristics otherwise) picks the cheapest capable model.
-  const routing = resolveTurnModel(
-    settings,
-    input.model ?? input.agent?.modelDefault ?? undefined,
-    classification
-  );
-  const effectiveModel = routing.model;
-  const fallbackModel = settings.fallbackDeployment;
+  // 8.6. The model the effort plan chose (explicit picks first, then the level's chain).
+  const routing = {
+    ...classification,
+    model: plan.model,
+    routed: plan.routed,
+    reason: plan.reason,
+  };
+  const effectiveModel = plan.model;
 
   // Output budget: a complex turn (analysis, cross-check of attachments, a composed
   // document with every row written by the model) needs far more than a chat answer.
   // The admin's maxTokens is the floor; the model's own output cap is the ceiling.
   const resolveTurnMaxTokens = (model: string): number => {
     const cap = getModelById(model)?.maxOutput;
-    const heavy = classification.tier === 'complex' || attachmentsForContext.length > 0;
+    const heavy = plan.heavyOutput || attachmentsForContext.length > 0;
     // Reasoning models spend part of the budget thinking: give them room for both.
     const wanted = heavy
       ? Math.max(settings.maxTokens, isReasoningModel(model) ? 32_000 : 12_000)
       : settings.maxTokens;
     return cap && cap > 0 ? Math.min(wanted, cap) : wanted;
   };
-  const turnReasoningEffort =
-    classification.tier === 'complex'
-      ? settings.reasoningEffort || 'high'
-      : classification.tier === 'simple'
-        ? 'minimal'
-        : 'low';
+  const turnReasoningEffort = plan.reasoningEffort;
 
   // 8.65. Working instructions for THIS turn go last in the system prompt (most recent = most
   // followed): the attachment/analysis protocol, the document protocol or the complex-task bar.
@@ -805,6 +877,15 @@ async function* runAssistantInner(input: OrchestratorInput): AsyncGenerator<Orch
   });
   if (directives && messages[0] && typeof messages[0].content === 'string') {
     messages[0].content += `\n\n${directives}`;
+  }
+  if (picked && picked.directives.length > 0 && typeof messages[0]?.content === 'string') {
+    messages[0].content += `\n\n## LO QUE EL USUARIO ELIGIÓ USAR EN ESTE MENSAJE\n${picked.directives.map((d) => `- ${d}`).join('\n')}\nÚsalo salvo que sea imposible; si no puedes, dilo en una frase.`;
+  }
+  // Jev's route for this turn (path, needs, risk) as working guidance.
+  const routeHint =
+    envelope && classification.tier !== 'simple' ? describeRouteForPrompt(envelope) : null;
+  if (routeHint && messages[0] && typeof messages[0].content === 'string') {
+    messages[0].content += `\n\n${routeHint}`;
   }
 
   // 8.67. Objective detection (Jev): a message that delegates lasting work
@@ -911,8 +992,8 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
   let iteration = 0;
   const isWorkerTurn = input.agent?.mode === 'worker' || Boolean(input.taskId);
   let maxIterations = isWorkerTurn
-    ? Math.max(settings.maxToolIterations, WORKER_TOOL_ITERATIONS)
-    : settings.maxToolIterations;
+    ? Math.max(settings.maxToolIterations, WORKER_TOOL_ITERATIONS, plan.maxIterations)
+    : plan.maxIterations;
   const widenIterationsFor = (toolName: string) => {
     if (AGENTIC_TOOL_RE.test(toolName)) {
       maxIterations = Math.max(maxIterations, AGENTIC_TOOL_ITERATIONS);
@@ -931,19 +1012,36 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
   };
   let totalPromptTokens = 0;
   let totalCompletionTokens = 0;
-  let usingFallback = false;
+  // Model failover: a failed or empty model call moves the turn to the next
+  // candidate of the plan. Safe — tools only run after a call succeeds, so a
+  // retried call never repeats an action.
+  let currentModel = effectiveModel;
+  const triedModels = new Set<string>();
+  const fallbacks: Array<{
+    from: string;
+    to: string;
+    fromLabel: string;
+    toLabel: string;
+    reason: string;
+  }> = [];
+  let turnCostUsd = 0;
+  let turnCostKnown = true;
+  const nextCandidate = (): string | null =>
+    plan.candidates.find((m) => !triedModels.has(m) && isModelHealthy(m)) ??
+    plan.candidates.find((m) => !triedModels.has(m)) ??
+    null;
   // Mid-turn escalation: a routed standard turn whose draft fails verification (or
   // whose confidence Jev scores low) re-runs the final answer once on the
   // complex-tier model — escalation, not degradation. Explicit picks never escalate.
   let escalatedModel: string | null = null;
   const escalateModel = (): string | null => {
-    if (escalatedModel || !routing.routed) return escalatedModel;
+    if (escalatedModel || !routing.routed || !plan.confidenceEscalation) return escalatedModel;
     const heavy = pickModelForTier(settings, 'complex');
     const pick =
       classification.needsVision && !getModelById(heavy)?.capabilities.includes('vision')
         ? settings.deployment?.trim() || 'gpt-4o'
         : heavy;
-    if (pick === effectiveModel) return null;
+    if (pick === currentModel || !servable(pick) || !isModelHealthy(pick)) return null;
     escalatedModel = pick;
     console.log(
       JSON.stringify({
@@ -959,13 +1057,18 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
   // and released in one piece (or rewritten once). Everything else streams as usual.
   // A reasoning model already checks its own work while thinking; a second pass would add
   // minutes for little gain. The review is for the models that answer in one shot.
+  // Effort decides: "complex" reviews complex answers of one-shot models (as
+  // before); "always" (Ultra) reviews every substantive answer, reasoning
+  // models included — an independent second look is what that level buys.
   const bufferAnswer =
-    settings.answerReviewEnabled !== false &&
-    classification.tier === 'complex' &&
     !isAutoTrigger &&
     !input.context?.voice &&
-    !isReasoningModel(effectiveModel);
+    (plan.review === 'always' ||
+      (plan.review === 'complex' &&
+        classification.tier === 'complex' &&
+        !isReasoningModel(effectiveModel)));
   let nudges = 0;
+  let checkPasses = 0;
   let reviews = 0;
   // Every folio a tool returned this turn: an answer may only cite these.
   const knownFolios = new Set<string>();
@@ -1904,7 +2007,8 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
     let iterationToolCalls: Array<{ id: string; name: string; arguments: string }> | undefined;
     let finishReason: string | undefined;
 
-    const modelToUse = usingFallback ? fallbackModel : (escalatedModel ?? effectiveModel);
+    const modelToUse = escalatedModel ?? currentModel;
+    triedModels.add(modelToUse);
 
     // Buffered turns show a chip while the answer is being written instead of a blank wait.
     const draftStartedAt = Date.now();
@@ -1955,27 +2059,72 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
           totalPromptTokens += chunk.usage.promptTokens;
           totalCompletionTokens += chunk.usage.completionTokens;
           recordTokenUsage(input.actor.id, chunk.usage.totalTokens);
+          const cost = estimateCostUsd(
+            modelToUse,
+            chunk.usage.promptTokens,
+            chunk.usage.completionTokens
+          );
+          if (cost === null) turnCostKnown = false;
+          else turnCostUsd += cost;
         }
+      }
+      // A call that produced nothing at all (no text, no tool call) is a
+      // failure too — reasoning models can burn the whole budget thinking.
+      if (!iterationContent.trim() && !(iterationToolCalls && iterationToolCalls.length > 0)) {
+        throw new Error('empty answer');
       }
     } catch (err) {
       yield* closeDraftChip();
-      // Handle 429 rate limit: try fallback model
-      if (
-        err instanceof AiApiError &&
-        err.code === 'rate_limit' &&
-        !usingFallback &&
-        fallbackModel
-      ) {
+      const kind = reportModelFailure(modelToUse, err);
+      // An escalation that fails goes back to the model that was already
+      // working this turn; anything else moves down the plan's chain.
+      const next = escalatedModel && modelToUse === escalatedModel ? currentModel : nextCandidate();
+      if (next) {
+        const reason = describeFailure(kind);
         console.warn(
-          `[ai-orchestrator] Rate limited on ${modelToUse}, falling back to ${fallbackModel}`
+          JSON.stringify({
+            event: 'ai.model.fallback',
+            conversationId: input.conversationId,
+            from: modelToUse,
+            to: next,
+            kind,
+            error: err instanceof Error ? err.message.slice(0, 300) : String(err),
+          })
         );
-        usingFallback = true;
-        iteration--; // Don't count this failed attempt
+        fallbacks.push({
+          from: modelToUse,
+          to: next,
+          fromLabel: modelLabel(modelToUse),
+          toLabel: modelLabel(next),
+          reason,
+        });
+        yield {
+          type: 'model_fallback',
+          data: {
+            from: modelToUse,
+            to: next,
+            fromLabel: modelLabel(modelToUse),
+            toLabel: modelLabel(next),
+            reason,
+            // What the failed attempt already streamed: the client removes it.
+            discardChars: bufferAnswer ? 0 : iterationContent.length,
+            discardReasoningChars: iterationReasoning.length,
+          },
+        };
+        escalatedModel = null;
+        currentModel = next;
+        iteration--; // the failed attempt does not count
         continue;
       }
-      // Re-throw other errors
+      if (err instanceof Error && err.message === 'empty answer') {
+        throw new AiApiError(
+          'Ningún modelo disponible devolvió una respuesta. Revisa los proveedores de IA en la configuración.',
+          'server'
+        );
+      }
       throw err;
     }
+    reportModelSuccess(modelToUse);
 
     yield* closeDraftChip();
 
@@ -2026,10 +2175,11 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
       // returned, count-vs-table mismatches, numeric claims with no total behind
       // them, source claims whose tools never ran, and "voy a…" promises with zero
       // actions. One corrective pass, max two.
-      if (nudges < 2 && iteration < maxIterations) {
+      if (checkPasses < plan.checks && nudges < 2 && iteration < maxIterations) {
         const check = checkAnswer(iterationContent, knownFolios, knownTotals, toolsUsedThisTurn);
         if (check.issues.length > 0) {
           nudges += 1;
+          checkPasses += 1;
           if (classification.tier === 'standard') escalateModel();
           console.log(
             JSON.stringify({
@@ -2069,6 +2219,7 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
       if (
         escalatedModel === null &&
         routing.routed &&
+        plan.confidenceEscalation &&
         classification.tier === 'standard' &&
         !isAutoTrigger &&
         nudges < 2 &&
@@ -2219,9 +2370,21 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
         toolsFailed: turnStats.failed,
         hasNumbers: /\d/.test(iterationContent),
       });
+      const turnDurationMs = Date.now() - runStartedAt;
+      const turnCost = turnCostKnown ? Math.round(turnCostUsd * 1_000_000) / 1_000_000 : null;
       const meta = {
         model: modelToUse,
-        routing: { tier: routing.tier, reason: routing.reason, routed: routing.routed },
+        modelLabel: modelLabel(modelToUse),
+        effort: effortLevel,
+        durationMs: turnDurationMs,
+        costUsd: turnCost,
+        fallbacks: fallbacks.length > 0 ? fallbacks : undefined,
+        routing: {
+          tier: routing.tier,
+          reason: routing.reason,
+          routed: routing.routed,
+          jev: jevRouted,
+        },
         confidence,
         confidenceNote: parsedConfidence.note,
         // The badge's source list is derived HERE from tools that actually ran —
@@ -2326,6 +2489,12 @@ Antes de ejecutar cualquier tool de datos o acción, llama proposePlan con los p
           completionTokens: totalCompletionTokens,
           messageId: finalMessage.id,
           model: modelToUse,
+          modelLabel: modelLabel(modelToUse),
+          effort: effortLevel,
+          reason: routing.reason,
+          durationMs: turnDurationMs,
+          costUsd: turnCost,
+          fallbacks,
           routed: routing.routed,
           tier: routing.tier,
           confidence,

@@ -175,6 +175,31 @@ export async function classifyTaskWithJev(
   };
 }
 
+/**
+ * Classification from the turn's Jev routing envelope (one batch decision
+ * already made by the agent runtime) — no second Jev call. Forced tiers keep
+ * the heuristic verdict exactly like `classifyTaskWithJev`.
+ */
+export function classificationFromRoute(
+  route: { path: 'fast' | 'standard' | 'deep'; needsComputer?: boolean },
+  input: ClassifyInput
+): TaskClassification {
+  const heuristic = classifyTask(input);
+  if (input.planFirst || input.autoTrigger) return heuristic;
+  if (input.attachmentKinds?.some((k) => k === 'document' || k === 'audio' || k === 'video'))
+    return heuristic;
+  // Writing code needs the strongest reasoning, whatever the route says.
+  if (heuristic.reason === 'programación') return heuristic;
+  const tier: TaskTier =
+    route.path === 'fast' ? 'simple' : route.path === 'deep' ? 'complex' : 'standard';
+  return {
+    tier,
+    reason: `JEV: ${route.path === 'fast' ? 'rápido' : route.path === 'deep' ? 'a fondo' : 'estándar'}`,
+    needsVision: heuristic.needsVision,
+    computer: heuristic.computer || Boolean(route.needsComputer),
+  };
+}
+
 function modelSupportsVision(modelId: string): boolean {
   const info = getModelById(modelId);
   // Unknown ids (custom deployments) are trusted; catalog entries must declare vision.

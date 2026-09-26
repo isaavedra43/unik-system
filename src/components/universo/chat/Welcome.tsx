@@ -10,8 +10,9 @@ import { firstName, greeting } from '../lib/format';
 import { AgentAvatar } from '../ui';
 
 /**
- * Empty thread: who you're talking to, the composer in the middle and real
- * starting points — each card sends a complete, executable request.
+ * Empty thread: who you're talking to (hero, above the composer) and real
+ * starting points (below it) — each card sends a complete, executable
+ * request. The composer itself lives in Chat so it is never remounted.
  */
 
 interface Starter {
@@ -72,40 +73,47 @@ const SPECIALIST_STARTERS = [
   'Propón una misión para esta semana',
 ];
 
-export function Welcome({
+export function WelcomeHero({
   agent,
   userName,
-  composer,
-  onSend,
-  onTeam,
   teamSize,
 }: {
   agent: AgentInfo;
   userName?: string | null;
-  composer: React.ReactNode;
-  onSend: (text: string) => void;
-  /** Open the "new team" dialog with a template preselected. */
-  onTeam?: (team: AgentTeamTemplate) => void;
   teamSize: number;
 }) {
   const principal = agent.kind === 'principal';
   const who = firstName(userName);
   return (
-    <motion.div className="uv-welcome" variants={fadeUp} initial="initial" animate="animate">
-      <div className="uv-welcome-hero">
-        <AgentAvatar agent={agent} size="lg" />
-        <h1 className="uv-welcome-title">
-          {principal ? `${greeting()}${who ? `, ${who}` : ''}` : agent.name}
-        </h1>
-        <p className="uv-welcome-sub">
-          {principal
-            ? teamSize > 1
-              ? `Dirijo a tus ${teamSize - 1} especialistas: pídeme algo y lo reparto, lo reviso y te entrego el resultado.`
-              : 'Pídeme cualquier trabajo: investigo, uso el navegador y la computadora, programo, preparo documentos y coordino a un equipo de agentes.'
-            : (agent.purpose ?? 'Especialista de tu equipo: dale una tarea o pide un estado.')}
-        </p>
-      </div>
-      {composer}
+    <motion.div className="uv-welcome-hero" variants={fadeUp} initial="initial" animate="animate">
+      <AgentAvatar agent={agent} size="lg" />
+      <h1 className="uv-welcome-title">
+        {principal ? `${greeting()}${who ? `, ${who}` : ''}` : agent.name}
+      </h1>
+      <p className="uv-welcome-sub">
+        {principal
+          ? teamSize > 1
+            ? `Dirijo a tus ${teamSize - 1} especialistas: pídeme algo y lo reparto, lo reviso y te entrego el resultado.`
+            : 'Pídeme cualquier trabajo: investigo, uso el navegador y la computadora, programo, preparo documentos y coordino a un equipo de agentes.'
+          : (agent.purpose ?? 'Especialista de tu equipo: dale una tarea o pide un estado.')}
+      </p>
+    </motion.div>
+  );
+}
+
+export function WelcomeStarters({
+  agent,
+  onSend,
+  onTeam,
+}: {
+  agent: AgentInfo;
+  onSend: (text: string) => void;
+  /** Open the "new team" dialog with a template preselected. */
+  onTeam?: (team: AgentTeamTemplate) => void;
+}) {
+  const principal = agent.kind === 'principal';
+  return (
+    <motion.div className="uv-welcome-below" variants={fadeUp} initial="initial" animate="animate">
       {principal ? (
         <div className="uv-cap-grid" aria-label="Ideas para empezar">
           {STARTERS.map((s) => (

@@ -1,6 +1,22 @@
 export interface TurnMeta {
   model?: string;
-  routing?: { tier?: string; reason?: string; routed?: boolean };
+  /** Display name of the model that answered ("GPT-5"). */
+  modelLabel?: string;
+  /** Effort level of the turn (instant | light | medium | high | ultra). */
+  effort?: string;
+  /** Wall time of the whole turn. */
+  durationMs?: number;
+  /** Estimated cost from catalog prices (null when a model has no known price). */
+  costUsd?: number | null;
+  /** Models that failed this turn and who took over. */
+  fallbacks?: Array<{
+    from: string;
+    to: string;
+    fromLabel?: string;
+    toLabel?: string;
+    reason: string;
+  }>;
+  routing?: { tier?: string; reason?: string; routed?: boolean; jev?: boolean };
   confidence?: 'verified' | 'estimate' | 'assumption' | null;
   confidenceNote?: string | null;
   /** Server-derived list of the sources that REALLY ran ("búsqueda web · base de datos UNIK"). */

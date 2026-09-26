@@ -222,3 +222,52 @@ export async function routeTurn(input: RouteTurnInput): Promise<RoutingEnvelope>
   if (!res) return heuristicRoute(input);
   return mapEnvelope(res, input);
 }
+
+const DELEGATE_LABEL: Record<DelegateKind, string> = {
+  researcher: 'investigador',
+  analyst: 'analista',
+  programmer: 'programador',
+  watcher: 'vigía',
+  messenger: 'mensajero',
+  any: 'especialista',
+};
+
+const RISK_LABEL: Record<RiskClass, string> = {
+  read: 'solo lectura',
+  draft: 'borradores',
+  internal_task: 'tareas internas',
+  external_send: 'mensajes a terceros',
+  business_write: 'cambios en el ERP',
+  destructive: 'acciones irreversibles',
+};
+
+/**
+ * The route Jev decided, as working guidance for the model (the fusion: Jev
+ * decides the path and needs, the LLM executes). Heuristic envelopes add
+ * nothing the prompt does not already know → null.
+ */
+export function describeRouteForPrompt(route: RoutingEnvelope): string | null {
+  if (route.source === 'heuristic') return null;
+  const needs: string[] = [];
+  if (route.needsBrowser) needs.push('buscar o navegar en internet');
+  if (route.needsComputer) needs.push('operar la computadora virtual');
+  if (route.needsRag) needs.push('consultar la base documental');
+  if (route.needsDelegation)
+    needs.push(`delegar a un ${DELEGATE_LABEL[route.delegateTo ?? 'any']}`);
+  const path =
+    route.path === 'deep'
+      ? 'a fondo (varios pasos, verifica antes de concluir)'
+      : route.path === 'fast'
+        ? 'rápido (responde directo)'
+        : 'estándar';
+  const lines = [
+    '## RUTA DEL TURNO (decidida por JEV)',
+    `Camino: ${path}.${needs.length > 0 ? ` Probablemente necesitas: ${needs.join(', ')}.` : ''}`,
+  ];
+  if (route.parallelizable)
+    lines.push('Las partes son independientes: lanza esas lecturas en paralelo.');
+  lines.push(
+    `Riesgo estimado: ${RISK_LABEL[route.riskClass]}${route.needsApproval ? ' — esas acciones piden la aprobación del usuario.' : '.'} Es una estimación: si los datos dicen otra cosa, síguelos.`
+  );
+  return lines.join('\n');
+}

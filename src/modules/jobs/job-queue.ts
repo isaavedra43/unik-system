@@ -151,6 +151,82 @@ export async function waitForJob(id: string, timeoutMs: number, pollMs = 250) {
   return null;
 }
 
+/**
+ * Runs a pending job right here, in the caller, instead of waiting for a
+ * worker slot. For interactive work (upload validation) that must not queue
+ * behind long agent runs: the worker has few slots and an agent task can hold
+ * one for many minutes.
+ *
+ * The claim is atomic (`UPDATE … WHERE status = 'pending'`), so a job runs
+ * exactly once — here or in a worker. `ran: false` means a worker already has
+ * it (wait for it with `waitForJob`). A failure hands the job back to the
+ * queue with backoff, same as a worker failure, and rethrows.
+ */
+export async function runJobInline<R>(
+  id: string,
+  fn: () => Promise<R>
+): Promise<{ ran: boolean; result?: R }> {
+  const state = getWorkerState();
+  const lockedBy = `${state.workerId}:inline`;
+  const rows = await prisma.$queryRaw<Array<{ attempts: number; maxAttempts: number }>>`
+    UPDATE "BackgroundJob"
+    SET "status" = 'running', "lockedAt" = NOW(), "lockedBy" = ${lockedBy}, "attempts" = "attempts" + 1, "updatedAt" = NOW()
+    WHERE "id" = ${id} AND "status" = 'pending'
+    RETURNING "attempts", "maxAttempts"
+  `;
+  const claimed = rows[0];
+  if (!claimed) return { ran: false };
+  try {
+    const result = await fn();
+    await prisma.backgroundJob.update({
+      where: { id },
+      data: {
+        status: 'completed',
+        completedAt: new Date(),
+        progress: 100,
+        result: result === undefined ? Prisma.JsonNull : toJson(result),
+        lockedAt: null,
+        lockedBy: null,
+        dedupeKey: null,
+      },
+    });
+    return { ran: true, result };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const exhausted = claimed.attempts >= claimed.maxAttempts;
+    await prisma.backgroundJob
+      .update({
+        where: { id },
+        data: exhausted
+          ? {
+              status: 'failed',
+              lastError: message.slice(0, 2000),
+              completedAt: new Date(),
+              lockedAt: null,
+              lockedBy: null,
+              dedupeKey: null,
+            }
+          : {
+              status: 'pending',
+              lastError: message.slice(0, 2000),
+              runAt: new Date(Date.now() + 5_000),
+              lockedAt: null,
+              lockedBy: null,
+            },
+      })
+      .catch(() => undefined);
+    log({
+      event: 'job_inline_failed',
+      jobId: id,
+      attempt: claimed.attempts,
+      exhausted,
+      error: message,
+    });
+    if (!exhausted) wakeWorker();
+    throw err;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Worker
 // ---------------------------------------------------------------------------

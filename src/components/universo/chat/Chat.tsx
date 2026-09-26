@@ -8,6 +8,7 @@ import {
   Loader2,
   Menu,
   PanelRight,
+  Paperclip,
   RotateCcw,
   SquarePen,
   X,
@@ -18,12 +19,12 @@ import type { AgentInfo, AttachmentInfo, MessageData, TeamTask, WorkspaceTab } f
 import { stepLabel } from '../lib/tools';
 import { AgentAvatar, IconButton } from '../ui';
 import { useChatStream } from './useChatStream';
-import { Message } from './Message';
+import { Message, ModelChip } from './Message';
 import { Markdown } from './Markdown';
 import { WorkLog, stepsFromLive } from './WorkLog';
 import { Composer, type ComposerHandle, type ComposerMode } from './Composer';
-import { AUTO_MODEL, loadStoredModel } from './ModelPicker';
-import { Welcome } from './Welcome';
+import { loadStoredEffort, type EffortValue } from './EffortPicker';
+import { WelcomeHero, WelcomeStarters } from './Welcome';
 import { VoiceMode } from './VoiceMode';
 import { Cards } from '../cards/Cards';
 import { ArtifactCard } from '../cards/ArtifactCard';
@@ -100,22 +101,26 @@ export function Chat({
   onThreadAgent,
 }: ChatProps) {
   const [mode, setMode] = useState<ComposerMode>(defaultMode);
-  const [model, setModel] = useState<string>(AUTO_MODEL);
+  const [effort, setEffort] = useState<EffortValue>({ effort: 'medium', model: null });
   const [voice, setVoice] = useState(false);
+  /** Files dragged over the conversation (drop zone overlay). */
+  const [dropping, setDropping] = useState(false);
+  const dragDepth = useRef(0);
   const [scrolled, setScrolled] = useState(false);
   const [atBottom, setAtBottom] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
   const nearBottomRef = useRef(true);
   const composerRef = useRef<ComposerHandle>(null);
 
-  useEffect(() => setModel(loadStoredModel()), []);
+  useEffect(() => setEffort(loadStoredEffort()), []);
   useEffect(() => setMode(defaultMode), [defaultMode]);
 
   const chat = useChatStream({
     conversationId: externalId,
     onConversationCreated,
     agentId: agent.id,
-    model: model === AUTO_MODEL ? AUTO_MODEL : model,
+    model: effort.model,
+    effort: effort.effort,
     context,
     onWorkspaceHint,
   });
@@ -132,9 +137,9 @@ export function Chat({
   const canUseVoice = user.isSuperAdmin || user.permissionKeys.includes('assistant.voice');
 
   const send = useCallback(
-    (text: string, attachments?: AttachmentInfo[]) => {
+    (text: string, attachments?: AttachmentInfo[], capabilities?: string[]) => {
       nearBottomRef.current = true;
-      void chat.send(text, { attachments, planFirst: mode === 'mission' });
+      void chat.send(text, { attachments, capabilities, planFirst: mode === 'mission' });
       // A mission is a one-shot choice: the next message goes back to the default.
       if (mode === 'mission' && defaultMode !== 'mission') setMode(defaultMode);
     },
@@ -295,7 +300,7 @@ export function Chat({
   const composer = (
     <Composer
       ref={composerRef}
-      onSend={(text, files) => send(text, files)}
+      onSend={(text, files, capabilities) => send(text, files, capabilities)}
       onStop={chat.stop}
       streaming={streaming}
       disabled={loading}
@@ -311,8 +316,8 @@ export function Chat({
       }
       mode={mode}
       onModeChange={setMode}
-      model={model}
-      onModelChange={setModel}
+      effort={effort}
+      onEffortChange={setEffort}
       onTeach={onTeach}
       autoFocus={isEmpty}
     />
@@ -320,9 +325,32 @@ export function Chat({
 
   return (
     <section
-      className="uv-chat"
+      className={cn('uv-chat', isEmpty && 'is-empty')}
       aria-label={`Conversación con ${agent.name}`}
       data-agent={agent.id}
+      onDragEnter={(e) => {
+        if (!canUpload || !e.dataTransfer.types.includes('Files')) return;
+        dragDepth.current += 1;
+        setDropping(true);
+      }}
+      onDragOver={(e) => {
+        if (!canUpload || !e.dataTransfer.types.includes('Files')) return;
+        e.preventDefault();
+      }}
+      onDragLeave={() => {
+        dragDepth.current = Math.max(0, dragDepth.current - 1);
+        if (dragDepth.current === 0) setDropping(false);
+      }}
+      onDrop={(e) => {
+        dragDepth.current = 0;
+        setDropping(false);
+        // Dropped on the composer: it already took the files.
+        if (!canUpload || e.defaultPrevented) return;
+        const files = Array.from(e.dataTransfer.files ?? []);
+        if (files.length === 0) return;
+        e.preventDefault();
+        composerRef.current?.addFiles(files);
+      }}
     >
       <header className={cn('uv-chat-head', scrolled && 'is-scrolled')}>
         {onOpenSidebar && (
@@ -422,14 +450,7 @@ export function Chat({
         )}
 
         {isEmpty && (
-          <Welcome
-            agent={agent}
-            userName={user.name}
-            composer={composer}
-            onSend={(t) => send(t)}
-            onTeam={onNewTeam}
-            teamSize={agents?.length ?? 1}
-          />
+          <WelcomeHero agent={agent} userName={user.name} teamSize={agents?.length ?? 1} />
         )}
 
         {!loading && !isEmpty && (
@@ -474,7 +495,26 @@ export function Chat({
                 <div className="uv-msg-author">
                   <AgentAvatar agent={agent} size="xs" status="working" />
                   <span>{agent.name}</span>
+                  {live.route?.label && (
+                    <ModelChip
+                      live
+                      label={live.route.label}
+                      effort={live.route.effort}
+                      reason={live.route.reason}
+                      jev={live.route.jev}
+                      fallbacks={live.route.fallbacks}
+                    />
+                  )}
                 </div>
+                {live.route?.fallbacks && live.route.fallbacks.length > 0 && (
+                  <div className="uv-fallback-note" role="status">
+                    <RotateCcw size={13} />
+                    {(() => {
+                      const f = live.route.fallbacks[live.route.fallbacks.length - 1];
+                      return `${f.fromLabel} ${f.reason}; sigue con ${f.toLabel}.`;
+                    })()}
+                  </div>
+                )}
                 <div className="uv-msg-body">
                   <WorkLog
                     live
@@ -540,18 +580,32 @@ export function Chat({
         )}
       </div>
 
-      {!isEmpty && (
-        <div className="uv-composer-dock">
-          {!atBottom && (
-            <button type="button" className="uv-jump" onClick={jumpToEnd}>
-              <ArrowDown size={14} /> Ir al final
-            </button>
-          )}
-          {composer}
+      {/* Always the same element: the composer is never remounted (typing,
+          uploads and focus survive the first message and thread creation). */}
+      <div className="uv-composer-dock">
+        {!isEmpty && !atBottom && (
+          <button type="button" className="uv-jump" onClick={jumpToEnd}>
+            <ArrowDown size={14} /> Ir al final
+          </button>
+        )}
+        {composer}
+        {isEmpty ? (
+          <WelcomeStarters agent={agent} onSend={(t) => send(t)} onTeam={onNewTeam} />
+        ) : (
           <p className="uv-composer-hint">
             Los agentes piden tu aprobación antes de enviar, pagar o cambiar algo. Verifica la
             información importante.
           </p>
+        )}
+      </div>
+
+      {dropping && (
+        <div className="uv-dropzone" aria-hidden="true">
+          <div className="uv-dropzone-card">
+            <Paperclip size={22} />
+            <strong>Suelta para adjuntar</strong>
+            <span>Imágenes, PDF, Word, Excel, CSV, texto, audio o video</span>
+          </div>
         </div>
       )}
 

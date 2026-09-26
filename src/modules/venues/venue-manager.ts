@@ -8,7 +8,12 @@ import {
   isSecretsConfigured,
   maskSecret,
 } from '@/modules/extensions/secrets';
-import { DaytonaVenue, type AttachOptions, type DaytonaVenueConfig } from './daytona-venue';
+import {
+  DaytonaVenue,
+  venueEnvName,
+  type AttachOptions,
+  type DaytonaVenueConfig,
+} from './daytona-venue';
 import type { Venue } from './venue';
 
 /**
@@ -137,6 +142,13 @@ export async function acquireVenue(input: {
     );
   }
   const settings = await getAiSettings();
+  // Only browser work waits for Chromium; terminal, files and desktop answer as
+  // soon as the sandbox runs (the browser keeps preparing in the background and
+  // browserAct heals itself on first use).
+  const needsBrowser = /^(browser|playbook|screenshot|analyze)/.test(input.purpose ?? '');
+  const attachOpts: AttachOptions =
+    input.warm === 'background' || !needsBrowser ? { heal: false, wake: true } : {};
+  const warm = input.warm ?? (needsBrowser ? 'await' : 'background');
 
   // Reuse the user's most recent active session when the sandbox is still up.
   const existing = await prisma.venueSession.findFirst({
@@ -152,7 +164,7 @@ export async function acquireVenue(input: {
         existing.externalId,
         cfg,
         token,
-        input.warm === 'background' ? { heal: false, wake: true } : {}
+        attachOpts
       );
       await prisma.venueSession.update({
         where: { id: existing.id },
@@ -185,6 +197,51 @@ export async function acquireVenue(input: {
     );
   }
 
+  // Reuse the user's previous (stopped/archived) sandbox before creating a new
+  // one: files survive between sessions and the org never piles up sandboxes
+  // (every stopped one counts against Daytona's disk quota).
+  const previous = await prisma.venueSession.findFirst({
+    where: {
+      userId: input.userId,
+      status: 'stopped',
+      externalId: { not: null },
+      endedAt: { gte: new Date(Date.now() - REUSE_WINDOW_MS) },
+    },
+    orderBy: { endedAt: 'desc' },
+  });
+  if (previous?.externalId) {
+    try {
+      const token =
+        (previous.metadata as { controllerToken?: string } | null)?.controllerToken ?? '';
+      const venue = await DaytonaVenue.attach(
+        previous.id,
+        previous.externalId,
+        cfg,
+        token,
+        attachOpts
+      );
+      await prisma.venueSession.update({
+        where: { id: previous.id },
+        data: {
+          status: 'active',
+          endedAt: null,
+          lastUsedAt: new Date(),
+          purpose: input.purpose ?? previous.purpose,
+        },
+      });
+      await emitVenueEvent(previous.id, 'session_resumed', { externalId: previous.externalId });
+      return venue;
+    } catch (err) {
+      console.warn(
+        '[venue] previous sandbox could not be resumed:',
+        err instanceof Error ? err.message : err
+      );
+      await prisma.venueSession
+        .update({ where: { id: previous.id }, data: { status: 'error' } })
+        .catch(() => undefined);
+    }
+  }
+
   const session = await prisma.venueSession.create({
     data: {
       userId: input.userId,
@@ -193,16 +250,27 @@ export async function acquireVenue(input: {
       purpose: input.purpose ?? null,
     },
   });
-  try {
-    const venue = await DaytonaVenue.create(session.id, cfg, { warm: input.warm ?? 'await' });
-    // Persist sandbox id + controller token so we can reattach later.
+  const persist = async (externalId: string, controllerToken: string) => {
     await prisma.venueSession.update({
       where: { id: session.id },
-      data: {
-        externalId: venue.externalId,
-        metadata: { controllerToken: venueToken(venue) },
-      },
+      data: { externalId, metadata: { controllerToken } },
     });
+  };
+  const create = () => DaytonaVenue.create(session.id, cfg, { warm, onCreated: persist });
+  try {
+    let venue: Venue;
+    try {
+      venue = await create();
+    } catch (err) {
+      // Daytona answers "Total disk limit exceeded" when stopped sandboxes fill
+      // the org quota: free disk (archive the reusable one per user, delete the
+      // rest of ours) and try once more.
+      if (!isQuotaError(err)) throw err;
+      const freed = await reclaimVenueDisk({ aggressive: true, cfg });
+      console.warn('[venue] quota hit, reclaimed disk:', freed);
+      if (freed.archived + freed.deleted === 0) throw err;
+      venue = await create();
+    }
     await emitVenueEvent(session.id, 'session_started', {
       externalId: venue.externalId,
       purpose: input.purpose,
@@ -211,16 +279,104 @@ export async function acquireVenue(input: {
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
     console.error('[venue] create failed:', err);
+    const row = await prisma.venueSession
+      .findUnique({ where: { id: session.id } })
+      .catch(() => null);
     await prisma.venueSession.update({
       where: { id: session.id },
-      data: { status: 'error', endedAt: new Date(), metadata: { error: reason.slice(0, 300) } },
+      data: {
+        status: 'error',
+        endedAt: new Date(),
+        metadata: {
+          ...((row?.metadata as Record<string, unknown> | null) ?? {}),
+          error: reason.slice(0, 300),
+        },
+      },
     });
-    throw new VenueUnavailableError(`No se pudo crear la computadora virtual: ${reason}`);
+    // A sandbox that exists but failed to get ready must not stay alive.
+    if (row?.externalId) void DaytonaVenue.dispose(cfg, row.externalId, 'delete');
+    throw new VenueUnavailableError(
+      isQuotaError(err)
+        ? 'Daytona no tiene espacio para otra computadora (límite de disco de la organización). Libera o archiva sandboxes en app.daytona.io o sube de plan.'
+        : `No se pudo crear la computadora virtual: ${reason}`
+    );
   }
 }
 
-function venueToken(venue: Venue): string {
-  return (venue as unknown as { controllerToken?: string }).controllerToken ?? '';
+/** Sessions resumed instead of recreated while their sandbox still exists. */
+const REUSE_WINDOW_MS = 3 * 24 * 60 * 60_000;
+
+const QUOTA_RE =
+  /disk limit|storage limit|quota|limit exceeded|insufficient (disk|storage)|no space/i;
+
+export function isQuotaError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err ?? '');
+  return QUOTA_RE.test(msg);
+}
+
+const ORPHAN_AGE_MS = 6 * 60 * 60_000;
+const AGGRESSIVE_ORPHAN_AGE_MS = 30 * 60_000;
+let lastReclaimAt = 0;
+
+/**
+ * Keeps the Daytona org under its disk quota. For OUR sandboxes only (label
+ * `unik-session`, same environment label):
+ *   - live sessions (active/idle) are never touched;
+ *   - the most recent stopped sandbox of each user is ARCHIVED (keeps files,
+ *     frees disk) so the next session resumes it;
+ *   - older stopped ones, errored ones and orphans (no DB row, older than a
+ *     grace period) are DELETED.
+ */
+export async function reclaimVenueDisk(
+  opts: { aggressive?: boolean; cfg?: DaytonaVenueConfig | null } = {}
+): Promise<{ archived: number; deleted: number }> {
+  const cfg = opts.cfg ?? (await daytonaConfig());
+  const result = { archived: 0, deleted: 0 };
+  if (!cfg) return result;
+  lastReclaimAt = Date.now();
+  let own;
+  try {
+    own = await DaytonaVenue.listOwn(cfg);
+  } catch (err) {
+    console.warn('[venue] could not list sandboxes:', err instanceof Error ? err.message : err);
+    return result;
+  }
+  const env = venueEnvName();
+  const mine = own.filter((sb) => !sb.env || sb.env === env);
+  if (mine.length === 0) return result;
+  const rows = await prisma.venueSession.findMany({
+    where: { externalId: { in: mine.map((sb) => sb.id) } },
+    select: { id: true, userId: true, status: true, externalId: true, endedAt: true },
+  });
+  const byExternal = new Map(rows.map((r) => [r.externalId as string, r]));
+  const latestStopped = new Map<string, string>();
+  for (const r of [...rows]
+    .filter((r) => r.status === 'stopped')
+    .sort((a, b) => (b.endedAt?.getTime() ?? 0) - (a.endedAt?.getTime() ?? 0))) {
+    if (!latestStopped.has(r.userId)) latestStopped.set(r.userId, r.externalId as string);
+  }
+  const orphanAge = opts.aggressive ? AGGRESSIVE_ORPHAN_AGE_MS : ORPHAN_AGE_MS;
+  for (const sb of mine) {
+    if (/^(archived|archiving|destroyed|destroying)$/.test(sb.state)) continue;
+    const row = byExternal.get(sb.id);
+    if (row && (row.status === 'active' || row.status === 'idle')) continue;
+    if (!row && Date.now() - sb.touchedAt < orphanAge) continue; // may be mid-creation
+    const reusable = row && latestStopped.get(row.userId) === sb.id;
+    if (reusable) {
+      if (await DaytonaVenue.dispose(cfg, sb.id, 'archive')) result.archived++;
+    } else if (await DaytonaVenue.dispose(cfg, sb.id, 'delete')) {
+      result.deleted++;
+      if (row) {
+        await prisma.venueSession
+          .update({
+            where: { id: row.id },
+            data: { status: 'deleted', endedAt: row.endedAt ?? new Date() },
+          })
+          .catch(() => undefined);
+      }
+    }
+  }
+  return result;
 }
 
 /** Reattach to a specific session (tool calls carry sessionId). */
@@ -326,6 +482,11 @@ export async function reapIdleVenues(): Promise<{ reaped: number }> {
   for (const s of stale) {
     await releaseVenue(s.id);
     reaped++;
+  }
+  // Disk hygiene at most every 30 min: archive/delete stopped sandboxes so the
+  // org quota never fills up again.
+  if (Date.now() - lastReclaimAt > 30 * 60_000) {
+    await reclaimVenueDisk().catch(() => undefined);
   }
   return { reaped };
 }
