@@ -2,8 +2,13 @@ import { prisma } from '@/lib/prisma';
 import { getAiSettings } from '@/modules/ai/ai-admin-config-service';
 import { recordUsage } from '@/modules/extensions/usage-meter';
 import { publishRealtime } from '@/modules/realtime/realtime-service';
-import { encryptSecret, decryptSecret, isSecretsConfigured, maskSecret } from '@/modules/extensions/secrets';
-import { DaytonaVenue, type DaytonaVenueConfig } from './daytona-venue';
+import {
+  encryptSecret,
+  decryptSecret,
+  isSecretsConfigured,
+  maskSecret,
+} from '@/modules/extensions/secrets';
+import { DaytonaVenue, type AttachOptions, type DaytonaVenueConfig } from './daytona-venue';
 import type { Venue } from './venue';
 
 /**
@@ -79,7 +84,11 @@ function minutesBetween(a: Date, b: Date): number {
 }
 
 /** Emit a live event for the future "pantalla del agente" feed (SSE). */
-export async function emitVenueEvent(sessionId: string, type: string, payload: Record<string, unknown>): Promise<void> {
+export async function emitVenueEvent(
+  sessionId: string,
+  type: string,
+  payload: Record<string, unknown>
+): Promise<void> {
   try {
     await publishRealtime(`venue:${sessionId}`, type, payload);
   } catch {
@@ -88,10 +97,12 @@ export async function emitVenueEvent(sessionId: string, type: string, payload: R
 }
 
 async function billMinutes(sessionId: string, userId: string, minutes: number): Promise<void> {
-  await prisma.venueSession.update({
-    where: { id: sessionId },
-    data: { billedMinutes: { increment: minutes } },
-  }).catch(() => undefined);
+  await prisma.venueSession
+    .update({
+      where: { id: sessionId },
+      data: { billedMinutes: { increment: minutes } },
+    })
+    .catch(() => undefined);
   await recordUsage('venue', userId, 'minutes', minutes).catch(() => undefined);
 }
 
@@ -112,7 +123,9 @@ async function dailyVenueMinutes(): Promise<number> {
 export async function acquireVenue(input: { userId: string; purpose?: string }): Promise<Venue> {
   const cfg = await daytonaConfig();
   if (!cfg) {
-    throw new VenueUnavailableError('La computadora virtual está desactivada o falta DAYTONA_API_KEY.');
+    throw new VenueUnavailableError(
+      'La computadora virtual está desactivada o falta DAYTONA_API_KEY.'
+    );
   }
   const settings = await getAiSettings();
 
@@ -123,7 +136,8 @@ export async function acquireVenue(input: { userId: string; purpose?: string }):
   });
   if (existing?.externalId) {
     try {
-      const token = (existing.metadata as { controllerToken?: string } | null)?.controllerToken ?? '';
+      const token =
+        (existing.metadata as { controllerToken?: string } | null)?.controllerToken ?? '';
       const venue = await DaytonaVenue.attach(existing.id, existing.externalId, cfg, token);
       await prisma.venueSession.update({
         where: { id: existing.id },
@@ -132,10 +146,12 @@ export async function acquireVenue(input: { userId: string; purpose?: string }):
       return venue;
     } catch {
       // Sandbox is gone or broken — retire the row and fall through to create.
-      await prisma.venueSession.update({
-        where: { id: existing.id },
-        data: { status: 'error', endedAt: new Date() },
-      }).catch(() => undefined);
+      await prisma.venueSession
+        .update({
+          where: { id: existing.id },
+          data: { status: 'error', endedAt: new Date() },
+        })
+        .catch(() => undefined);
     }
   }
 
@@ -144,14 +160,23 @@ export async function acquireVenue(input: { userId: string; purpose?: string }):
     dailyVenueMinutes(),
   ]);
   if (liveCount >= (settings.venueMaxConcurrent || 2)) {
-    throw new VenueUnavailableError(`Límite de computadoras virtuales simultáneas alcanzado (${settings.venueMaxConcurrent}).`);
+    throw new VenueUnavailableError(
+      `Límite de computadoras virtuales simultáneas alcanzado (${settings.venueMaxConcurrent}).`
+    );
   }
   if (usedMinutes >= (settings.venueMaxMinutesPerDay || 60)) {
-    throw new VenueUnavailableError(`Presupuesto diario de computadora virtual agotado (${settings.venueMaxMinutesPerDay} min).`);
+    throw new VenueUnavailableError(
+      `Presupuesto diario de computadora virtual agotado (${settings.venueMaxMinutesPerDay} min).`
+    );
   }
 
   const session = await prisma.venueSession.create({
-    data: { userId: input.userId, kind: 'daytona', status: 'active', purpose: input.purpose ?? null },
+    data: {
+      userId: input.userId,
+      kind: 'daytona',
+      status: 'active',
+      purpose: input.purpose ?? null,
+    },
   });
   try {
     const venue = await DaytonaVenue.create(session.id, cfg);
@@ -163,7 +188,10 @@ export async function acquireVenue(input: { userId: string; purpose?: string }):
         metadata: { controllerToken: venueToken(venue) },
       },
     });
-    await emitVenueEvent(session.id, 'session_started', { externalId: venue.externalId, purpose: input.purpose });
+    await emitVenueEvent(session.id, 'session_started', {
+      externalId: venue.externalId,
+      purpose: input.purpose,
+    });
     return venue;
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
@@ -181,20 +209,49 @@ function venueToken(venue: Venue): string {
 }
 
 /** Reattach to a specific session (tool calls carry sessionId). */
-export async function attachVenue(sessionId: string, userId: string): Promise<Venue> {
+export async function attachVenue(
+  sessionId: string,
+  userId: string,
+  opts: AttachOptions = {}
+): Promise<Venue> {
   const session = await prisma.venueSession.findUnique({ where: { id: sessionId } });
   if (!session || session.userId !== userId) {
     throw new VenueUnavailableError('Sesión de computadora virtual no encontrada.');
   }
   if (session.status !== 'active' && session.status !== 'idle') {
-    throw new VenueUnavailableError('La sesión de computadora virtual ya terminó — pide una nueva con el venue.');
+    throw new VenueUnavailableError(
+      'La sesión de computadora virtual ya terminó — pide una nueva con el venue.'
+    );
   }
   const cfg = await daytonaConfig();
   if (!cfg || !session.externalId) throw new VenueUnavailableError('Venue no disponible.');
   const token = (session.metadata as { controllerToken?: string } | null)?.controllerToken ?? '';
-  const venue = await DaytonaVenue.attach(session.id, session.externalId, cfg, token);
-  await prisma.venueSession.update({ where: { id: session.id }, data: { status: 'active', lastUsedAt: new Date() } });
+  const venue = await DaytonaVenue.attach(session.id, session.externalId, cfg, token, opts);
+  // A passive poll (heal:false) must not count as "use" — otherwise watching
+  // the panel keeps the sandbox alive forever and the idle reaper never fires.
+  if (opts.heal !== false) {
+    await prisma.venueSession.update({
+      where: { id: session.id },
+      data: { status: 'active', lastUsedAt: new Date() },
+    });
+  }
   return venue;
+}
+
+/** The user's live session row, if any (the panel and the session route share it). */
+export async function currentVenueSession(userId: string) {
+  return prisma.venueSession.findFirst({
+    where: { userId, status: { in: ['active', 'idle'] } },
+    orderBy: { lastUsedAt: 'desc' },
+  });
+}
+
+/** Panel "Apagar": stop the user's live sandbox (bills elapsed minutes). No-op without one. */
+export async function stopUserVenue(userId: string): Promise<boolean> {
+  const session = await currentVenueSession(userId);
+  if (!session) return false;
+  await releaseVenue(session.id);
+  return true;
 }
 
 /** Mark the session idle and stop the sandbox (bills elapsed minutes). */
@@ -205,7 +262,8 @@ export async function releaseVenue(sessionId: string): Promise<void> {
   const cfg = await daytonaConfig();
   if (cfg && session.externalId) {
     try {
-      const token = (session.metadata as { controllerToken?: string } | null)?.controllerToken ?? '';
+      const token =
+        (session.metadata as { controllerToken?: string } | null)?.controllerToken ?? '';
       const venue = await DaytonaVenue.attach(session.id, session.externalId, cfg, token);
       await venue.stop();
     } catch {
@@ -268,24 +326,36 @@ export async function saveBrowserProfile(input: {
   stateJson: string;
 }): Promise<{ id: string }> {
   if (!isSecretsConfigured()) {
-    throw new VenueUnavailableError('El vault de secretos no está configurado (UNIK_SECRETS_MASTER_KEY).');
+    throw new VenueUnavailableError(
+      'El vault de secretos no está configurado (UNIK_SECRETS_MASTER_KEY).'
+    );
   }
   const encrypted = encryptSecret(input.stateJson);
   const ciphertext = JSON.stringify(encrypted);
   const row = await prisma.browserProfile.upsert({
     where: { userId_host: { userId: input.userId, host: input.host } },
-    create: { userId: input.userId, name: input.name, host: input.host, stateCiphertext: ciphertext },
+    create: {
+      userId: input.userId,
+      name: input.name,
+      host: input.host,
+      stateCiphertext: ciphertext,
+    },
     update: { name: input.name, stateCiphertext: ciphertext },
   });
   return { id: row.id };
 }
 
 /** Returns decrypted storage state — controller-side use only, never logged. */
-export async function loadBrowserProfileState(userId: string, host: string): Promise<{ id: string; stateJson: string } | null> {
+export async function loadBrowserProfileState(
+  userId: string,
+  host: string
+): Promise<{ id: string; stateJson: string } | null> {
   const row = await prisma.browserProfile.findUnique({ where: { userId_host: { userId, host } } });
   if (!row) return null;
   const stateJson = decryptSecret(JSON.parse(row.stateCiphertext));
-  await prisma.browserProfile.update({ where: { id: row.id }, data: { lastUsedAt: new Date() } }).catch(() => undefined);
+  await prisma.browserProfile
+    .update({ where: { id: row.id }, data: { lastUsedAt: new Date() } })
+    .catch(() => undefined);
   return { id: row.id, stateJson };
 }
 

@@ -4,7 +4,17 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { AnimatePresence, motion } from 'motion/react';
-import { Flag, Pencil, Plus, Puzzle, Search, SlidersHorizontal, Star, Trash2 } from 'lucide-react';
+import {
+  CalendarClock,
+  Flag,
+  Pencil,
+  Plus,
+  Puzzle,
+  Search,
+  SlidersHorizontal,
+  Star,
+  Trash2,
+} from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { listItem } from '@/lib/motion';
 import { AssistantPreferencesPanel } from '@/components/copilot/AssistantPreferencesPanel';
@@ -17,7 +27,7 @@ import {
 import { PRINCIPAL_AGENT, relTime, type AgentInfo } from './agent-types';
 import { AgentAvatar } from './AgentAvatar';
 import { InstallAppButton } from './InstallAppButton';
-import { NewAgentSheet } from './NewAgentSheet';
+import { NewAgentSheet, type NewAgentTemplate } from './NewAgentSheet';
 
 interface ConversationItem {
   id: string;
@@ -68,6 +78,43 @@ export function missionSubtitle(m: MissionItem): string {
   return total > 0 ? `${label} · ${done}/${total} tareas` : label;
 }
 
+type ThreadGroup = { key: string; label: string; items: ConversationItem[] };
+
+/** Favoritas · Hoy · Ayer · Últimos 7 días · Anteriores */
+function groupThreads(list: ConversationItem[]): ThreadGroup[] {
+  const groups: Record<string, ConversationItem[]> = {
+    starred: [],
+    today: [],
+    yesterday: [],
+    week: [],
+    older: [],
+  };
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const dayMs = 86_400_000;
+  for (const c of list) {
+    if (c.isStarred) {
+      groups.starred.push(c);
+      continue;
+    }
+    const t = Date.parse(c.lastMessageAt ?? c.updatedAt ?? c.createdAt);
+    if (Number.isNaN(t) || t < startOfToday - 6 * dayMs) groups.older.push(c);
+    else if (t >= startOfToday) groups.today.push(c);
+    else if (t >= startOfToday - dayMs) groups.yesterday.push(c);
+    else groups.week.push(c);
+  }
+  const labels: Record<string, string> = {
+    starred: 'Favoritas',
+    today: 'Hoy',
+    yesterday: 'Ayer',
+    week: 'Últimos 7 días',
+    older: 'Anteriores',
+  };
+  return Object.entries(groups)
+    .filter(([, items]) => items.length > 0)
+    .map(([key, items]) => ({ key, label: labels[key], items }));
+}
+
 export interface AgentSidebarProps {
   userId: string;
   activeId: string | null;
@@ -81,7 +128,7 @@ export interface AgentSidebarProps {
   /** Controlled NewAgentSheet — the empty-state cards can open it pre-filled. */
   newAgent?: {
     open: boolean;
-    template: { name: string; purpose: string; icon: string; color: number } | null;
+    template: NewAgentTemplate | null;
   };
   onNewAgentOpenChange?: (open: boolean) => void;
 }
@@ -109,6 +156,7 @@ export function AgentSidebar({
   const [prefsOpen, setPrefsOpen] = useState(false);
   const [sheetOpenLocal, setSheetOpenLocal] = useState(false);
   const teamRef = useRef<HTMLDivElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
   const searchParams = useSearchParams();
   const router = useRouter();
 
@@ -126,6 +174,13 @@ export function AgentSidebar({
     }
   }, [searchParams, router]);
 
+  // ⌘K from the page focuses the search box.
+  useEffect(() => {
+    const focus = () => searchRef.current?.focus();
+    window.addEventListener('uv:focus-search', focus);
+    return () => window.removeEventListener('uv:focus-search', focus);
+  }, []);
+
   // Recent missions — real API.
   useEffect(() => {
     let cancelled = false;
@@ -133,7 +188,7 @@ export function AgentSidebar({
       .then(async (res) => {
         if (cancelled || !res.ok) return;
         const d = (await res.json()) as { missions?: MissionItem[] };
-        setMissions((d.missions ?? []).slice(0, 5));
+        setMissions((d.missions ?? []).slice(0, 6));
       })
       .catch(() => undefined)
       .finally(() => {
@@ -163,13 +218,20 @@ export function AgentSidebar({
     loadConversations();
   }, [loadConversations]);
 
+  // A new thread created from the chat (first message) shows up without a reload.
+  useEffect(() => {
+    if (activeId && !conversations.some((c) => c.id === activeId)) void loadConversations();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeId]);
+
   async function handleNew() {
     const { id } = await createConversationAction({});
     await loadConversations();
     onSelect(id);
   }
 
-  async function handleDelete(id: string) {
+  async function handleDelete(id: string, title: string) {
+    if (!window.confirm(`¿Eliminar la conversación «${title}»?`)) return;
     await deleteConversationAction({ id });
     await loadConversations();
     if (activeId === id) onSelect('');
@@ -194,110 +256,145 @@ export function AgentSidebar({
   function handleTeamKeyDown(e: React.KeyboardEvent) {
     if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
     const items = Array.from(
-      teamRef.current?.querySelectorAll<HTMLButtonElement>('.agent-item') ?? []
+      teamRef.current?.querySelectorAll<HTMLButtonElement>('.uv-agent') ?? []
     );
     const idx = items.indexOf(document.activeElement as HTMLButtonElement);
     if (idx < 0) return;
     e.preventDefault();
-    const next = e.key === 'ArrowDown' ? idx + 1 : idx - 1;
-    items[next]?.focus();
+    items[e.key === 'ArrowDown' ? idx + 1 : idx - 1]?.focus();
   }
 
-  const filteredAgents = search
-    ? agents.filter((a) => a.name.toLowerCase().includes(search.toLowerCase()))
-    : agents;
-  const filteredMissions = search
-    ? missions.filter((m) => m.goal.toLowerCase().includes(search.toLowerCase()))
-    : missions;
+  const q = search.trim().toLowerCase();
+  const filteredAgents = q ? agents.filter((a) => a.name.toLowerCase().includes(q)) : agents;
+  const filteredMissions = q ? missions.filter((m) => m.goal.toLowerCase().includes(q)) : missions;
   const teamEmpty = filteredAgents.length <= 1 && !agentsSupported;
   const selectedAgentId = activeAgentId ?? PRINCIPAL_AGENT.id;
+  const routines = filteredMissions.filter((m) => m.schedule);
+  const recentMissions = filteredMissions.filter((m) => !m.schedule);
+  const groups = groupThreads(conversations);
 
   return (
-    <div className="assistant-sidebar agent-sidebar">
-      <div className="assistant-sidebar-header">
-        <button type="button" className="agent-btn-primary" onClick={() => setSheetOpen(true)}>
+    <div className="uv-side">
+      <div className="uv-side-top">
+        <button type="button" className="uv-btn-primary" onClick={() => setSheetOpen(true)}>
           <Plus size={15} /> Nuevo agente
         </button>
-        <div className="assistant-sidebar-search">
+        <label className="uv-search">
           <Search size={14} />
           <input
+            ref={searchRef}
             type="text"
-            placeholder="Buscar…"
+            placeholder="Buscar agentes o conversaciones"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             aria-label="Buscar agentes, misiones y conversaciones"
           />
-        </div>
+          {!search && <kbd>⌘K</kbd>}
+        </label>
       </div>
 
-      <div className="assistant-sidebar-list agent-sidebar-scroll">
+      <div className="uv-side-scroll">
         {/* Tu equipo */}
-        <div className="agent-section">
-          <div className="agent-section-label">Tu equipo</div>
-          <div className="agent-team" ref={teamRef} role="list" onKeyDown={handleTeamKeyDown}>
+        <div className="uv-section">
+          <div className="uv-section-label">
+            <span>Tu equipo</span>
+            <span>{agents.length}</span>
+          </div>
+          <div ref={teamRef} role="list" onKeyDown={handleTeamKeyDown}>
             <AnimatePresence initial={false}>
-              {filteredAgents.map((a) => (
-                <motion.div
-                  key={a.id}
-                  variants={listItem}
-                  initial="initial"
-                  animate="animate"
-                  exit="exit"
-                  layout={false}
-                >
-                  <button
-                    type="button"
-                    role="listitem"
-                    className={cn('agent-item', selectedAgentId === a.id && 'active')}
-                    onClick={() => onSelectAgent?.(a)}
+              {filteredAgents.map((a) => {
+                const working = a.status === 'working';
+                return (
+                  <motion.div
+                    key={a.id}
+                    variants={listItem}
+                    initial="initial"
+                    animate="animate"
+                    exit="exit"
+                    layout={false}
                   >
-                    <AgentAvatar agent={a} status={a.status ?? 'idle'} />
-                    <span className="agent-item-text">
-                      <span className="agent-item-title">
-                        {a.name}
-                        {a.kind === 'principal' && <span className="agent-badge-jefe">Jefe</span>}
+                    <button
+                      type="button"
+                      role="listitem"
+                      className={cn('uv-agent', selectedAgentId === a.id && 'is-active')}
+                      onClick={() => onSelectAgent?.(a)}
+                      aria-current={selectedAgentId === a.id ? 'true' : undefined}
+                    >
+                      <AgentAvatar agent={a} status={a.status ?? 'idle'} />
+                      <span className="uv-agent-text">
+                        <span className="uv-agent-name">
+                          {a.name}
+                          {a.kind === 'principal' && <span className="uv-badge-jefe">Jefe</span>}
+                        </span>
+                        <span className={cn('uv-agent-sub', working && 'is-working')}>
+                          {a.statusLine ?? (working ? 'Trabajando…' : (a.purpose ?? 'Disponible'))}
+                        </span>
                       </span>
-                      <span className="agent-item-sub">
-                        {a.statusLine ??
-                          a.purpose ??
-                          (a.status === 'working' ? 'Trabajando…' : 'Disponible')}
-                      </span>
-                    </span>
-                    {a.unread && <span className="agent-unread" aria-label="Tiene novedades" />}
-                  </button>
-                </motion.div>
-              ))}
+                      {a.unread && (
+                        <span className="uv-agent-unread" aria-label="Tiene novedades" />
+                      )}
+                    </button>
+                  </motion.div>
+                );
+              })}
             </AnimatePresence>
             {teamEmpty && !search && (
-              <button type="button" className="agent-team-empty" onClick={() => setSheetOpen(true)}>
+              <button type="button" className="uv-agent-ghost" onClick={() => setSheetOpen(true)}>
                 <Plus size={13} /> Crea especialistas para delegar trabajo
               </button>
             )}
           </div>
         </div>
 
+        {/* Rutinas (missions with a schedule) */}
+        {routines.length > 0 && (
+          <div className="uv-section">
+            <div className="uv-section-label">
+              <span>Rutinas</span>
+            </div>
+            {routines.map((m) => (
+              <button
+                key={m.id}
+                type="button"
+                className="uv-mission"
+                onClick={() => m.conversationId && onSelect(m.conversationId)}
+                disabled={!m.conversationId}
+                title={m.goal}
+              >
+                <CalendarClock size={13} className="uv-mission-icon" />
+                <span className="uv-agent-text">
+                  <span className="uv-agent-name">{m.goal}</span>
+                  <span className="uv-agent-sub">{missionSubtitle(m)}</span>
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
+
         {/* Misiones recientes */}
-        {missionsLoaded && (filteredMissions.length > 0 || !search) && (
-          <div className="agent-section">
-            <div className="agent-section-label">Misiones recientes</div>
-            {filteredMissions.length === 0 ? (
-              <div className="agent-section-empty">Sin misiones — pídele una al Central</div>
+        {missionsLoaded && (recentMissions.length > 0 || !search) && (
+          <div className="uv-section">
+            <div className="uv-section-label">
+              <span>Misiones</span>
+            </div>
+            {recentMissions.length === 0 ? (
+              <div className="uv-empty-inline">Sin misiones — pídele una al Central</div>
             ) : (
-              filteredMissions.map((m) => (
+              recentMissions.map((m) => (
                 <button
                   key={m.id}
                   type="button"
-                  className="agent-mission-item"
+                  className="uv-mission"
                   onClick={() => m.conversationId && onSelect(m.conversationId)}
                   disabled={!m.conversationId}
                   title={m.goal}
                 >
-                  <Flag size={13} className="agent-mission-icon" />
-                  <span className="agent-item-text">
-                    <span className="agent-item-title">{m.goal}</span>
-                    <span className="agent-item-sub">{missionSubtitle(m)}</span>
+                  <Flag size={13} className="uv-mission-icon" />
+                  <span className="uv-agent-text">
+                    <span className="uv-agent-name">{m.goal}</span>
+                    <span className="uv-agent-sub">{missionSubtitle(m)}</span>
                   </span>
-                  <span className="agent-item-time">
+                  <span className="uv-mission-time">
                     {relTime(m.completedAt ?? m.nextRunAt ?? m.createdAt)}
                   </span>
                 </button>
@@ -307,101 +404,122 @@ export function AgentSidebar({
         )}
 
         {/* Conversaciones */}
-        <div className="agent-section">
-          <div className="agent-section-label agent-section-label-row">
+        <div className="uv-section">
+          <div className="uv-section-label">
             <span>Conversaciones</span>
             <button
               type="button"
-              className="agent-section-add"
+              className="uv-section-add"
               onClick={() => void handleNew()}
               aria-label="Nueva conversación"
               title="Nueva conversación"
             >
-              <Plus size={12} />
+              <Plus size={13} />
             </button>
           </div>
-          {loading && <div className="assistant-sidebar-empty">Cargando…</div>}
+          {loading && (
+            <>
+              <div className="uv-skeleton" />
+              <div className="uv-skeleton" style={{ width: '80%' }} />
+              <div className="uv-skeleton" style={{ width: '60%' }} />
+            </>
+          )}
           {!loading && conversations.length === 0 && (
-            <div className="assistant-sidebar-empty">
-              {search ? 'Sin resultados' : 'No hay conversaciones'}
+            <div className="uv-empty-inline">
+              {search ? 'Sin resultados' : 'Aún no hay conversaciones'}
             </div>
           )}
-          {conversations.map((c) => (
-            <div
-              key={c.id}
-              className={`assistant-sidebar-item ${activeId === c.id ? 'active' : ''}`}
-              onClick={() => onSelect(c.id)}
-            >
-              {editingId === c.id ? (
-                <input
-                  type="text"
-                  value={editTitle}
-                  onChange={(e) => setEditTitle(e.target.value)}
-                  onClick={(e) => e.stopPropagation()}
+          {groups.map((g) => (
+            <React.Fragment key={g.key}>
+              {groups.length > 1 && <div className="uv-thread-group">{g.label}</div>}
+              {g.items.map((c) => (
+                <div
+                  key={c.id}
+                  role="button"
+                  tabIndex={0}
+                  className={cn('uv-thread', activeId === c.id && 'is-active')}
+                  onClick={() => onSelect(c.id)}
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter') handleRename(c.id);
-                    if (e.key === 'Escape') setEditingId(null);
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      onSelect(c.id);
+                    }
                   }}
-                  autoFocus
-                  className="assistant-sidebar-rename"
-                />
-              ) : (
-                <>
-                  <div className="assistant-sidebar-item-title">
-                    {c.isStarred && <Star size={12} className="assistant-sidebar-star" />}
-                    {c.title}
-                  </div>
-                  <div className="assistant-sidebar-item-actions">
-                    <button
-                      type="button"
-                      onClick={(e) => {
+                  title={c.title}
+                >
+                  {editingId === c.id ? (
+                    <input
+                      type="text"
+                      value={editTitle}
+                      onChange={(e) => setEditTitle(e.target.value)}
+                      onClick={(e) => e.stopPropagation()}
+                      onKeyDown={(e) => {
                         e.stopPropagation();
-                        handleStar(c.id);
+                        if (e.key === 'Enter') void handleRename(c.id);
+                        if (e.key === 'Escape') setEditingId(null);
                       }}
-                      aria-label="Marcar favorito"
-                    >
-                      <Star size={14} />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setEditingId(c.id);
-                        setEditTitle(c.title);
-                      }}
-                      aria-label="Renombrar"
-                    >
-                      <Pencil size={14} />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleDelete(c.id);
-                      }}
-                      aria-label="Eliminar"
-                    >
-                      <Trash2 size={14} />
-                    </button>
-                  </div>
-                </>
-              )}
-            </div>
+                      onBlur={() => void handleRename(c.id)}
+                      autoFocus
+                      className="uv-thread-rename"
+                      aria-label="Nuevo título"
+                    />
+                  ) : (
+                    <>
+                      {c.isStarred && <Star size={12} className="uv-thread-star" />}
+                      <span className="uv-thread-title">{c.title}</span>
+                      <span className="uv-thread-actions">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void handleStar(c.id);
+                          }}
+                          aria-label={c.isStarred ? 'Quitar de favoritas' : 'Marcar favorita'}
+                          title={c.isStarred ? 'Quitar de favoritas' : 'Favorita'}
+                        >
+                          <Star size={13} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setEditingId(c.id);
+                            setEditTitle(c.title);
+                          }}
+                          aria-label="Renombrar"
+                          title="Renombrar"
+                        >
+                          <Pencil size={13} />
+                        </button>
+                        <button
+                          type="button"
+                          className="is-danger"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void handleDelete(c.id, c.title);
+                          }}
+                          aria-label="Eliminar"
+                          title="Eliminar"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </span>
+                    </>
+                  )}
+                </div>
+              ))}
+            </React.Fragment>
           ))}
         </div>
       </div>
 
-      <div className="assistant-sidebar-header agent-sidebar-footer">
-        <button type="button" className="assistant-sidebar-new" onClick={() => setPrefsOpen(true)}>
-          <SlidersHorizontal size={16} />
+      <div className="uv-side-foot">
+        <button type="button" className="uv-side-link" onClick={() => setPrefsOpen(true)}>
+          <SlidersHorizontal size={15} />
           <span>Preferencias y memoria</span>
         </button>
-        <Link
-          href="/app/assistant/extensions"
-          className="assistant-sidebar-new"
-          style={{ textDecoration: 'none' }}
-        >
-          <Puzzle size={16} />
+        <Link href="/app/assistant/extensions" className="uv-side-link">
+          <Puzzle size={15} />
           <span>Extensiones y skills</span>
         </Link>
         <InstallAppButton />

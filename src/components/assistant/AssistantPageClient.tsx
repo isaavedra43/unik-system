@@ -1,13 +1,20 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { MotionConfig } from 'motion/react';
-import { Menu, Monitor, X } from 'lucide-react';
+import { X } from 'lucide-react';
+import type { Layout } from 'react-resizable-panels';
 import type { CurrentUser } from '@/modules/auth/authorization';
+import {
+  ResizableHandle,
+  ResizablePanel,
+  ResizablePanelGroup,
+} from '@/components/shadcn/resizable';
 import { AssistantChat } from './AssistantChat';
 import { AgentSidebar } from './agents/AgentSidebar';
-import { OpsPanel } from './agents/OpsPanel';
+import { WorkspacePanel } from './agents/WorkspacePanel';
+import type { NewAgentTemplate } from './agents/NewAgentSheet';
 import { TweaksPanel } from './agents/TweaksPanel';
 import { useAssistantTweaks } from './agents/useAssistantTweaks';
 import {
@@ -15,21 +22,58 @@ import {
   agentFromRecord,
   type AgentInfo,
   type AgentRecordDTO,
+  type WorkspaceTab,
 } from './agents/agent-types';
 
 export interface AssistantPageClientProps {
   user: CurrentUser;
 }
 
-type AgentTemplate = { name: string; purpose: string; icon: string; color: number } | null;
+type AgentTemplate = NewAgentTemplate | null;
 
+const LAYOUT_KEY = 'unik.assistant.layout.v2';
+const MOBILE_QUERY = '(max-width: 1023px)';
+
+/** null until mounted — the page renders a neutral skeleton meanwhile. */
+function useIsMobile(): boolean | null {
+  const [mobile, setMobile] = useState<boolean | null>(null);
+  useEffect(() => {
+    const mq = window.matchMedia(MOBILE_QUERY);
+    const apply = () => setMobile(mq.matches);
+    apply();
+    mq.addEventListener('change', apply);
+    return () => mq.removeEventListener('change', apply);
+  }, []);
+  return mobile;
+}
+
+function loadLayout(): Layout | undefined {
+  try {
+    const raw = window.localStorage.getItem(LAYOUT_KEY);
+    return raw ? (JSON.parse(raw) as Layout) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * /app/assistant — UNIVERSO: three columns.
+ *   team (agents · missions · threads) | conversation | workspace
+ * Desktop: resizable panels (layout persisted per browser).
+ * Mobile/tablet: the team is a drawer and the workspace a full sheet.
+ */
 export function AssistantPageClient({ user }: AssistantPageClientProps) {
   const searchParams = useSearchParams();
   const requestedId = searchParams.get('c');
+  const isMobile = useIsMobile();
   const [activeId, setActiveId] = useState<string | null>(requestedId);
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  // The team — GET /api/agents does not exist yet, so the Principal (the
-  // assistant itself, which is real) is always present and the rest degrades.
+  const [wsSheetOpen, setWsSheetOpen] = useState(false);
+  const [wsTab, setWsTab] = useState<WorkspaceTab>('browser');
+  const [wsHint, setWsHint] = useState<{ tab: WorkspaceTab; at: number } | null>(null);
+  const [wsBadge, setWsBadge] = useState(false);
+  const [layout, setLayout] = useState<Layout | undefined>(undefined);
+  const [layoutReady, setLayoutReady] = useState(false);
   const [agents, setAgents] = useState<AgentInfo[]>([PRINCIPAL_AGENT]);
   const [agentsSupported, setAgentsSupported] = useState(false);
   const [activeAgentId, setActiveAgentId] = useState(PRINCIPAL_AGENT.id);
@@ -40,15 +84,19 @@ export function AssistantPageClient({ user }: AssistantPageClientProps) {
   const { tweaks, setTweaks } = useAssistantTweaks();
 
   const activeAgent = agents.find((a) => a.id === activeAgentId) ?? PRINCIPAL_AGENT;
-  const workspaceOpen = tweaks.opsVisible;
+  const workspaceOpen = isMobile ? wsSheetOpen : tweaks.opsVisible;
+
+  useEffect(() => {
+    setLayout(loadLayout());
+    setLayoutReady(true);
+  }, []);
 
   // Deep link from a notification ("the assistant finished"): open that thread.
   useEffect(() => {
     if (requestedId) setActiveId(requestedId);
   }, [requestedId]);
 
-  // Team — degrades to just the Principal while the agents tables do not exist
-  // (the API answers 200 with an empty list until the migration lands).
+  // The team — degrades to the Principal while the agents tables do not exist.
   useEffect(() => {
     let cancelled = false;
     fetch('/app/assistant/api/agents')
@@ -70,109 +118,203 @@ export function AssistantPageClient({ user }: AssistantPageClientProps) {
     };
   }, []);
 
-  // Force-open the ops panel when the agent requests a secure input or starts
-  // driving the virtual browser — the user must see the live screen / form.
+  // A tool that has a surface brings it up: the workspace opens on desktop,
+  // and on mobile the header button lights up instead of stealing the screen.
+  const handleWorkspaceHint = useCallback(
+    (tab: WorkspaceTab) => {
+      setWsHint({ tab, at: Date.now() });
+      if (isMobile) setWsBadge(true);
+      else setTweaks({ opsVisible: true });
+    },
+    [isMobile, setTweaks]
+  );
+
+  const toggleWorkspace = useCallback(() => {
+    if (isMobile) {
+      setWsSheetOpen((v) => !v);
+      setWsBadge(false);
+    } else {
+      setTweaks({ opsVisible: !tweaks.opsVisible });
+    }
+  }, [isMobile, setTweaks, tweaks.opsVisible]);
+
+  // Keyboard: ⌘/Ctrl+K focuses the team search, ⌘/Ctrl+J toggles the workspace,
+  // Escape closes mobile overlays.
   useEffect(() => {
-    if (!activeId) return;
-    const es = new EventSource(
-      `/app/realtime/api/stream?channels=${encodeURIComponent(`assistant:${activeId}`)}`
-    );
-    const open = () => setTweaks({ opsVisible: true });
-    es.addEventListener('workspace.secure_input', open);
-    es.addEventListener('workspace.screen', open);
-    return () => es.close();
-  }, [activeId, setTweaks]);
+    const onKey = (e: KeyboardEvent) => {
+      const mod = e.metaKey || e.ctrlKey;
+      if (mod && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        if (isMobile) setSidebarOpen(true);
+        window.dispatchEvent(new CustomEvent('uv:focus-search'));
+      } else if (mod && e.key.toLowerCase() === 'j') {
+        e.preventDefault();
+        toggleWorkspace();
+      } else if (e.key === 'Escape') {
+        setSidebarOpen(false);
+        setWsSheetOpen(false);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [isMobile, toggleWorkspace]);
+
+  const saveLayout = useCallback((next: Layout) => {
+    try {
+      window.localStorage.setItem(LAYOUT_KEY, JSON.stringify(next));
+    } catch {
+      /* private mode */
+    }
+  }, []);
+
+  const sidebar = (
+    <AgentSidebar
+      userId={user.id}
+      activeId={activeId}
+      onSelect={(id) => {
+        setActiveId(id || null);
+        setSidebarOpen(false);
+      }}
+      agents={agents}
+      agentsSupported={agentsSupported}
+      onAgentCreated={(a) => setAgents((prev) => [...prev, a])}
+      activeAgentId={activeAgentId}
+      onSelectAgent={(a) => {
+        setActiveAgentId(a.id);
+        setSidebarOpen(false);
+      }}
+      newAgent={newAgent}
+      onNewAgentOpenChange={(open) => setNewAgent({ open, template: null })}
+    />
+  );
+
+  const chat = (
+    <AssistantChat
+      conversationId={activeId}
+      context={{ page: '/app/assistant' }}
+      user={user}
+      onConversationCreated={setActiveId}
+      agent={activeAgent}
+      agents={agents}
+      onSelectAgent={setActiveAgentId}
+      composerMode={tweaks.composerMode}
+      onNewAgent={(template) => setNewAgent({ open: true, template: template ?? null })}
+      onNewConversation={() => setActiveId(null)}
+      onToggleOps={toggleWorkspace}
+      workspaceOpen={workspaceOpen}
+      workspaceBadge={wsBadge}
+      onOpenSidebar={() => setSidebarOpen(true)}
+      onWorkspaceHint={handleWorkspaceHint}
+    />
+  );
+
+  const workspace = (
+    <WorkspacePanel
+      conversationId={activeId}
+      userId={user.id}
+      tab={wsTab}
+      onTabChange={setWsTab}
+      hint={wsHint}
+      onClose={() => (isMobile ? setWsSheetOpen(false) : setTweaks({ opsVisible: false }))}
+      onOpenConversation={(id) => {
+        setActiveId(id);
+        setWsSheetOpen(false);
+      }}
+      onSendText={(text) => {
+        window.dispatchEvent(new CustomEvent('uv:send', { detail: { text } }));
+        setWsSheetOpen(false);
+      }}
+    />
+  );
 
   return (
-    // MotionConfig propagates the "animations off" tweak to every motion/react
-    // component below; the data-anim attr does the same for pure-CSS animation.
     <MotionConfig reducedMotion={tweaks.animations ? 'user' : 'always'}>
       <div
-        className="assistant-page-body"
+        className="uv-root"
         data-density={tweaks.density}
         data-anim={tweaks.animations ? 'on' : 'off'}
       >
-        {/* Mobile sidebar toggle */}
-        <button
-          type="button"
-          className="assistant-sidebar-toggle"
-          onClick={() => setSidebarOpen(true)}
-          aria-label="Ver equipo y conversaciones"
-        >
-          <Menu size={18} />
-          <span>Equipo</span>
-        </button>
-
-        {/* Mobile backdrop */}
-        {sidebarOpen && (
-          <div
-            className="assistant-sidebar-backdrop"
-            onClick={() => setSidebarOpen(false)}
-            aria-hidden="true"
-          />
-        )}
-
-        {/* Sidebar — becomes drawer on mobile */}
-        <div className={`assistant-sidebar-wrapper ${sidebarOpen ? 'open' : ''}`}>
-          <div className="assistant-sidebar-header-mobile">
-            <span>Tu equipo</span>
-            <button type="button" onClick={() => setSidebarOpen(false)} aria-label="Cerrar">
-              <X size={20} />
-            </button>
+        {isMobile === null || !layoutReady ? (
+          <div className="uv-layout" aria-busy="true" style={{ display: 'flex' }}>
+            <div
+              className="uv-panel"
+              style={{ width: 286, flexDirection: 'column', padding: 12, gap: 8 }}
+            >
+              <div className="uv-skeleton" style={{ height: 38 }} />
+              <div className="uv-skeleton" />
+              <div className="uv-skeleton" />
+              <div className="uv-skeleton" />
+            </div>
+            <div className="uv-panel" style={{ flex: 1 }} />
           </div>
-          <AgentSidebar
-            userId={user.id}
-            activeId={activeId}
-            onSelect={(id) => {
-              setActiveId(id || null);
-              setSidebarOpen(false);
-            }}
-            agents={agents}
-            agentsSupported={agentsSupported}
-            onAgentCreated={(a) => setAgents((prev) => [...prev, a])}
-            activeAgentId={activeAgentId}
-            onSelectAgent={(a) => setActiveAgentId(a.id)}
-            newAgent={newAgent}
-            onNewAgentOpenChange={(open) => setNewAgent({ open, template: null })}
-          />
-        </div>
-
-        <div className="assistant-page-main">
-          <AssistantChat
-            conversationId={activeId}
-            context={{ page: '/app/assistant' }}
-            user={user}
-            onConversationCreated={setActiveId}
-            agent={activeAgent}
-            agents={agents}
-            onSelectAgent={setActiveAgentId}
-            composerMode={tweaks.composerMode}
-            onNewAgent={(template) => setNewAgent({ open: true, template: template ?? null })}
-            onToggleOps={() => setTweaks({ opsVisible: !workspaceOpen })}
-          />
-        </div>
-
-        {/* Ops panel — live feed of the team's operation. */}
-        {!workspaceOpen && (
-          <button
-            type="button"
-            className="assistant-workspace-toggle"
-            onClick={() => setTweaks({ opsVisible: true })}
-            aria-label="Abrir panel de operación"
-            title="Panel de operación"
+        ) : isMobile ? (
+          <>
+            <div className="uv-chat" style={{ flex: 1 }}>
+              {chat}
+            </div>
+            {sidebarOpen && (
+              <div
+                className="uv-backdrop"
+                onClick={() => setSidebarOpen(false)}
+                aria-hidden="true"
+              />
+            )}
+            <div
+              className={`uv-side-drawer ${sidebarOpen ? 'is-open' : ''}`}
+              aria-hidden={!sidebarOpen}
+            >
+              <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+                <div className="uv-side-drawer-head">
+                  <span>Tu equipo</span>
+                  <button
+                    type="button"
+                    className="uv-icon-btn"
+                    onClick={() => setSidebarOpen(false)}
+                    aria-label="Cerrar"
+                  >
+                    <X size={18} />
+                  </button>
+                </div>
+                {sidebar}
+              </div>
+            </div>
+            {wsSheetOpen && <div className="uv-ws-sheet">{workspace}</div>}
+          </>
+        ) : (
+          <ResizablePanelGroup
+            orientation="horizontal"
+            className="uv-layout"
+            defaultLayout={layout}
+            onLayoutChanged={saveLayout}
           >
-            <Monitor size={18} />
-          </button>
-        )}
-        {workspaceOpen && (
-          <div className="assistant-workspace-col ops-col">
-            <OpsPanel
-              conversationId={activeId}
-              userId={user.id}
-              onClose={() => setTweaks({ opsVisible: false })}
-              onOpenConversation={(id) => setActiveId(id)}
-            />
-          </div>
+            <ResizablePanel
+              id="sidebar"
+              defaultSize={286}
+              minSize={230}
+              maxSize={420}
+              className="uv-panel"
+            >
+              {sidebar}
+            </ResizablePanel>
+            <ResizableHandle className="uv-handle" />
+            <ResizablePanel id="chat" minSize={380} className="uv-panel">
+              {chat}
+            </ResizablePanel>
+            {workspaceOpen && (
+              <>
+                <ResizableHandle className="uv-handle" />
+                <ResizablePanel
+                  id="workspace"
+                  defaultSize={540}
+                  minSize={380}
+                  maxSize={960}
+                  className="uv-panel"
+                >
+                  {workspace}
+                </ResizablePanel>
+              </>
+            )}
+          </ResizablePanelGroup>
         )}
 
         <TweaksPanel tweaks={tweaks} setTweaks={setTweaks} />

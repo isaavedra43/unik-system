@@ -34,10 +34,24 @@ export interface VenueScreenshot {
 
 export interface BrowserActInput {
   action:
-    | 'open' | 'back' | 'forward' | 'click' | 'type' | 'press'
-    | 'scroll' | 'extract' | 'screenshot' | 'pdf' | 'tabs'
-    | 'newTab' | 'closeTab' | 'waitFor' | 'submit' | 'useCredential'
-    | 'captureState' | 'applyState'
+    | 'open'
+    | 'back'
+    | 'forward'
+    | 'click'
+    | 'type'
+    | 'press'
+    | 'scroll'
+    | 'extract'
+    | 'screenshot'
+    | 'pdf'
+    | 'tabs'
+    | 'newTab'
+    | 'closeTab'
+    | 'waitFor'
+    | 'submit'
+    | 'useCredential'
+    | 'captureState'
+    | 'applyState'
     /**
      * Handled entirely by the tool layer (secure user-takeover form) — the
      * browser tool returns before ever calling browserAct with it. Listed here
@@ -86,6 +100,13 @@ export interface BrowserActResult {
   tabs?: Array<{ id: string; url: string; title: string; active: boolean }>;
 }
 
+export interface VenueHealth {
+  /** true when the in-venue browser controller answers. */
+  ok: boolean;
+  /** Why it does not (provisioning output, controller log) — for the panel and the model. */
+  reason?: string;
+}
+
 export interface Venue {
   /** VenueSession.id in our DB. */
   readonly id: string;
@@ -93,7 +114,12 @@ export interface Venue {
   readonly externalId: string;
   readonly kind: string;
 
-  exec(command: string, opts?: { cwd?: string; timeoutSec?: number; env?: Record<string, string> }): Promise<VenueExecResult>;
+  /** Cheap probe of the browser controller — never provisions. */
+  health(): Promise<VenueHealth>;
+  exec(
+    command: string,
+    opts?: { cwd?: string; timeoutSec?: number; env?: Record<string, string> }
+  ): Promise<VenueExecResult>;
   readFile(path: string, maxBytes?: number): Promise<string>;
   writeFile(path: string, content: string | Buffer): Promise<void>;
   listFiles(path: string): Promise<VenueFileEntry[]>;

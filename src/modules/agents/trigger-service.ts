@@ -21,8 +21,14 @@ import { DEFAULT_TENANT_ID } from './tenancy';
  */
 
 const CONDITION_PROBE_TOOLS = new Set([
-  'listSalesOrders', 'getSalesOrder', 'listInvoices', 'listQuotes',
-  'getInventoryStatus', 'listProducts', 'listCustomers', 'searchRecords',
+  'listSalesOrders',
+  'getSalesOrder',
+  'listInvoices',
+  'listQuotes',
+  'getInventoryStatus',
+  'listProducts',
+  'listCustomers',
+  'searchRecords',
 ]);
 
 export interface TriggerSpec {
@@ -47,14 +53,72 @@ export interface TriggerAction {
   playbookId?: string;
 }
 
-/** Próxima corrida de un trigger `time` (mínimo viable, sin dependencias). */
+/**
+ * Offset (ms) de `tz` respecto a UTC en el instante `at`. Sin librerías:
+ * se lee el reloj de pared de la zona con Intl y se compara contra UTC.
+ * Devuelve null si la zona no existe (el caller cae a la hora del servidor).
+ */
+function tzOffsetMs(tz: string, at: Date): number | null {
+  try {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: tz,
+      hourCycle: 'h23',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    }).formatToParts(at);
+    const get = (type: string) => Number(parts.find((p) => p.type === type)?.value);
+    const wall = Date.UTC(
+      get('year'),
+      get('month') - 1,
+      get('day'),
+      get('hour') % 24,
+      get('minute'),
+      get('second')
+    );
+    if (Number.isNaN(wall)) return null;
+    // Redondeado al minuto: formatToParts descarta los milisegundos.
+    return wall - Math.floor(at.getTime() / 1000) * 1000;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Próxima corrida de un trigger `time` (mínimo viable, sin dependencias).
+ * `atHour/atMinute` se interpretan en `spec.tz` cuando viene (hora local del
+ * negocio: "7:30" es 7:30 en Ciudad de México aunque el servidor esté en UTC);
+ * sin `tz`, en la hora del servidor como antes.
+ */
 export function computeNextRun(spec: TriggerSpec, from = new Date()): Date | null {
   if (spec.everyMinutes && spec.everyMinutes >= 1) {
     return new Date(from.getTime() + spec.everyMinutes * 60_000);
   }
   if (spec.atHour !== undefined) {
+    const hour = Math.min(23, Math.max(0, Math.floor(spec.atHour)));
+    const minute = Math.min(59, Math.max(0, Math.floor(spec.atMinute ?? 0)));
+    const offset = spec.tz ? tzOffsetMs(spec.tz, from) : null;
+    if (offset !== null) {
+      // Reloj de pared de la zona → UTC restando su offset; si ya pasó, mañana.
+      const wallNow = new Date(from.getTime() + offset);
+      let target =
+        Date.UTC(
+          wallNow.getUTCFullYear(),
+          wallNow.getUTCMonth(),
+          wallNow.getUTCDate(),
+          hour,
+          minute,
+          0,
+          0
+        ) - offset;
+      if (target <= from.getTime()) target += 24 * 60 * 60_000;
+      return new Date(target);
+    }
     const next = new Date(from);
-    next.setHours(spec.atHour, spec.atMinute ?? 0, 0, 0);
+    next.setHours(hour, minute, 0, 0);
     if (next <= from) next.setDate(next.getDate() + 1);
     return next;
   }
@@ -76,7 +140,7 @@ export async function createTrigger(input: {
         type: input.type,
         spec: input.spec as never,
         action: input.action as never,
-        nextRunAt: input.type === 'time' ? computeNextRun(input.spec) ?? undefined : undefined,
+        nextRunAt: input.type === 'time' ? (computeNextRun(input.spec) ?? undefined) : undefined,
       },
     });
     return { id: t.id };
@@ -86,10 +150,12 @@ export async function createTrigger(input: {
 }
 
 export async function listTriggers(tenantId: string, agentId?: string) {
-  return prisma.trigger.findMany({
-    where: { tenantId, ...(agentId ? { agentId } : {}), enabled: true },
-    orderBy: { createdAt: 'desc' },
-  }).catch(() => []);
+  return prisma.trigger
+    .findMany({
+      where: { tenantId, ...(agentId ? { agentId } : {}), enabled: true },
+      orderBy: { createdAt: 'desc' },
+    })
+    .catch(() => []);
 }
 
 /** Dispara un trigger → job `agent.trigger.fire` (sesión fresca por diseño). */
@@ -115,26 +181,37 @@ async function evalCondition(spec: TriggerSpec, actor: CurrentUser): Promise<boo
 /** trigger.tick — corre cada minuto junto a mission.tick. */
 async function tickTriggers(): Promise<{ fired: number }> {
   let fired = 0;
-  const due = await prisma.trigger.findMany({
-    where: { enabled: true, type: 'time', nextRunAt: { lte: new Date() } },
-    take: 50,
-  }).catch(() => [] as never[]);
+  const due = await prisma.trigger
+    .findMany({
+      where: { enabled: true, type: 'time', nextRunAt: { lte: new Date() } },
+      take: 50,
+    })
+    .catch(() => [] as never[]);
   for (const t of due as Array<{ id: string; spec: unknown }>) {
     const spec = (t.spec ?? {}) as TriggerSpec;
-    await prisma.trigger.update({
-      where: { id: t.id },
-      data: { lastFiredAt: new Date(), nextRunAt: computeNextRun(spec) },
-    }).catch(() => null);
+    await prisma.trigger
+      .update({
+        where: { id: t.id },
+        data: { lastFiredAt: new Date(), nextRunAt: computeNextRun(spec) },
+      })
+      .catch(() => null);
     await fireTrigger(t.id, 'time');
     fired += 1;
   }
 
   // Conditions: sondas read-only deterministas, cada trigger evalúa la suya.
-  const conditions = await prisma.trigger.findMany({
-    where: { enabled: true, type: 'condition' },
-    take: 50,
-  }).catch(() => [] as never[]);
-  for (const t of conditions as Array<{ id: string; spec: unknown; agentId: string; tenantId: string }>) {
+  const conditions = await prisma.trigger
+    .findMany({
+      where: { enabled: true, type: 'condition' },
+      take: 50,
+    })
+    .catch(() => [] as never[]);
+  for (const t of conditions as Array<{
+    id: string;
+    spec: unknown;
+    agentId: string;
+    tenantId: string;
+  }>) {
     const spec = (t.spec ?? {}) as TriggerSpec;
     const agent = await prisma.agent.findUnique({ where: { id: t.agentId } }).catch(() => null);
     if (!agent) continue;
@@ -150,10 +227,15 @@ async function tickTriggers(): Promise<{ fired: number }> {
 }
 
 /** Dispara triggers por evento (entity_change, webhook, message, manual). */
-export async function fireTriggersForEvent(type: string, match: Record<string, unknown>): Promise<number> {
-  const triggers = await prisma.trigger.findMany({
-    where: { enabled: true, type },
-  }).catch(() => [] as never[]);
+export async function fireTriggersForEvent(
+  type: string,
+  match: Record<string, unknown>
+): Promise<number> {
+  const triggers = await prisma.trigger
+    .findMany({
+      where: { enabled: true, type },
+    })
+    .catch(() => [] as never[]);
   let fired = 0;
   for (const t of triggers as Array<{ id: string; spec: unknown }>) {
     const spec = (t.spec ?? {}) as TriggerSpec;
@@ -186,21 +268,34 @@ async function fireTriggerNow(triggerId: string): Promise<{ status: string }> {
   // LLM. "Guardar como rutina" convierte una automatización exitosa en
   // trabajo programado real.
   if (action.kind === 'playbook' && action.playbookId) {
-    const res = await executeTool('runVenuePlaybook', actor, { playbookId: action.playbookId }, {
-      agentId: agent.id,
-    }).catch(() => null);
+    const res = await executeTool(
+      'runVenuePlaybook',
+      actor,
+      { playbookId: action.playbookId },
+      {
+        agentId: agent.id,
+      }
+    ).catch(() => null);
     const ok = Boolean(res?.success);
     await publishRealtime(`user:${agent.ownerUserId}`, 'agent.trigger', {
-      triggerId: t.id, agentId: agent.id, agentName: agent.name,
+      triggerId: t.id,
+      agentId: agent.id,
+      agentName: agent.name,
       preview: ok ? `Playbook ejecutado: ${action.goal}` : `Playbook falló: ${action.goal}`,
     }).catch(() => null);
     return { status: ok ? 'playbook-done' : 'playbook-failed' };
   }
 
   // kind='run' → sesión fresca del agente.
-  const convo = await prisma.aiConversation.create({
-    data: { userId: agent.ownerUserId, agentId: agent.id, title: `⏱ ${action.goal}`.slice(0, 120) },
-  }).catch(() => null);
+  const convo = await prisma.aiConversation
+    .create({
+      data: {
+        userId: agent.ownerUserId,
+        agentId: agent.id,
+        title: `⏱ ${action.goal}`.slice(0, 120),
+      },
+    })
+    .catch(() => null);
 
   const { executeAgentTurn } = await import('./agent-runtime');
   let report = '';
@@ -219,7 +314,9 @@ async function fireTriggerNow(triggerId: string): Promise<{ status: string }> {
   // Si el run produjo algo, notifica al dueño (la rutina existe para avisar).
   if (report.trim()) {
     await publishRealtime(`user:${agent.ownerUserId}`, 'agent.trigger', {
-      triggerId: t.id, agentId: agent.id, agentName: agent.name,
+      triggerId: t.id,
+      agentId: agent.id,
+      agentName: agent.name,
       conversationId: convo?.id ?? null,
       preview: report.slice(0, 300),
     }).catch(() => null);

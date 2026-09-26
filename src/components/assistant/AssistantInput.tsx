@@ -1,7 +1,15 @@
 'use client';
 
 import React, { useRef, useState, useEffect, useCallback } from 'react';
-import { Send, Paperclip, X, FileText, Image as ImageIcon } from 'lucide-react';
+import {
+  ArrowUp,
+  AudioLines,
+  FileText,
+  Image as ImageIcon,
+  Paperclip,
+  Square,
+  X,
+} from 'lucide-react';
 import { ToolsButton } from './ToolsButton';
 import { VoiceDictationButton } from '@/components/voice/VoiceDictationButton';
 import { uploadFile, UploadError } from '@/lib/upload-client';
@@ -26,6 +34,8 @@ interface UploadingDraft {
 
 export interface AssistantInputProps {
   onSend: (message: string, attachments: AttachmentDraft[]) => void;
+  /** Stops the current answer (keeps whatever the server persists). */
+  onStop?: () => void;
   disabled?: boolean;
   streaming?: boolean;
   maxLength?: number;
@@ -34,18 +44,33 @@ export interface AssistantInputProps {
   canUpload?: boolean;
   canUseVoice?: boolean;
   onVoiceOpen?: () => void;
+  /** Extra controls in the bar: mode pills (left) and model picker (right). */
+  leading?: React.ReactNode;
+  trailing?: React.ReactNode;
+  /** Text set from outside (quick actions, "retry"). Consumed once. */
+  draft?: { text: string; at: number } | null;
+}
+
+function formatSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes}B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)}MB`;
 }
 
 export function AssistantInput({
   onSend,
+  onStop,
   disabled,
   streaming,
   maxLength = 10_000,
-  placeholder = 'Escribe tu mensaje…',
+  placeholder = 'Escribe un mensaje o pide una misión…',
   conversationId,
   canUpload = false,
   canUseVoice = false,
   onVoiceOpen,
+  leading,
+  trailing,
+  draft,
 }: AssistantInputProps) {
   const [value, setValue] = useState('');
   const [attachments, setAttachments] = useState<AttachmentDraft[]>([]);
@@ -60,10 +85,18 @@ export function AssistantInput({
     const ta = textareaRef.current;
     if (!ta) return;
     ta.style.height = 'auto';
-    ta.style.height = `${Math.min(ta.scrollHeight, 200)}px`;
+    ta.style.height = `${Math.min(ta.scrollHeight, 220)}px`;
   }, [value]);
 
-  const canSend = (value.trim().length > 0 || attachments.length > 0) && !disabled && !streaming && !uploading;
+  // External drafts (quick actions from the workspace, retry from an error).
+  useEffect(() => {
+    if (!draft?.text) return;
+    setValue(draft.text);
+    requestAnimationFrame(() => textareaRef.current?.focus());
+  }, [draft]);
+
+  const canSend =
+    (value.trim().length > 0 || attachments.length > 0) && !disabled && !streaming && !uploading;
 
   function handleSend() {
     if (!canSend) return;
@@ -73,7 +106,7 @@ export function AssistantInput({
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
       handleSend();
     }
@@ -89,9 +122,7 @@ export function AssistantInput({
 
     setUploadError(null);
     const selected = Array.from(files);
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
-    }
+    if (fileInputRef.current) fileInputRef.current.value = '';
 
     // Direct-to-storage upload: the browser only receives short-lived per-part
     // authorizations; the server validates the real format before "ready".
@@ -144,201 +175,219 @@ export function AssistantInput({
 
   function cancelUpload(key: string) {
     setUploads((prev) => {
-      const target = prev.find((u) => u.key === key);
-      target?.controller.abort();
+      prev.find((u) => u.key === key)?.controller.abort();
       return prev;
     });
   }
 
   function removeAttachment(id: string) {
-    // Delete from server
     fetch(`/app/assistant/api/attachments/${id}?conversationId=${conversationId}`, {
       method: 'DELETE',
     }).catch(() => {});
     setAttachments((prev) => prev.filter((a) => a.id !== id));
   }
 
-  function formatSize(bytes: number): string {
-    if (bytes < 1024) return `${bytes}B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
-    return `${(bytes / 1024 / 1024).toFixed(1)}MB`;
-  }
+  const insertAtCursor = useCallback(
+    (text: string) => {
+      const ta = textareaRef.current;
+      if (!ta) {
+        setValue((prev) => (prev ? `${prev} ${text}` : text));
+        return;
+      }
+      const start = ta.selectionStart;
+      const end = ta.selectionEnd;
+      const before = value.slice(0, start);
+      const after = value.slice(end);
+      const needsSpace = before.length > 0 && !before.endsWith(' ') && !text.startsWith(' ');
+      const insert = (needsSpace ? ' ' : '') + text;
+      setValue(before + insert + after);
+      requestAnimationFrame(() => {
+        ta.focus();
+        const pos = start + insert.length;
+        ta.setSelectionRange(pos, pos);
+      });
+    },
+    [value]
+  );
 
-  function isImage(mimeType: string): boolean {
-    return mimeType.startsWith('image/');
+  // Drag & drop files onto the composer.
+  const [dragOver, setDragOver] = useState(false);
+  function onDrop(e: React.DragEvent) {
+    e.preventDefault();
+    setDragOver(false);
+    if (!canUpload || !fileInputRef.current) return;
+    const dt = e.dataTransfer;
+    if (!dt?.files?.length) return;
+    fileInputRef.current.files = dt.files;
+    fileInputRef.current.dispatchEvent(new Event('change', { bubbles: true }));
   }
-
-  const insertAtCursor = useCallback((text: string) => {
-    const ta = textareaRef.current;
-    if (!ta) {
-      setValue((prev) => (prev ? `${prev} ${text}` : text));
-      return;
-    }
-    const start = ta.selectionStart;
-    const end = ta.selectionEnd;
-    const before = value.slice(0, start);
-    const after = value.slice(end);
-    const needsSpace = before.length > 0 && !before.endsWith(' ') && !text.startsWith(' ');
-    const insert = (needsSpace ? ' ' : '') + text;
-    const newValue = before + insert + after;
-    setValue(newValue);
-    requestAnimationFrame(() => {
-      ta.focus();
-      const pos = start + insert.length;
-      ta.setSelectionRange(pos, pos);
-    });
-  }, [value]);
 
   return (
-    <div className="assistant-input-container">
-      {/* Uploads in progress */}
-      {uploads.length > 0 && (
-        <div className="assistant-attachments-preview" aria-live="polite">
+    <div
+      className="uv-composer"
+      onDragOver={(e) => {
+        if (!canUpload) return;
+        e.preventDefault();
+        setDragOver(true);
+      }}
+      onDragLeave={() => setDragOver(false)}
+      onDrop={onDrop}
+      style={
+        dragOver
+          ? { boxShadow: 'var(--uv-composer-ring-focus), var(--uv-composer-shadow)' }
+          : undefined
+      }
+    >
+      {(uploads.length > 0 || attachments.length > 0) && (
+        <div className="uv-composer-attachments" aria-live="polite">
           {uploads.map((u) => (
-            <div key={u.key} className="attachment-chip attachment-chip-uploading">
+            <span key={u.key} className="uv-att">
               <span className="spinner" aria-hidden="true" />
-              <span className="attachment-chip-name" title={u.fileName}>
+              <span className="uv-att-name" title={u.fileName}>
                 {u.fileName}
               </span>
-              <span className="attachment-chip-size">
+              <span className="uv-att-progress" aria-hidden="true">
+                <i style={{ width: `${u.percent}%` }} />
+              </span>
+              <span className="uv-att-size">
                 {u.phase === 'validating' ? 'Validando…' : `${u.percent}%`}
               </span>
               <button
                 type="button"
-                className="attachment-chip-remove"
                 onClick={() => cancelUpload(u.key)}
                 aria-label={`Cancelar subida de ${u.fileName}`}
               >
-                <X size={14} />
+                <X size={13} />
               </button>
-            </div>
+            </span>
           ))}
-        </div>
-      )}
-
-      {/* Attachment previews */}
-      {attachments.length > 0 && (
-        <div className="assistant-attachments-preview">
           {attachments.map((att) => (
-            <div key={att.id} className="attachment-chip">
-              {isImage(att.mimeType) ? (
-                <ImageIcon size={14} className="attachment-chip-icon" />
-              ) : (
-                <FileText size={14} className="attachment-chip-icon" />
-              )}
-              <span className="attachment-chip-name" title={att.fileName}>
+            <span key={att.id} className="uv-att">
+              {att.mimeType.startsWith('image/') ? <ImageIcon size={13} /> : <FileText size={13} />}
+              <span className="uv-att-name" title={att.fileName}>
                 {att.fileName}
               </span>
-              <span className="attachment-chip-size">{formatSize(att.sizeBytes)}</span>
+              <span className="uv-att-size">{formatSize(att.sizeBytes)}</span>
               <button
                 type="button"
-                className="attachment-chip-remove"
                 onClick={() => removeAttachment(att.id)}
                 aria-label={`Quitar ${att.fileName}`}
               >
-                <X size={14} />
+                <X size={13} />
               </button>
-            </div>
+            </span>
           ))}
         </div>
       )}
 
-      {/* Upload error */}
       {uploadError && (
-        <div className="assistant-upload-error">
+        <div className="uv-composer-error" role="alert">
           {uploadError}
-          <button onClick={() => setUploadError(null)} aria-label="Cerrar">
-            <X size={14} />
+          <button type="button" onClick={() => setUploadError(null)} aria-label="Cerrar">
+            <X size={13} />
           </button>
         </div>
       )}
 
-      <div className="assistant-input">
-        <textarea
-          ref={textareaRef}
-          className="assistant-input-textarea"
-          value={value}
-          onChange={(e) => setValue(e.target.value.slice(0, maxLength))}
-          onKeyDown={handleKeyDown}
-          placeholder={placeholder}
-          disabled={disabled}
-          rows={1}
-          aria-label="Mensaje al asistente"
-        />
-        <div className="assistant-input-actions">
-          <div className="assistant-input-actions-left">
-            {canUseVoice && (
+      <textarea
+        ref={textareaRef}
+        value={value}
+        onChange={(e) => setValue(e.target.value.slice(0, maxLength))}
+        onKeyDown={handleKeyDown}
+        placeholder={placeholder}
+        disabled={disabled}
+        rows={1}
+        aria-label="Mensaje al asistente"
+      />
+
+      <div className="uv-composer-bar">
+        <div className="uv-composer-left">
+          {canUpload && (
+            <>
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                accept="image/png,image/jpeg,image/webp,image/gif,application/pdf,text/plain,text/csv,text/markdown,.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,audio/*,video/mp4,video/webm"
+                onChange={handleFileSelect}
+                style={{ display: 'none' }}
+                aria-label="Adjuntar archivos"
+              />
               <button
                 type="button"
-                className="voice-mode-btn"
-                onClick={onVoiceOpen}
-                disabled={disabled || streaming}
-                aria-label="Asistente de voz"
-                title="Asistente de voz conversacional"
+                className="uv-tool-btn"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={disabled || streaming || uploading}
+                aria-label="Adjuntar archivos"
+                title="Adjuntar imagen, PDF, documento o audio"
               >
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
-                  <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-                  <line x1="12" y1="19" x2="12" y2="22" />
-                </svg>
+                {uploading ? (
+                  <span className="spinner" aria-hidden="true" />
+                ) : (
+                  <Paperclip size={17} />
+                )}
               </button>
-            )}
-            {canUpload && (
-              <>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  multiple
-                  accept="image/png,image/jpeg,image/webp,image/gif,application/pdf,text/plain,text/csv,text/markdown,.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,audio/*,video/mp4,video/webm"
-                  onChange={handleFileSelect}
-                  style={{ display: 'none' }}
-                  aria-label="Adjuntar archivos"
-                />
-                <button
-                  type="button"
-                  className="assistant-input-attach"
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={disabled || streaming || uploading}
-                  aria-label="Adjuntar archivos"
-                  title="Adjuntar imagen o PDF"
-                >
-                  {uploading ? (
-                    <span className="spinner" aria-hidden="true" />
-                  ) : (
-                    <Paperclip size={18} />
-                  )}
-                </button>
-              </>
-            )}
-            <ToolsButton
+            </>
+          )}
+          <ToolsButton
+            disabled={disabled || streaming}
+            onSelect={(name, desc) => {
+              setValue(`Usa el tool "${name}" para: ${desc.split('.')[0].toLowerCase()}`);
+              textareaRef.current?.focus();
+            }}
+          />
+          <VoiceDictationButton
+            onFinalTranscript={insertAtCursor}
+            disabled={disabled || streaming}
+            iconSize={17}
+          />
+          {canUseVoice && (
+            <button
+              type="button"
+              className="uv-tool-btn"
+              onClick={onVoiceOpen}
               disabled={disabled || streaming}
-              onSelect={(name, desc) => {
-                const prompt = `Usa el tool "${name}" para: ${desc.split('.')[0].toLowerCase()}`;
-                setValue(prompt);
-                textareaRef.current?.focus();
-              }}
-            />
-            <VoiceDictationButton
-              onFinalTranscript={insertAtCursor}
-              disabled={disabled || streaming}
-              iconSize={18}
-            />
-          </div>
-          <button
-            type="button"
-            className="assistant-input-send"
-            onClick={handleSend}
-            disabled={!canSend}
-            aria-label="Enviar mensaje"
-          >
-            {streaming ? <span className="spinner" aria-hidden="true" /> : <Send size={18} />}
-          </button>
+              aria-label="Modo de voz"
+              title="Conversación por voz"
+            >
+              <AudioLines size={17} />
+            </button>
+          )}
+          {leading}
         </div>
-        {maxLength > 0 && value.length > maxLength * 0.8 && (
-          <span className="assistant-input-counter">
-            {value.length}/{maxLength}
-          </span>
-        )}
+        <div className="uv-composer-right">
+          {maxLength > 0 && value.length > maxLength * 0.8 && (
+            <span className="uv-counter">
+              {value.length}/{maxLength}
+            </span>
+          )}
+          {trailing}
+          {streaming && onStop ? (
+            <button
+              type="button"
+              className="uv-send is-stop"
+              onClick={onStop}
+              aria-label="Detener respuesta"
+              title="Detener"
+            >
+              <Square size={14} fill="currentColor" />
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="uv-send"
+              onClick={handleSend}
+              disabled={!canSend}
+              aria-label="Enviar mensaje"
+            >
+              {streaming ? (
+                <span className="spinner" aria-hidden="true" />
+              ) : (
+                <ArrowUp size={18} strokeWidth={2.4} />
+              )}
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );

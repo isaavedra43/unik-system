@@ -23,6 +23,24 @@ import {
 
 export type AgentStatus = 'idle' | 'working' | 'offline';
 
+/** Workspace surfaces (third column): what the team is doing right now. */
+export type WorkspaceTab = 'browser' | 'computer' | 'team' | 'files';
+
+/** Tool → surface that should come to the front when it runs. */
+export function workspaceTabForTool(tool: string): WorkspaceTab | null {
+  if (/^(browser|browserProfile|venueScreenshot)/.test(tool)) return 'browser';
+  if (/^venue/.test(tool) || /Playbook$/.test(tool)) return 'computer';
+  if (/^(web_search|web_research|web_crawl|fetch_url)$/.test(tool)) return 'browser';
+  if (
+    /^(generate(Pdf|Excel|Word|Csv)|generateImage|generateVideo|composeDocument|generateChart|generateReportImage)/.test(
+      tool
+    )
+  )
+    return 'files';
+  if (/^(delegateTask|proposeMission)$/.test(tool)) return 'team';
+  return null;
+}
+
 export interface AgentInfo {
   id: string;
   name: string;

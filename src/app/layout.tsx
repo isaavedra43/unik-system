@@ -2,6 +2,7 @@ import { ReactNode } from 'react';
 import type { Metadata, Viewport } from 'next';
 import '@/styles/shadcn.css';
 import './globals.css';
+import '@/styles/universo-chat.css';
 import { Providers } from '@/components/providers';
 
 export const metadata: Metadata = {
@@ -20,12 +21,8 @@ export const metadata: Metadata = {
       { url: '/icon-512.png', sizes: '512x512', type: 'image/png' },
       { url: '/favicon-32.png', sizes: '32x32', type: 'image/png' },
     ],
-    apple: [
-      { url: '/apple-touch-icon.png', sizes: '180x180', type: 'image/png' },
-    ],
-    shortcut: [
-      { url: '/icon-192.png', sizes: '192x192', type: 'image/png' },
-    ],
+    apple: [{ url: '/apple-touch-icon.png', sizes: '180x180', type: 'image/png' }],
+    shortcut: [{ url: '/icon-192.png', sizes: '192x192', type: 'image/png' }],
   },
   formatDetection: {
     telephone: false,

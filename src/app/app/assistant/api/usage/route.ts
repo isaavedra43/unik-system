@@ -22,25 +22,33 @@ export async function GET() {
   const tenantId = session.user.tenantId ?? DEFAULT_TENANT_ID;
 
   const [runAgg, venueAgg, runIds] = await Promise.all([
-    prisma.agentRun.aggregate({
-      _sum: { modelCostUsd: true, toolsCostUsd: true, venueCostUsd: true },
-      _count: { id: true },
-      where: { userId: session.user.id, tenantId, startedAt: { gte: monthStart } },
-    }).catch(() => null),
-    prisma.venueSession.aggregate({
-      _sum: { billedMinutes: true },
-      where: { userId: session.user.id, createdAt: { gte: monthStart } },
-    }).catch(() => null),
-    prisma.agentRun.findMany({
-      where: { userId: session.user.id, tenantId, startedAt: { gte: monthStart } },
-      select: { id: true },
-      take: 2000,
-    }).catch(() => [] as { id: string }[]),
+    prisma.agentRun
+      .aggregate({
+        _sum: { modelCostUsd: true, toolsCostUsd: true, venueCostUsd: true },
+        _count: { id: true },
+        where: { userId: session.user.id, tenantId, startedAt: { gte: monthStart } },
+      })
+      .catch(() => null),
+    prisma.venueSession
+      .aggregate({
+        _sum: { billedMinutes: true },
+        where: { userId: session.user.id, createdAt: { gte: monthStart } },
+      })
+      .catch(() => null),
+    prisma.agentRun
+      .findMany({
+        where: { userId: session.user.id, tenantId, startedAt: { gte: monthStart } },
+        select: { id: true },
+        take: 2000,
+      })
+      .catch(() => [] as { id: string }[]),
   ]);
   const jevCount = runIds.length
-    ? await prisma.agentEvent.count({
-        where: { type: 'route', runId: { in: runIds.map((r) => r.id) } },
-      }).catch(() => 0)
+    ? await prisma.agentEvent
+        .count({
+          where: { type: 'route', runId: { in: runIds.map((r) => r.id) } },
+        })
+        .catch(() => 0)
     : 0;
 
   const llm = Number(runAgg?._sum?.modelCostUsd ?? 0) + Number(runAgg?._sum?.toolsCostUsd ?? 0);
@@ -48,7 +56,9 @@ export async function GET() {
   const venueMinutes = Number(venueAgg?._sum?.billedMinutes ?? 0);
   return NextResponse.json({
     llm,
-    venue: venueUsd > 0 ? venueUsd : venueMinutes,
+    // USD only — minutes travel separately. Mixing them here made the panel
+    // print "58 minutes" as "$58.000".
+    venue: venueUsd,
     venueMinutes,
     jev: jevCount,
     runs: runAgg?._count.id ?? 0,

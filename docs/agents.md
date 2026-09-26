@@ -52,29 +52,54 @@ journal del run.
 
 ## APIs (`/app/assistant/api/*`)
 
-| Ruta                              | Contenido                                                                                                        |
-| --------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| `GET/POST /agents`                | Lista del equipo / crear especialista                                                                            |
-| `PATCH/DELETE /agents/[id]`       | Editar (crea `AgentVersion`) / archivar (el principal no se archiva)                                             |
-| `GET /runs/[id]`                  | Run + eventos + DAG de tasks                                                                                     |
-| `POST /tasks/[id]/cancel`         | Cancelar task + cascada                                                                                          |
-| `GET/POST/PATCH/DELETE /triggers` | Rutinas                                                                                                          |
-| `GET /workspace`                  | Workspace central + lease actual                                                                                 |
-| `GET /usage`                      | `{llm, venue, jev, runs, spent}` medido real (sums de `AgentRun`, `VenueSession.billedMinutes`, eventos `route`) |
+| Ruta                              | Contenido                                                                                                                          |
+| --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `GET/POST /agents`                | Lista del equipo / crear especialista                                                                                              |
+| `PATCH/DELETE /agents/[id]`       | Editar (crea `AgentVersion`) / archivar (el principal no se archiva)                                                               |
+| `GET /runs/[id]`                  | Run + eventos + DAG de tasks                                                                                                       |
+| `POST /tasks/[id]/cancel`         | Cancelar task + cascada                                                                                                            |
+| `GET/POST/PATCH/DELETE /triggers` | Rutinas                                                                                                                            |
+| `GET /workspace`                  | Workspace central + lease actual                                                                                                   |
+| `GET /usage`                      | `{llm, venue, venueMinutes, jev, runs, spent}` — `venue` en USD, `venueMinutes` aparte (antes se mostraban minutos como dólares)   |
+| `GET /venue/state`                | Estado PASIVO de la computadora virtual (`active/booting/screen/reason/pendingInputs`); no arranca nada, solo repara en background |
+| `POST /venue/session`             | `{action:'start'                                                                                                                   | 'stop'}`— encender/apagar la computadora desde el panel (permiso`browser.use`; 409 si no hay Daytona) |
 
 `POST /chat` acepta `agentId` opcional; `AiConversation.agentId` fija el agente
 del hilo.
 
-## Front (`src/components/assistant/agents/`)
+## Front (`src/components/assistant/`)
 
-`AgentSidebar` ("Tu equipo", JEFE fijado, misiones recientes + **Descargar app**
-— instalación PWA vía `beforeinstallprompt`), `OpsPanel` (**Superficies** +
-pantalla venue EN VIVO + terminal vivo + misiones + vigilancias + aprobaciones
+Tres columnas (`AssistantPageClient`, capa visual `src/styles/universo-chat.css`,
+namespace `uv-*`, paneles redimensionables con `react-resizable-panels` y layout
+persistido en `localStorage`):
 
-- costo), `MissionCard`, `ActivityCard`, `AgentMessageCard`, `RoutineChip`,
-  `NewAgentSheet`, `TweaksPanel`, `AgentAvatar`. Meta del mensaje: `meta.agent`
-  (avatar por respuesta), `meta.agentMessages` (fold "Mensajes de X"),
-  `meta.routineCreated` (chip). SSE: `agent.task`/`agent.message` en `user:{id}`.
+1. **Equipo** — `agents/AgentSidebar`: agentes (JEFE fijado), rutinas y misiones,
+   conversaciones agrupadas por fecha con búsqueda (⌘K), favoritas, renombrar y
+   borrar, **Descargar app** (PWA vía `beforeinstallprompt`).
+2. **Conversación** — `AssistantChat` + `AssistantInput`: streaming SSE con
+   razonamiento plegable, pasos de tools, UI generativa, artefactos, propuestas
+   de aprobación, adjuntos (drag & drop), dictado y modo voz, selector de modelo,
+   pills Misión/Mensaje, botón **Detener**, banner de error con **Reintentar** y
+   recuperación cuando se corta el stream (`waitForPersistedAnswer`). El estado
+   vacío ofrece plantillas de especialistas y chips de arranque.
+3. **Espacio de trabajo** — `agents/WorkspacePanel` (sustituye a `OpsPanel`):
+   pestañas **Navegador** (pantalla en vivo + páginas abiertas + lector),
+   **Computadora** (encender/apagar, terminal con salida real de `venueExec`,
+   archivos, takeover de credenciales), **Equipo** (misiones, vigilancias,
+   aprobaciones, costo en USD + minutos, actividad) y **Archivos** (artefactos y
+   media). Un tool con superficie (`workspaceTabForTool`) trae su pestaña al
+   frente (⌘J alterna la columna; en móvil es una hoja completa y el equipo un
+   drawer).
+
+`NewAgentSheet` crea especialistas desde `src/modules/agents/agent-templates.ts`
+(Director matutino, Vendedor autónomo, Rescate de cotizaciones, Coordinador de
+pedidos, Investigador de competencia, Cobranza, Vigía, Analista): persona,
+`toolAllowlist`, autonomía, política de computadora y, opcionalmente, una
+**rutina** (`POST /triggers`, tipo `time` con `tz` = hora local del negocio).
+Meta del mensaje: `meta.agent` (avatar por respuesta), `meta.agentMessages`
+(fold "Mensajes de X"), `meta.routineCreated` (chip). SSE:
+`agent.task`/`agent.message` en `user:{id}`; `workspace.*` en
+`assistant:{conversationId}`.
 
 ## Icono flotante y app de escritorio
 
@@ -90,11 +115,27 @@ pantalla venue EN VIVO + terminal vivo + misiones + vigilancias + aprobaciones
 
 ## Superficies de control (3)
 
-| Superficie                                         | Estado                                               | Dónde                                               |
-| -------------------------------------------------- | ---------------------------------------------------- | --------------------------------------------------- |
-| Computadora virtual                                | Venue Daytona compartida (workspace central + lease) | `OpsPanel` → Pantalla/Terminal                      |
-| Páginas web del agente                             | Páginas abiertas por tools web/browser               | `OpsPanel` → Páginas                                |
-| **Apps por API** (sustituye a "computadora local") | Toolkits Composio conectados por el usuario          | `OpsPanel` → Superficies / `GET /composio/toolkits` |
+| Superficie                                         | Estado                                               | Dónde                                                              |
+| -------------------------------------------------- | ---------------------------------------------------- | ------------------------------------------------------------------ |
+| Computadora virtual                                | Venue Daytona compartida (workspace central + lease) | `WorkspacePanel` → Computadora (y Navegador para la pantalla)      |
+| Páginas web del agente                             | Páginas abiertas por tools web/browser               | `WorkspacePanel` → Navegador → Páginas                             |
+| **Apps por API** (sustituye a "computadora local") | Toolkits Composio conectados por el usuario          | `WorkspacePanel` → Equipo → Superficies / `GET /composio/toolkits` |
+
+### Arranque del navegador dentro de la venue (`daytona-venue.ts`)
+
+- Un solo arranque en vuelo por sandbox (lock en memoria) + enfriamiento de
+  45 s: el poll del panel y el tool del agente ya no se matan entre sí con
+  `pkill`.
+- El controlador (`browser-controller.mjs`, puerto 3100) se lanza en una
+  **sesión de proceso Daytona** (`process.createSession` + `runAsync`) para que
+  sobreviva al `executeCommand`; fallback `nohup`.
+- `provision.sh` usa `sudo -n` cuando no es root, instala Chromium con
+  `npx playwright install chromium` (+ `install-deps`) y deja marcadores
+  (`UNIK_PROV_OK`, `UNIK_PROV_FAIL=…`, `UNIK_CHROME_PATH=…`,
+  `UNIK_CHROME_MISSING_LIBS`) que `diagnose()` devuelve como motivo real al
+  usuario en vez de un 502 mudo.
+- `GET /venue/state` es pasivo (`attachVenue(..., {heal:false})`): el panel
+  puede consultar cada pocos segundos sin provocar reinicios.
 
 ## Computer use — modelo rápido y barato
 
