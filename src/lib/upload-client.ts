@@ -65,6 +65,75 @@ interface SignedPart {
   headers: Record<string, string>;
   expiresAt: string;
   contentLength: number;
+  /** Same-origin relay through the app (R2 only). */
+  relayUrl?: string;
+}
+
+/**
+ * Files up to this size go through the app's same-origin relay: it always
+ * works (no CSP, bucket CORS or hidden ETag involved) and the extra hop is
+ * negligible. Bigger files try the bucket directly and switch to the relay
+ * the moment the browser cannot reach it.
+ */
+const RELAY_UP_TO_BYTES = 64 * 1024 * 1024;
+const RELAY_KEY = 'unik.upload.relay';
+let relayPreferred = false;
+try {
+  relayPreferred =
+    typeof window !== 'undefined' && window.sessionStorage.getItem(RELAY_KEY) === '1';
+} catch {
+  /* storage unavailable */
+}
+function preferRelay() {
+  relayPreferred = true;
+  try {
+    window.sessionStorage.setItem(RELAY_KEY, '1');
+  } catch {
+    /* storage unavailable */
+  }
+}
+
+/** Which way a part goes: relay (same origin) or straight to the bucket. */
+export function chooseRoute(
+  part: Pick<SignedPart, 'relayUrl'>,
+  fileSize: number,
+  relay = relayPreferred
+): 'relay' | 'direct' {
+  if (!part.relayUrl) return 'direct';
+  return relay || fileSize <= RELAY_UP_TO_BYTES ? 'relay' : 'direct';
+}
+
+async function sendPart(
+  part: SignedPart,
+  blob: Blob,
+  fileSize: number,
+  onBytes: (loaded: number) => void,
+  signal?: AbortSignal
+): Promise<string> {
+  if (chooseRoute(part, fileSize) === 'relay') {
+    return putPart(
+      { ...part, url: part.relayUrl!, headers: { 'Content-Type': 'application/octet-stream' } },
+      blob,
+      onBytes,
+      signal
+    );
+  }
+  try {
+    return await putPart(part, blob, onBytes, signal);
+  } catch (err) {
+    // Blocked by CSP/CORS or the bucket is unreachable: the relay from now on.
+    if (err instanceof UploadError && err.code === 'network' && part.relayUrl) {
+      preferRelay();
+      onBytes(0);
+      return putPart(
+        { ...part, url: part.relayUrl, headers: { 'Content-Type': 'application/octet-stream' } },
+        blob,
+        onBytes,
+        signal
+      );
+    }
+    throw err;
+  }
 }
 
 interface InitiateResponse {
@@ -274,9 +343,10 @@ export async function uploadFile(file: Blob, options: UploadOptions): Promise<Up
             const part = signed.get(partNumber);
             if (!part) throw new UploadError('Parte sin autorización', 'server');
             try {
-              const etag = await putPart(
+              const etag = await sendPart(
                 part,
                 blob,
+                totalBytes,
                 (loaded) => {
                   loadedByPart.set(partNumber, loaded);
                   report('uploading', totalLoaded());

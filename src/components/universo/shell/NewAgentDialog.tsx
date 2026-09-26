@@ -44,18 +44,18 @@ import { AgentAvatar } from '../ui';
 const AUTONOMY: Array<{ value: AgentAutonomy; label: string; hint: string }> = [
   {
     value: 'approval',
-    label: 'Pide aprobación',
-    hint: 'Consulta solo; todo lo que tenga efecto espera tu OK.',
+    label: 'Equilibrado',
+    hint: 'Consulta, redacta, delega y arma gráficas solo; enviar, cambiar datos o borrar espera tu OK.',
   },
   {
     value: 'notify',
     label: 'Avisa',
-    hint: 'Consultas y borradores solos; te avisa de cada efecto.',
+    hint: 'Igual que equilibrado y te avisa de cada cosa que hace.',
   },
   {
-    value: 'auto',
-    label: 'Autónomo',
-    hint: 'Consultas, borradores y tareas internas sin preguntar.',
+    value: 'strict',
+    label: 'Todo con aprobación',
+    hint: 'Solo consulta sin preguntar; hasta los borradores esperan tu OK.',
   },
 ];
 

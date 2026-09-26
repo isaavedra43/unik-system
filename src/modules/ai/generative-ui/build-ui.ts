@@ -129,7 +129,91 @@ const cut = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1).trimE
 const isObj = (v: unknown): v is Record<string, unknown> =>
   Boolean(v) && typeof v === 'object' && !Array.isArray(v);
 
+/** Spanish labels for the keys ERP tools return most (the rest are humanized). */
+const LABELS_ES: Record<string, string> = {
+  count: 'Cantidad',
+  total: 'Total',
+  totalsum: 'Total',
+  subtotal: 'Subtotal',
+  balance: 'Saldo',
+  balancesum: 'Saldo',
+  amount: 'Monto',
+  price: 'Precio',
+  rate: 'Precio',
+  quantity: 'Cantidad',
+  qty: 'Cantidad',
+  ordernumber: 'Orden',
+  ordernumbers: 'Órdenes',
+  salesordernumber: 'Orden',
+  customer: 'Cliente',
+  customername: 'Cliente',
+  vendorname: 'Proveedor',
+  salesperson: 'Vendedor',
+  salespersonname: 'Vendedor',
+  date: 'Fecha',
+  createdat: 'Creado',
+  updatedat: 'Actualizado',
+  duedate: 'Vence',
+  status: 'Estado',
+  ticketstatus: 'Ticket',
+  paymentmethod: 'Pago',
+  deliverymethod: 'Entrega',
+  branch: 'Sucursal',
+  location: 'Sucursal',
+  locationname: 'Sucursal',
+  warehouse: 'Almacén',
+  product: 'Producto',
+  productname: 'Producto',
+  name: 'Nombre',
+  sku: 'SKU',
+  email: 'Correo',
+  phone: 'Teléfono',
+  label: 'Concepto',
+  group: 'Grupo',
+  key: 'Grupo',
+  value: 'Valor',
+};
+
+/** Tools whose name the user sees as the source of a card. */
+const TOOL_LABELS_ES: Record<string, string> = {
+  querysalesorders: 'Ventas',
+  getsalesorderdetail: 'Orden de venta',
+  queryproducts: 'Productos',
+  querycontacts: 'Contactos',
+  getcontactfile: 'Expediente',
+  querypayments: 'Pagos',
+  queryinvoices: 'Facturas',
+  querypurchaseorders: 'Compras',
+  querypackages: 'Envíos',
+  queryquotes: 'Cotizaciones',
+  queryinventory: 'Inventario',
+  universalsearch: 'Búsqueda',
+  getdatabaseoverview: 'Panorama',
+};
+
+/** Money-like keys get currency format; other numbers get thousands separators. */
+const MONEY_KEY =
+  /(total|balance|saldo|amount|monto|price|precio|subtotal|importe|sum$|cost|costo|revenue|venta)/i;
+
+export function formatCell(key: string, value: unknown): string | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    if (MONEY_KEY.test(key)) {
+      return `$${value.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    }
+    return Number.isInteger(value)
+      ? value.toLocaleString('es-MX')
+      : value.toLocaleString('es-MX', { maximumFractionDigits: 2 });
+  }
+  return textOf(value);
+}
+
+export function toolLabel(toolName: string): string {
+  return TOOL_LABELS_ES[toolName.toLowerCase()] ?? humanize(toolName);
+}
+
 export function humanize(key: string): string {
+  const known = LABELS_ES[key.replace(/[_\s-]+/g, '').toLowerCase()];
+  if (known) return known;
   const spaced = key
     .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
     .replace(/[_-]+/g, ' ')
@@ -235,7 +319,7 @@ export function toRecord(obj: Record<string, unknown>): UiRecord | null {
         ? textOf(v)
         : typeof v === 'object'
           ? undefined
-          : textOf(v);
+          : formatCell(k, v);
     if (t && t.length <= 80) fields.push({ label: humanize(k), value: t });
   }
 
@@ -296,7 +380,9 @@ function toTable(rows: Record<string, unknown>[]): { columns: string[]; rows: st
   if (columns.length < 2) return null;
   return {
     columns: columns.map(humanize),
-    rows: rows.slice(0, MAX_UI_ITEMS).map((r) => columns.map((c) => cut(textOf(r[c]) ?? '', 80))),
+    rows: rows
+      .slice(0, MAX_UI_ITEMS)
+      .map((r) => columns.map((c) => cut(formatCell(c, r[c]) ?? '', 80))),
   };
 }
 
@@ -875,7 +961,7 @@ export function buildUiComponents(input: UiToolResultInput): UiComponent[] {
   // render nothing. Browser/venue tools are excluded: their live surface is
   // the workspace panel, not chat cards.
   if (!toolName.startsWith('browser') && !toolName.startsWith('venue')) {
-    out.push(...extractUiFromData(result, humanize(toolName)));
+    out.push(...extractUiFromData(result, toolLabel(toolName)));
   }
   return out.slice(0, MAX_UI_COMPONENTS_PER_TOOL);
 }

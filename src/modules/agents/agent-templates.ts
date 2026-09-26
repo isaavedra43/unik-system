@@ -17,7 +17,7 @@ import type { TriggerAction, TriggerSpec } from './trigger-service';
  *   deja activado. `tz` fija la hora local del negocio.
  */
 
-export type AgentAutonomy = 'auto' | 'notify' | 'approval';
+export type AgentAutonomy = 'auto' | 'notify' | 'approval' | 'strict';
 export type AgentVenuePolicy = 'shared' | 'dedicated' | 'ephemeral';
 
 export interface AgentRoutine {

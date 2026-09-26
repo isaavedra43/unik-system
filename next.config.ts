@@ -35,7 +35,8 @@ const contentSecurityPolicy = [
   `connect-src 'self'${isDev ? ' ws: wss:' : ''}${livekitOrigins()
     .map((o) => ` ${o}`)
     .join('')}`,
-  "media-src 'self' blob:",
+  // Audio/video from signed storage URLs and generated media (never scripts).
+  "media-src 'self' blob: https:",
   "worker-src 'self' blob:",
   // PDF/preview iframes are always same-origin or blob: — no external frame
   // is allowed to render inside the app (phishing inside our origin).

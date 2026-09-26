@@ -264,3 +264,19 @@ describe('executeTool — external capabilities', () => {
     ).toThrow(/collides/);
   });
 });
+
+describe('readableSummary', () => {
+  it('describes the action in words, without internal ids or JSON', async () => {
+    const { readableSummary } = await import('./registry');
+    const s = readableSummary(
+      {
+        name: 'sendInternalChatMessage',
+        description: 'Envía un mensaje al chat interno de UNIK. Úsalo cuando…',
+      },
+      { conversationId: 'cm1', channelId: 'ch_9', text: 'Ya salió el pedido', urgent: true }
+    );
+    expect(s).toBe(
+      'Envía un mensaje al chat interno de UNIK — text: Ya salió el pedido · urgent: true'
+    );
+  });
+});

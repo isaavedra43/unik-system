@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { Readable } from 'stream';
-import { receiveDiskPart } from '@/modules/storage/storage-service';
+import { receivePart } from '@/modules/storage/storage-service';
 import { verifyUploadPartToken } from '@/modules/storage/upload-tokens';
 import { storageErrorResponse } from '../../../../_shared';
 
@@ -11,10 +11,11 @@ export const maxDuration = 300;
 /**
  * PUT /app/files/api/uploads/[id]/parts/[partNumber]?token=…
  *
- * Direct upload endpoint of the DISK driver (local development / emulator).
- * It plays the role of an R2 presigned URL: the HMAC token authorizes ONE
- * part of ONE upload for a few minutes and nothing else. With the R2 driver
- * the browser never calls this route (it PUTs straight to R2).
+ * Same-origin upload endpoint. With the DISK driver it is the "presigned URL";
+ * with R2 it is the relay the browser uses when it cannot PUT to the bucket
+ * itself (the app's CSP only allows `connect-src 'self'`, the bucket may lack
+ * CORS for this origin). The HMAC token authorizes ONE part of ONE upload for
+ * a few minutes and nothing else.
  */
 export async function PUT(
   request: NextRequest,
@@ -33,7 +34,7 @@ export async function PUT(
     const body = Readable.fromWeb(
       request.body as unknown as import('stream/web').ReadableStream<Uint8Array>
     );
-    const { etag } = await receiveDiskPart(claims, body);
+    const { etag } = await receivePart(claims, body);
     return new NextResponse(null, { status: 200, headers: { ETag: etag } });
   } catch (err) {
     return storageErrorResponse(err);

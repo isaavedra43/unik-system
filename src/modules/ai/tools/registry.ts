@@ -379,8 +379,33 @@ function defaultSummary(tool: ToolDefinition, args: unknown): string {
       // fall through
     }
   }
-  const short = JSON.stringify(args ?? {});
-  return `${tool.name}: ${short.length > 300 ? `${short.slice(0, 300)}…` : short}`;
+  return readableSummary(tool, args);
+}
+
+/**
+ * What the approval card says when a tool has no `summarize`: the first
+ * clause of its (Spanish) description plus the plain arguments — never raw
+ * JSON with internal ids.
+ */
+export function readableSummary(tool: Pick<ToolDefinition, 'name' | 'description'>, args: unknown): string {
+  const first = (tool.description ?? '').split(/(?<=[.:])\s|\n/)[0]?.replace(/[.:]$/, '').trim();
+  const what = first && first.length <= 140 ? first : tool.name;
+  const details: string[] = [];
+  if (args && typeof args === 'object' && !Array.isArray(args)) {
+    for (const [key, value] of Object.entries(args as Record<string, unknown>)) {
+      // Internal ids mean nothing to the person approving.
+      if (/(^id$|Id$|Ids$)/.test(key) || value == null || value === '') continue;
+      let text: string | null = null;
+      if (typeof value === 'string') text = value;
+      else if (typeof value === 'number' || typeof value === 'boolean') text = String(value);
+      else if (Array.isArray(value) && value.every((v) => typeof v === 'string' || typeof v === 'number'))
+        text = value.join(', ');
+      if (!text) continue;
+      details.push(`${key}: ${text.length > 120 ? `${text.slice(0, 120)}…` : text}`);
+      if (details.length >= 4) break;
+    }
+  }
+  return details.length > 0 ? `${what} — ${details.join(' · ')}` : what;
 }
 
 /** Executes a tool validating availability, enablement, permissions, args, approval and limits. */

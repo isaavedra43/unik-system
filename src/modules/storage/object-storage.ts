@@ -118,6 +118,25 @@ export interface ObjectStorageDriver {
   ): Promise<void>;
   abortMultipartUpload(bucket: BucketAlias, key: string, providerUploadId: string): Promise<void>;
 
+  /**
+   * Relay: the app receives the bytes of one part (same origin — no CSP or
+   * bucket CORS involved) and forwards them to the provider.
+   */
+  uploadPartStream?(
+    bucket: BucketAlias,
+    key: string,
+    providerUploadId: string,
+    partNumber: number,
+    body: Readable,
+    contentLength: number
+  ): Promise<{ etag: string }>;
+  /** Parts the provider already holds (recovers ETags a browser could not read). */
+  listParts?(
+    bucket: BucketAlias,
+    key: string,
+    providerUploadId: string
+  ): Promise<Array<{ partNumber: number; etag: string; sizeBytes: number }>>;
+
   /** Short-lived download URL. Returns null when the driver cannot presign (disk). */
   presignGet(
     bucket: BucketAlias,

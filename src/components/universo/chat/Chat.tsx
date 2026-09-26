@@ -26,6 +26,7 @@ import { Composer, type ComposerHandle, type ComposerMode } from './Composer';
 import { loadStoredEffort, type EffortValue } from './EffortPicker';
 import { WelcomeHero, WelcomeStarters } from './Welcome';
 import { VoicePanel } from '../voice/VoicePanel';
+import { mergeAssistantRuns } from '../lib/turns';
 import { Cards } from '../cards/Cards';
 import { ArtifactCard } from '../cards/ArtifactCard';
 import { ApprovalCard, TeamRunCard } from '../cards/Agentic';
@@ -221,8 +222,10 @@ export function Chat({
     el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
   };
 
-  const lastUserIndex = messages.reduce((acc, m, i) => (m.role === 'user' ? i : acc), -1);
-  const lastUserText = lastUserIndex >= 0 ? (messages[lastUserIndex].content ?? '') : '';
+  // One answer per turn (every model round of a turn in one block).
+  const shown = useMemo(() => mergeAssistantRuns(messages), [messages]);
+  const lastUserIndex = shown.reduce((acc, m, i) => (m.role === 'user' ? i : acc), -1);
+  const lastUserText = lastUserIndex >= 0 ? (shown[lastUserIndex].content ?? '') : '';
   const pending = useMemo(
     () => proposals.filter((p) => !p.status || p.status === 'pending'),
     [proposals]
@@ -465,8 +468,8 @@ export function Chat({
 
         {!loading && !isEmpty && (
           <div className="uv-thread">
-            {messages.map((m, i) => (
-              <React.Fragment key={m.id}>
+            {shown.map((m, i) => (
+              <React.Fragment key={m.mergedIds[0]}>
                 <Message
                   message={m}
                   agent={agent}
@@ -480,8 +483,8 @@ export function Chat({
                   }
                   onOpenWorkspace={onOpenWorkspace}
                 />
-                {approvalCards(placed.byMessage.get(m.id) ?? [])}
-                {m.id === delegatedAt && !liveDelegated && teamCard}
+                {approvalCards(m.mergedIds.flatMap((id) => placed.byMessage.get(id) ?? []))}
+                {delegatedAt && m.mergedIds.includes(delegatedAt) && !liveDelegated && teamCard}
               </React.Fragment>
             ))}
 

@@ -11,13 +11,21 @@ import { prisma } from '@/lib/prisma';
 
 export type GateDecision = 'allow' | 'deny' | 'require_approval';
 
-const AUTONOMY_MATRIX: Record<string, Set<string>> = {
-  // auto: corre lecturas, borradores y tareas internas sin preguntar
+/**
+ * Lo que el agente hace sin preguntar. Enviar, escribir en el negocio y
+ * borrar SIEMPRE piden aprobación en el registry (paso 5), sea cual sea la
+ * autonomía — la promesa de la app: «aprobación antes de enviar, pagar o
+ * cambiar algo». Consultar, dibujar gráficas/tarjetas, redactar documentos,
+ * delegar al equipo y recordar nunca deberían pedirla.
+ */
+export const AUTONOMY_MATRIX: Record<string, Set<string>> = {
   auto: new Set(['read', 'draft', 'internal_task']),
   // notify: igual que auto pero cada efecto avisa (la propuesta fluye igual)
   notify: new Set(['read', 'draft', 'internal_task']),
-  // approval (default): solo lecturas corren solas
-  approval: new Set(['read']),
+  // approval (default): igual — solo lo que sale o cambia datos pide aprobación
+  approval: new Set(['read', 'draft', 'internal_task']),
+  // strict: hasta los borradores y el trabajo interno piden aprobación
+  strict: new Set(['read']),
 };
 
 const grantCache = new Map<string, { grants: Map<string, GateDecision>; at: number }>();
@@ -46,7 +54,7 @@ export function clearGrantCache(agentId?: string): void {
  */
 export async function checkAgentGate(
   agentId: string,
-  tool: { name: string; effect?: string },
+  tool: { name: string; effect?: string }
 ): Promise<{ decision: GateDecision; reason: string }> {
   const grants = await grantsFor(agentId);
   const byTool = grants.get(`tool:${tool.name}`);
@@ -56,34 +64,43 @@ export async function checkAgentGate(
   const byEffect = grants.get(`effect:${effect}`);
   if (byEffect) return { decision: byEffect, reason: `grant effect:${effect}` };
 
-  const agent = await prisma.agent.findUnique({
-    where: { id: agentId },
-    select: { autonomy: true, status: true },
-  }).catch(() => null);
+  const agent = await prisma.agent
+    .findUnique({
+      where: { id: agentId },
+      select: { autonomy: true, status: true },
+    })
+    .catch(() => null);
   if (!agent || agent.status !== 'active') {
     return { decision: 'deny', reason: 'agente inactivo' };
   }
   const auto = AUTONOMY_MATRIX[agent.autonomy] ?? AUTONOMY_MATRIX.approval;
   return auto.has(effect)
     ? { decision: 'allow', reason: `autonomía ${agent.autonomy}` }
-    : { decision: 'require_approval', reason: `efecto ${effect} requiere aprobación con autonomía ${agent.autonomy}` };
+    : {
+        decision: 'require_approval',
+        reason: `efecto ${effect} requiere aprobación con autonomía ${agent.autonomy}`,
+      };
 }
 
 /** Presupuesto del agente (USD por periodo) — null = sin límite. */
 export async function agentBudgetExceeded(agentId: string): Promise<boolean> {
-  const agent = await prisma.agent.findUnique({
-    where: { id: agentId },
-    select: { budgetUsd: true, budgetPeriod: true },
-  }).catch(() => null);
+  const agent = await prisma.agent
+    .findUnique({
+      where: { id: agentId },
+      select: { budgetUsd: true, budgetPeriod: true },
+    })
+    .catch(() => null);
   if (!agent?.budgetUsd) return false;
   const since = new Date();
   if (agent.budgetPeriod === 'day') since.setHours(0, 0, 0, 0);
   else if (agent.budgetPeriod === 'week') since.setDate(since.getDate() - 7);
   else since.setDate(1);
-  const agg = await prisma.agentRun.aggregate({
-    _sum: { modelCostUsd: true, toolsCostUsd: true, venueCostUsd: true },
-    where: { agentId, startedAt: { gte: since } },
-  }).catch(() => null);
+  const agg = await prisma.agentRun
+    .aggregate({
+      _sum: { modelCostUsd: true, toolsCostUsd: true, venueCostUsd: true },
+      where: { agentId, startedAt: { gte: since } },
+    })
+    .catch(() => null);
   const spent =
     Number(agg?._sum.modelCostUsd ?? 0) +
     Number(agg?._sum.toolsCostUsd ?? 0) +

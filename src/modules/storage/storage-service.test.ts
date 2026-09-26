@@ -506,3 +506,104 @@ describe('saveGeneratedFile', () => {
     expect(object.objectKey).toMatch(/^assistant\//);
   });
 });
+
+describe('same-origin relay (R2 without direct browser access)', () => {
+  /**
+   * An R2-like driver backed by the disk: presigned URLs point to the bucket
+   * host (which the app's CSP blocks in the browser), and the relay methods
+   * forward the bytes the app receives.
+   */
+  function r2Like() {
+    const held = new Map<number, string>();
+    const fake = Object.assign(Object.create(driver) as DiskObjectStorageDriver, {
+      provider: 'r2',
+      presignPut: async () => ({
+        url: 'https://acct.r2.cloudflarestorage.com/quarantine/x?X-Amz-Signature=1',
+        method: 'PUT' as const,
+        headers: {},
+        expiresAt: new Date(Date.now() + 900_000),
+      }),
+      presignUploadPart: async () => ({
+        url: 'https://acct.r2.cloudflarestorage.com/quarantine/x?partNumber=1',
+        method: 'PUT' as const,
+        headers: {},
+        expiresAt: new Date(Date.now() + 900_000),
+      }),
+      uploadPartStream: async (
+        bucket: 'quarantine',
+        key: string,
+        providerUploadId: string,
+        partNumber: number,
+        body: Readable,
+        _contentLength: number
+      ) => {
+        void _contentLength;
+        const { etag } = await driver.writePart(bucket, key, providerUploadId, partNumber, body);
+        held.set(partNumber, etag);
+        return { etag };
+      },
+      listParts: async () =>
+        [...held.entries()].map(([partNumber, etag]) => ({ partNumber, etag, sizeBytes: 0 })),
+    });
+    setObjectStorageDriverForTests(fake as never, null);
+    return { fake, held };
+  }
+
+  it('signs a same-origin relay URL next to the bucket URL', async () => {
+    r2Like();
+    const data = png(4096);
+    const init = await initiateUpload({
+      actorId: 'u1',
+      fileName: 'foto.png',
+      declaredMimeType: 'image/png',
+      declaredSize: data.length,
+      target: { type: 'chat_channel', id: 'c1' },
+      policy,
+    });
+    const part = init.parts![0];
+    expect(part.url).toMatch(/^https:\/\/acct\.r2/);
+    expect(part.relayUrl).toMatch(/^\/app\/files\/api\/uploads\/.+\/parts\/1\?token=/);
+
+    // The browser PUTs to the relay; the app forwards to the provider.
+    await putViaToken(part.relayUrl!, data);
+    const done = await completeUpload('u1', init.uploadId, [{ partNumber: 1, etag: '' }]);
+    expect(done.status).toBe('validating');
+    expect((await validateAndPromote(init.objectId)).status).toBe('ready');
+  });
+
+  it('relays multipart uploads and recovers ETags the browser could not read', async () => {
+    const { fake } = r2Like();
+    const data = png(12 * 1024 * 1024 + 5);
+    const init = await initiateUpload({
+      actorId: 'u1',
+      fileName: 'plano.png',
+      declaredMimeType: 'image/png',
+      declaredSize: data.length,
+      target: { type: 'chat_channel', id: 'c1' },
+      policy,
+    });
+    const signed = await signUploadParts('u1', init.uploadId, [1, 2, 3]);
+    const slice = (n: number) =>
+      data.subarray((n - 1) * init.partSize, Math.min(data.length, n * init.partSize));
+    // Part 1 through the relay; parts 2 and 3 straight to the bucket (CORS hid the ETag).
+    await putViaToken(signed[0].relayUrl!, slice(1));
+    const quarantineKey = (await repo.getSession(init.uploadId))!.quarantineKey;
+    const providerUploadId = (await repo.getSession(init.uploadId))!.providerUploadId!;
+    for (const n of [2, 3]) {
+      await fake.uploadPartStream!(
+        'quarantine',
+        quarantineKey,
+        providerUploadId,
+        n,
+        Readable.from([slice(n)]),
+        slice(n).length
+      );
+    }
+    const done = await completeUpload('u1', init.uploadId, [
+      { partNumber: 2, etag: '' },
+      { partNumber: 3, etag: '' },
+    ]);
+    expect(done.status).toBe('validating');
+    expect((await validateAndPromote(init.objectId)).status).toBe('ready');
+  });
+});

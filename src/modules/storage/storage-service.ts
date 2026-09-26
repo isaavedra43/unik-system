@@ -25,7 +25,7 @@ import { HEAD_BYTES, normalizeMime, validateFileContent } from './file-validatio
 import type { ZipRandomAccess } from './zip-reader';
 import { enqueueJob, JOB_PRIORITY, runJobInline, waitForJob } from '@/modules/jobs/job-queue';
 import { publishRealtime, REALTIME_CHANNELS } from '@/modules/realtime/realtime-service';
-import type { UploadPartClaims } from './upload-tokens';
+import { createUploadPartToken, type UploadPartClaims } from './upload-tokens';
 import { recordUsage } from '@/modules/extensions/usage-meter';
 
 /**
@@ -87,6 +87,28 @@ export interface SignedPartDTO {
   headers: Record<string, string>;
   expiresAt: string;
   contentLength: number;
+  /**
+   * Same-origin alternative to `url` (the app relays the bytes to the
+   * provider). Works where the browser cannot reach the bucket directly:
+   * the app's CSP (`connect-src 'self'`), a bucket without CORS for this
+   * origin, or an ETag header CORS does not expose.
+   */
+  relayUrl?: string;
+}
+
+function relayPartUrl(
+  uploadId: string,
+  partNumber: number,
+  contentLength: number,
+  expiresAt: Date
+): string {
+  const token = createUploadPartToken({
+    uploadId,
+    partNumber,
+    contentLength,
+    expiresAt: expiresAt.getTime(),
+  });
+  return `/app/files/api/uploads/${encodeURIComponent(uploadId)}/parts/${partNumber}?token=${encodeURIComponent(token)}`;
 }
 
 export interface InitiateUploadResult {
@@ -345,26 +367,76 @@ export async function signUploadParts(
       headers: req.headers,
       expiresAt: req.expiresAt.toISOString(),
       contentLength,
+      ...(driver.provider !== 'disk'
+        ? { relayUrl: relayPartUrl(session.id, partNumber, contentLength, req.expiresAt) }
+        : {}),
     });
   }
   return signed;
 }
 
+/** Writes one part on the configured provider (disk file or R2 relay). */
+async function writePartTo(
+  driver: ObjectStorageDriver,
+  session: {
+    quarantineKey: string;
+    multipart: boolean;
+    providerUploadId: string | null;
+    object: { declaredMimeType: string };
+  },
+  partNumber: number,
+  body: Readable,
+  expected: number
+): Promise<{ etag: string; sizeBytes: number }> {
+  // Check the provider, not `instanceof`: the driver is cached on globalThis and may have been
+  // created by another bundle (instrumentation/job worker) with its own copy of the class.
+  if (driver.provider === 'disk') {
+    return (driver as DiskObjectStorageDriver).writePart(
+      'quarantine',
+      session.quarantineKey,
+      session.multipart ? session.providerUploadId : null,
+      partNumber,
+      body
+    );
+  }
+  if (session.multipart) {
+    if (!session.providerUploadId || !driver.uploadPartStream) {
+      throw new StorageError('Subida por relevo no disponible', 'state', 400);
+    }
+    const { etag } = await driver.uploadPartStream(
+      'quarantine',
+      session.quarantineKey,
+      session.providerUploadId,
+      partNumber,
+      body,
+      expected
+    );
+    return { etag, sizeBytes: expected };
+  }
+  const { etag } = await driver.putObject({
+    bucket: 'quarantine',
+    key: session.quarantineKey,
+    body,
+    contentType: session.object.declaredMimeType,
+    contentLength: expected,
+  });
+  return { etag: etag ?? `"relay-${partNumber}"`, sizeBytes: expected };
+}
+
+/** @deprecated kept for callers of the disk-only name. */
+export const receiveDiskPart = (claims: UploadPartClaims, body: Readable) =>
+  receivePart(claims, body);
+
 /**
- * Disk-driver only: receives the bytes of ONE authorized part. The token was
+ * Receives the bytes of ONE authorized part through the app: the disk
+ * driver's upload endpoint, and the same-origin relay for R2. The token was
  * issued by `signUploadParts`, so the caller has already proven ownership.
  */
-export async function receiveDiskPart(
+export async function receivePart(
   claims: UploadPartClaims,
   body: Readable
 ): Promise<{ etag: string }> {
   const shared = getObjectStorageDriver();
-  // Check the provider, not `instanceof`: the driver is cached on globalThis and may have been
-  // created by another bundle (instrumentation/job worker) with its own copy of the class.
-  if (shared.provider !== 'disk') {
-    throw new StorageError('Subida directa no disponible con este proveedor', 'state', 400);
-  }
-  const driver = shared as DiskObjectStorageDriver;
   const repo = getStorageRepository();
   const session = await repo.getSession(claims.uploadId);
   if (!session) throw new StorageError('Carga no encontrada', 'not_found', 404);
@@ -387,12 +459,10 @@ export async function receiveDiskPart(
     },
   });
   const pass = new PassThrough();
-  const writePromise = driver.writePart(
-    'quarantine',
-    session.quarantineKey,
-    session.multipart ? session.providerUploadId : null,
-    claims.partNumber,
-    pass
+  const writePromise = writePartTo(shared, session, claims.partNumber, pass, expected);
+  // If the provider fails before reading everything, stop feeding it (no stalled pipe).
+  writePromise.catch((err: unknown) =>
+    pass.destroy(err instanceof Error ? err : new Error(String(err)))
   );
   await pipeline(body, limited, pass);
   const written = await writePromise;
@@ -506,7 +576,9 @@ export async function completeUpload(
         : [];
       const merged = new Map<number, string>();
       for (const p of recorded) merged.set(p.partNumber, p.etag);
-      for (const p of parts) {
+      // A browser that PUT straight to the bucket may not see the ETag header
+      // (CORS): those parts come without one and are looked up below.
+      for (const p of parts.filter((x) => !(typeof x.etag === 'string' && x.etag.length === 0))) {
         if (
           !Number.isInteger(p.partNumber) ||
           p.partNumber < 1 ||
@@ -518,6 +590,14 @@ export async function completeUpload(
           throw new StorageError('ETag inválido', 'invalid', 400);
         }
         merged.set(p.partNumber, p.etag);
+      }
+      if (merged.size !== session.partCount && session.providerUploadId && driver.listParts) {
+        const held = await driver.listParts(
+          'quarantine',
+          session.quarantineKey,
+          session.providerUploadId
+        );
+        for (const p of held) if (!merged.has(p.partNumber)) merged.set(p.partNumber, p.etag);
       }
       if (merged.size !== session.partCount) {
         throw new StorageError(

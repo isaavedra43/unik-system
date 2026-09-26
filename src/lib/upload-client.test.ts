@@ -28,3 +28,16 @@ describe('inferMimeType', () => {
     expect(inferMimeType('raro.xyz', '')).toBe('application/octet-stream');
   });
 });
+
+describe('chooseRoute', () => {
+  it('sends ordinary files through the same-origin relay and big ones to the bucket', async () => {
+    const { chooseRoute } = await import('./upload-client');
+    const relay = { relayUrl: '/app/files/api/uploads/u/parts/1?token=t' };
+    expect(chooseRoute(relay, 300 * 1024, false)).toBe('relay');
+    expect(chooseRoute(relay, 500 * 1024 * 1024, false)).toBe('direct');
+    // Once the bucket was unreachable, everything goes through the relay.
+    expect(chooseRoute(relay, 500 * 1024 * 1024, true)).toBe('relay');
+    // Disk driver: its URL is already same-origin.
+    expect(chooseRoute({}, 300 * 1024, false)).toBe('direct');
+  });
+});

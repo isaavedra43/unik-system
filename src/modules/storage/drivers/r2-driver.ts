@@ -8,6 +8,7 @@ import {
   GetObjectCommand,
   HeadObjectCommand,
   ListObjectsV2Command,
+  ListPartsCommand,
   PutObjectCommand,
   S3Client,
   UploadPartCommand,
@@ -237,6 +238,56 @@ export class R2ObjectStorageDriver implements ObjectStorageDriver {
       headers: {},
       expiresAt: new Date(Date.now() + opts.expiresInSeconds * 1000),
     };
+  }
+
+  async uploadPartStream(
+    bucket: BucketAlias,
+    key: string,
+    providerUploadId: string,
+    partNumber: number,
+    body: Readable,
+    contentLength: number
+  ): Promise<{ etag: string }> {
+    assertSafeKey(key);
+    const res = await this.client.send(
+      new UploadPartCommand({
+        Bucket: this.bucket(bucket),
+        Key: key,
+        UploadId: providerUploadId,
+        PartNumber: partNumber,
+        Body: body,
+        ContentLength: contentLength,
+      })
+    );
+    if (!res.ETag) throw new Error('R2 did not return an ETag for the part');
+    return { etag: res.ETag };
+  }
+
+  async listParts(
+    bucket: BucketAlias,
+    key: string,
+    providerUploadId: string
+  ): Promise<Array<{ partNumber: number; etag: string; sizeBytes: number }>> {
+    assertSafeKey(key);
+    const out: Array<{ partNumber: number; etag: string; sizeBytes: number }> = [];
+    let marker: string | undefined;
+    for (let page = 0; page < 20; page++) {
+      const res = await this.client.send(
+        new ListPartsCommand({
+          Bucket: this.bucket(bucket),
+          Key: key,
+          UploadId: providerUploadId,
+          PartNumberMarker: marker,
+        })
+      );
+      for (const p of res.Parts ?? []) {
+        if (p.PartNumber && p.ETag)
+          out.push({ partNumber: p.PartNumber, etag: p.ETag, sizeBytes: Number(p.Size ?? 0) });
+      }
+      if (!res.IsTruncated || !res.NextPartNumberMarker) break;
+      marker = res.NextPartNumberMarker;
+    }
+    return out;
   }
 
   async completeMultipartUpload(

@@ -854,9 +854,12 @@ async function* runAssistantInner(input: OrchestratorInput): AsyncGenerator<Orch
     const cap = getModelById(model)?.maxOutput;
     const heavy = plan.heavyOutput || attachmentsForContext.length > 0;
     // Reasoning models spend part of the budget thinking: give them room for both.
+    // Even a plain turn may draw a card (a renderUi spec is thousands of tokens of
+    // tool arguments): a tight cap cut the call mid-JSON and the turn "failed"
+    // over to a weaker model. Only used tokens are billed, so the floor is free.
     const wanted = heavy
       ? Math.max(settings.maxTokens, isReasoningModel(model) ? 32_000 : 12_000)
-      : settings.maxTokens;
+      : Math.max(settings.maxTokens, isReasoningModel(model) ? 16_000 : 8_000);
     return cap && cap > 0 ? Math.min(wanted, cap) : wanted;
   };
   const turnReasoningEffort = plan.reasoningEffort;

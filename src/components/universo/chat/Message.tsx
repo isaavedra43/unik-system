@@ -417,6 +417,15 @@ export interface MessageProps {
   onOpenWorkspace?: (tab: WorkspaceTab) => void;
 }
 
+const EXPLICIT_VISUAL_TOOLS = new Set([
+  'renderUi',
+  'renderView',
+  'generateTable',
+  'generateChart',
+  'generateReportImage',
+]);
+const DATA_LOOKUP = /^(query|get|list|search|universalSearch|lookup)/;
+
 export const Message = memo(function Message({
   message,
   agent,
@@ -432,8 +441,11 @@ export const Message = memo(function Message({
   const derived = useMemo(() => {
     if (isUser) return null;
     const steps = stepsFromRecords(records);
+    // When the agent drew the answer itself (dashboard, table, chart), the raw
+    // lookups behind it are not shown again as cards.
+    const drewVisual = records.some((r) => r.success && EXPLICIT_VISUAL_TOOLS.has(r.toolName));
     const cards = records.flatMap((r) =>
-      r.success
+      r.success && !(drewVisual && DATA_LOOKUP.test(r.toolName))
         ? buildUiComponents({ toolName: r.toolName, args: r.args, result: r.result, success: true })
         : []
     );

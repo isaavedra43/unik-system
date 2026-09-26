@@ -287,7 +287,7 @@ registerTool({
   category: 'communication',
   requiredPermission: 'inbox.use',
   enabledByDefault: true,
-  effect: 'internal_task',
+  effect: 'business_write',
   contextTags: ['inbox'],
   parameters: z.object({
     inboxConversationId: z.string().min(1),
