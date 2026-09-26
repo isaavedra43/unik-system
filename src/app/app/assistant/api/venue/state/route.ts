@@ -1,107 +1,111 @@
-import { NextResponse } from 'next/server';
-import { getCurrentSession, hasPermission } from '@/modules/auth/authorization';
+import type { NextRequest } from 'next/server';
 import { attachVenue, currentVenueSession } from '@/modules/venues/venue-manager';
+import {
+  browserFramePayload,
+  json,
+  metaOf,
+  pendingInputsOf,
+  requireVenueUser,
+  teachOf,
+} from '@/modules/venues/venue-http';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-interface PendingSecureInput {
-  id: string;
-  fields: { selector: string; label: string; sensitive?: boolean }[];
-  message?: string | null;
-  ts: string;
-}
-
-/** Screenshots are ephemeral: the frame lives only in this response, never cached. */
-const NO_STORE = {
-  'Cache-Control': 'no-store, no-cache, must-revalidate',
-  Pragma: 'no-cache',
-} as const;
-
-function stateJson(body: unknown, status = 200) {
-  return NextResponse.json(body, { status, headers: NO_STORE });
-}
-
 /**
- * GET /app/assistant/api/venue/state
+ * GET /app/assistant/api/venue/state?surface=browser|desktop|none&quality=55
  *
- * Live-state poll for the workspace "Navegador" surface: the caller's latest
- * active venue session, a fresh screenshot of the agent's browser page (the
- * sandbox desktop itself is headless — the controller's page screenshot is
- * what the user wants to see) and any pending secure-input requests.
+ * Live state of the caller's virtual computer for the workspace column. The
+ * BROWSER and the COMPUTER are reported separately (they are different
+ * surfaces); only the one the user is looking at gets a fresh frame, so the
+ * poll stays cheap.
  *
- * This is a passive read: it never provisions (that is the tool call's job)
- * and never counts as usage, so watching the panel cannot keep a sandbox
- * alive by itself. While the browser is still booting it answers
- * `active:true, booting:true` with the real reason instead of flipping the
- * panel to "off".
- *
- * Values marked `sensitive` are never included here — only field metadata.
+ * Passive: it never wakes a paused sandbox, never provisions synchronously
+ * (a background heal is kicked through the per-sandbox lock) and never counts
+ * as usage — watching the panel cannot keep a computer alive by itself.
+ * Sensitive values of secure-input requests are never included.
  */
-export async function GET() {
-  const session = await getCurrentSession();
-  if (!session) return NextResponse.json({ error: 'No autenticado' }, { status: 401 });
-  if (!hasPermission(session.user, 'browser.use')) {
-    return NextResponse.json({ error: 'Sin permiso' }, { status: 403 });
-  }
+export async function GET(request: NextRequest) {
+  const auth = await requireVenueUser('browser.use');
+  if ('response' in auth) return auth.response;
+  const { user } = auth;
 
-  const vs = await currentVenueSession(session.user.id);
-  if (!vs?.externalId) return stateJson({ active: false });
+  const surface = request.nextUrl.searchParams.get('surface') ?? 'none';
+  const quality = Math.min(
+    Math.max(Number(request.nextUrl.searchParams.get('quality')) || 55, 20),
+    85
+  );
 
-  const meta = (vs.metadata as Record<string, unknown> | null) ?? {};
-  const cutoff = Date.now() - 30 * 60_000;
-  const pendingInputs = ((meta.pendingSecureInputs as PendingSecureInput[] | undefined) ?? [])
-    .filter((r) => new Date(r.ts).getTime() > cutoff)
-    .map((r) => ({
-      requestId: r.id,
-      message: r.message ?? null,
-      fields: (r.fields ?? []).map((f) => ({
-        selector: f.selector,
-        label: f.label,
-        sensitive: f.sensitive === true,
-      })),
-    }));
+  const vs = await currentVenueSession(user.id);
+  if (!vs?.externalId) return json({ active: false });
+
+  const meta = metaOf(vs);
+  const pendingInputs = pendingInputsOf(meta);
+  const teach = teachOf(meta);
+  const base = {
+    active: true,
+    sessionId: vs.id,
+    startedAt: vs.createdAt.toISOString(),
+    pendingInputs,
+    teach: teach ? { recording: true, steps: teach.steps.length } : { recording: false, steps: 0 },
+  };
 
   let venue;
   try {
-    venue = await attachVenue(vs.id, session.user.id, { heal: false });
+    venue = await attachVenue(vs.id, user.id, { heal: false });
   } catch {
-    // Sandbox gone (deleted/expired) — the row is stale; the next tool call recreates.
-    return stateJson({ active: false, pendingInputs });
+    // Sandbox gone (deleted/expired) — the row is stale; the next start recreates.
+    return json({ active: false, pendingInputs });
   }
 
-  const health = await venue.health();
-  if (!health.ok) {
-    return stateJson({
-      active: true,
-      booting: true,
-      sessionId: vs.id,
-      screen: null,
-      reason: health.reason ?? null,
-      pendingInputs,
+  const sandboxState = venue.sandboxState ?? 'started';
+  if (sandboxState !== 'started') {
+    return json({
+      ...base,
+      paused: true,
+      sandboxState,
+      browser: { ready: false, stage: 'starting', reason: 'La computadora está en pausa.' },
+      desktop: { running: false, reason: 'La computadora está en pausa.' },
     });
   }
 
-  const shot = await venue.browserAct({ action: 'screenshot', timeoutMs: 15_000 });
-  if (!shot.ok || !shot.screenshotBase64) {
-    // Browser is up but has no page yet.
-    return stateJson({
-      active: true,
-      booting: false,
-      sessionId: vs.id,
-      screen: null,
-      pendingInputs,
-    });
+  const [health, desktop] = await Promise.all([
+    venue.health(),
+    venue.desktopStatus().catch(() => ({ running: false, reason: undefined })),
+  ]);
+
+  let browserFrame = null;
+  if (surface === 'browser' && health.ok) {
+    const r = await venue.browserAct({ action: 'frame', quality, timeoutMs: 15_000 });
+    browserFrame = browserFramePayload(r);
   }
-  return stateJson({
-    active: true,
-    booting: false,
-    sessionId: vs.id,
-    screen: {
-      dataUrl: `data:image/jpeg;base64,${shot.screenshotBase64}`,
-      url: shot.url ?? null,
-      title: shot.title ?? null,
+
+  let desktopFrame = null;
+  if (surface === 'desktop' && desktop.running) {
+    const r = await venue.desktopAct({ action: 'screenshot', quality });
+    if (r.ok && r.screenshotBase64) {
+      desktopFrame = {
+        frame: `data:image/jpeg;base64,${r.screenshotBase64}`,
+        width: r.width ?? null,
+        height: r.height ?? null,
+      };
+    }
+  }
+
+  return json({
+    ...base,
+    paused: false,
+    sandboxState,
+    browser: {
+      ready: health.ok,
+      stage: health.stage ?? (health.ok ? 'ready' : 'starting'),
+      reason: health.ok ? null : (health.reason ?? null),
+      ...(browserFrame ?? {}),
     },
-    pendingInputs,
+    desktop: {
+      running: desktop.running,
+      reason: desktop.running ? null : (desktop.reason ?? null),
+      ...(desktopFrame ?? {}),
+    },
   });
 }

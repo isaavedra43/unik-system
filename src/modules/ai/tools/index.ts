@@ -116,6 +116,9 @@ import './interactive-ui-tools';
 
 // Venue tools (computadora virtual Daytona: browser, exec, archivos, screenshot)
 import './venue-tools';
+
+// Sitios web publicados por los agentes (/sites/{slug})
+import './site-tools';
 import '@/modules/venues/venue-playbook-tools';
 
 // Agent memory tools (recallMemory, saveFact — memoria episódica/semántica/procedural)

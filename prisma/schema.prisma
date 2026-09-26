@@ -2674,6 +2674,32 @@ model MissionEvent {
 
 /// Automatización de computadora virtual: flujo grabable que una rutina
 /// ejecuta sin improvisar (login → navegar → extraer → reportar).
+/// Sitios web que los agentes crean y publican (UNIVERSO). Se sirven en
+/// /sites/{slug} con CSP sandbox (origen opaco: sin acceso a la sesión del ERP).
+/// Los archivos viven aquí mismo (base64 en JSON, máx. ~8 MB por sitio).
+model PublishedSite {
+  id          String   @id @default(cuid())
+  tenantId    String?
+  ownerUserId String
+  agentId     String?
+  /// URL pública: /sites/{slug}
+  slug        String   @unique
+  name        String
+  description String?
+  /// { "index.html": { "type": "text/html", "b64": "..." }, "css/app.css": {...} }
+  files       Json
+  fileCount   Int      @default(0)
+  sizeBytes   Int      @default(0)
+  /// published | unpublished
+  status      String   @default("published")
+  visits      Int      @default(0)
+  publishedAt DateTime @default(now())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([ownerUserId, updatedAt])
+}
+
 model VenuePlaybook {
   id           String    @id @default(cuid())
   userId       String

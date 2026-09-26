@@ -1,5 +1,5 @@
 import { requirePermission } from '@/modules/auth/authorization';
-import { AssistantPageClient } from '@/components/assistant/AssistantPageClient';
+import { UniversoApp } from '@/components/universo/UniversoApp';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -9,7 +9,15 @@ export default async function AssistantPage() {
 
   return (
     <div className="assistant-page">
-      <AssistantPageClient user={user} />
+      <UniversoApp
+        user={{
+          id: user.id,
+          name: user.name,
+          username: user.username,
+          isSuperAdmin: user.isSuperAdmin,
+          permissionKeys: [...user.permissionKeys],
+        }}
+      />
     </div>
   );
 }

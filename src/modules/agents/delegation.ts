@@ -19,10 +19,15 @@ import { DEFAULT_TENANT_ID } from './tenancy';
  * - Todo emite a `user:{ownerId}` (SSE del front) y al journal del run.
  */
 
-export const MAX_FANOUT = 4;
+/** A director coordinates up to 10 specialists at once (sales, warehouse, purchasing…). */
+export const MAX_FANOUT = 10;
 export const MAX_DEPTH = 2;
-const WORKER_TIMEOUT_MS = 4 * 60 * 1000;
+/** Hard ceiling for one worker turn (research of dozens of companies, long browsing). */
+const WORKER_TIMEOUT_MS = 25 * 60 * 1000;
 const CAPSULE_MAX_CHARS = 8000;
+/** Review rounds per delegating run: consolidate → (one correction) → consolidate. */
+const MAX_CONSOLIDATIONS = 2;
+const CONSOLIDATE_JOB = 'agent.run.consolidate';
 
 /** Contenido de la cápsula (Json) — autocontenida para el worker. */
 export interface TaskCapsule {
@@ -262,8 +267,8 @@ async function runAgentTask(taskId: string): Promise<{ status: string }> {
   const toolCalls: string[] = [];
   try {
     const { executeAgentTurn } = await import('./agent-runtime');
-    const deadlineMs = Math.min(capsule.timeoutMin ?? 10, 60) * 60_000;
-    const timer = setTimeout(() => { failed = 'timeout'; }, Math.max(30_000, Math.min(deadlineMs, WORKER_TIMEOUT_MS)));
+    const deadlineMs = Math.min(capsule.timeoutMin ?? 15, 60) * 60_000;
+    const timer = setTimeout(() => { failed = 'timeout'; }, Math.max(60_000, Math.min(deadlineMs, WORKER_TIMEOUT_MS - 30_000)));
     try {
       for await (const ev of executeAgentTurn({
         conversationId: convo?.id ?? capsule.conversationId ?? taskId,
@@ -358,8 +363,128 @@ async function runAgentTask(taskId: string): Promise<{ status: string }> {
     conversationId: capsule.conversationId ?? null,
     reportPreview: report.slice(0, 400), durationMs: Date.now() - startedAt,
   });
+  await maybeScheduleConsolidation(task.parentRunId, ownerUserId, capsule.conversationId).catch(() => null);
   return { status };
 }
+
+/**
+ * When the LAST delegated task of a run finishes, the agent that delegated
+ * (the director) gets one turn in its own conversation to review every
+ * delivery, re-delegate a concrete correction if something falls short, and
+ * present the result with the decisions that need the user's authorization.
+ * Bounded to MAX_CONSOLIDATIONS rounds per run — never a loop.
+ */
+async function maybeScheduleConsolidation(
+  parentRunId: string,
+  ownerUserId: string,
+  conversationId?: string | null
+): Promise<void> {
+  if (!conversationId) return;
+  const active = await prisma.agentTask.count({
+    where: { parentRunId, status: { in: ['pending', 'ready', 'running'] } },
+  });
+  if (active > 0) return;
+  const rounds = await prisma.agentEvent.count({
+    where: { runId: parentRunId, type: 'team.consolidated' },
+  }).catch(() => 0);
+  if (rounds >= MAX_CONSOLIDATIONS) return;
+  await enqueueJob({
+    type: CONSOLIDATE_JOB,
+    payload: { parentRunId, userId: ownerUserId, conversationId, round: rounds + 1 },
+    dedupeKey: `consolidate:${parentRunId}:${rounds + 1}`,
+    runAt: new Date(Date.now() + 4_000),
+  });
+}
+
+function consolidationPrompt(
+  tasks: Array<{ objective: string; status: string; result: unknown; error: string | null; agentName: string }>,
+  round: number
+): string {
+  const lines = tasks.map((t, i) => {
+    const r = (t.result ?? {}) as { report?: string };
+    const body = t.status === 'done'
+      ? (r.report ?? '').slice(0, 2500)
+      : `NO TERMINÓ (${t.status}${t.error ? `: ${t.error}` : ''})`;
+    return `### ${i + 1}. ${t.agentName} — ${t.objective}\n${body}`;
+  });
+  return [
+    `⟦auto:team⟧ Tu equipo terminó las ${tasks.length} tareas que delegaste (revisión ${round} de ${MAX_CONSOLIDATIONS}).`,
+    '',
+    lines.join('\n\n'),
+    '',
+    'Como director:',
+    '1. Revisa cada entrega contra su objetivo: ¿está completa, con datos verificables y fuentes? Señala huecos o contradicciones entre áreas.',
+    round < MAX_CONSOLIDATIONS
+      ? '2. Si una entrega es insuficiente y se puede corregir, re-delega UNA corrección concreta (delegateTask) y dile al usuario qué falta; si no, continúa.'
+      : '2. Ya no re-delegues: trabaja con lo que hay y di qué quedó pendiente.',
+    '3. Entrega al usuario: resumen ejecutivo (3-6 líneas), resultados por área, y las DECISIONES que requieren su autorización — cuando implican una acción (enviar, comprar, cambiar datos) prepárala para que aparezca como propuesta a aprobar.',
+    'Sé breve y accionable; usa tablas o tarjetas solo si ayudan.',
+  ].join('\n');
+}
+
+async function runConsolidation(payload: {
+  parentRunId: string;
+  userId: string;
+  conversationId: string;
+  round?: number;
+}): Promise<{ status: string }> {
+  const run = await prisma.agentRun.findUnique({
+    where: { id: payload.parentRunId },
+    select: { id: true, agentId: true, userId: true, conversationId: true },
+  }).catch(() => null);
+  if (!run || run.userId !== payload.userId) return { status: 'missing' };
+  const round = payload.round ?? 1;
+  const tasks = await prisma.agentTask.findMany({
+    where: { parentRunId: run.id },
+    orderBy: { createdAt: 'asc' },
+    take: 20,
+  });
+  if (tasks.length === 0) return { status: 'no-tasks' };
+  const agentIds = [...new Set(tasks.map((t) => t.assignedAgentId).filter((x): x is string => Boolean(x)))];
+  const agents = agentIds.length
+    ? await prisma.agent.findMany({ where: { id: { in: agentIds } }, select: { id: true, name: true } })
+    : [];
+  const nameOf = new Map(agents.map((a) => [a.id, a.name]));
+  await prisma.agentEvent.create({
+    data: { runId: run.id, type: 'team.consolidated', payload: { round, tasks: tasks.length } as Prisma.InputJsonValue },
+  }).catch(() => null);
+
+  const { loadUserActor } = await import('@/modules/auth/user-actor');
+  const actor = await loadUserActor({ id: payload.userId }).catch(() => null);
+  if (!actor) return { status: 'no-actor' };
+  await publishRealtime(`assistant:${payload.conversationId}`, 'agent.consolidating', {
+    round, tasks: tasks.length,
+  }).catch(() => null);
+
+  const { executeAgentTurn } = await import('./agent-runtime');
+  let ok = false;
+  for await (const ev of executeAgentTurn({
+    conversationId: payload.conversationId,
+    message: consolidationPrompt(
+      tasks.map((t) => ({
+        objective: t.objective,
+        status: t.status,
+        result: t.result,
+        error: t.error,
+        agentName: t.assignedAgentId ? (nameOf.get(t.assignedAgentId) ?? 'Especialista') : 'Subagente',
+      })),
+      round
+    ),
+    actor,
+    agentId: run.agentId,
+    notifyWhenDone: true,
+  })) {
+    if (ev.type === 'done') ok = true;
+  }
+  await publishRealtime(`assistant:${payload.conversationId}`, 'agent.message', {
+    kind: 'consolidated', round, ok,
+  }).catch(() => null);
+  return { status: ok ? 'done' : 'failed' };
+}
+
+registerJobHandler(CONSOLIDATE_JOB, async (ctx) => {
+  return runConsolidation(ctx.payload as { parentRunId: string; userId: string; conversationId: string; round?: number });
+}, { timeoutMs: 10 * 60 * 1000 });
 
 /** Cancela una tarea y (cascada B5) sus hijas pendientes. */
 export async function cancelTask(taskId: string, userId: string): Promise<boolean> {

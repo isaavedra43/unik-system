@@ -94,10 +94,12 @@ export async function POST(request: NextRequest) {
         }
       }, 15_000);
       try {
-        // UNIVERSO B2: cuando el runtime V2 está activo, el turno corre con
-        // identidad de agente (persona, allowlist, routing envelope). Sin el
-        // flag, el camino es el asistente actual, byte a byte.
-        const runtimeV2 = process.env.UNIK_AGENT_RUNTIME_V2 === 'true';
+        // UNIVERSO B2: el turno corre con identidad de agente (persona,
+        // allowlist, routing envelope). Con UNIK_AGENT_RUNTIME_V2=false vuelve
+        // al asistente clásico, byte a byte.
+        // On by default: agents (persona, tool allowlist, delegation, team
+        // consolidation) only exist on this path. Opt out with =false.
+        const runtimeV2 = process.env.UNIK_AGENT_RUNTIME_V2 !== 'false';
         if (parsed.data.agentId) {
           await assignConversationAgent(parsed.data.conversationId, session.user.id, parsed.data.agentId);
         }

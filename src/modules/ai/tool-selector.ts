@@ -44,6 +44,8 @@ export const PROVIDER_MAX_TOOLS = 128;
 export const CORE_TOOL_NAMES: readonly string[] = [
   'loadMoreTools',
   'proposePlan',
+  'delegateTask',
+  'listAgents',
   'getCurrentUserContext',
   'getSystemTime',
   'universalSearch',
@@ -302,7 +304,10 @@ const DOMAIN_RULES: DomainRule[] = [
   { domain: 'system', test: /integraci|zoho|sincroniz|notificaci|modulo|sistema|quien soy|permiso/, categories: ['system'], tools: ['getIntegrationStatus', 'getNotifications', 'getModuleList', 'getCurrentUserContext'] },
   { domain: 'apps', test: /gmail|outlook|calendar|calendario|slack|github|gitlab|notion|sheets|hoja de calculo|google|drive|dropbox|hubspot|salesforce|stripe|jira|linear|trello|asana|discord|twitter|linkedin|zoom|\bteams\b|airtable|clickup|monday|shopify|figma|composio|app externa|apps externas|aplicacion externa|integracion externa/, categories: [], tools: ['composioListToolkits', 'composioSearchTools', 'composioConnect', 'composioExecute'] },
   { domain: 'web', test: /internet|\bweb\b|online|en linea|googl|busca(r)? en la red|investiga en|notici|tipo de cambio|clima|\bpagina web|sitio web|https?:\/\/|www\.|\.com\b|\.mx\b|\.io\b|\.ai\b/, categories: ['web'], tools: ['web_search', 'web_research', 'fetch_url', 'web_crawl'] },
-  { domain: 'venue', test: /computadora virtual|maquina virtual|sandbox|navega(r)? (en|la|el)|abre (una |la |el )?(pagina|p[aá]gina|sitio|web|google|url)|entra a|inicia sesion en|screenshot|captura de pantalla|ejecuta|corre este|terminal|comando|script/, categories: ['venue'], tools: ['browser', 'browserProfile', 'venueExec', 'venueReadFile', 'venueListFiles', 'venueWriteFile', 'venueScreenshot'] },
+  { domain: 'venue', test: /computadora|maquina virtual|sandbox|escritorio|navegador|navega(r)? (en|la|el|por)|abre (una |la |el )?(pagina|p[aá]gina|sitio|web|google|url|navegador)|entra a|inicia sesion en|portal|screenshot|captura de pantalla|pantalla|ejecuta|corre este|terminal|comando|script|codig|program|desarroll|repositori|\bgit\b|github|\bnpm\b|python|node|compila|prueba(s)? (en|de|del)|testea|\bqa\b|\bbug|reproduc|formulario|llena(r)? (el|un|los)/, categories: ['venue'], tools: ['browser', 'browserProfile', 'computer', 'venueExec', 'venueReadFile', 'venueListFiles', 'venueWriteFile', 'venueScreenshot', 'venuePreview', 'runVenuePlaybook', 'listVenuePlaybooks'] },
+  { domain: 'sites', test: /sitio web|pagina web|p[aá]gina de (inicio|aterrizaje)|landing|micrositio|tienda en linea|tienda online|web para|web de (mi|un|una)|publica(r)? (el|un|mi|la)? ?(sitio|pagina|web)|despliega|deploy|dominio|hosting/, categories: [], tools: ['publishSite', 'listSites', 'unpublishSite', 'venueExec', 'venueWriteFile', 'venuePreview', 'browser'] },
+  { domain: 'team', test: /agente|equipo|delega|director|coordina|supervis|departament|subagente|especialista|mision|asigna|reparte|en paralelo|al mismo tiempo/, categories: [], tools: ['delegateTask', 'listAgents', 'proposeMission', 'listMissions', 'missionStatus', 'controlMission'] },
+  { domain: 'playbooks', test: /procedimiento|aprende|ense[nñ]|como lo hago|repite|repetir|playbook|automatiza|cada vez que|siempre que/, categories: [], tools: ['saveVenuePlaybook', 'listVenuePlaybooks', 'runVenuePlaybook'] },
   { domain: 'planning', test: /\bplan\b|planea|paso a paso|primero.*luego|trimestral|anual|completo|integral/, categories: [], tools: ['proposePlan'] },
 ];
 
@@ -336,7 +341,10 @@ const DOMAIN_HINTS: Record<string, string> = {
   apps: 'Apps externas conectadas: Gmail, Sheets, Slack, etc.',
   planning: 'Planes paso a paso antes de ejecutar.',
   web: 'Internet: buscar en la web, abrir páginas, noticias, precios externos.',
-  venue: 'Computadora virtual del agente: navegar sitios con sesión, ejecutar comandos/scripts, archivos del sandbox.',
+  venue: 'Computadora virtual del agente: navegador web real, escritorio Linux, terminal, código y pruebas, archivos del sandbox, portales sin API.',
+  sites: 'Crear y publicar sitios o páginas web.',
+  team: 'Coordinar agentes especialistas: delegar tareas, misiones, supervisar al equipo.',
+  playbooks: 'Procedimientos aprendidos (grabados) que el agente puede repetir.',
 };
 
 /** Domain catalog for Jev-based detection (id + criteria). */

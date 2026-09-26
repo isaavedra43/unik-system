@@ -45,11 +45,12 @@ export interface CopilotProposal {
 
 export const AUTO_PREFIX = '⟦auto:';
 
-export type AutoEventKind = 'open' | 'inbound' | 'action_failed';
+export type AutoEventKind = 'open' | 'inbound' | 'action_failed' | 'team';
 
 export function autoKind(content: string | null | undefined): AutoEventKind | null {
   if (!content || !content.startsWith(AUTO_PREFIX)) return null;
   if (content.startsWith(`${AUTO_PREFIX}action_failed`)) return 'action_failed';
+  if (content.startsWith(`${AUTO_PREFIX}team`)) return 'team';
   return content.startsWith(`${AUTO_PREFIX}inbound`) ? 'inbound' : 'open';
 }
 
@@ -63,6 +64,7 @@ export const AUTO_EVENT_LABELS: Record<AutoEventKind, string> = {
   open: 'Analicé el contexto al abrir',
   inbound: 'Llegó algo nuevo · reanalicé',
   action_failed: 'Una acción aprobada falló · la IA la está corrigiendo',
+  team: 'Tu equipo terminó · el director revisa y consolida los resultados',
 };
 
 /** Result of an executed tool that must open something in the UI (call dock, internal call). */
@@ -232,8 +234,19 @@ const TOOL_LABELS: Record<string, { running: string; done: string }> = {
   generateVideo: { running: 'Generando el video', done: 'Video generado' },
   renderInteractiveUi: { running: 'Construyendo interfaz', done: 'Interfaz interactiva lista' },
   browser: { running: 'Usando el navegador', done: 'Navegación lista' },
-  venueExec: { running: 'Ejecutando en la computadora', done: 'Comando ejecutado' },
+  browserProfile: { running: 'Gestionando la sesión del sitio', done: 'Sesión del sitio lista' },
+  venueExec: { running: 'Ejecutando en la terminal', done: 'Comando ejecutado' },
   venueScreenshot: { running: 'Tomando captura', done: 'Captura lista' },
+  venueListFiles: { running: 'Revisando archivos', done: 'Archivos revisados' },
+  venueReadFile: { running: 'Leyendo archivo', done: 'Archivo leído' },
+  venueWriteFile: { running: 'Escribiendo archivo', done: 'Archivo escrito' },
+  venuePreview: { running: 'Abriendo vista previa', done: 'Vista previa lista' },
+  computer: { running: 'Usando la computadora', done: 'Acción en la computadora' },
+  publishSite: { running: 'Publicando el sitio web', done: 'Sitio publicado' },
+  listSites: { running: 'Revisando tus sitios', done: 'Sitios revisados' },
+  unpublishSite: { running: 'Actualizando el sitio', done: 'Sitio actualizado' },
+  delegateTask: { running: 'Delegando al equipo', done: 'Tarea delegada' },
+  listAgents: { running: 'Revisando el equipo', done: 'Equipo revisado' },
   callMcpTool: { running: 'Usando herramienta MCP', done: 'Herramienta MCP lista' },
   executeApiOperation: { running: 'Consultando la API', done: 'API consultada' },
 };

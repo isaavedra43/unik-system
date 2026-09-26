@@ -51,9 +51,9 @@ Servicio: `src/modules/copilot/preferences-service.ts`.
 - Los paneles de copiloto de `/app/inbox` y `/app/chat` se eliminaron junto con sus rutas,
   prompts y tools exclusivas (`proposeInboxDraft`, `proposeChatDraft`,
   `suggestNextActions` en turnos automáticos). Se reconstruirán desde cero.
-- Sobreviven en `src/components/copilot/`: las tarjetas compartidas del asistente
-  (`ProposalCard`, `PlanCard`, `MissionCard`, `MessageFeedback`, `ConfidenceBadge`) y
-  `copilot-types.ts` con los parsers y etiquetas de tool que usa el asistente.
+- En `src/components/copilot/` quedan `copilot-types.ts` (parsers y etiquetas de tool)
+  y `AssistantPreferencesPanel`; las tarjetas (aprobación, plan, misión, feedback,
+  confianza) se reconstruyeron en `src/components/universo/` (ver `docs/agents.md`).
 - `src/modules/ai/copilot-surfaces.ts` quedó reducido a los `kind` históricos
   (`inbox_copilot`/`chat_copilot`/`assistant_mission`) para ocultarlos del historial y
   al prefijo `⟦auto:` que usa la autocorrección de acciones fallidas.
@@ -162,7 +162,7 @@ Segunda ronda tras comparar de nuevo con ChatGPT (GPT-5 "Alta", 3 min de razonam
 **Tercera ronda (misma tarde): 10 minutos y "network error".** Con GPT-5 el turno tardó ~10 min y la conexión se cortó. Causas y fixes:
 
 - Sin latidos en el SSE y con la respuesta en búfer pasaban minutos sin bytes → el proxy/navegador corta el stream. Ahora `/app/assistant/api/chat` manda un comentario SSE (`: ping`) cada 15 s; los parsers ignoran las líneas que no empiezan con `data:`.
-- Si aun así se corta, `AssistantChat` no falla: muestra "el asistente sigue trabajando" y sondea la conversación cada 6 s (hasta 15 min) hasta que aparece la respuesta persistida (`waitForPersistedAnswer`).
+- Si aun así se corta, el chat (`universo/chat/useChatStream`) no falla: muestra "el asistente sigue trabajando" y sondea la conversación cada 6 s (hasta 15 min) hasta que aparece la respuesta persistida (`waitForPersistedAnswer`).
 - `readAttachment` con GPT-5 corría sin streaming con 12k tokens y esfuerzo medium bajo un timeout de 180 s (expiraba y el modelo reintentaba). Ahora: esfuerzo low, 6k tokens, timeout 300 s. Y cuando el modelo del turno razona y ve imágenes (GPT-5), la directiva le pide transcribir él mismo y saltarse esa pasada (una llamada pesada menos); `lookupSalesOrdersByNumber` sigue corrigiendo folios.
 - `reasoningEffort` por defecto baja a `medium` (high multiplicaba minutos en cada pasada); el cliente OpenAI tiene `timeout` 15 min y `maxRetries: 1` (un reintento silencioso duplicaba llamadas de minutos). Turnos con adjuntos ofrecen ≤ 48 tools (prompt más corto en cada pasada).
 - En modo búfer la UI muestra el chip "Redactando la respuesta" (`draftAnswer`) mientras el modelo escribe, y "Revisando la respuesta" durante la revisión.
@@ -176,7 +176,7 @@ Segunda ronda tras comparar de nuevo con ChatGPT (GPT-5 "Alta", 3 min de razonam
 
 **Quinta ronda: se adelanta, no se equivoca, aprende, más rápida.**
 
-- **Sugerencias con un clic** (`followups.ts`): la IA cierra respuestas con datos con `Sugerencias: [acción] · [acción] · [acción]` (antes de "Confianza:"); el orquestador la guarda en `AiMessage.meta.followUps` y `AssistantMessage` la muestra como chips que envían el texto al escribirlo (solo en el último mensaje).
+- **Sugerencias con un clic** (`followups.ts`): la IA cierra respuestas con datos con `Sugerencias: [acción] · [acción] · [acción]` (antes de "Confianza:"); el orquestador la guarda en `AiMessage.meta.followUps` y `universo/chat/Message` la muestra como chips que envían el texto al escribirlo (solo en el último mensaje).
 - **Verificación determinista antes de entregar** (`answer-checks.ts`, todos los modelos): folios citados que ninguna tool devolvió en el turno (`collectFolios` sobre cada resultado) y encabezados "### Grupo — 20"/"(20)" cuya tabla markdown no trae ese número de filas → nota interna y una pasada de corrección (chip "Revisando la respuesta"). Máx. 2 correcciones por turno.
 - **Aprende de correcciones** (`ai-learning.ts`, setting `learningCaptureEnabled`): si el mensaje corrige o define algo ("no, Producción significa…", "para nosotros Recolección es…"), un pase de fondo con el modelo utilitario extrae hasta 3 reglas durables y las propone como recuerdos `pending` (fuente `correction`, tag `auto`) que el usuario confirma en Preferencias y memoria; evita duplicados por similitud. El prompt pide aplicar las definiciones de la memoria al clasificar.
 - **Caché de prompt**: la fecha/hora sale del encabezado y va al final del system prompt; las tools ofrecidas se ordenan por nombre → prefijo estable entre pasadas y turnos (OpenAI reutiliza el prefijo cacheado: primer token más rápido y más barato).

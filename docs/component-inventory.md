@@ -3,8 +3,8 @@
 Tabla viva de componentes compartidos. Mantener actualizada. Fuente real:
 `src/components/shadcn/` (primitivas), `src/components/patterns/` (patrones de
 negocio). Los estados "Story" con `planned` indican cobertura pendiente; las
-stories existentes hoy son `button.stories.tsx`, `SalesOrdersWorkspace.stories.tsx`
-y `GenerativeUi.stories.tsx`.
+stories existentes hoy son `button.stories.tsx`, `SalesOrdersWorkspace.stories.tsx`,
+`universo/UniversoApp.stories.tsx` y `universo/cards/Cards.stories.tsx`.
 
 ## Primitivas (`src/components/shadcn/`)
 
@@ -57,10 +57,10 @@ y `GenerativeUi.stories.tsx`.
 | ----------------- | -------------------------------------------- | ------------------------------------------------- |
 | EntityWorkspace   | `src/components/common/EntityWorkspace.tsx`  | Workspaces genéricos por módulo (tabla+filtros)   |
 | NotificationBell  | `src/components/notifications/`              | Campana con badge SSE/push                        |
-| GenerativeUi      | `src/components/assistant/generative/`       | Render de specs de UI del asistente (tiene story) |
+| Cards (UNIVERSO)  | `src/components/universo/cards/Cards.tsx`    | Tarjetas de respuesta de la IA (tiene story)      |
 | MessageBubble     | `src/components/campaigns/MessageBubble.tsx` | Preview WhatsApp/SMS/Telegram                     |
 | CallDockProvider  | `src/components/calls/CallDockProvider.tsx`  | Dock global de llamadas                           |
-| ProposalCard etc. | `src/components/copilot/`                    | Tarjetas del asistente (aprobación, plan, misión) |
+| Agentic (UNIVERSO)| `src/components/universo/cards/Agentic.tsx`  | Aprobación, plan, misión, equipo (tiene story)    |
 
 ## Cómo actualizar
 

@@ -59,14 +59,21 @@ const COMPLEX_PATTERNS = [
   /resumen ejecutivo|reporte (completo|integral|ejecutivo)|informe (completo|integral)/,
 ];
 
+const CODING_RE =
+  /codig|programa(r|cion|dor)|desarroll(a|ar|o) (una|un|el|la)? ?(app|aplicacion|sistema|pagina|sitio|api|backend|frontend)|repositori|\bgit(hub)?\b|\bnpm\b|typescript|javascript|python|refactor|pull request|\bbug\b|depura|\bdebug/;
+
 export function classifyTask(input: ClassifyInput): TaskClassification {
   const raw = input.message ?? '';
   const norm = normalizeText(raw);
   const kinds = input.attachmentKinds ?? [];
   const needsVision = kinds.includes('image') || kinds.includes('document');
   const domains = detectDomains(raw);
-  const computer = domains.includes('venue');
+  // Writing/reviewing code runs in the venue too, but it needs the strongest
+  // reasoning model — not the fast "computer use" one.
+  const coding = CODING_RE.test(norm);
+  const computer = domains.includes('venue') && !coding;
   const words = norm ? norm.split(' ').length : 0;
+  if (coding) return { tier: 'complex', reason: 'programación', needsVision, computer: false };
 
   if (input.planFirst)
     return { tier: 'complex', reason: 'plan-then-execute', needsVision, computer };

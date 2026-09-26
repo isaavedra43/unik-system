@@ -120,7 +120,16 @@ async function dailyVenueMinutes(): Promise<number> {
  * creating a new sandbox (budget + concurrency checked). Throws
  * VenueUnavailableError with a user-safe reason when it can't.
  */
-export async function acquireVenue(input: { userId: string; purpose?: string }): Promise<Venue> {
+export async function acquireVenue(input: {
+  userId: string;
+  purpose?: string;
+  /**
+   * 'background' — answer as soon as the sandbox exists and prepare the
+   * browser stack behind the scenes (the panel's power button). Tool calls
+   * keep the default: wait until the browser is ready.
+   */
+  warm?: 'await' | 'background';
+}): Promise<Venue> {
   const cfg = await daytonaConfig();
   if (!cfg) {
     throw new VenueUnavailableError(
@@ -138,7 +147,13 @@ export async function acquireVenue(input: { userId: string; purpose?: string }):
     try {
       const token =
         (existing.metadata as { controllerToken?: string } | null)?.controllerToken ?? '';
-      const venue = await DaytonaVenue.attach(existing.id, existing.externalId, cfg, token);
+      const venue = await DaytonaVenue.attach(
+        existing.id,
+        existing.externalId,
+        cfg,
+        token,
+        input.warm === 'background' ? { heal: false, wake: true } : {}
+      );
       await prisma.venueSession.update({
         where: { id: existing.id },
         data: { status: 'active', lastUsedAt: new Date() },
@@ -179,7 +194,7 @@ export async function acquireVenue(input: { userId: string; purpose?: string }):
     },
   });
   try {
-    const venue = await DaytonaVenue.create(session.id, cfg);
+    const venue = await DaytonaVenue.create(session.id, cfg, { warm: input.warm ?? 'await' });
     // Persist sandbox id + controller token so we can reattach later.
     await prisma.venueSession.update({
       where: { id: session.id },

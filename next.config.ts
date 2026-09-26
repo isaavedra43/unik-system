@@ -67,6 +67,39 @@ const securityHeaders = [
   { key: 'X-Robots-Tag', value: 'noindex, nofollow, noarchive' },
 ];
 
+/**
+ * Websites published by the agents (/sites/{slug}) are public, third-party
+ * content: they get their own policy instead of the app's. `sandbox` without
+ * allow-same-origin gives the page an opaque origin — its scripts can never
+ * read the ERP session cookie nor call /app APIs as the visitor.
+ */
+const siteContentSecurityPolicy = [
+  'sandbox allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-downloads',
+  "default-src 'self' https: data: blob:",
+  "script-src 'self' 'unsafe-inline' https:",
+  "style-src 'self' 'unsafe-inline' https:",
+  "img-src 'self' https: data: blob:",
+  "font-src 'self' https: data:",
+  "connect-src 'self' https:",
+  "media-src 'self' https: data: blob:",
+  'frame-src https:',
+  "object-src 'none'",
+  "base-uri 'self'",
+  // The workspace previews the site in an iframe of the app itself.
+  "frame-ancestors 'self'",
+].join('; ');
+
+const siteHeaders = [
+  { key: 'Content-Security-Policy', value: siteContentSecurityPolicy },
+  { key: 'X-Content-Type-Options', value: 'nosniff' },
+  { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+  { key: 'Strict-Transport-Security', value: 'max-age=63072000; includeSubDomains; preload' },
+  {
+    key: 'Permissions-Policy',
+    value: 'camera=(), microphone=(), geolocation=(), payment=(), usb=(), serial=(), bluetooth=()',
+  },
+];
+
 const nextConfig: NextConfig = {
   // Slim runtime bundle for the Docker image (Dockerfile copies
   // .next/standalone). Keeps the repo root explicit — a stray lockfile outside
@@ -82,7 +115,11 @@ const nextConfig: NextConfig = {
   poweredByHeader: false,
   serverExternalPackages: ['pdf-parse', 'pdfkit', '@modelcontextprotocol/sdk', '@composio/core'],
   async headers() {
-    return [{ source: '/:path*', headers: securityHeaders }];
+    return [
+      // The app: every path except the public sites.
+      { source: '/((?!sites/).*)', headers: securityHeaders },
+      { source: '/sites/:path*', headers: siteHeaders },
+    ];
   },
 };
 

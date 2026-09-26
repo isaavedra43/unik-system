@@ -7,6 +7,8 @@ export interface ConversationRow {
   id: string;
   title: string;
   isStarred: boolean;
+  /** Agent that owns the thread (null = the principal / legacy threads). */
+  agentId: string | null;
   messageCount: number;
   lastMessageAt: string | null;
   createdAt: string;
@@ -63,6 +65,7 @@ function formatConv(c: Prisma.AiConversationGetPayload<object>): ConversationRow
     id: c.id,
     title: c.title,
     isStarred: c.isStarred,
+    agentId: c.agentId ?? null,
     messageCount: 0, // filled by caller if needed
     lastMessageAt: null,
     createdAt: c.createdAt.toISOString(),

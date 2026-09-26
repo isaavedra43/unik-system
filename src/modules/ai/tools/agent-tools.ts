@@ -14,13 +14,24 @@ import { delegateTask, MAX_FANOUT } from '@/modules/agents/delegation';
  * delegar (nombres + propósitos, sin prompts internos).
  */
 
+/** Depth of a new delegation: the delegating worker's own depth + 1 (0 from the chat). */
+async function delegationDepthFor(taskId?: string): Promise<number> {
+  if (!taskId) return 0;
+  const { prisma } = await import('@/lib/prisma');
+  const task = await prisma.agentTask
+    .findUnique({ where: { id: taskId }, select: { capsule: true } })
+    .catch(() => null);
+  const parentDepth = Number((task?.capsule as { depth?: number } | null)?.depth ?? 0);
+  return (Number.isFinite(parentDepth) ? parentDepth : 0) + 1;
+}
+
 registerTool({
   name: 'delegateTask',
   description:
-    'Delega una subtarea a un agente especialista o a un subagente transitorio que la ejecuta en segundo plano. ' +
-    `Úsala cuando el trabajo sea especializado, largo o paralelizable (máx. ${MAX_FANOUT} en paralelo). ` +
-    'Pasa el objetivo concreto y el contexto mínimo necesario en "capsule" — el agente NO ve esta conversación. ' +
-    'La tarea corre sola y su reporte te llega como mensaje cuando termine; informa al usuario que quedó delegada.',
+    'Delega una subtarea a un agente especialista del equipo (agentId de listAgents) o a un subagente transitorio; corre en segundo plano con sus propias herramientas (ERP, web, navegador, computadora, apps conectadas). ' +
+    `Úsala para trabajo especializado, largo o paralelizable: reparte un objetivo grande entre varias áreas a la vez (máx. ${MAX_FANOUT} tareas activas). ` +
+    'Pasa un objetivo verificable y en "capsule" todo el contexto necesario (el agente NO ve esta conversación). Encadena con dependsOn cuando una tarea necesita el resultado de otra (p. ej. "pruebas" depende de "backend"). ' +
+    'Cuando TODAS terminan, recibirás sus reportes para revisarlos y consolidarlos: no esperes en este turno — dile al usuario qué delegaste y a quién.',
   category: 'system',
   enabledByDefault: true,
   effect: 'internal_task',
@@ -29,7 +40,7 @@ registerTool({
     agentId: z.string().max(80).optional().describe('Id del especialista del equipo (ver listAgents). Omitir = subagente transitorio'),
     capsule: z.string().max(6000).optional().describe('Contexto mínimo que el worker necesita: datos ya obtenidos, restricciones, por qué'),
     outputHint: z.string().max(200).optional().describe('Formato esperado del reporte (ej. "lista de clientes con monto")'),
-    timeoutMin: z.number().int().min(1).max(60).optional().describe('Límite de minutos (default 10)'),
+    timeoutMin: z.number().int().min(1).max(60).optional().describe('Límite de minutos (default 15; investigaciones grandes 30-60)'),
     dependsOn: z.array(z.string().max(80)).max(8).optional().describe('Ids de tareas que deben terminar antes de esta'),
     allowedTools: z.array(z.string().max(120)).max(40).optional().describe('Tools extra permitidas — solo acotan al agente'),
   }),
@@ -67,7 +78,7 @@ registerTool({
         timeoutMin: args.timeoutMin,
         dependsOn: args.dependsOn,
         allowedTools: args.allowedTools,
-        depth: ctx.taskId ? 1 : 0,
+        depth: await delegationDepthFor(ctx.taskId),
       },
     });
     if ('error' in res) return { error: res.error };

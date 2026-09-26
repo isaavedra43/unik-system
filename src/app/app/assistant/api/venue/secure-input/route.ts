@@ -4,6 +4,7 @@ import { getCurrentSession, hasPermission } from '@/modules/auth/authorization';
 import { prisma } from '@/lib/prisma';
 import { Prisma } from '@prisma/client';
 import { attachVenue, emitVenueEvent } from '@/modules/venues/venue-manager';
+import { fieldKey, type PendingSecureInput } from '@/modules/venues/venue-http';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -25,11 +26,6 @@ const bodySchema = z.object({
   values: z.record(z.string(), z.string().max(4000)),
 });
 
-interface PendingSecureInput {
-  id: string;
-  fields: { selector: string; label: string; sensitive?: boolean }[];
-  ts: string;
-}
 
 export async function POST(request: NextRequest) {
   const session = await getCurrentSession();
@@ -71,11 +67,11 @@ export async function POST(request: NextRequest) {
     const venue = await attachVenue(sessionId, session.user.id);
     let filled = 0;
     for (const field of req.fields) {
-      const value = values[field.selector];
+      const value = values[fieldKey(field)];
       if (typeof value !== 'string' || value.length === 0) continue;
       const res = await venue.browserAct({
         action: 'useCredential',
-        selector: field.selector,
+        ...(field.selector ? { selector: field.selector } : { ref: field.ref }),
         secretValue: value,
         timeoutMs: 15_000,
       });

@@ -28,7 +28,9 @@ describe('registration barrels', () => {
       ['external_send', 'business_write', 'destructive'].includes(t.effect ?? 'read')
     );
     expect(sideEffects.length).toBeGreaterThan(0);
-  });
+    // Importing every tool module takes ~4 s on a cold cache; under a loaded CI
+    // runner the default 5 s timeout made this check flaky.
+  }, 30_000);
 
   it('loads job handlers and storage access resolvers without throwing', async () => {
     await import('@/modules/jobs/register-handlers');

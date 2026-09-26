@@ -388,6 +388,16 @@ export const DEFAULT_AI_SETTINGS: AiSettings = {
     'venueListFiles',
     'venueWriteFile',
     'venueScreenshot',
+    // Escritorio real de la computadora virtual + vistas previas de apps
+    'computer',
+    'venuePreview',
+    // Sitios web publicados por los agentes
+    'publishSite',
+    'listSites',
+    'unpublishSite',
+    // UNIVERSO: delegación al equipo (sin estas el principal no puede coordinar)
+    'delegateTask',
+    'listAgents',
   ],
   maxAttachmentSizeMb: 25,
   allowedMimeTypes: [

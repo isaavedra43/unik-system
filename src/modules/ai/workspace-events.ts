@@ -18,7 +18,18 @@ import type { ToolExecutionResult } from './tools/registry';
 export const workspaceChannel = (conversationId: string) => `assistant:${conversationId}`;
 
 export type WorkspaceEventType =
-  'tool' | 'pages' | 'page_content' | 'screen' | 'browser' | 'artifact' | 'media' | 'secure_input';
+  | 'tool'
+  | 'pages'
+  | 'page_content'
+  | 'screen'
+  | 'browser'
+  | 'artifact'
+  | 'media'
+  | 'secure_input'
+  | 'desktop'
+  | 'desktop_screen'
+  | 'preview'
+  | 'site';
 
 interface WorkspaceEvent {
   type: WorkspaceEventType;
@@ -55,6 +66,12 @@ function summarize(tool: string, args: unknown): string {
       return `Leer: ${str(a.path) ?? ''}`;
     case 'venueWriteFile':
       return `Escribir: ${str(a.path) ?? ''}`;
+    case 'computer':
+      return `Computadora: ${str(a.action) ?? ''}${a.text ? ` "${String(a.text).slice(0, 40)}"` : ''}${a.command ? ` ${String(a.command).slice(0, 60)}` : ''}`;
+    case 'venuePreview':
+      return `Vista previa del puerto ${String(a.port ?? '')}`;
+    case 'publishSite':
+      return `Publicar sitio: ${str(a.name) ?? str(a.slug) ?? ''}`;
     default:
       return '';
   }
@@ -221,11 +238,20 @@ export function workspaceEventsForTool(
           error: str(res.error),
         },
       });
-      const shot = dataUrl(res.screenshotBase64, res.screenshotMimeType ?? 'image/jpeg');
+      // A frame that may show a typed secret is never broadcast nor stored.
+      const shot =
+        res.frameSensitive === true
+          ? undefined
+          : dataUrl(res.screenshotBase64, res.screenshotMimeType ?? 'image/jpeg');
       if (shot)
         events.push({
           type: 'screen',
-          payload: { dataUrl: shot, url: str(res.url) ?? str(obj(args).url) },
+          payload: {
+            dataUrl: shot,
+            url: str(res.url) ?? str(obj(args).url),
+            title: str(res.title),
+            viewport: res.viewport ?? null,
+          },
         });
       // secureInput — user takeover: the workspace renders the masked form.
       const inputRequest = obj(res.inputRequest);
@@ -237,7 +263,7 @@ export function workspaceEventsForTool(
             venueSessionId: str(res.venueSessionId),
             message: str(inputRequest.message),
             fields: arr(inputRequest.fields).map((f) => ({
-              selector: str(f.selector),
+              key: str(f.selector) ?? `ref:${typeof f.ref === 'number' ? f.ref : '?'}`,
               label: str(f.label) ?? 'Campo',
               sensitive: f.sensitive === true,
             })),
@@ -249,6 +275,34 @@ export function workspaceEventsForTool(
     case 'venueScreenshot': {
       const shot = dataUrl(res.imageBase64, res.mimeType);
       if (shot) events.push({ type: 'screen', payload: { dataUrl: shot } });
+      break;
+    }
+    case 'computer': {
+      events.push({
+        type: 'desktop',
+        payload: {
+          action: str(obj(args).action) ?? 'screenshot',
+          ok: res.ok === true,
+          error: str(res.error),
+        },
+      });
+      const shot = dataUrl(res.screenshotBase64, 'image/jpeg');
+      if (shot) {
+        events.push({
+          type: 'desktop_screen',
+          payload: { dataUrl: shot, width: res.width ?? null, height: res.height ?? null },
+        });
+      }
+      break;
+    }
+    case 'venuePreview': {
+      const url = str(res.url);
+      if (url) events.push({ type: 'preview', payload: { url, port: res.port ?? null, label: str(res.label) } });
+      break;
+    }
+    case 'publishSite': {
+      const url = str(res.url);
+      if (url) events.push({ type: 'site', payload: { url, name: str(res.name), pages: res.files ?? null } });
       break;
     }
     default: {

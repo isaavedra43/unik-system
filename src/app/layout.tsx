@@ -2,7 +2,7 @@ import { ReactNode } from 'react';
 import type { Metadata, Viewport } from 'next';
 import '@/styles/shadcn.css';
 import './globals.css';
-import '@/styles/universo-chat.css';
+import '@/styles/universo.css';
 import { Providers } from '@/components/providers';
 
 export const metadata: Metadata = {

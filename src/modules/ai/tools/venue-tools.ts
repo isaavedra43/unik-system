@@ -8,7 +8,8 @@ import {
   VenueUnavailableError,
 } from '@/modules/venues/venue-manager';
 import { isUrlDenied } from '@/modules/web/fetch-service';
-import type { BrowserActInput, BrowserActResult } from '@/modules/venues/venue';
+import type { BrowserActInput, BrowserActResult, DesktopActInput } from '@/modules/venues/venue';
+import { shq } from '@/modules/venues/daytona-venue';
 
 /**
  * Venue + browser tools — the agent's hands inside a disposable computer.
@@ -33,32 +34,49 @@ function browserEffect(args: unknown): ToolEffect {
   const a = args as { action?: string; intent?: string };
   const action = a.action ?? 'open';
   if (action === 'submit' || action === 'useCredential') return 'external_send';
+  // Page JS can submit forms or trigger payments — same gate as submit.
+  if (action === 'evaluate' || action === 'upload') return 'external_send';
   if (a.intent && RISKY_INTENTS.has(String(a.intent).toLowerCase())) return 'external_send';
   return 'read';
 }
 
-const secureFieldSchema = z.object({
-  selector: z.string().min(1).max(500).describe('Selector CSS del campo en la página'),
-  label: z.string().min(1).max(200).describe('Etiqueta que verá el usuario (p. ej. "Correo de Amazon")'),
-  sensitive: z.boolean().optional().describe('true = contraseña/tarjeta — se muestra enmascarado'),
-});
+const secureFieldSchema = z
+  .object({
+    selector: z.string().min(1).max(500).optional().describe('Selector CSS del campo'),
+    ref: z.number().int().min(1).max(2000).optional().describe('Número del campo según el último snapshot'),
+    label: z.string().min(1).max(200).describe('Etiqueta que verá el usuario (p. ej. "Correo de Amazon")'),
+    sensitive: z.boolean().optional().describe('true = contraseña/tarjeta — se muestra enmascarado'),
+  })
+  .refine((f) => Boolean(f.selector) || typeof f.ref === 'number', {
+    message: 'Cada campo necesita selector o ref',
+  });
 
 const browserParams = z.object({
   action: z.enum([
-    'open', 'back', 'forward', 'click', 'type', 'press', 'scroll',
-    'extract', 'screenshot', 'pdf', 'tabs', 'newTab', 'closeTab',
-    'waitFor', 'submit', 'secureInput',
+    'open', 'snapshot', 'click', 'type', 'select', 'hover', 'press', 'scroll',
+    'back', 'forward', 'reload', 'extract', 'screenshot', 'pdf', 'tabs', 'newTab',
+    'switchTab', 'closeTab', 'waitFor', 'submit', 'console', 'evaluate', 'upload', 'secureInput',
   ]),
-  url: z.string().url().max(2000).optional(),
-  selector: z.string().max(500).optional(),
-  text: z.string().max(4000).optional(),
-  key: z.string().max(50).optional(),
+  url: z.string().max(2000).optional().describe('open/newTab: URL o dominio (ej. "proveedor.com")'),
+  ref: z.number().int().min(1).max(2000).optional().describe('Número del elemento según el último snapshot (preferido)'),
+  target: z.string().max(200).optional().describe('Texto visible del elemento cuando no tienes ref'),
+  selector: z.string().max(500).optional().describe('Selector CSS (último recurso)'),
+  text: z.string().max(4000).optional().describe('type: texto a escribir'),
+  value: z.string().max(300).optional().describe('select: opción (etiqueta o valor)'),
+  key: z.string().max(50).optional().describe('press: tecla (Enter, Tab, Escape, ArrowDown…)'),
   direction: z.enum(['up', 'down', 'left', 'right']).optional(),
-  amount: z.number().int().min(50).max(3000).optional(),
-  extractMode: z.string().max(500).optional(),
+  amount: z.number().int().min(50).max(4000).optional(),
+  extractMode: z.string().max(500).optional().describe("extract: 'readable' (default) o selector CSS"),
+  script: z.string().max(4000).optional().describe('evaluate: expresión JS que corre en la página (pruebas/QA)'),
+  files: z.array(z.string().max(500)).max(10).optional().describe('upload: rutas de archivos dentro de la computadora virtual'),
   tabId: z.string().max(20).optional(),
   timeoutMs: z.number().int().min(1000).max(60_000).optional(),
-  intent: z.string().max(40).optional().describe('Qué intenta la acción (send/pay/purchase/publish/delete la marcan para aprobación)'),
+  look: z.boolean().optional().describe('true = además de la acción, mira la pantalla (modelos con visión)'),
+  intent: z
+    .string()
+    .max(40)
+    .optional()
+    .describe('Qué intenta la acción (send/pay/purchase/publish/delete la marcan para aprobación)'),
   /** secureInput: campos que el USUARIO escribe en un formulario seguro del panel. Nunca pasan por ti ni por el chat. */
   fields: z.array(secureFieldSchema).min(1).max(8).optional(),
   message: z.string().max(500).optional().describe('secureInput: instrucción breve para el usuario'),
@@ -67,7 +85,14 @@ const browserParams = z.object({
 registerTool({
   name: 'browser',
   description:
-    'Opera un navegador dentro de la computadora virtual: abrir páginas, hacer click, escribir, extraer contenido, screenshots, PDF. Las acciones que envían/publican/compran requieren aprobación del usuario. Cuando la página pida login, tarjeta u otro dato sensible usa action=secureInput: el usuario lo escribe en un formulario seguro de su panel y se teclea directo en la página — nunca pasa por ti ni por el chat. Tras pedirlo, dile que lo escriba en el panel "Espacio de trabajo" y que te avise; no continúes hasta que confirme.',
+    'Navegador web real (Chromium) dentro de la computadora virtual; el usuario lo ve en vivo en su panel. ' +
+    'Flujo: open {url} → snapshot (devuelve los elementos interactivos numerados [ref] y el texto de la página) → ' +
+    'click/type/select con {ref} → snapshot otra vez para ver el resultado. Usa extract para leer artículos largos, ' +
+    'screenshot para mirar la pantalla (si tu modelo tiene visión), console para errores de la página (pruebas/QA), ' +
+    'evaluate para pruebas con JS, upload para subir archivos del sandbox, tabs/switchTab/newTab para pestañas, pdf para guardar la página. ' +
+    'Las acciones que envían/publican/compran (submit o intent send|pay|purchase|publish|delete) requieren aprobación. ' +
+    'Si la página pide login, tarjeta u otro dato sensible usa action=secureInput con los campos (ref o selector): el usuario lo escribe en un formulario seguro de su panel y se teclea directo en la página — nunca pasa por ti ni por el chat; dile que lo escriba en "Espacio de trabajo" y no continúes hasta que confirme. ' +
+    'Si un ref ya no existe, toma otro snapshot.',
   category: 'venue',
   enabledByDefault: false,
   requiredPermission: 'browser.use',
@@ -86,12 +111,17 @@ registerTool({
     if (p.action === 'secureInput') {
       return `Solicitud de datos seguros: ${(p.fields ?? []).map((f) => f.label).join(', ')}`;
     }
-    const target = p.url ?? p.selector ?? '';
+    const q = p as { ref?: number; target?: string };
+    const target = p.url ?? (q.ref ? `#${q.ref}` : undefined) ?? q.target ?? p.selector ?? '';
     return `Navegador: ${p.action}${target ? ` ${target}` : ''}${p.intent ? ` (${p.intent})` : ''}`;
   },
   prepareArgs: async (_actor, args) => {
     const p = args as { action: string; url?: string };
     if (p.url) {
+      // Bare domains are fine for the model to write ("proveedor.com").
+      if (!/^https?:\/\//i.test(p.url)) {
+        p.url = /^localhost(:\d+)?/i.test(p.url) ? `http://${p.url}` : `https://${p.url}`;
+      }
       const settings = await getAiSettings();
       const denied = isUrlDenied(
         p.url,
@@ -104,8 +134,9 @@ registerTool({
   },
   execute: async (actor, args) => {
     const input = args as BrowserActInput & {
-      fields?: { selector: string; label: string; sensitive?: boolean }[];
+      fields?: { selector?: string; ref?: number; label: string; sensitive?: boolean }[];
       message?: string;
+      look?: boolean;
     };
     try {
       const venue = await acquireVenue({ userId: actor.id, purpose: 'browser' });
@@ -115,7 +146,9 @@ registerTool({
       // panel; a dedicated route types them into the page via useCredential.
       // Values never pass through the model, the chat log or this result.
       if (input.action === 'secureInput') {
-        const fields = (input.fields ?? []).slice(0, 8);
+        const fields = (
+          (input.fields ?? []) as { selector?: string; ref?: number; label: string; sensitive?: boolean }[]
+        ).slice(0, 8);
         if (fields.length === 0) return { error: 'fields requerido para secureInput' };
         const requestId = crypto.randomUUID();
         const session = await prisma.venueSession.findUnique({ where: { id: venue.id } });
@@ -144,7 +177,9 @@ registerTool({
         };
       }
 
-      const result = await venue.browserAct(input);
+      const { look: _look, ...actInput } = input;
+      void _look;
+      const result = await venue.browserAct(actInput);
       await emitVenueEvent(venue.id, 'browser_action', {
         action: input.action,
         url: result.url,
@@ -219,7 +254,10 @@ registerTool({
 registerTool({
   name: 'venueExec',
   description:
-    'Ejecuta un comando de shell DENTRO de la computadora virtual (sandbox desechable, nunca en el servidor). Para scripts, builds, procesamiento de archivos.',
+    'Terminal Linux DENTRO de la computadora virtual (sandbox desechable, nunca en el servidor): git, node/npm, python/pip, builds, pruebas, procesamiento de archivos, descargas. ' +
+    'Para programar: clona o crea el proyecto en ~/proyectos, escribe archivos con venueWriteFile, corre pruebas aquí. ' +
+    'Procesos largos (servidor de desarrollo, "npm run dev") van con background:true y luego venuePreview para verlos en vivo. ' +
+    'El usuario ve cada comando y su salida en su panel.',
   category: 'venue',
   enabledByDefault: false,
   requiredPermission: 'venue.exec',
@@ -232,6 +270,10 @@ registerTool({
     command: z.string().min(1).max(4000),
     cwd: z.string().max(500).optional(),
     timeoutSec: z.number().int().min(1).max(300).optional(),
+    background: z
+      .boolean()
+      .optional()
+      .describe('true = proceso que sigue corriendo (servidor dev); devuelve pid y ruta del log'),
   }),
   resolveEffect: async (_actor, args) => {
     // Jev screens for exfiltration/external effects — flagged commands need approval.
@@ -249,8 +291,29 @@ registerTool({
   },
   summarize: (a) => `Ejecutar en computadora virtual: ${(a as { command: string }).command.slice(0, 120)}`,
   execute: async (actor, args) => {
-    const { command, cwd, timeoutSec } = args as { command: string; cwd?: string; timeoutSec?: number };
+    const { command, cwd, timeoutSec, background } = args as {
+      command: string;
+      cwd?: string;
+      timeoutSec?: number;
+      background?: boolean;
+    };
     const venue = await acquireVenue({ userId: actor.id, purpose: 'exec' });
+    if (background) {
+      const log = `/tmp/unik/bg-${Date.now()}.log`;
+      const res = await venue.exec(
+        `mkdir -p /tmp/unik && nohup sh -c ${shq(command)} > ${log} 2>&1 & echo "UNIK_PID=$!"; sleep 3; tail -20 ${log}`,
+        { cwd, timeoutSec: 20 }
+      );
+      const pid = /UNIK_PID=(\d+)/.exec(res.stdout)?.[1] ?? null;
+      await emitVenueEvent(venue.id, 'exec', { command: command.slice(0, 200), background: true });
+      return {
+        background: true,
+        pid,
+        log,
+        output: res.stdout.replace(/UNIK_PID=\d+\n?/, ''),
+        note: `Proceso en segundo plano. Revisa su salida con venueExec "tail -40 ${log}"; si sirve una web, usa venuePreview con su puerto.`,
+      };
+    }
     const res = await venue.exec(command, { cwd, timeoutSec });
     await emitVenueEvent(venue.id, 'exec', { command: command.slice(0, 200), exitCode: res.exitCode });
     return { exitCode: res.exitCode, output: res.stdout };
@@ -337,5 +400,109 @@ registerTool({
     const shot = await venue.screenshot();
     await emitVenueEvent(venue.id, 'screenshot', {});
     return { imageBase64: shot.imageBase64, mimeType: shot.mimeType };
+  },
+});
+
+registerTool({
+  name: 'computer',
+  description:
+    'Escritorio Linux REAL de la computadora virtual (distinto del navegador): ventanas, apps, terminal gráfica, gestor de archivos. ' +
+    'Cada acción devuelve la pantalla (la ves si tu modelo tiene visión). Coordenadas en píxeles de esa pantalla. ' +
+    'Acciones: screenshot, click/doubleClick/rightClick {x,y}, move, drag {x,y,toX,toY}, scroll {x,y,direction}, type {text}, key {key: "enter"|"ctrl+c"…}, ' +
+    'openApp {command: "xfce4-terminal"|"firefox"|"thunar"|"libreoffice"…}, windows (lista ventanas), find {role,name} (árbol de accesibilidad → ids), invoke/setValue {nodeId}, wait {seconds}. ' +
+    'Para páginas web usa la tool browser (más rápida y precisa); usa computer para apps de escritorio o cuando el usuario pida ver/usar la computadora.',
+  category: 'venue',
+  enabledByDefault: true,
+  requiredPermission: 'browser.use',
+  resultTrust: 'untrusted',
+  timeoutMs: 180_000,
+  maxResultBytes: 6_000_000,
+  contextTags: ['all'],
+  isAvailable: isVenueEnabled,
+  parameters: z.object({
+    action: z.enum([
+      'screenshot', 'click', 'doubleClick', 'rightClick', 'move', 'drag', 'scroll', 'type', 'key',
+      'hotkey', 'openApp', 'windows', 'find', 'invoke', 'setValue', 'wait',
+    ]),
+    x: z.number().min(0).max(8000).optional(),
+    y: z.number().min(0).max(8000).optional(),
+    toX: z.number().min(0).max(8000).optional(),
+    toY: z.number().min(0).max(8000).optional(),
+    direction: z.enum(['up', 'down']).optional(),
+    amount: z.number().int().min(1).max(20).optional(),
+    text: z.string().max(4000).optional(),
+    key: z.string().max(40).optional(),
+    command: z.string().max(500).optional(),
+    role: z.string().max(60).optional(),
+    name: z.string().max(200).optional(),
+    nodeId: z.string().max(200).optional(),
+    value: z.string().max(2000).optional(),
+    seconds: z.number().min(0.2).max(10).optional(),
+  }),
+  // Operating a desktop is like browsing: reading/clicking is audited but free;
+  // anything that sends/pays still goes through the browser/Composio gates.
+  resolveEffect: () => 'internal_task',
+  summarize: (a) => {
+    const p = a as { action: string; x?: number; y?: number; text?: string; command?: string };
+    if (p.action === 'openApp') return `Computadora: abrir ${p.command ?? 'app'}`;
+    if (p.action === 'type') return `Computadora: escribir "${String(p.text ?? '').slice(0, 40)}"`;
+    if (typeof p.x === 'number') return `Computadora: ${p.action} (${p.x}, ${p.y})`;
+    return `Computadora: ${p.action}`;
+  },
+  execute: async (actor, args) => {
+    try {
+      const venue = await acquireVenue({ userId: actor.id, purpose: 'desktop' });
+      const res = await venue.desktopAct(args as DesktopActInput);
+      await emitVenueEvent(venue.id, 'desktop_action', {
+        action: (args as { action: string }).action,
+        ok: res.ok,
+        error: res.error ?? null,
+      });
+      return res.ok
+        ? { ...res, screen: res.width && res.height ? `${res.width}x${res.height}` : undefined }
+        : { ok: false, error: res.error };
+    } catch (err) {
+      if (err instanceof VenueUnavailableError) return { error: err.message };
+      throw err;
+    }
+  },
+});
+
+registerTool({
+  name: 'venuePreview',
+  description:
+    'Publica temporalmente (hasta 24 h) un puerto de la computadora virtual como URL privada firmada — para que el usuario vea en vivo la web/app que estás construyendo (npm run dev en background). ' +
+    'Para revisarla tú mismo, abre http://localhost:PUERTO con la tool browser. Para publicar un sitio de forma permanente usa publishSite.',
+  category: 'venue',
+  enabledByDefault: true,
+  requiredPermission: 'venue.exec',
+  resultTrust: 'untrusted',
+  timeoutMs: 60_000,
+  contextTags: ['all'],
+  isAvailable: isVenueEnabled,
+  parameters: z.object({
+    port: z.number().int().min(1024).max(65535),
+    hours: z.number().min(0.1).max(24).optional().describe('Validez del enlace (default 2 h)'),
+    label: z.string().max(80).optional().describe('Nombre de lo que se muestra (ej. "Tienda — versión 1")'),
+  }),
+  resolveEffect: () => 'internal_task',
+  summarize: (a) => `Vista previa del puerto ${(a as { port: number }).port}`,
+  execute: async (actor, args) => {
+    const { port, hours, label } = args as { port: number; hours?: number; label?: string };
+    try {
+      const venue = await acquireVenue({ userId: actor.id, purpose: 'preview' });
+      const url = await venue.previewUrl(port, Math.round((hours ?? 2) * 3600));
+      await emitVenueEvent(venue.id, 'preview', { port });
+      return {
+        url,
+        port,
+        label: label ?? `Puerto ${port}`,
+        expiresInHours: hours ?? 2,
+        note: 'Comparte este enlace con el usuario; expira. Si la página no carga, verifica que el servidor escuche en 0.0.0.0.',
+      };
+    } catch (err) {
+      if (err instanceof VenueUnavailableError) return { error: err.message };
+      return { error: err instanceof Error ? err.message : 'No se pudo crear la vista previa' };
+    }
   },
 });

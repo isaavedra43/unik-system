@@ -42,7 +42,7 @@ import { ThemeToggle } from '@/components/layout/ThemeToggle';
 import { NotificationBell } from '@/components/notifications/NotificationBell';
 import { PushEnablePrompt } from '@/components/notifications/PushEnablePrompt';
 import { SeedDemoDataButton } from '@/components/dev/SeedDemoDataButton';
-import { AssistantWidget } from '@/components/assistant/AssistantWidget';
+import { AssistantWidget } from '@/components/universo/Widget';
 
 interface AppShellProps {
   user: CurrentUser;
